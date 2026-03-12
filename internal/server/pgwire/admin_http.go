@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"sort"
@@ -14,6 +15,7 @@ import (
 
 	"asql/internal/cluster/coordinator"
 	"asql/internal/engine/executor"
+	api "asql/pkg/adminapi"
 )
 
 const maxFailoverHistoryEntries = 64
@@ -124,6 +126,13 @@ func (server *Server) startAdminHTTP() error {
 	mux.HandleFunc("/api/v1/failover-history", server.handleAdminFailoverHistory)
 	mux.HandleFunc("/api/v1/snapshot-catalog", server.handleAdminSnapshotCatalog)
 	mux.HandleFunc("/api/v1/wal-retention", server.handleAdminWALRetention)
+	mux.HandleFunc("/api/v1/recovery/backup-create", server.handleAdminRecoveryCreateBackup)
+	mux.HandleFunc("/api/v1/recovery/backup-manifest", server.handleAdminRecoveryBackupManifest)
+	mux.HandleFunc("/api/v1/recovery/backup-verify", server.handleAdminRecoveryVerifyBackup)
+	mux.HandleFunc("/api/v1/recovery/restore-lsn", server.handleAdminRecoveryRestoreLSN)
+	mux.HandleFunc("/api/v1/recovery/restore-timestamp", server.handleAdminRecoveryRestoreTimestamp)
+	mux.HandleFunc("/api/v1/recovery/snapshot-catalog", server.handleAdminRecoverySnapshotCatalog)
+	mux.HandleFunc("/api/v1/recovery/wal-retention", server.handleAdminRecoveryWALRetention)
 
 	server.adminListener = listener
 	server.adminServer = &http.Server{Handler: mux}
@@ -216,6 +225,176 @@ func (server *Server) handleAdminWALRetention(w http.ResponseWriter, _ *http.Req
 		return
 	}
 	writeAdminJSON(w, http.StatusOK, state)
+}
+
+func (server *Server) handleAdminRecoveryCreateBackup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.RecoveryCreateBackupRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	dataDir := server.recoveryDataDir(req.DataDir)
+	if dataDir == "" {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "data directory is required"})
+		return
+	}
+	if strings.TrimSpace(req.BackupDir) == "" {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "backup directory is required"})
+		return
+	}
+	manifest, err := executor.CreateBaseBackup(dataDir, strings.TrimSpace(req.BackupDir))
+	if err != nil {
+		writeAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, toAdminBaseBackupManifest(manifest))
+}
+
+func (server *Server) handleAdminRecoveryBackupManifest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.RecoveryBackupManifestRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.BackupDir) == "" {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "backup directory is required"})
+		return
+	}
+	manifest, err := executor.LoadBaseBackupManifest(strings.TrimSpace(req.BackupDir))
+	if err != nil {
+		writeAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, toAdminBaseBackupManifest(manifest))
+}
+
+func (server *Server) handleAdminRecoveryVerifyBackup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.RecoveryVerifyBackupRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.BackupDir) == "" {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "backup directory is required"})
+		return
+	}
+	manifest, err := executor.VerifyBaseBackup(strings.TrimSpace(req.BackupDir))
+	if err != nil {
+		writeAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, api.RecoveryVerifyBackupResponse{Status: "OK", Manifest: toAdminBaseBackupManifest(manifest)})
+}
+
+func (server *Server) handleAdminRecoveryRestoreLSN(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.RecoveryRestoreLSNRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.BackupDir) == "" {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "backup directory is required"})
+		return
+	}
+	if strings.TrimSpace(req.TargetDataDir) == "" {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "target data directory is required"})
+		return
+	}
+	if req.LSN == 0 {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "lsn must be greater than zero"})
+		return
+	}
+	result, err := executor.RestoreBaseBackupToLSN(r.Context(), strings.TrimSpace(req.BackupDir), strings.TrimSpace(req.TargetDataDir), req.LSN)
+	if err != nil {
+		writeAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, api.RestoreResult{AppliedLSN: result.AppliedLSN, AppliedTimestamp: result.AppliedTimestamp})
+}
+
+func (server *Server) handleAdminRecoveryRestoreTimestamp(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.RecoveryRestoreTimestampRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if strings.TrimSpace(req.BackupDir) == "" {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "backup directory is required"})
+		return
+	}
+	if strings.TrimSpace(req.TargetDataDir) == "" {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "target data directory is required"})
+		return
+	}
+	if req.LogicalTimestamp == 0 {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "logical timestamp must be greater than zero"})
+		return
+	}
+	result, err := executor.RestoreBaseBackupToTimestamp(r.Context(), strings.TrimSpace(req.BackupDir), strings.TrimSpace(req.TargetDataDir), req.LogicalTimestamp)
+	if err != nil {
+		writeAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, api.RestoreResult{AppliedLSN: result.AppliedLSN, AppliedTimestamp: result.AppliedTimestamp})
+}
+
+func (server *Server) handleAdminRecoverySnapshotCatalog(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.RecoverySnapshotCatalogRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	dataDir := server.recoveryDataDir(req.DataDir)
+	if dataDir == "" {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "data directory is required"})
+		return
+	}
+	entries, err := executor.InspectDataDirSnapshotCatalog(dataDir)
+	if err != nil {
+		writeAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, api.RecoverySnapshotCatalogResponse{Snapshots: toAdminSnapshotCatalog(entries)})
+}
+
+func (server *Server) handleAdminRecoveryWALRetention(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.RecoveryWALRetentionRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	dataDir := server.recoveryDataDir(req.DataDir)
+	if dataDir == "" {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "data directory is required"})
+		return
+	}
+	state, err := executor.InspectDataDirWALRetention(dataDir)
+	if err != nil {
+		writeAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": err.Error()})
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, toAdminWALRetentionState(state))
 }
 
 func (server *Server) liveStatus() adminHealthResponse {
@@ -419,6 +598,117 @@ func writeAdminJSON(w http.ResponseWriter, statusCode int, payload any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(statusCode)
 	_ = json.NewEncoder(w).Encode(payload)
+}
+
+func decodeAdminJSON(w http.ResponseWriter, r *http.Request, target any) bool {
+	defer r.Body.Close()
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": fmt.Sprintf("decode request: %v", err)})
+		return false
+	}
+	var extra struct{}
+	if err := decoder.Decode(&extra); err != io.EOF {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "request body must contain a single JSON object"})
+		return false
+	}
+	return true
+}
+
+func (server *Server) recoveryDataDir(requested string) string {
+	if trimmed := strings.TrimSpace(requested); trimmed != "" {
+		return trimmed
+	}
+	if server == nil {
+		return ""
+	}
+	return strings.TrimSpace(server.config.DataDirPath)
+}
+
+func toAdminBaseBackupManifest(manifest executor.BaseBackupManifest) api.BaseBackupManifest {
+	out := api.BaseBackupManifest{
+		Version:       manifest.Version,
+		HeadLSN:       manifest.HeadLSN,
+		HeadTimestamp: manifest.HeadTimestamp,
+		Snapshots:     make([]api.SnapshotBackupMetadata, 0, len(manifest.Snapshots)),
+		WALSegments:   make([]api.WALSegmentBackupMetadata, 0, len(manifest.WALSegments)),
+	}
+	for _, snapshot := range manifest.Snapshots {
+		out.Snapshots = append(out.Snapshots, api.SnapshotBackupMetadata{
+			BackupFileMetadata: api.BackupFileMetadata{
+				RelativePath: snapshot.RelativePath,
+				Bytes:        snapshot.Bytes,
+				SHA256:       snapshot.SHA256,
+			},
+			Sequence:  snapshot.Sequence,
+			LSN:       snapshot.LSN,
+			LogicalTS: snapshot.LogicalTS,
+		})
+	}
+	for _, segment := range manifest.WALSegments {
+		out.WALSegments = append(out.WALSegments, api.WALSegmentBackupMetadata{
+			BackupFileMetadata: api.BackupFileMetadata{
+				RelativePath: segment.RelativePath,
+				Bytes:        segment.Bytes,
+				SHA256:       segment.SHA256,
+			},
+			SeqNum:      segment.SeqNum,
+			FirstLSN:    segment.FirstLSN,
+			LastLSN:     segment.LastLSN,
+			RecordCount: segment.RecordCount,
+		})
+	}
+	if manifest.TimestampIndex != nil {
+		out.TimestampIndex = &api.BackupFileMetadata{
+			RelativePath: manifest.TimestampIndex.RelativePath,
+			Bytes:        manifest.TimestampIndex.Bytes,
+			SHA256:       manifest.TimestampIndex.SHA256,
+		}
+	}
+	return out
+}
+
+func toAdminSnapshotCatalog(entries []executor.SnapshotCatalogEntry) []api.SnapshotCatalogEntry {
+	out := make([]api.SnapshotCatalogEntry, 0, len(entries))
+	for _, entry := range entries {
+		out = append(out, api.SnapshotCatalogEntry{
+			FileName:  entry.FileName,
+			Sequence:  entry.Sequence,
+			LSN:       entry.LSN,
+			LogicalTS: entry.LogicalTS,
+			Bytes:     entry.Bytes,
+			IsFull:    entry.IsFull,
+		})
+	}
+	return out
+}
+
+func toAdminWALRetentionState(state executor.WALRetentionState) api.WALRetentionState {
+	out := api.WALRetentionState{
+		DataDir:             state.DataDir,
+		RetainWAL:           state.RetainWAL,
+		HeadLSN:             state.HeadLSN,
+		OldestRetainedLSN:   state.OldestRetainedLSN,
+		LastRetainedLSN:     state.LastRetainedLSN,
+		SegmentCount:        state.SegmentCount,
+		DiskSnapshotCount:   state.DiskSnapshotCount,
+		MemorySnapshotCount: state.MemorySnapshotCount,
+		MaxDiskSnapshots:    state.MaxDiskSnapshots,
+		Segments:            make([]api.WALSegmentCatalogEntry, 0, len(state.Segments)),
+	}
+	for _, segment := range state.Segments {
+		out.Segments = append(out.Segments, api.WALSegmentCatalogEntry{
+			FileName:    segment.FileName,
+			SeqNum:      segment.SeqNum,
+			FirstLSN:    segment.FirstLSN,
+			LastLSN:     segment.LastLSN,
+			RecordCount: segment.RecordCount,
+			Bytes:       segment.Bytes,
+			Sealed:      segment.Sealed,
+		})
+	}
+	return out
 }
 
 func writeMetricHelp(buf *bytes.Buffer, name, help, typ string) {

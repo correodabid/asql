@@ -29,7 +29,7 @@ ASQL is not a vertical product for healthcare, finance, or manufacturing. It sho
 Treat these as current realities unless the code or newer docs prove otherwise:
 
 - canonical local runtime is `cmd/asqld` on pgwire,
-- canonical Studio path is `cmd/asqlstudio` with `-pgwire-endpoint`,
+- canonical Studio path is `asqlstudio` with `-pgwire-endpoint`,
 - compatibility stance is a pragmatic PostgreSQL-compatible subset over pgwire,
 - getting-started is the primary onboarding narrative,
 - deeper docs should support getting-started rather than duplicate it.

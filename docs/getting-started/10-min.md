@@ -39,7 +39,7 @@ SELECT * FROM users;
 ## 5) Optional Studio path
 
 ```bash
-go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
+go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
 
 ## 6) Optional fixture path

@@ -54,7 +54,7 @@ SELECT * FROM users;
 ### 4. Launch ASQL Studio
 
 ```bash
-go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
+go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
 
 ### 5. Validate and load a deterministic fixture
@@ -394,7 +394,7 @@ Desktop Studio for managing ASQL interactively over pgwire.
 - Replication lag monitoring (with optional `-follower-endpoint` or cluster peer endpoints)
 
 ```bash
-go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
+go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
 
 ### CLI (asqlctl)

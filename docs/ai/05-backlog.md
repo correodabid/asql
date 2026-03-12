@@ -217,6 +217,33 @@ Acceptance gates (must pass before closing Epic AD)
 - [x] Schema evolution guidance covers not just SQL validity but historical and replay-visible impact.
 - [x] Adoption review can use first-class signals instead of only manual inspection of example apps.
 
+## Epic AE — Decouple ASQL Studio from engine internals
+
+Reference inputs:
+- `docs/adr/0003-studio-as-external-product-surface.md`
+- `asqlstudio/`
+
+P0 — establish public boundary first:
+- [x] Extract the admin request/response contracts used by Studio from `internal/server/httpapi` into a stable public package.
+- [x] Extract fixture load/validate/export contracts and helpers from `internal/fixtures` into a stable public package.
+- [x] Replace Studio imports of `internal/engine/executor` with public admin API calls for backup/restore and storage-inspection workflows.
+
+P1 — move Studio to product-level layout:
+- [x] Move the Studio implementation from `cmd/asqlstudio/` to a root-level `asqlstudio/` folder.
+- [x] Leave `cmd/asqlstudio` as a thin bootstrap wrapper or remove it if the root-level entrypoint becomes canonical.
+- [x] Update Wails config, embedded assets, workspace tasks, packaging paths, and docs to the new Studio location.
+
+P2 — harden against regression:
+- [x] Add checks/tests that fail if Studio imports `internal/engine/*` or `internal/server/*`.
+- [x] Stop treating generated Studio build outputs as canonical source artifacts where possible.
+- [x] Document Studio explicitly as a public product surface that consumes stable engine interfaces.
+
+Acceptance gates (must pass before closing Epic AE)
+- [x] Studio can build and run from a root-level `asqlstudio/` product folder.
+- [x] Studio imports no engine-private packages under `internal/engine/*`.
+- [x] Studio imports no server-private packages under `internal/server/*`.
+- [x] Backup/restore, fixture, and schema workflows are consumed through public contracts or public admin APIs.
+
 ## Epic V — Post-Epic U competitiveness execution (8-week)
 
 Reference plan:

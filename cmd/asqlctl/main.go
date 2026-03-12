@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"asql/internal/engine/executor"
-	"asql/internal/fixtures"
 	api "asql/internal/server/grpc"
+	"asql/pkg/fixtures"
 
 	"github.com/jackc/pgx/v5"
 	grpcgo "google.golang.org/grpc"

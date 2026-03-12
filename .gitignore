@@ -30,3 +30,7 @@ scripts
 .vscode
 
 hospital-miks/frontend/node_modules/*
+
+# ASQL Studio generated/local artifacts
+asqlstudio/webapp/node_modules/
+asqlstudio/build/bin/

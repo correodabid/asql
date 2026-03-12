@@ -43,7 +43,7 @@ go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
 In a second terminal:
 
 ```bash
-go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
+go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
 
 Use Studio when you want:

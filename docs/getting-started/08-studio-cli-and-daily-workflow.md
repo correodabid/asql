@@ -14,10 +14,12 @@ Studio is best for:
 - exploring snapshots and diffs in Time Explorer,
 - fixture validate/load/export workflows.
 
+Treat [asqlstudio](../../asqlstudio) as a public product surface: it consumes pgwire plus stable admin and fixture contracts rather than engine-private packages.
+
 Start it with:
 
 ```bash
-go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
+go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
 
 ## Use `asqlctl` for scripts and repeatable commands
