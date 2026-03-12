@@ -59,6 +59,9 @@ func toUpperSmall(s string) string {
 // Parse parses a minimal SQL subset into an AST statement.
 func Parse(sql string) (ast.Statement, error) {
 	trimmed := normalizeSQL(sql)
+	if err := unsupportedSQLGuidance(trimmed); err != nil {
+		return nil, err
+	}
 
 	// Use case-insensitive prefix matching instead of uppercasing the
 	// entire SQL string. INSERT statements can be very long and the old
@@ -108,6 +111,22 @@ func Parse(sql string) (ast.Statement, error) {
 		return parseSelect(trimmed)
 	default:
 		return nil, errUnsupportedSQL
+	}
+}
+
+func unsupportedSQLGuidance(sql string) error {
+	trimmed := strings.TrimSpace(sql)
+	switch {
+	case strings.EqualFold(trimmed, "BEGIN") || strings.EqualFold(trimmed, "BEGIN;"):
+		return fmt.Errorf("%w: use BEGIN DOMAIN <name> or BEGIN CROSS DOMAIN <a>, <b>", errUnsupportedSQL)
+	case hasPrefixFold(trimmed, "START TRANSACTION"):
+		return fmt.Errorf("%w: use BEGIN DOMAIN <name> or BEGIN CROSS DOMAIN <a>, <b> instead of START TRANSACTION", errUnsupportedSQL)
+	case containsFold(trimmed, "ANY(") || containsFold(trimmed, " ANY ("):
+		return fmt.Errorf("%w: ANY(...) predicates are not supported; use IN (...) for literal lists or IN (SELECT ...) for subqueries", errUnsupportedSQL)
+	case containsFold(trimmed, "ARRAY[") || containsFold(trimmed, "ARRAY ["):
+		return fmt.Errorf("%w: PostgreSQL array literals are not supported; use IN (...) / IN (SELECT ...) or model collections with JSON/rows", errUnsupportedSQL)
+	default:
+		return nil
 	}
 }
 

@@ -21,16 +21,27 @@ type SnapshotCatalogEntry struct {
 
 // WALRetentionState summarizes the current retained WAL and snapshot window.
 type WALRetentionState struct {
-	DataDir             string               `json:"data_dir"`
-	RetainWAL           bool                 `json:"retain_wal"`
-	HeadLSN             uint64               `json:"head_lsn"`
-	OldestRetainedLSN   uint64               `json:"oldest_retained_lsn"`
-	LastRetainedLSN     uint64               `json:"last_retained_lsn"`
-	SegmentCount        int                  `json:"segment_count"`
-	DiskSnapshotCount   int                  `json:"disk_snapshot_count"`
-	MemorySnapshotCount int                  `json:"memory_snapshot_count,omitempty"`
-	MaxDiskSnapshots    int                  `json:"max_disk_snapshots"`
+	DataDir             string                    `json:"data_dir"`
+	RetainWAL           bool                      `json:"retain_wal"`
+	HeadLSN             uint64                    `json:"head_lsn"`
+	OldestRetainedLSN   uint64                    `json:"oldest_retained_lsn"`
+	LastRetainedLSN     uint64                    `json:"last_retained_lsn"`
+	SegmentCount        int                       `json:"segment_count"`
+	DiskSnapshotCount   int                       `json:"disk_snapshot_count"`
+	MemorySnapshotCount int                       `json:"memory_snapshot_count,omitempty"`
+	MaxDiskSnapshots    int                       `json:"max_disk_snapshots"`
 	Segments            []wal.SegmentCatalogEntry `json:"segments,omitempty"`
+}
+
+// CurrentLSN returns the current visible head LSN for the engine.
+func (engine *Engine) CurrentLSN() uint64 {
+	if engine == nil {
+		return 0
+	}
+	if state := engine.readState.Load(); state != nil {
+		return state.headLSN
+	}
+	return engine.headLSN
 }
 
 // SnapshotCatalog returns the catalog of persisted snapshots for the engine's snapshot directory.

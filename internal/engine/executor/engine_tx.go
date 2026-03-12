@@ -212,7 +212,10 @@ func (engine *Engine) commit(ctx context.Context, session *Session) (Result, err
 		return Result{}, err
 	}
 
-	ordered := orderMutationsByDomain(prepared, tx.domains)
+	// Preserve statement order inside a transaction so later statements can
+	// resolve references against rows and entity versions made visible by
+	// earlier statements in the same transaction.
+	ordered := prepared
 
 	// Collect affected domains for COW clone.
 	affectedDomains := make(map[string]struct{}, len(tx.domains))

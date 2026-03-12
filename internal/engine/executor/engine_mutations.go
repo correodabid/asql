@@ -653,7 +653,7 @@ func (engine *Engine) applyMutationPlanWithEntityTrackingTracked(state *readable
 		}
 	}
 
-	if err := engine.applyPlanToStateTracked(state, plan, mutationLSN, clonedTables, fkValCache); err != nil {
+	if err := engine.applyPlanToStateTracked(state, plan, mutationLSN, clonedTables, fkValCache, collector); err != nil {
 		return err
 	}
 
@@ -690,7 +690,7 @@ func (engine *Engine) applyMutationPlanWithEntityTrackingTracked(state *readable
 // For callers that apply multiple mutations to the same table (e.g., commit),
 // use applyPlanToStateTracked to avoid redundant clones.
 func (engine *Engine) applyPlanToState(state *readableState, plan planner.Plan, mutationLSN uint64) error {
-	return engine.applyPlanToStateTracked(state, plan, mutationLSN, nil, nil)
+	return engine.applyPlanToStateTracked(state, plan, mutationLSN, nil, nil, nil)
 }
 
 // applyPlanToStateTracked applies a mutation with optional clone tracking.
@@ -699,7 +699,7 @@ func (engine *Engine) applyPlanToState(state *readableState, plan planner.Plan, 
 // within a single transaction.
 // fkValCache, when non-nil, caches positive FK-existence lookups to avoid
 // redundant hasBucket walks when multiple child rows reference the same parent.
-func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner.Plan, mutationLSN uint64, clonedTables map[string]struct{}, fkValCache map[string]struct{}) error {
+func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner.Plan, mutationLSN uint64, clonedTables map[string]struct{}, fkValCache map[string]struct{}, pendingEntityVersions map[string]map[string][]string) error {
 
 	domainState := getOrCreateDomain(state, plan.DomainName)
 
@@ -1226,14 +1226,12 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 				row["_lsn"] = ast.Literal{Kind: ast.LiteralNumber, NumberValue: int64(mutationLSN)}
 			}
 
-			// Validate versioned foreign keys (may auto-capture LSN).
-			// Skip during WAL replay: the leader already validated at commit
-			// time, and during replay entity versions from other transactions
-			// may not be recorded yet (their COMMIT record hasn't been replayed).
-			if !engine.replayMode {
-				if err := validateVersionedForeignKeys(state, engine, table, row); err != nil {
-					return err
-				}
+			// Validate versioned foreign keys and resolve auto-captured reference
+			// tokens against the current transaction-visible state. Replay uses
+			// the same path so auto-captured values are reconstructed
+			// deterministically from WAL order.
+			if err := validateVersionedForeignKeys(state, engine, table, row, pendingEntityVersions); err != nil {
+				return err
 			}
 
 			rows = append(rows, row)
@@ -1389,10 +1387,9 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			}
 
 			// Validate versioned FKs for updated rows that touch FK or LSN columns.
-			// Skip during WAL replay — see INSERT comment above.
-			if !engine.replayMode && len(table.versionedForeignKeys) > 0 {
+			if len(table.versionedForeignKeys) > 0 {
 				for _, u := range updatedByRowID {
-					if err := validateVersionedForeignKeys(state, engine, table, u.newRow); err != nil {
+					if err := validateVersionedForeignKeys(state, engine, table, u.newRow, pendingEntityVersions); err != nil {
 						return err
 					}
 				}

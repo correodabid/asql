@@ -142,13 +142,13 @@ func New(config Config) (*Server, error) {
 	}
 
 	srv := &Server{
-		config:     config,
-		engine:     engine,
-		walStore:   walStore,
-		auditStore: auditStore,
-		leadership: leadershipManager,
-		metrics:    newRuntimeMetrics(config.NodeID),
-		closeCh:    make(chan struct{}),
+		config:        config,
+		engine:        engine,
+		walStore:      walStore,
+		auditStore:    auditStore,
+		leadership:    leadershipManager,
+		metrics:       newRuntimeMetrics(config.NodeID),
+		closeCh:       make(chan struct{}),
 		cancelTargets: make(map[backendCancelKey]*connState),
 	}
 
@@ -503,10 +503,10 @@ func (server *Server) handleConnection(conn net.Conn) error {
 	}
 
 	state := &connState{
-		session:  server.engine.NewSession(),
-		prepared: make(map[string]preparedStmt),
-		portals:  make(map[string]portal),
-		logger:   server.config.Logger,
+		session:   server.engine.NewSession(),
+		prepared:  make(map[string]preparedStmt),
+		portals:   make(map[string]portal),
+		logger:    server.config.Logger,
 		processID: backendKey.processID,
 		secretKey: backendKey.secretKey,
 	}
@@ -1089,19 +1089,23 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 
 	statement, parseErr := parser.Parse(stripped)
 	if parseErr == nil {
-		if _, isSelect := statement.(ast.SelectStatement); isSelect {
+		if selectStatement, isSelect := statement.(ast.SelectStatement); isSelect {
 			domains := session.ActiveDomains()
 			var result executor.Result
 			var err error
-			switch asOfKind {
-			case "ts":
-				result, err = server.engine.TimeTravelQueryAsOfTimestamp(ctx, stripped, domains, asOfValue)
-			default:
-				targetLSN := maxLSN
-				if asOfKind == "lsn" {
-					targetLSN = asOfValue
+			if selectStatement.ForHistory {
+				result, err = server.engine.RowHistory(ctx, stripped, domains)
+			} else {
+				switch asOfKind {
+				case "ts":
+					result, err = server.engine.TimeTravelQueryAsOfTimestamp(ctx, stripped, domains, asOfValue)
+				default:
+					targetLSN := maxLSN
+					if asOfKind == "lsn" {
+						targetLSN = asOfValue
+					}
+					result, err = server.engine.TimeTravelQueryAsOfLSN(ctx, stripped, domains, targetLSN)
 				}
-				result, err = server.engine.TimeTravelQueryAsOfLSN(ctx, stripped, domains, targetLSN)
 			}
 			if err != nil {
 				return executor.Result{}, nil, err

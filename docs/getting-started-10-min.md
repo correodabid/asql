@@ -1,6 +1,12 @@
 # ASQL Getting Started (10 Minutes)
 
-This guide gets you from zero to a successful transaction and replay validation quickly.
+This is the shortest path into ASQL.
+
+If you want the complete adoption guide, start here instead:
+
+- [docs/getting-started/README.md](getting-started/README.md)
+
+This quick guide gets you from zero to a successful transaction and replay validation quickly.
 
 ## Prerequisites
 
@@ -66,3 +72,9 @@ Then run client commands against `127.0.0.1:9042`.
 - `connection refused`: ensure `asqld` is running.
 - `table not found`: run once with `-init-schema`.
 - admin replay warning: run on a fresh WAL or keep admin checks in best-effort mode.
+
+## Next reading
+
+- [getting-started/04-domains-and-transactions.md](getting-started/04-domains-and-transactions.md)
+- [getting-started/05-time-travel-and-history.md](getting-started/05-time-travel-and-history.md)
+- [getting-started/07-fixtures-and-seeding.md](getting-started/07-fixtures-and-seeding.md)

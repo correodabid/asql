@@ -2,6 +2,8 @@
 
 This cookbook provides practical, runnable Go-centric workflows using ASQL APIs and examples.
 
+For the broader adoption path, see [docs/getting-started/README.md](getting-started/README.md).
+
 ## Prerequisites
 
 - ASQL server running on `127.0.0.1:9042`
@@ -62,6 +64,52 @@ go run ./examples/go-client -endpoint 127.0.0.1:9042 -domain app -secondary-doma
 Expected in non-strict mode:
 - admin errors are reported as warnings,
 - write flow remains successful.
+
+---
+
+## Recipe 4: Temporal introspection helpers
+
+Use the pgwire compatibility surface from Go to inspect temporal metadata:
+
+```go
+conn, err := pgx.Connect(ctx, "postgres://asql@127.0.0.1:5433/asql?sslmode=disable")
+if err != nil {
+	log.Fatal(err)
+}
+defer conn.Close(ctx)
+
+var currentLSN int64
+if err := conn.QueryRow(ctx, "SELECT current_lsn()").Scan(&currentLSN); err != nil {
+	log.Fatal(err)
+}
+
+var rowLSN int64
+if err := conn.QueryRow(ctx, "SELECT row_lsn('billing.invoices', '42')").Scan(&rowLSN); err != nil {
+	log.Fatal(err)
+}
+
+var entityVersion int64
+if err := conn.QueryRow(ctx, "SELECT entity_version('recipes', 'recipe_aggregate', 'recipe-1')").Scan(&entityVersion); err != nil {
+	log.Fatal(err)
+}
+
+var entityHeadLSN int64
+if err := conn.QueryRow(ctx, "SELECT entity_head_lsn('recipes', 'recipe_aggregate', 'recipe-1')").Scan(&entityHeadLSN); err != nil {
+	log.Fatal(err)
+}
+
+var resolvedReference int64
+if err := conn.QueryRow(ctx, "SELECT resolve_reference('recipes.master_recipes', '1')").Scan(&resolvedReference); err != nil {
+	log.Fatal(err)
+}
+```
+
+Use these helpers when you need:
+- the current visible engine head,
+- the latest visible row head for a specific primary key,
+- the latest visible aggregate version,
+- the commit LSN of the latest aggregate version,
+- the exact token a versioned foreign key would capture for the current committed snapshot.
 
 ---
 

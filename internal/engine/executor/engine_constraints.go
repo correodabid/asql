@@ -166,9 +166,10 @@ func (engine *Engine) expandDomainsForVFKJoins(statement ast.Statement, txDomain
 }
 
 // validateVersionedForeignKeys validates versioned FK constraints for a row.
-// If the LSN column is absent/NULL, auto-captures either the latest entity version
-// number (when the referenced table belongs to an entity) or the current headLSN.
-func validateVersionedForeignKeys(state *readableState, engine *Engine, table *tableState, row map[string]ast.Literal) error {
+// If the LSN column is absent/NULL, auto-captures either the latest visible
+// entity version number (when the referenced table belongs to an entity) or the
+// referenced row's current head LSN.
+func validateVersionedForeignKeys(state *readableState, engine *Engine, table *tableState, row map[string]ast.Literal, pendingEntityVersions map[string]map[string][]string) error {
 	if table == nil || len(table.versionedForeignKeys) == 0 {
 		return nil
 	}
@@ -194,7 +195,8 @@ func validateVersionedForeignKeys(state *readableState, engine *Engine, table *t
 			if !tableExists {
 				return fmt.Errorf("%w: versioned FK table %s.%s not found", errConstraint, vfk.referencesDomain, vfk.referencesTable)
 			}
-			if !tableContainsValue(refTable, vfk.referencesColumn, fkValue) {
+			refRow, found := lookupUniqueRow(refTable, vfk.referencesColumn, fkValue)
+			if !found {
 				return fmt.Errorf("%w: versioned FK %s references missing %s.%s(%s) [lookup=%v rows=%d headLSN=%d]",
 					errConstraint, vfk.column, vfk.referencesDomain, vfk.referencesTable, vfk.referencesColumn,
 					fkValue.StringValue, len(refTable.rows), state.headLSN)
@@ -209,15 +211,20 @@ func validateVersionedForeignKeys(state *readableState, engine *Engine, table *t
 					return fmt.Errorf("%w: versioned FK %s references child table %s of entity %q; must reference root table %s",
 						errConstraint, vfk.column, vfk.referencesTable, entityName, entity.rootTable)
 				}
-				version, ok := latestEntityVersion(refDomainState, entityName, rootPK)
+				version, ok := visibleEntityVersion(refDomainState, entityName, rootPK, pendingEntityVersions)
 				if !ok {
 					return fmt.Errorf("%w: versioned FK %s: entity %q has no committed version for root PK %s; commit the entity first",
 						errConstraint, vfk.column, entityName, rootPK)
 				}
 				row[vfk.lsnColumn] = ast.Literal{Kind: ast.LiteralNumber, NumberValue: int64(version)}
 			} else {
-				// No entity — fall back to headLSN (current behavior).
-				row[vfk.lsnColumn] = ast.Literal{Kind: ast.LiteralNumber, NumberValue: int64(state.headLSN)}
+				// No entity — capture the referenced row's current visible row-head LSN.
+				refLSN, ok := refRow["_lsn"]
+				if !ok || refLSN.Kind != ast.LiteralNumber {
+					return fmt.Errorf("%w: versioned FK %s references %s.%s(%s) but row has no visible _lsn",
+						errConstraint, vfk.column, vfk.referencesDomain, vfk.referencesTable, vfk.referencesColumn)
+				}
+				row[vfk.lsnColumn] = refLSN
 			}
 		} else {
 			// Explicit value provided: validate accordingly.
@@ -234,6 +241,9 @@ func validateVersionedForeignKeys(state *readableState, engine *Engine, table *t
 				rootPK := literalKey(fkValue)
 				version := uint64(lsnValue.NumberValue)
 				_, ok := resolveEntityVersionCommitLSN(refDomainState, entityName, rootPK, version)
+				if !ok {
+					ok = visiblePendingEntityVersion(pendingEntityVersions, entityName, rootPK, refDomainState, version)
+				}
 				if !ok {
 					return fmt.Errorf("%w: versioned FK %s: entity %q version %d not found for root PK %s",
 						errConstraint, vfk.column, entityName, version, rootPK)
@@ -253,6 +263,45 @@ func validateVersionedForeignKeys(state *readableState, engine *Engine, table *t
 		}
 	}
 	return nil
+}
+
+func lookupUniqueRow(table *tableState, column string, value ast.Literal) (map[string]ast.Literal, bool) {
+	if table == nil {
+		return nil, false
+	}
+	return indexLookupRow(table, column, literalKey(value))
+}
+
+func visibleEntityVersion(ds *domainState, entityName, rootPK string, pendingEntityVersions map[string]map[string][]string) (uint64, bool) {
+	latest, ok := latestEntityVersion(ds, entityName, rootPK)
+	if visiblePendingEntityVersion(pendingEntityVersions, entityName, rootPK, ds, latest+1) {
+		return latest + 1, true
+	}
+	if ok {
+		return latest, true
+	}
+	if visiblePendingEntityVersion(pendingEntityVersions, entityName, rootPK, ds, 1) {
+		return 1, true
+	}
+	return 0, false
+}
+
+func visiblePendingEntityVersion(pendingEntityVersions map[string]map[string][]string, entityName, rootPK string, ds *domainState, version uint64) bool {
+	if pendingEntityVersions == nil || ds == nil {
+		return false
+	}
+	pendingRoots, ok := pendingEntityVersions[entityName]
+	if !ok {
+		return false
+	}
+	if _, ok := pendingRoots[rootPK]; !ok {
+		return false
+	}
+	latest, hasLatest := latestEntityVersion(ds, entityName, rootPK)
+	if !hasLatest {
+		return version == 1
+	}
+	return version == latest+1
 }
 
 // tableContainsValueAtLSN checks whether a row with the given value existed in a table at a specific LSN.

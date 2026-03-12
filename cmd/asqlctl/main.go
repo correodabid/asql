@@ -9,12 +9,15 @@ import (
 	"io"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	"asql/internal/engine/executor"
+	"asql/internal/fixtures"
 	api "asql/internal/server/grpc"
 
+	"github.com/jackc/pgx/v5"
 	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -39,7 +42,7 @@ func main() {
 	pgwireAddr := flag.String("pgwire", "127.0.0.1:5433", "ASQL pgwire endpoint (used by shell)")
 	authToken := flag.String("auth-token", "", "optional bearer token for authenticated APIs")
 	demo := flag.Bool("demo", false, "run end-to-end gRPC demo flow")
-	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention")
+	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|fixture-validate|fixture-load|fixture-export")
 	mode := flag.String("mode", "domain", "tx mode for begin: domain|cross")
 	domains := flag.String("domains", "", "comma-separated domains (required for begin and usually for time-travel)")
 	txID := flag.String("tx-id", "", "transaction id for execute/commit/rollback")
@@ -48,6 +51,7 @@ func main() {
 	logicalTS := flag.Uint64("logical-ts", 0, "logical timestamp for time-travel when lsn is not provided")
 	dataDir := flag.String("data-dir", "", "local ASQL data directory for backup/restore commands")
 	backupDir := flag.String("backup-dir", "", "backup directory for backup/restore commands")
+	fixtureFile := flag.String("fixture-file", "", "path to a deterministic fixture JSON file")
 	flag.Parse()
 
 	// Support positional  "asqlctl shell"  syntax in addition to -command.
@@ -69,6 +73,14 @@ func main() {
 				AuthToken:  *authToken,
 			}); err != nil {
 				fmt.Fprintf(os.Stderr, "shell error: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+
+		if isFixtureCommand(*command) {
+			if err := runFixtureCommand(context.Background(), os.Stdout, *command, *fixtureFile, *domains, *pgwireAddr, *authToken); err != nil {
+				fmt.Fprintf(os.Stderr, "command failed: %v\n", err)
 				os.Exit(1)
 			}
 			return
@@ -235,6 +247,15 @@ func isLocalRecoveryCommand(command string) bool {
 	}
 }
 
+func isFixtureCommand(command string) bool {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "fixture-validate", "fixture-load", "fixture-export":
+		return true
+	default:
+		return false
+	}
+}
+
 func runLocalRecoveryCommand(ctx context.Context, out io.Writer, command, dataDir, backupDir string, lsn, logicalTS uint64) error {
 	switch strings.ToLower(strings.TrimSpace(command)) {
 	case "backup-create":
@@ -312,6 +333,101 @@ func runLocalRecoveryCommand(ctx context.Context, out io.Writer, command, dataDi
 	default:
 		return fmt.Errorf("unsupported local recovery command %q", command)
 	}
+}
+
+func runFixtureCommand(ctx context.Context, out io.Writer, command, fixturePath, domainsCSV, pgwireAddr, authToken string) error {
+	fixturePath = strings.TrimSpace(fixturePath)
+	if fixturePath == "" {
+		return errors.New("fixture command requires -fixture-file")
+	}
+	domains := parseDomains(domainsCSV)
+	result := struct {
+		Status      string   `json:"status"`
+		Fixture     string   `json:"fixture"`
+		FixtureName string   `json:"fixture_name"`
+		Steps       int      `json:"steps"`
+		Domains     []string `json:"domains,omitempty"`
+	}{
+		Fixture: fixturePath,
+	}
+
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "fixture-validate":
+		fixture, err := fixtures.LoadFile(fixturePath)
+		if err != nil {
+			return err
+		}
+		if err := fixtures.ValidateDryRun(ctx, fixture); err != nil {
+			return err
+		}
+		result.FixtureName = fixture.Name
+		result.Steps = len(fixture.Steps)
+		result.Status = "validated"
+		return printJSONTo(out, result)
+	case "fixture-load":
+		fixture, err := fixtures.LoadFile(fixturePath)
+		if err != nil {
+			return err
+		}
+		if err := fixtures.ValidateDryRun(ctx, fixture); err != nil {
+			return err
+		}
+		if strings.TrimSpace(pgwireAddr) == "" {
+			return errors.New("fixture-load requires -pgwire")
+		}
+		conn, err := pgx.Connect(ctx, buildConnString(shellConfig{PgwireAddr: pgwireAddr, AuthToken: authToken}))
+		if err != nil {
+			return fmt.Errorf("connect pgwire: %w", err)
+		}
+		defer conn.Close(ctx)
+
+		if err := fixtures.Apply(ctx, fixture, pgwireFixtureExecutor{conn: conn}); err != nil {
+			return err
+		}
+		result.FixtureName = fixture.Name
+		result.Steps = len(fixture.Steps)
+		result.Status = "loaded"
+		return printJSONTo(out, result)
+	case "fixture-export":
+		if strings.TrimSpace(pgwireAddr) == "" {
+			return errors.New("fixture-export requires -pgwire")
+		}
+		if len(domains) == 0 {
+			return errors.New("fixture-export requires -domains")
+		}
+		conn, err := pgx.Connect(ctx, buildConnString(shellConfig{PgwireAddr: pgwireAddr, AuthToken: authToken}))
+		if err != nil {
+			return fmt.Errorf("connect pgwire: %w", err)
+		}
+		defer conn.Close(ctx)
+
+		exported, err := fixtures.ExportFromPGWire(ctx, conn, fixtures.ExportOptions{
+			Domains: domains,
+			Name:    strings.TrimSuffix(filepath.Base(fixturePath), filepath.Ext(fixturePath)),
+		})
+		if err != nil {
+			return err
+		}
+		if err := fixtures.SaveFile(fixturePath, exported); err != nil {
+			return err
+		}
+		result.Status = "exported"
+		result.FixtureName = exported.Name
+		result.Steps = len(exported.Steps)
+		result.Domains = domains
+		return printJSONTo(out, result)
+	default:
+		return fmt.Errorf("unsupported fixture command %q", command)
+	}
+}
+
+type pgwireFixtureExecutor struct {
+	conn *pgx.Conn
+}
+
+func (e pgwireFixtureExecutor) Exec(ctx context.Context, sql string) error {
+	_, err := e.conn.Exec(ctx, sql)
+	return err
 }
 
 func dialConnection(ctx context.Context, endpoint string) (*grpcgo.ClientConn, error) {

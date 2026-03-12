@@ -744,7 +744,7 @@ func TestExplainAccessPlanWithData(t *testing.T) {
 	}
 }
 
-func TestExecuteCrossDomainCommitOrdersMutationsByDomain(t *testing.T) {
+func TestExecuteCrossDomainCommitPreservesStatementOrder(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "cross-order.wal")
 
@@ -796,8 +796,8 @@ func TestExecuteCrossDomainCommitOrdersMutationsByDomain(t *testing.T) {
 		t.Fatalf("decode second mutation: %v", err)
 	}
 
-	if firstDomain != "accounts" || secondDomain != "loans" {
-		t.Fatalf("mutations are not domain ordered: first=%s second=%s", firstDomain, secondDomain)
+	if firstDomain != "loans" || secondDomain != "accounts" {
+		t.Fatalf("mutations do not preserve statement order: first=%s second=%s", firstDomain, secondDomain)
 	}
 }
 
@@ -3772,9 +3772,22 @@ func TestRowHistory_InsertUpdateDelete(t *testing.T) {
 	// Check operations
 	ops := make([]string, len(result.Rows))
 	for i, row := range result.Rows {
-		op, ok := row["_operation"]
+		op, ok := row[HistoryOperationColumnName]
 		if !ok {
-			t.Fatalf("row %d missing _operation: %+v", i, row)
+			t.Fatalf("row %d missing %s: %+v", i, HistoryOperationColumnName, row)
+		}
+		if _, legacy := row["_operation"]; legacy {
+			t.Fatalf("row %d unexpectedly exposed legacy _operation column: %+v", i, row)
+		}
+		commitLSN, ok := row[HistoryCommitLSNColumnName]
+		if !ok {
+			t.Fatalf("row %d missing %s: %+v", i, HistoryCommitLSNColumnName, row)
+		}
+		if commitLSN.Kind != ast.LiteralNumber || commitLSN.NumberValue <= 0 {
+			t.Fatalf("row %d invalid %s: %+v", i, HistoryCommitLSNColumnName, commitLSN)
+		}
+		if _, legacy := row["_lsn"]; legacy {
+			t.Fatalf("row %d unexpectedly exposed legacy _lsn column: %+v", i, row)
 		}
 		ops[i] = op.StringValue
 	}
@@ -3932,9 +3945,9 @@ func TestRowHistory_PreservedAfterSnapshotRestart(t *testing.T) {
 
 	// Verify the latest operation reflects the update.
 	lastRow := result.Rows[len(result.Rows)-1]
-	lastOp, ok := lastRow["_operation"]
+	lastOp, ok := lastRow[HistoryOperationColumnName]
 	if !ok {
-		t.Fatalf("last row missing _operation: %+v", lastRow)
+		t.Fatalf("last row missing %s: %+v", HistoryOperationColumnName, lastRow)
 	}
 	if lastOp.StringValue != "UPDATE" && lastOp.StringValue != "INSERT" {
 		t.Errorf("expected last operation UPDATE or INSERT, got %s", lastOp.StringValue)
@@ -4523,7 +4536,7 @@ func TestRowHistoryCrossDomainVFK(t *testing.T) {
 	}
 	if len(historyResult.Rows) != 2 {
 		for i, row := range historyResult.Rows {
-			t.Logf("  row[%d]: op=%s status=%s", i, row["_operation"].StringValue, row["status"].StringValue)
+			t.Logf("  row[%d]: op=%s status=%s", i, row[HistoryOperationColumnName].StringValue, row["status"].StringValue)
 		}
 		t.Fatalf("expected 2 history entries (INSERT + UPDATE), got %d", len(historyResult.Rows))
 	}
@@ -4607,22 +4620,22 @@ func TestRowHistoryWithUUIDAndReturning(t *testing.T) {
 	}
 	if len(historyResult.Rows) != 2 {
 		for i, row := range historyResult.Rows {
-			t.Logf("  row[%d]: op=%s status=%s id=%s", i, row["_operation"].StringValue, row["status"].StringValue, row["id"].StringValue)
+			t.Logf("  row[%d]: op=%s status=%s id=%s", i, row[HistoryOperationColumnName].StringValue, row["status"].StringValue, row["id"].StringValue)
 		}
 		t.Fatalf("expected 2 history entries (INSERT + UPDATE), got %d", len(historyResult.Rows))
 	}
 
 	// First entry should be INSERT with draft.
-	if historyResult.Rows[0]["_operation"].StringValue != "INSERT" {
-		t.Fatalf("expected first entry to be INSERT, got %s", historyResult.Rows[0]["_operation"].StringValue)
+	if historyResult.Rows[0][HistoryOperationColumnName].StringValue != "INSERT" {
+		t.Fatalf("expected first entry to be INSERT, got %s", historyResult.Rows[0][HistoryOperationColumnName].StringValue)
 	}
 	if historyResult.Rows[0]["status"].StringValue != "draft" {
 		t.Fatalf("expected first entry status=draft, got %s", historyResult.Rows[0]["status"].StringValue)
 	}
 
 	// Second entry should be UPDATE with published.
-	if historyResult.Rows[1]["_operation"].StringValue != "UPDATE" {
-		t.Fatalf("expected second entry to be UPDATE, got %s", historyResult.Rows[1]["_operation"].StringValue)
+	if historyResult.Rows[1][HistoryOperationColumnName].StringValue != "UPDATE" {
+		t.Fatalf("expected second entry to be UPDATE, got %s", historyResult.Rows[1][HistoryOperationColumnName].StringValue)
 	}
 	if historyResult.Rows[1]["status"].StringValue != "published" {
 		t.Fatalf("expected second entry status=published, got %s", historyResult.Rows[1]["status"].StringValue)
@@ -4693,16 +4706,16 @@ func TestRowHistoryShowsInsertAndUpdate(t *testing.T) {
 	}
 
 	// First entry should be INSERT.
-	if historyResult.Rows[0]["_operation"].StringValue != "INSERT" {
-		t.Fatalf("expected first entry to be INSERT, got %s", historyResult.Rows[0]["_operation"].StringValue)
+	if historyResult.Rows[0][HistoryOperationColumnName].StringValue != "INSERT" {
+		t.Fatalf("expected first entry to be INSERT, got %s", historyResult.Rows[0][HistoryOperationColumnName].StringValue)
 	}
 	if historyResult.Rows[0]["status"].StringValue != "draft" {
 		t.Fatalf("expected first entry status=draft, got %s", historyResult.Rows[0]["status"].StringValue)
 	}
 
 	// Second entry should be UPDATE.
-	if historyResult.Rows[1]["_operation"].StringValue != "UPDATE" {
-		t.Fatalf("expected second entry to be UPDATE, got %s", historyResult.Rows[1]["_operation"].StringValue)
+	if historyResult.Rows[1][HistoryOperationColumnName].StringValue != "UPDATE" {
+		t.Fatalf("expected second entry to be UPDATE, got %s", historyResult.Rows[1][HistoryOperationColumnName].StringValue)
 	}
 	if historyResult.Rows[1]["status"].StringValue != "published" {
 		t.Fatalf("expected second entry status=published, got %s", historyResult.Rows[1]["status"].StringValue)

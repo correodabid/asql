@@ -11,7 +11,7 @@ const SHORTCUTS: Shortcut[] = [
     shortcuts: [
       { keys: 'Cmd+K', description: 'Open command palette' },
       { keys: '?', description: 'Show keyboard shortcuts' },
-      { keys: 'Cmd+1/2/3/4', description: 'Switch tabs' },
+      { keys: 'Cmd+1…7', description: 'Switch tabs' },
     ],
   },
   {

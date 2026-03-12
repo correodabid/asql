@@ -205,9 +205,7 @@ func (engine *Engine) RowHistory(ctx context.Context, sql string, txDomains []st
 			continue
 		}
 
-		resultRow := cloneRow(matchRow)
-		resultRow["_lsn"] = ast.Literal{Kind: ast.LiteralNumber, NumberValue: int64(entry.commitLSN)}
-		resultRow["_operation"] = ast.Literal{Kind: ast.LiteralString, StringValue: entry.operation}
+		resultRow := buildHistoryResultRow(matchRow, entry.commitLSN, entry.operation)
 		historyRows = append(historyRows, resultRow)
 	}
 
@@ -400,9 +398,7 @@ func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planne
 			continue
 		}
 
-		resultRow := cloneRow(matchRow)
-		resultRow["_lsn"] = ast.Literal{Kind: ast.LiteralNumber, NumberValue: int64(e.CommitLSN)}
-		resultRow["_operation"] = ast.Literal{Kind: ast.LiteralString, StringValue: e.Operation}
+		resultRow := buildHistoryResultRow(matchRow, e.CommitLSN, e.Operation)
 		historyRows = append(historyRows, resultRow)
 	}
 
@@ -424,9 +420,7 @@ func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planne
 					if plan.Filter != nil && !matchPredicate(matchRow, plan.Filter, state, engine) {
 						continue
 					}
-					resultRow := cloneRow(matchRow)
-					resultRow["_lsn"] = ast.Literal{Kind: ast.LiteralNumber, NumberValue: int64(entry.commitLSN)}
-					resultRow["_operation"] = ast.Literal{Kind: ast.LiteralString, StringValue: entry.operation}
+					resultRow := buildHistoryResultRow(matchRow, entry.commitLSN, entry.operation)
 					historyRows = append(historyRows, resultRow)
 				}
 			}
@@ -436,7 +430,7 @@ func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planne
 	// Sort chronologically — lazy-anchored INSERT entries land after the
 	// UPDATE/DELETE that triggered them in the slice, reorder here.
 	sort.Slice(historyRows, func(i, j int) bool {
-		return historyRows[i]["_lsn"].NumberValue < historyRows[j]["_lsn"].NumberValue
+		return historyRows[i][HistoryCommitLSNColumnName].NumberValue < historyRows[j][HistoryCommitLSNColumnName].NumberValue
 	})
 
 	if plan.Limit != nil && len(historyRows) > *plan.Limit {

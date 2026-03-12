@@ -27,7 +27,17 @@ export function ExecuteBatch(arg1:main.executeBatchRequest):Promise<Record<strin
 
 export function Explain(arg1:main.explainRequest):Promise<Record<string, any>>;
 
+export function FixtureExport(arg1:main.fixtureExportRequest):Promise<Record<string, any>>;
+
+export function FixtureLoad(arg1:string):Promise<Record<string, any>>;
+
+export function FixtureValidate(arg1:string):Promise<Record<string, any>>;
+
 export function Health():Promise<Record<string, any>>;
+
+export function PickFixtureExportFile(arg1:string):Promise<string>;
+
+export function PickFixtureFile():Promise<string>;
 
 export function ReadQuery(arg1:main.readQueryRequest):Promise<main.readQueryResponse>;
 
@@ -78,6 +88,8 @@ export function SchemaLoadAllBaselines():Promise<Record<string, any>>;
 export function SchemaLoadBaseline(arg1:main.schemaLoadBaselineRequest):Promise<Record<string, any>>;
 
 export function SchemaTables(arg1:string):Promise<Record<string, any>>;
+
+export function TemporalLookup(arg1:main.temporalLookupRequest):Promise<Record<string, any>>;
 
 export function TimeTravel(arg1:main.timeTravelRequest):Promise<Record<string, any>>;
 

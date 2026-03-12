@@ -31,13 +31,13 @@ import (
 
 // connState holds per-connection mutable state for one pgwire client.
 type connState struct {
-	session  *executor.Session
-	prepared map[string]preparedStmt // statement name → parsed SQL
-	portals  map[string]portal       // portal name → bound, ready-to-execute SQL
+	session   *executor.Session
+	prepared  map[string]preparedStmt // statement name → parsed SQL
+	portals   map[string]portal       // portal name → bound, ready-to-execute SQL
 	processID uint32
 	secretKey uint32
-	copyIn   *copyInState
-	copySeq  uint64
+	copyIn    *copyInState
+	copySeq   uint64
 
 	// errorPending is true when an extended-protocol error has been sent but
 	// the client has not yet responded with a Sync message.  In this state the
@@ -46,7 +46,7 @@ type connState struct {
 
 	mu            sync.Mutex
 	currentCancel context.CancelFunc
-	logger *slog.Logger
+	logger        *slog.Logger
 }
 
 func (state *connState) beginQuery() (context.Context, func()) {
@@ -648,10 +648,10 @@ func (server *Server) describeFields(sql string) []pgproto3.FieldDescription {
 			}
 		}
 		cols = server.resolveStarColumns(lookupSel)
-		// FOR HISTORY adds _operation and _lsn to every result row; include
+		// FOR HISTORY adds canonical metadata columns to every result row; include
 		// them in the RowDescription so the column count matches the DataRows.
 		if sel.ForHistory && len(cols) > 0 {
-			cols = append(cols, "_lsn", "_operation")
+			cols = append(cols, executor.HistoryOperationColumnName, executor.HistoryCommitLSNColumnName)
 			sortColumns(cols)
 		}
 	}
@@ -669,12 +669,12 @@ func (server *Server) describeFields(sql string) []pgproto3.FieldDescription {
 	// original INSERT), the column sets differ and positional OID assignment
 	// breaks — a TEXT value ends up decoded with an INT OID.  Avoid the
 	// mismatch by using only text (25) for user columns and int8 (20) for
-	// _lsn, which is always present and always numeric.
+	// __commit_lsn, which is always present and always numeric.
 	if sel.ForHistory {
 		fields := make([]pgproto3.FieldDescription, len(cols))
 		for i, c := range cols {
 			oid := uint32(25) // text
-			if c == "_lsn" {
+			if c == executor.HistoryCommitLSNColumnName {
 				oid = 20 // int8
 			}
 			fields[i] = pgproto3.FieldDescription{

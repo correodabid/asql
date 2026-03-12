@@ -3,6 +3,7 @@ import { formatCell } from '../lib/sql'
 import type { EntityDefinition } from '../schema'
 import type { ForeignKeyLink, QueryResult, ReverseFK } from '../types/workspace'
 import { IconKey, IconLink } from './Icons'
+import { DetailTemporalMetadata } from './DetailTemporalMetadata'
 import { DetailMutationHistory } from './DetailMutationHistory'
 import { DetailEntityHistory } from './DetailEntityHistory'
 import { DetailReferencedBy } from './DetailReferencedBy'
@@ -89,6 +90,18 @@ export function DetailPanel({
             )
           })}
         </div>
+
+        {pkColumns.length > 0 && (
+          <DetailTemporalMetadata
+          domain={domain}
+          tableName={tableName}
+          pkColumns={pkColumns}
+          row={row}
+          entityName={entity?.name}
+          entityRootTable={entity?.root_table}
+          foreignKeys={foreignKeys}
+          />
+        )}
 
         {pkColumns.length > 0 && (
           <DetailMutationHistory

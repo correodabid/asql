@@ -2,6 +2,8 @@
 
 This guide helps teams move lightweight SQLite-style workloads to ASQL quickly.
 
+For the full adoption guide, see [docs/getting-started/10-adoption-playbook.md](getting-started/10-adoption-playbook.md).
+
 ## Scope
 
 Best fit:

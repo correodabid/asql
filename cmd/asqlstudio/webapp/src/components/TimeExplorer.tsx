@@ -11,7 +11,7 @@ import { IconClock, IconCopy, IconExpand, IconRefresh, IconTable, IconTimeline }
 type View = 'snapshot' | 'diff' | 'history'
 type RowStatus = 'added' | 'removed' | 'changed' | 'unchanged'
 type TableInfo = { name: string }
-type HistoryEntry = { _lsn: number; _operation: string; [k: string]: unknown }
+type HistoryEntry = { __commit_lsn?: number; __operation?: string; _lsn?: number; _operation?: string; [k: string]: unknown }
 
 // ─── Helpers ────────────────────────────────────────────
 
@@ -611,9 +611,9 @@ export function TimeExplorer({ domain }: Props) {
         <div className="te-history-scroll">
           <div className="te-history-timeline">
             {histRows.map((entry, i) => {
-              const op  = String(entry._operation || '').toLowerCase()
-              const lsn = Number(entry._lsn || 0)
-              const fields = Object.entries(entry).filter(([k]) => !k.startsWith('_'))
+                const op = String(entry.__operation || entry._operation || '').toLowerCase()
+                const lsn = Number(entry.__commit_lsn || entry._lsn || 0)
+                const fields = Object.entries(entry).filter(([k]) => k !== '__operation' && k !== '__commit_lsn' && !k.startsWith('_'))
               const isLast = i === histRows.length - 1
               return (
                 <div key={i} className="te-history-entry">

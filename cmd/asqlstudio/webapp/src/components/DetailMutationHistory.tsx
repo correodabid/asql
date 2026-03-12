@@ -62,17 +62,19 @@ export function DetailMutationHistory({ tableName, pkColumns, row, domain }: Pro
             <div className="text-muted">No mutations found</div>
           )}
           {mutations.map((m, i) => {
-            const op = (m._operation as string) || 'unknown'
-            const ts = (m._timestamp as string) || ''
+            const op = (m.__operation as string) || (m._operation as string) || 'unknown'
+            const commitLSN = (m.__commit_lsn as string | number | undefined) ?? (m._lsn as string | number | undefined)
             return (
               <div key={i} className={`mutation-entry mutation-${op.toLowerCase()}`}>
                 <div className="mutation-header">
                   <span className={`mutation-badge ${op.toLowerCase()}`}>{op}</span>
-                  {ts && <span className="mutation-ts mono">{ts}</span>}
+                  {commitLSN !== undefined && commitLSN !== null && (
+                    <span className="mutation-ts mono">LSN {String(commitLSN)}</span>
+                  )}
                 </div>
                 <div className="mutation-fields">
                   {Object.entries(m)
-                    .filter(([k]) => !k.startsWith('_'))
+                    .filter(([k]) => k !== '__operation' && k !== '__commit_lsn' && !k.startsWith('_'))
                     .map(([k, v]) => (
                       <span key={k} className="mutation-field">
                         <span className="mutation-field-name">{k}:</span>{' '}

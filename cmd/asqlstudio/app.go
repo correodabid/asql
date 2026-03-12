@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"asql/internal/engine/executor"
+	"asql/internal/fixtures"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
@@ -116,19 +118,19 @@ type clusterFailoverTransition struct {
 }
 
 type clusterDiagnosticsSummary struct {
-	ReachableNodes     int    `json:"reachable_nodes"`
-	ReadyNodes         int    `json:"ready_nodes"`
-	TotalSegments      int    `json:"total_segments"`
-	TotalSnapshots     int    `json:"total_snapshots"`
-	HighestDurableLSN  uint64 `json:"highest_durable_lsn"`
+	ReachableNodes      int    `json:"reachable_nodes"`
+	ReadyNodes          int    `json:"ready_nodes"`
+	TotalSegments       int    `json:"total_segments"`
+	TotalSnapshots      int    `json:"total_snapshots"`
+	HighestDurableLSN   uint64 `json:"highest_durable_lsn"`
 	WorstReplicationLag uint64 `json:"worst_replication_lag"`
 }
 
 type clusterDiagnosticsResponse struct {
-	EngineStats     *api.EngineStatsResponse  `json:"engine_stats,omitempty"`
-	AdminNodes      []clusterDiagnosticsNode  `json:"admin_nodes"`
+	EngineStats     *api.EngineStatsResponse    `json:"engine_stats,omitempty"`
+	AdminNodes      []clusterDiagnosticsNode    `json:"admin_nodes"`
 	FailoverHistory []clusterFailoverTransition `json:"failover_history,omitempty"`
-	Summary         clusterDiagnosticsSummary `json:"summary"`
+	Summary         clusterDiagnosticsSummary   `json:"summary"`
 }
 
 // startup is called by Wails when the app window is ready; stores the lifetime context.
@@ -437,9 +439,9 @@ func (a *App) startClusterWatcher(ctx context.Context) {
 	}
 
 	const (
-		pollInterval      = 100 * time.Millisecond
-		heartbeatInterval = 2 * time.Second
-		syncPeersInterval = 2 * time.Second // re-discover peers and leader every 2 s
+		pollInterval       = 100 * time.Millisecond
+		heartbeatInterval  = 2 * time.Second
+		syncPeersInterval  = 2 * time.Second // re-discover peers and leader every 2 s
 		leaderSyncDebounce = 1 * time.Second // min gap between leader-unreachable re-syncs
 	)
 
@@ -741,6 +743,51 @@ func (a *App) EntityVersionHistory(req entityVersionHistoryRequest) (map[string]
 		return nil, err
 	}
 	return structToMap(resp)
+}
+
+// TemporalLookup resolves the current helper surface for a specific row/entity context.
+func (a *App) TemporalLookup(req temporalLookupRequest) (map[string]interface{}, error) {
+	ctx, cancel := a.reqCtx()
+	defer cancel()
+
+	client := a.getLeaderClient()
+	if client == nil {
+		return nil, fmt.Errorf("leader client is not available")
+	}
+	resp, err := client.TemporalLookup(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+
+	result := map[string]interface{}{
+		"status":                  "OK",
+		"current_lsn":             nil,
+		"row_lsn":                 nil,
+		"resolve_reference":       nil,
+		"resolve_reference_error": strings.TrimSpace(resp.ResolveReferenceErr),
+		"entity_version":          nil,
+		"entity_head_lsn":         nil,
+		"entity_version_lsn":      nil,
+	}
+	if resp.CurrentLSN != nil {
+		result["current_lsn"] = *resp.CurrentLSN
+	}
+	if resp.RowLSN != nil {
+		result["row_lsn"] = *resp.RowLSN
+	}
+	if resp.ResolveReference != nil {
+		result["resolve_reference"] = *resp.ResolveReference
+	}
+	if resp.EntityVersion != nil {
+		result["entity_version"] = *resp.EntityVersion
+	}
+	if resp.EntityHeadLSN != nil {
+		result["entity_head_lsn"] = *resp.EntityHeadLSN
+	}
+	if resp.EntityVersionLSN != nil {
+		result["entity_version_lsn"] = *resp.EntityVersionLSN
+	}
+	return result, nil
 }
 
 // Explain returns the query execution plan for a SQL statement.
@@ -1618,6 +1665,118 @@ func (a *App) fetchLastLSN(ctx context.Context, client *engineClient) (uint64, e
 		return 0, err
 	}
 	return resp.LSN, nil
+}
+
+// PickFixtureFile shows a native open dialog for fixture JSON files.
+func (a *App) PickFixtureFile() (string, error) {
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Open ASQL fixture",
+		Filters: []runtime.FileFilter{{
+			DisplayName: "ASQL fixture",
+			Pattern:     "*.json",
+		}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	return path, nil
+}
+
+// PickFixtureExportFile shows a native save dialog for exported fixture files.
+func (a *App) PickFixtureExportFile(suggestedName string) (string, error) {
+	if strings.TrimSpace(suggestedName) == "" {
+		suggestedName = "fixture-export-v1.json"
+	}
+	path, err := runtime.SaveFileDialog(a.ctx, runtime.SaveDialogOptions{
+		Title:           "Save ASQL fixture",
+		DefaultFilename: suggestedName,
+		Filters: []runtime.FileFilter{{
+			DisplayName: "ASQL fixture",
+			Pattern:     "*.json",
+		}},
+	})
+	if err != nil || path == "" {
+		return "", err
+	}
+	return path, nil
+}
+
+// FixtureValidate validates a fixture file, including a deterministic dry run.
+func (a *App) FixtureValidate(path string) (map[string]interface{}, error) {
+	fixture, err := fixtures.LoadFile(strings.TrimSpace(path))
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := a.reqCtx()
+	defer cancel()
+	if err := fixtures.ValidateDryRun(ctx, fixture); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"status": "validated",
+		"file":   strings.TrimSpace(path),
+		"name":   fixture.Name,
+		"steps":  len(fixture.Steps),
+	}, nil
+}
+
+// FixtureLoad validates then applies a fixture to the current leader endpoint.
+func (a *App) FixtureLoad(path string) (map[string]interface{}, error) {
+	fixture, err := fixtures.LoadFile(strings.TrimSpace(path))
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := a.reqCtx()
+	defer cancel()
+	if err := fixtures.ValidateDryRun(ctx, fixture); err != nil {
+		return nil, err
+	}
+	client := a.getLeaderClient()
+	if client == nil {
+		return nil, fmt.Errorf("leader client is not available")
+	}
+	if err := client.ApplyFixture(ctx, fixture); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"status": "loaded",
+		"file":   strings.TrimSpace(path),
+		"name":   fixture.Name,
+		"steps":  len(fixture.Steps),
+	}, nil
+}
+
+// FixtureExport exports the selected domains into a deterministic fixture file.
+func (a *App) FixtureExport(req fixtureExportRequest) (map[string]interface{}, error) {
+	if strings.TrimSpace(req.FilePath) == "" {
+		return nil, fmt.Errorf("file_path is required")
+	}
+	if len(req.Domains) == 0 {
+		return nil, fmt.Errorf("at least one domain is required")
+	}
+	ctx, cancel := a.reqCtx()
+	defer cancel()
+	client := a.getLeaderClient()
+	if client == nil {
+		return nil, fmt.Errorf("leader client is not available")
+	}
+	fixture, err := client.ExportFixture(ctx, fixtures.ExportOptions{
+		Domains:     req.Domains,
+		Name:        req.Name,
+		Description: req.Description,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := fixtures.SaveFile(strings.TrimSpace(req.FilePath), fixture); err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{
+		"status": "exported",
+		"file":   strings.TrimSpace(req.FilePath),
+		"name":   fixture.Name,
+		"steps":  len(fixture.Steps),
+	}, nil
 }
 
 // ── File export (Wails desktop downloads) ────────────────────────────────────

@@ -39,33 +39,39 @@ var reCurrentSetting = regexp.MustCompile(`(?i)current_setting\s*\(\s*'([^']+)'\
 // reSetConfig matches  SELECT set_config('param', 'value', false/true)
 var reSetConfig = regexp.MustCompile(`(?i)set_config\s*\(\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*(?:false|true)\s*\)`)
 
+var reRowLSN = regexp.MustCompile(`(?is)^select\s+row_lsn\s*\(\s*'((?:[^']|'')+)'\s*,\s*'((?:[^']|'')*)'\s*\)\s*(?:as\s+row_lsn)?\s*$`)
+var reEntityVersion = regexp.MustCompile(`(?is)^select\s+entity_version\s*\(\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'\s*\)\s*(?:as\s+entity_version)?\s*$`)
+var reEntityHeadLSN = regexp.MustCompile(`(?is)^select\s+entity_head_lsn\s*\(\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'\s*\)\s*(?:as\s+entity_head_lsn)?\s*$`)
+var reEntityVersionLSN = regexp.MustCompile(`(?is)^select\s+entity_version_lsn\s*\(\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'\s*,\s*([0-9]+)\s*\)\s*(?:as\s+entity_version_lsn)?\s*$`)
+var reResolveReference = regexp.MustCompile(`(?is)^select\s+resolve_reference\s*\(\s*'((?:[^']|'')+)'\s*,\s*'((?:[^']|'')*)'\s*\)\s*(?:as\s+resolve_reference)?\s*$`)
+
 // currentSettingDefaults maps GUC parameter names to the default values
 // ASQL should report.  The set is deliberately small — only the parameters
 // that commonly appear in startup introspection from psql, JDBC, DBeaver,
 // DataGrip, pgx, and similar clients.
 var currentSettingDefaults = map[string]string{
-	"server_version":              "16.0",
-	"server_version_num":          "160000",
-	"server_encoding":             "UTF8",
-	"client_encoding":             "UTF8",
-	"datestyle":                   "ISO, MDY",
-	"intervalstyle":               "postgres",
-	"timezone":                    "UTC",
-	"integer_datetimes":           "on",
-	"standard_conforming_strings": "on",
-	"search_path":                 "\"$user\", public",
-	"max_identifier_length":       "63",
-	"transaction_isolation":       "read committed",
-	"is_superuser":                "on",
-	"session_authorization":       "asql",
-	"lc_collate":                  "en_US.UTF-8",
-	"lc_ctype":                    "en_US.UTF-8",
-	"lc_messages":                 "en_US.UTF-8",
-	"lc_monetary":                 "en_US.UTF-8",
-	"lc_numeric":                  "en_US.UTF-8",
-	"lc_time":                     "en_US.UTF-8",
+	"server_version":                "16.0",
+	"server_version_num":            "160000",
+	"server_encoding":               "UTF8",
+	"client_encoding":               "UTF8",
+	"datestyle":                     "ISO, MDY",
+	"intervalstyle":                 "postgres",
+	"timezone":                      "UTC",
+	"integer_datetimes":             "on",
+	"standard_conforming_strings":   "on",
+	"search_path":                   "\"$user\", public",
+	"max_identifier_length":         "63",
+	"transaction_isolation":         "read committed",
+	"is_superuser":                  "on",
+	"session_authorization":         "asql",
+	"lc_collate":                    "en_US.UTF-8",
+	"lc_ctype":                      "en_US.UTF-8",
+	"lc_messages":                   "en_US.UTF-8",
+	"lc_monetary":                   "en_US.UTF-8",
+	"lc_numeric":                    "en_US.UTF-8",
+	"lc_time":                       "en_US.UTF-8",
 	"default_transaction_isolation": "read committed",
-	"bytea_output":                "hex",
+	"bytea_output":                  "hex",
 }
 
 // interceptCatalog returns a synthetic result when sql is a recognised catalog
@@ -77,6 +83,25 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string) (interce
 
 	switch {
 	// ── Scalar utility queries ────────────────────────────────────────────
+
+	case reRowLSN.MatchString(trimmed):
+		return server.handleRowLSN(trimmed)
+
+	case reEntityVersion.MatchString(trimmed):
+		return server.handleEntityVersion(trimmed)
+
+	case reEntityHeadLSN.MatchString(trimmed):
+		return server.handleEntityHeadLSN(trimmed)
+
+	case reEntityVersionLSN.MatchString(trimmed):
+		return server.handleEntityVersionLSN(trimmed)
+
+	case reResolveReference.MatchString(trimmed):
+		return server.handleResolveReference(trimmed)
+
+	case lower == "select current_lsn()",
+		lower == "select current_lsn() as current_lsn":
+		return literalScalarResult("current_lsn", litU(server.engine.CurrentLSN()))
 
 	case lower == "select current_database()",
 		lower == "select current_database() as current_database":
@@ -303,6 +328,98 @@ func (server *Server) handleCurrentSetting(lower string) (interceptResult, bool)
 	return scalarResult("current_setting", "")
 }
 
+func (server *Server) handleRowLSN(sql string) (interceptResult, bool) {
+	m := reRowLSN.FindStringSubmatch(sql)
+	if m == nil {
+		return interceptResult{}, false
+	}
+	tableRef := strings.ReplaceAll(m[1], "''", "'")
+	primaryKey := strings.ReplaceAll(m[2], "''", "'")
+	rowLSN, ok, err := server.engine.RowLSN(tableRef, primaryKey)
+	if err != nil {
+		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+	}
+	if !ok {
+		return literalScalarResult("row_lsn", ast.Literal{Kind: ast.LiteralNull})
+	}
+	return literalScalarResult("row_lsn", litU(rowLSN))
+}
+
+func (server *Server) handleEntityVersion(sql string) (interceptResult, bool) {
+	m := reEntityVersion.FindStringSubmatch(sql)
+	if m == nil {
+		return interceptResult{}, false
+	}
+	domain := strings.ReplaceAll(m[1], "''", "'")
+	entityName := strings.ReplaceAll(m[2], "''", "'")
+	rootPK := strings.ReplaceAll(m[3], "''", "'")
+	version, ok, err := server.engine.EntityVersion(domain, entityName, rootPK)
+	if err != nil {
+		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+	}
+	if !ok {
+		return literalScalarResult("entity_version", ast.Literal{Kind: ast.LiteralNull})
+	}
+	return literalScalarResult("entity_version", litU(version))
+}
+
+func (server *Server) handleEntityHeadLSN(sql string) (interceptResult, bool) {
+	m := reEntityHeadLSN.FindStringSubmatch(sql)
+	if m == nil {
+		return interceptResult{}, false
+	}
+	domain := strings.ReplaceAll(m[1], "''", "'")
+	entityName := strings.ReplaceAll(m[2], "''", "'")
+	rootPK := strings.ReplaceAll(m[3], "''", "'")
+	headLSN, ok, err := server.engine.EntityHeadLSN(domain, entityName, rootPK)
+	if err != nil {
+		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+	}
+	if !ok {
+		return literalScalarResult("entity_head_lsn", ast.Literal{Kind: ast.LiteralNull})
+	}
+	return literalScalarResult("entity_head_lsn", litU(headLSN))
+}
+
+func (server *Server) handleEntityVersionLSN(sql string) (interceptResult, bool) {
+	m := reEntityVersionLSN.FindStringSubmatch(sql)
+	if m == nil {
+		return interceptResult{}, false
+	}
+	domain := strings.ReplaceAll(m[1], "''", "'")
+	entityName := strings.ReplaceAll(m[2], "''", "'")
+	rootPK := strings.ReplaceAll(m[3], "''", "'")
+	version, err := strconv.ParseUint(m[4], 10, 64)
+	if err != nil {
+		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: invalid entity version %q", m[4])}}, true
+	}
+	lsn, ok, err := server.engine.EntityVersionLSN(domain, entityName, rootPK, version)
+	if err != nil {
+		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+	}
+	if !ok {
+		return literalScalarResult("entity_version_lsn", ast.Literal{Kind: ast.LiteralNull})
+	}
+	return literalScalarResult("entity_version_lsn", litU(lsn))
+}
+
+func (server *Server) handleResolveReference(sql string) (interceptResult, bool) {
+	m := reResolveReference.FindStringSubmatch(sql)
+	if m == nil {
+		return interceptResult{}, false
+	}
+	tableRef := strings.ReplaceAll(m[1], "''", "'")
+	primaryKey := strings.ReplaceAll(m[2], "''", "'")
+	resolved, ok, err := server.engine.ResolveReference(tableRef, primaryKey)
+	if err != nil {
+		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+	}
+	if !ok {
+		return literalScalarResult("resolve_reference", ast.Literal{Kind: ast.LiteralNull})
+	}
+	return literalScalarResult("resolve_reference", litU(resolved))
+}
+
 // handleSetConfig is a no-op handler for set_config(name, value, is_local).
 // It extracts the value argument and echoes it back as the result.
 func handleSetConfig(sql string) (interceptResult, bool) {
@@ -350,19 +467,19 @@ func catalogPgDatabase() (interceptResult, bool) {
 		"datlastsysoid", "datfrozenxid", "datminmxid", "dattablespace",
 	}
 	row := map[string]ast.Literal{
-		"oid":            lit(16384),
-		"datname":        litS("asql"),
-		"datdba":         lit(10),
-		"encoding":       lit(6),
-		"datcollate":     litS("en_US.UTF-8"),
-		"datctype":       litS("en_US.UTF-8"),
-		"datistemplate":  litB(false),
-		"datallowconn":   litB(true),
-		"datconnlimit":   lit(-1),
-		"datlastsysoid":  lit(12000),
-		"datfrozenxid":   litS("726"),
-		"datminmxid":     litS("1"),
-		"dattablespace":  lit(1663),
+		"oid":           lit(16384),
+		"datname":       litS("asql"),
+		"datdba":        lit(10),
+		"encoding":      lit(6),
+		"datcollate":    litS("en_US.UTF-8"),
+		"datctype":      litS("en_US.UTF-8"),
+		"datistemplate": litB(false),
+		"datallowconn":  litB(true),
+		"datconnlimit":  lit(-1),
+		"datlastsysoid": lit(12000),
+		"datfrozenxid":  litS("726"),
+		"datminmxid":    litS("1"),
+		"dattablespace": lit(1663),
 	}
 	return interceptResult{
 		result:  executor.Result{Status: "OK", Rows: []map[string]ast.Literal{row}},
@@ -552,48 +669,48 @@ func (server *Server) adminEngineStats() (interceptResult, bool) {
 		"wal_file_size_bytes", "snapshot_file_size_bytes", "audit_file_size_bytes",
 	}
 	row := map[string]ast.Literal{
-		"total_commits":              litU(s.TotalCommits),
-		"total_reads":                litU(s.TotalReads),
-		"total_rollbacks":            litU(s.TotalRollbacks),
-		"total_begins":               litU(s.TotalBegins),
-		"total_time_travel_queries":  litU(s.TotalTimeTravelQueries),
-		"total_snapshots":            litU(s.TotalSnapshots),
-		"total_replays":              litU(s.TotalReplays),
-		"total_fsync_errors":         litU(s.TotalFsyncErrors),
-		"total_audit_errors":         litU(s.TotalAuditErrors),
-		"active_transactions":        lit(s.ActiveTransactions),
-		"commit_batch_count":         litU(s.CommitBatchCount),
-		"commit_batch_avg_jobs":      litF(s.CommitBatchAvgJobs),
-		"commit_batch_max_jobs":      litU(s.CommitBatchMaxJobs),
+		"total_commits":                litU(s.TotalCommits),
+		"total_reads":                  litU(s.TotalReads),
+		"total_rollbacks":              litU(s.TotalRollbacks),
+		"total_begins":                 litU(s.TotalBegins),
+		"total_time_travel_queries":    litU(s.TotalTimeTravelQueries),
+		"total_snapshots":              litU(s.TotalSnapshots),
+		"total_replays":                litU(s.TotalReplays),
+		"total_fsync_errors":           litU(s.TotalFsyncErrors),
+		"total_audit_errors":           litU(s.TotalAuditErrors),
+		"active_transactions":          lit(s.ActiveTransactions),
+		"commit_batch_count":           litU(s.CommitBatchCount),
+		"commit_batch_avg_jobs":        litF(s.CommitBatchAvgJobs),
+		"commit_batch_max_jobs":        litU(s.CommitBatchMaxJobs),
 		"commit_batch_avg_wal_records": litF(s.CommitBatchAvgWalRecords),
 		"commit_batch_max_wal_records": litU(s.CommitBatchMaxWalRecords),
-		"commit_latency_p50_ms":      litF(s.CommitLatencyP50),
-		"commit_latency_p95_ms":      litF(s.CommitLatencyP95),
-		"commit_latency_p99_ms":      litF(s.CommitLatencyP99),
-		"fsync_latency_p50_ms":       litF(s.FsyncLatencyP50),
-		"fsync_latency_p95_ms":       litF(s.FsyncLatencyP95),
-		"fsync_latency_p99_ms":       litF(s.FsyncLatencyP99),
-		"commit_queue_wait_p50_ms":   litF(s.CommitQueueWaitP50),
-		"commit_queue_wait_p95_ms":   litF(s.CommitQueueWaitP95),
-		"commit_queue_wait_p99_ms":   litF(s.CommitQueueWaitP99),
-		"commit_write_hold_p50_ms":   litF(s.CommitWriteHoldP50),
-		"commit_write_hold_p95_ms":   litF(s.CommitWriteHoldP95),
-		"commit_write_hold_p99_ms":   litF(s.CommitWriteHoldP99),
-		"commit_apply_p50_ms":        litF(s.CommitApplyP50),
-		"commit_apply_p95_ms":        litF(s.CommitApplyP95),
-		"commit_apply_p99_ms":        litF(s.CommitApplyP99),
-		"read_latency_p50_ms":        litF(s.ReadLatencyP50),
-		"read_latency_p95_ms":        litF(s.ReadLatencyP95),
-		"read_latency_p99_ms":        litF(s.ReadLatencyP99),
-		"time_travel_latency_p50_ms": litF(s.TimeTravelLatencyP50),
-		"time_travel_latency_p95_ms": litF(s.TimeTravelLatencyP95),
-		"time_travel_latency_p99_ms": litF(s.TimeTravelLatencyP99),
-		"replay_duration_ms":         litF(s.ReplayDurationMs),
-		"snapshot_duration_ms":       litF(s.SnapshotDurationMs),
-		"commit_throughput_per_sec":  litF(s.CommitThroughput),
-		"read_throughput_per_sec":    litF(s.ReadThroughput),
-		"wal_file_size_bytes":        lit(s.WALFileSize),
-		"snapshot_file_size_bytes":   lit(s.SnapshotFileSize), "audit_file_size_bytes": lit(s.AuditFileSize)}
+		"commit_latency_p50_ms":        litF(s.CommitLatencyP50),
+		"commit_latency_p95_ms":        litF(s.CommitLatencyP95),
+		"commit_latency_p99_ms":        litF(s.CommitLatencyP99),
+		"fsync_latency_p50_ms":         litF(s.FsyncLatencyP50),
+		"fsync_latency_p95_ms":         litF(s.FsyncLatencyP95),
+		"fsync_latency_p99_ms":         litF(s.FsyncLatencyP99),
+		"commit_queue_wait_p50_ms":     litF(s.CommitQueueWaitP50),
+		"commit_queue_wait_p95_ms":     litF(s.CommitQueueWaitP95),
+		"commit_queue_wait_p99_ms":     litF(s.CommitQueueWaitP99),
+		"commit_write_hold_p50_ms":     litF(s.CommitWriteHoldP50),
+		"commit_write_hold_p95_ms":     litF(s.CommitWriteHoldP95),
+		"commit_write_hold_p99_ms":     litF(s.CommitWriteHoldP99),
+		"commit_apply_p50_ms":          litF(s.CommitApplyP50),
+		"commit_apply_p95_ms":          litF(s.CommitApplyP95),
+		"commit_apply_p99_ms":          litF(s.CommitApplyP99),
+		"read_latency_p50_ms":          litF(s.ReadLatencyP50),
+		"read_latency_p95_ms":          litF(s.ReadLatencyP95),
+		"read_latency_p99_ms":          litF(s.ReadLatencyP99),
+		"time_travel_latency_p50_ms":   litF(s.TimeTravelLatencyP50),
+		"time_travel_latency_p95_ms":   litF(s.TimeTravelLatencyP95),
+		"time_travel_latency_p99_ms":   litF(s.TimeTravelLatencyP99),
+		"replay_duration_ms":           litF(s.ReplayDurationMs),
+		"snapshot_duration_ms":         litF(s.SnapshotDurationMs),
+		"commit_throughput_per_sec":    litF(s.CommitThroughput),
+		"read_throughput_per_sec":      litF(s.ReadThroughput),
+		"wal_file_size_bytes":          lit(s.WALFileSize),
+		"snapshot_file_size_bytes":     lit(s.SnapshotFileSize), "audit_file_size_bytes": lit(s.AuditFileSize)}
 	return interceptResult{
 		result:  executor.Result{Status: "OK", Rows: []map[string]ast.Literal{row}},
 		columns: columns,
@@ -995,6 +1112,16 @@ func scalarResult(column, value string) (interceptResult, bool) {
 	}, true
 }
 
+func literalScalarResult(column string, value ast.Literal) (interceptResult, bool) {
+	return interceptResult{
+		result: executor.Result{
+			Status: "OK",
+			Rows:   []map[string]ast.Literal{{column: value}},
+		},
+		columns: []string{column},
+	}, true
+}
+
 func emptyResult() (interceptResult, bool) {
 	return interceptResult{
 		result:  executor.Result{Status: "OK", Rows: nil},
@@ -1035,10 +1162,10 @@ func (server *Server) adminClusterMembers() (interceptResult, bool) {
 	selfNodeID := server.config.NodeID
 	if selfNodeID != "" {
 		rows = append(rows, map[string]ast.Literal{
-			"node_id":       litS(selfNodeID),
-			"grpc_address":  litS(normalizeAddr(server.config.ClusterGRPCAddr)),
+			"node_id":        litS(selfNodeID),
+			"grpc_address":   litS(normalizeAddr(server.config.ClusterGRPCAddr)),
 			"pgwire_address": litS(normalizeAddr(server.config.Address)),
-			"is_self":       litB(true),
+			"is_self":        litB(true),
 		})
 	}
 
@@ -1046,10 +1173,10 @@ func (server *Server) adminClusterMembers() (interceptResult, bool) {
 	if server.heartbeatLoop != nil {
 		for _, p := range server.heartbeatLoop.Peers() {
 			rows = append(rows, map[string]ast.Literal{
-				"node_id":       litS(p.NodeID),
-				"grpc_address":  litS(p.Address),
+				"node_id":        litS(p.NodeID),
+				"grpc_address":   litS(p.Address),
 				"pgwire_address": litS(p.PgwireAddress),
-				"is_self":       litB(false),
+				"is_self":        litB(false),
 			})
 		}
 	}

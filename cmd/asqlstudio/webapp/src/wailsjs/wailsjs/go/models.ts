@@ -95,6 +95,24 @@ export namespace main {
 	        this.domains = source["domains"];
 	    }
 	}
+	export class fixtureExportRequest {
+	    file_path: string;
+	    domains: string[];
+	    name?: string;
+	    description?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new fixtureExportRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.file_path = source["file_path"];
+	        this.domains = source["domains"];
+	        this.name = source["name"];
+	        this.description = source["description"];
+	    }
+	}
 	export class readQueryRequest {
 	    sql: string;
 	    domains: string[];
@@ -390,6 +408,26 @@ export namespace main {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.domain = source["domain"];
+	    }
+	}
+	export class temporalLookupRequest {
+	    domain: string;
+	    table_name: string;
+	    primary_key: string;
+	    entity_name?: string;
+	    entity_root_pk?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new temporalLookupRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.domain = source["domain"];
+	        this.table_name = source["table_name"];
+	        this.primary_key = source["primary_key"];
+	        this.entity_name = source["entity_name"];
+	        this.entity_root_pk = source["entity_root_pk"];
 	    }
 	}
 	export class timeTravelRequest {

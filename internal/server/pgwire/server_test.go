@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"asql/internal/engine/executor"
+
 	"github.com/jackc/pgx/v5"
 )
 
@@ -106,6 +108,516 @@ func TestPGWireSimpleQueryRoundtrip(t *testing.T) {
 	}
 	if actual[1].id != 2 || actual[1].email != "two@asql.dev" {
 		t.Fatalf("unexpected second row: %+v", actual[1])
+	}
+}
+
+func TestPGWireCompatibilitySupportedPatterns(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "compatibility-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT PRIMARY KEY, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"INSERT INTO users (id, email) VALUES (2, 'two@asql.dev')",
+		"INSERT INTO users (id, email) VALUES (3, 'three@asql.dev')",
+		"COMMIT",
+	} {
+		if _, err := conn.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	rows, err := conn.Query(ctx, "SELECT id, email FROM accounts.users WHERE id >= $1 ORDER BY id ASC LIMIT 2", int64(2))
+	if err != nil {
+		t.Fatalf("parameterized compatibility query: %v", err)
+	}
+	defer rows.Close()
+
+	var gotIDs []int64
+	for rows.Next() {
+		var id int64
+		var email string
+		if err := rows.Scan(&id, &email); err != nil {
+			t.Fatalf("scan parameterized row: %v", err)
+		}
+		gotIDs = append(gotIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate parameterized rows: %v", err)
+	}
+	if len(gotIDs) != 2 || gotIDs[0] != 2 || gotIDs[1] != 3 {
+		t.Fatalf("unexpected parameterized query ids: %v", gotIDs)
+	}
+
+	inRows, err := conn.Query(ctx, "SELECT id FROM accounts.users WHERE id IN (1, 3) ORDER BY id ASC LIMIT 2")
+	if err != nil {
+		t.Fatalf("literal IN compatibility query: %v", err)
+	}
+	defer inRows.Close()
+
+	gotIDs = gotIDs[:0]
+	for inRows.Next() {
+		var id int64
+		if err := inRows.Scan(&id); err != nil {
+			t.Fatalf("scan IN row: %v", err)
+		}
+		gotIDs = append(gotIDs, id)
+	}
+	if err := inRows.Err(); err != nil {
+		t.Fatalf("iterate IN rows: %v", err)
+	}
+	if len(gotIDs) != 2 || gotIDs[0] != 1 || gotIDs[1] != 3 {
+		t.Fatalf("unexpected IN query ids: %v", gotIDs)
+	}
+}
+
+func TestPGWireCompatibilityUnsupportedPatternGuidance(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "compatibility-unsupported-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+
+	if _, err := conn.Exec(ctx, "BEGIN"); err == nil || !strings.Contains(err.Error(), "BEGIN DOMAIN") {
+		t.Fatalf("expected bare BEGIN guidance error, got %v", err)
+	}
+
+	if _, err := conn.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+		t.Fatalf("begin domain for ANY guidance: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "SELECT id FROM users WHERE id = ANY(ARRAY[1,2])"); err == nil || !strings.Contains(err.Error(), "ANY(...)") {
+		t.Fatalf("expected ANY guidance error, got %v", err)
+	}
+	if _, err := conn.Exec(ctx, "ROLLBACK"); err != nil {
+		t.Fatalf("rollback after ANY guidance: %v", err)
+	}
+}
+
+func TestPGWireForHistoryContract(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dataDir := filepath.Join(t.TempDir(), "history-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: dataDir,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	connectionString := "postgres://asql@" + listener.Addr().String() + "/asql?sslmode=disable&default_query_exec_mode=simple_protocol"
+	connection, err := pgx.Connect(ctx, connectionString)
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN history",
+		"CREATE TABLE items (id INT PRIMARY KEY, name TEXT)",
+		"INSERT INTO items (id, name) VALUES (1, 'Alice')",
+		"COMMIT",
+		"BEGIN DOMAIN history",
+		"UPDATE items SET name = 'Bob' WHERE id = 1",
+		"COMMIT",
+		"BEGIN DOMAIN history",
+		"DELETE FROM items WHERE id = 1",
+		"COMMIT",
+	} {
+		if _, err := connection.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	rows, err := connection.Query(ctx, "SELECT * FROM history.items FOR HISTORY WHERE id = 1")
+	if err != nil {
+		t.Fatalf("history query: %v", err)
+	}
+	defer rows.Close()
+
+	fields := rows.FieldDescriptions()
+	gotColumns := make([]string, 0, len(fields))
+	for _, field := range fields {
+		gotColumns = append(gotColumns, string(field.Name))
+	}
+	wantColumns := []string{executor.HistoryOperationColumnName, executor.HistoryCommitLSNColumnName, "id", "name"}
+	if strings.Join(gotColumns, ",") != strings.Join(wantColumns, ",") {
+		t.Fatalf("unexpected FOR HISTORY columns: got %v want %v", gotColumns, wantColumns)
+	}
+
+	var operations []string
+	for rows.Next() {
+		var operation string
+		var commitLSN int64
+		var id int64
+		var name string
+		if err := rows.Scan(&operation, &commitLSN, &id, &name); err != nil {
+			t.Fatalf("scan history row: %v", err)
+		}
+		if commitLSN <= 0 {
+			t.Fatalf("expected positive commit lsn, got %d", commitLSN)
+		}
+		if id != 1 {
+			t.Fatalf("expected id=1, got %d", id)
+		}
+		operations = append(operations, operation)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate history rows: %v", err)
+	}
+
+	if strings.Join(operations, ",") != "INSERT,UPDATE,DELETE" {
+		t.Fatalf("unexpected FOR HISTORY operations: %v", operations)
+	}
+}
+
+func TestPGWireCurrentLSNFunction(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dataDir := filepath.Join(t.TempDir(), "current-lsn-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: dataDir,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	connectionString := "postgres://asql@" + listener.Addr().String() + "/asql?sslmode=disable&default_query_exec_mode=simple_protocol"
+	connection, err := pgx.Connect(ctx, connectionString)
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN metrics",
+		"CREATE TABLE counters (id INT PRIMARY KEY, value INT)",
+		"INSERT INTO counters (id, value) VALUES (1, 10)",
+		"COMMIT",
+	} {
+		if _, err := connection.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	rows, err := connection.Query(ctx, "SELECT current_lsn()")
+	if err != nil {
+		t.Fatalf("query current_lsn(): %v", err)
+	}
+	defer rows.Close()
+
+	fields := rows.FieldDescriptions()
+	if len(fields) != 1 || string(fields[0].Name) != "current_lsn" {
+		t.Fatalf("unexpected current_lsn() columns: %+v", fields)
+	}
+
+	if !rows.Next() {
+		t.Fatal("expected one current_lsn() row")
+	}
+	var currentLSN int64
+	if err := rows.Scan(&currentLSN); err != nil {
+		t.Fatalf("scan current_lsn(): %v", err)
+	}
+	if currentLSN <= 0 {
+		t.Fatalf("expected positive current_lsn(), got %d", currentLSN)
+	}
+	if rows.Next() {
+		t.Fatal("expected only one current_lsn() row")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate current_lsn() rows: %v", err)
+	}
+}
+
+func TestPGWireRowLSNAndEntityFunctions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dataDir := filepath.Join(t.TempDir(), "introspection-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: dataDir,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	connectionString := "postgres://asql@" + listener.Addr().String() + "/asql?sslmode=disable&default_query_exec_mode=simple_protocol"
+	connection, err := pgx.Connect(ctx, connectionString)
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN introspect",
+		"CREATE TABLE items (id INT PRIMARY KEY, status TEXT)",
+		"CREATE TABLE audit_entries (id INT PRIMARY KEY, note TEXT)",
+		"CREATE ENTITY item_aggregate (ROOT items)",
+		"COMMIT",
+		"BEGIN DOMAIN introspect",
+		"INSERT INTO items (id, status) VALUES (1, 'draft')",
+		"INSERT INTO audit_entries (id, note) VALUES (7, 'created')",
+		"COMMIT",
+		"BEGIN DOMAIN introspect",
+		"UPDATE items SET status = 'published' WHERE id = 1",
+		"COMMIT",
+	} {
+		if _, err := connection.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	var rowLSN int64
+	if err := connection.QueryRow(ctx, "SELECT row_lsn('introspect.items', '1')").Scan(&rowLSN); err != nil {
+		t.Fatalf("query row_lsn(): %v", err)
+	}
+	if rowLSN <= 0 {
+		t.Fatalf("expected positive row_lsn(), got %d", rowLSN)
+	}
+
+	var version int64
+	if err := connection.QueryRow(ctx, "SELECT entity_version('introspect', 'item_aggregate', '1')").Scan(&version); err != nil {
+		t.Fatalf("query entity_version(): %v", err)
+	}
+	if version != 2 {
+		t.Fatalf("expected entity_version()=2, got %d", version)
+	}
+
+	var entityHeadLSN int64
+	if err := connection.QueryRow(ctx, "SELECT entity_head_lsn('introspect', 'item_aggregate', '1')").Scan(&entityHeadLSN); err != nil {
+		t.Fatalf("query entity_head_lsn(): %v", err)
+	}
+	if entityHeadLSN <= 0 {
+		t.Fatalf("expected positive entity_head_lsn(), got %d", entityHeadLSN)
+	}
+	if entityHeadLSN != rowLSN {
+		t.Fatalf("expected entity_head_lsn() to match row_lsn() for root-only entity, got %d vs %d", entityHeadLSN, rowLSN)
+	}
+
+	var entityVersionOneLSN int64
+	if err := connection.QueryRow(ctx, "SELECT entity_version_lsn('introspect', 'item_aggregate', '1', 1)").Scan(&entityVersionOneLSN); err != nil {
+		t.Fatalf("query entity_version_lsn(version 1): %v", err)
+	}
+	if entityVersionOneLSN <= 0 || entityVersionOneLSN >= entityHeadLSN {
+		t.Fatalf("expected entity_version_lsn(version 1) to be positive and older than head, got %d vs head %d", entityVersionOneLSN, entityHeadLSN)
+	}
+
+	var entityVersionTwoLSN int64
+	if err := connection.QueryRow(ctx, "SELECT entity_version_lsn('introspect', 'item_aggregate', '1', 2)").Scan(&entityVersionTwoLSN); err != nil {
+		t.Fatalf("query entity_version_lsn(version 2): %v", err)
+	}
+	if entityVersionTwoLSN != entityHeadLSN {
+		t.Fatalf("expected entity_version_lsn(version 2)=%d to match entity_head_lsn()=%d", entityVersionTwoLSN, entityHeadLSN)
+	}
+
+	var resolvedEntity int64
+	if err := connection.QueryRow(ctx, "SELECT resolve_reference('introspect.items', '1')").Scan(&resolvedEntity); err != nil {
+		t.Fatalf("query resolve_reference() on entity root: %v", err)
+	}
+	if resolvedEntity != version {
+		t.Fatalf("expected resolve_reference()=%d to match entity_version()=%d", resolvedEntity, version)
+	}
+
+	var auditRowLSN int64
+	if err := connection.QueryRow(ctx, "SELECT row_lsn('introspect.audit_entries', '7')").Scan(&auditRowLSN); err != nil {
+		t.Fatalf("query audit row_lsn(): %v", err)
+	}
+	if auditRowLSN <= 0 {
+		t.Fatalf("expected positive audit row_lsn(), got %d", auditRowLSN)
+	}
+
+	var resolvedAudit int64
+	if err := connection.QueryRow(ctx, "SELECT resolve_reference('introspect.audit_entries', '7')").Scan(&resolvedAudit); err != nil {
+		t.Fatalf("query resolve_reference() on non-entity row: %v", err)
+	}
+	if resolvedAudit != auditRowLSN {
+		t.Fatalf("expected resolve_reference()=%d to match row_lsn()=%d for non-entity table", resolvedAudit, auditRowLSN)
+	}
+
+	var missingRowLSN *int64
+	if err := connection.QueryRow(ctx, "SELECT row_lsn('introspect.items', '999')").Scan(&missingRowLSN); err != nil {
+		t.Fatalf("query missing row_lsn(): %v", err)
+	}
+	if missingRowLSN != nil {
+		t.Fatalf("expected NULL row_lsn() for missing row, got %v", *missingRowLSN)
+	}
+
+	var missingResolved *int64
+	if err := connection.QueryRow(ctx, "SELECT resolve_reference('introspect.items', '999')").Scan(&missingResolved); err != nil {
+		t.Fatalf("query missing resolve_reference(): %v", err)
+	}
+	if missingResolved != nil {
+		t.Fatalf("expected NULL resolve_reference() for missing row, got %v", *missingResolved)
+	}
+
+	var missingVersionLSN *int64
+	if err := connection.QueryRow(ctx, "SELECT entity_version_lsn('introspect', 'item_aggregate', '1', 99)").Scan(&missingVersionLSN); err != nil {
+		t.Fatalf("query missing entity_version_lsn(): %v", err)
+	}
+	if missingVersionLSN != nil {
+		t.Fatalf("expected NULL entity_version_lsn() for missing version, got %v", *missingVersionLSN)
 	}
 }
 

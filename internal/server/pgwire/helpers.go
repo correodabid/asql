@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"asql/internal/engine/executor"
 	"asql/internal/engine/parser/ast"
 )
 
@@ -84,21 +85,30 @@ func allColumnsFromRows(rows []map[string]ast.Literal) []string {
 }
 
 // sortColumns sorts a column slice in the canonical display order:
-//  1. System columns (names that start with "_"), sorted alphabetically among themselves.
-//  2. "id" (exact match, case-insensitive).
-//  3. All remaining columns, sorted alphabetically.
+//  1. FOR HISTORY contract metadata columns in explicit order.
+//  2. Other system columns (names that start with "_").
+//  3. "id" (exact match, case-insensitive).
+//  4. All remaining columns, sorted alphabetically.
 //
 // This produces a consistent, predictable column order across SELECT *,
 // schema snapshots, and fallback row-derived column lists.
 func sortColumns(cols []string) {
 	sort.SliceStable(cols, func(i, j int) bool {
 		a, b := cols[i], cols[j]
+		aHistoryRank, aIsHistory := historyColumnRank(a)
+		bHistoryRank, bIsHistory := historyColumnRank(b)
 		aIsSys := strings.HasPrefix(a, "_")
 		bIsSys := strings.HasPrefix(b, "_")
 		aIsID := strings.EqualFold(a, "id")
 		bIsID := strings.EqualFold(b, "id")
 
 		switch {
+		case aIsHistory && bIsHistory:
+			return aHistoryRank < bHistoryRank
+		case aIsHistory:
+			return true
+		case bIsHistory:
+			return false
 		case aIsSys && bIsSys:
 			return a < b // both system: alphabetical
 		case aIsSys:
@@ -115,4 +125,15 @@ func sortColumns(cols []string) {
 			return a < b // both regular: alphabetical
 		}
 	})
+}
+
+func historyColumnRank(col string) (int, bool) {
+	switch col {
+	case executor.HistoryOperationColumnName:
+		return 0, true
+	case executor.HistoryCommitLSNColumnName:
+		return 1, true
+	default:
+		return 0, false
+	}
 }

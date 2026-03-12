@@ -18,7 +18,7 @@ COMMIT;
 ## Rules
 1. A transaction MUST declare domain scope at `BEGIN`.
 2. Statements touching undeclared domains MUST fail.
-3. Cross-domain transactions use deterministic coordinator ordering (lexicographic domain order).
+3. Cross-domain transactions preserve client statement order within the declared domain scope.
 4. Commit is atomic from client perspective.
 5. Any conflict aborts transaction with deterministic error code.
 
@@ -58,6 +58,13 @@ Use stable machine-readable error codes:
 - `ERR_TX_NOT_FOUND`
 - `ERR_REPLAY_CORRUPTED_LOG`
 - `ERR_UNSUPPORTED_SQL`
+
+## Compatibility stance
+
+ASQL exposes a pragmatic PostgreSQL-compatible subset over pgwire, but it is
+not a drop-in PostgreSQL replacement. See
+[docs/sql-pgwire-compatibility-policy-v1.md](../sql-pgwire-compatibility-policy-v1.md)
+and [docs/postgres-compatibility-surface-v1.md](../postgres-compatibility-surface-v1.md).
 
 ## Time-travel semantics
 - `AS OF LSN <n>`: read from materialized state as of log position.

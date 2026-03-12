@@ -1,7 +1,11 @@
-# PostgreSQL Compatibility Surface Matrix v1 (Spike)
+# PostgreSQL Compatibility Surface Matrix v1
 
 ## Scope
-This document defines the explicit supported and unsupported surface of ASQL's PostgreSQL protocol compatibility spike (Sprint V3).
+This document defines the explicit supported and unsupported surface of ASQL's
+PostgreSQL-oriented SQL and pgwire compatibility layer.
+
+Policy stance: ASQL supports a pragmatic PostgreSQL-compatible subset for
+documented workflows. It is not a drop-in PostgreSQL replacement.
 
 ## Supported (Spike v1)
 - Protocol: PostgreSQL startup, simple query flow, and the extended query pipeline (`Parse` / `Bind` / `Describe` / `Execute` / `Sync`).
@@ -49,7 +53,26 @@ This document defines the explicit supported and unsupported surface of ASQL's P
   - `pgx/v5` roundtrip is validated in integration-like tests
   - raw pgwire conformance-style tests cover portal resume, parameter inference, and extended-protocol error recovery
 
-## Unsupported (Spike v1)
+## Common app workflow SQL matrix
+
+| Pattern | Status | Notes |
+|---|---|---|
+| `SELECT ... WHERE <scalar predicate>` | Supported | Current ASQL SQL subset. |
+| `ORDER BY ... LIMIT n` | Supported | Covered in executor and pgwire tests. |
+| Literal `IN (...)` / `NOT IN (...)` | Supported | Covered in executor tests. |
+| Subquery-based `IN (SELECT ...)` | Supported | Covered in executor tests for current shapes. |
+| Extended protocol with scalar bind parameters | Supported | Session-scoped prepared statements/portals. |
+| Parameterized predicates like `WHERE id >= $1` | Supported | Covered through pgwire regression tests. |
+| Cross-domain transactions via `BEGIN CROSS DOMAIN ...` | Supported | ASQL-native transaction model. |
+| Temporal helpers like `current_lsn()` / `row_lsn(...)` | Supported | ASQL-native surface over SQL/pgwire. |
+| `LIMIT ... OFFSET ...` pagination | Supported | Supported in the current SQL subset; keyset pagination is still recommended for large scans. |
+| Arrays / `ANY(...)` | Unsupported | Not part of the current ASQL subset. |
+| Bare `BEGIN` / `START TRANSACTION` | Unsupported | Use `BEGIN DOMAIN ...` or `BEGIN CROSS DOMAIN ...`; guardrail errors are explicit. |
+| Full PostgreSQL catalog parity | Unsupported | Only the documented compatibility shim is supported. |
+| Drop-in PostgreSQL transaction syntax/semantics | Unsupported | Use ASQL transaction primitives. |
+| Broader PostgreSQL feature parity beyond documented subset | Planned/Unsupported | Add only with docs + regression tests. |
+
+## Unsupported (v1)
 - PostgreSQL password authentication methods beyond the narrow cleartext-password token flow above (MD5/SCRAM), role/user management.
 - TLS transport for pgwire connections (assessed and deferred — current `SSLRequest -> N` is sufficient for all mainstream tools in default configuration; see TLS reassessment below).
 - Full PostgreSQL type system and general binary formats/results.
@@ -59,6 +82,17 @@ This document defines the explicit supported and unsupported surface of ASQL's P
 - General PostgreSQL `COPY` compatibility beyond the narrow table-oriented `FROM STDIN` / `TO STDOUT` flow above (for example program/file targets, binary format, and option parity).
 - Full server compatibility for PostgreSQL prepared-statement semantics beyond the currently supported session-scoped extended protocol path.
 - Transaction commands beyond ASQL deterministic transaction model.
+- PostgreSQL array literals and `ANY(...)` predicates.
+
+## Guardrails for likely PostgreSQL assumptions
+
+ASQL returns explicit actionable errors for several common PostgreSQL-shaped
+patterns that are outside the supported subset.
+
+- `BEGIN` / `START TRANSACTION` → points callers to `BEGIN DOMAIN ...` or
+  `BEGIN CROSS DOMAIN ...`.
+- `ANY(...)` / `ARRAY[...]` → points callers to `IN (...)`, `IN (SELECT ...)`,
+  or JSON/row modeling alternatives.
 
 ## Determinism Notes
 - Query execution remains delegated to ASQL engine primitives.

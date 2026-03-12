@@ -43,6 +43,9 @@ Production note:
 - Cross-domain commit ordering is canonicalized to preserve deterministic behavior.
 - Time-travel reads support `AS OF LSN` and logical timestamp mapping.
 
+Aggregate-facing note:
+- [docs/aggregate-reference-semantics-v1.md](aggregate-reference-semantics-v1.md) describes how entity versions and aggregate references sit on top of the deterministic row-and-WAL core.
+
 ## 5) Hexagonal boundaries
 
 ### Pure core

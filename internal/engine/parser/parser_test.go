@@ -396,6 +396,26 @@ func TestParseUnsupportedStatement(t *testing.T) {
 	}
 }
 
+func TestParseUnsupportedStatementProvidesGuidanceForAnyPredicate(t *testing.T) {
+	_, err := Parse("SELECT id FROM users WHERE id = ANY(ARRAY[1,2])")
+	if err == nil {
+		t.Fatal("expected unsupported statement error")
+	}
+	if !strings.Contains(err.Error(), "ANY(...)") {
+		t.Fatalf("expected ANY guidance, got %v", err)
+	}
+}
+
+func TestParseUnsupportedStatementProvidesGuidanceForBareBegin(t *testing.T) {
+	_, err := Parse("BEGIN")
+	if err == nil {
+		t.Fatal("expected unsupported statement error")
+	}
+	if !strings.Contains(err.Error(), "BEGIN DOMAIN") {
+		t.Fatalf("expected BEGIN DOMAIN guidance, got %v", err)
+	}
+}
+
 func TestParseCreateTableNewDataTypes(t *testing.T) {
 	statement, err := Parse("CREATE TABLE metrics (id INT, active BOOL, score FLOAT, created TIMESTAMP);")
 	if err != nil {

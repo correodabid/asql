@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"asql/internal/fixtures"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -571,6 +573,141 @@ func (c *engineClient) NodeRole(ctx context.Context) (nodeRoleResult, error) {
 		RaftLeaderID:  values["asql_raft_leader_id"],
 		NodeID:        values["asql_node_id"],
 	}, nil
+}
+
+type temporalLookupResult struct {
+	CurrentLSN          *uint64
+	RowLSN              *uint64
+	ResolveReference    *uint64
+	ResolveReferenceErr string
+	EntityVersion       *uint64
+	EntityHeadLSN       *uint64
+	EntityVersionLSN    *uint64
+}
+
+func (c *engineClient) TemporalLookup(ctx context.Context, req temporalLookupRequest) (*temporalLookupResult, error) {
+	if strings.TrimSpace(req.Domain) == "" {
+		return nil, fmt.Errorf("domain is required")
+	}
+	if strings.TrimSpace(req.TableName) == "" {
+		return nil, fmt.Errorf("table_name is required")
+	}
+	if strings.TrimSpace(req.PrimaryKey) == "" {
+		return nil, fmt.Errorf("primary_key is required")
+	}
+
+	tableRef := pgEscape(strings.TrimSpace(req.Domain) + "." + strings.TrimSpace(req.TableName))
+	pk := pgEscape(strings.TrimSpace(req.PrimaryKey))
+	result := &temporalLookupResult{}
+
+	currentLSN, err := c.queryOptionalUint64(ctx, "SELECT current_lsn()")
+	if err != nil {
+		return nil, err
+	}
+	result.CurrentLSN = currentLSN
+
+	rowLSN, err := c.queryOptionalUint64(ctx, fmt.Sprintf("SELECT row_lsn('%s', '%s')", tableRef, pk))
+	if err != nil {
+		return nil, err
+	}
+	result.RowLSN = rowLSN
+
+	resolveReference, err := c.queryOptionalUint64(ctx, fmt.Sprintf("SELECT resolve_reference('%s', '%s')", tableRef, pk))
+	if err != nil {
+		result.ResolveReferenceErr = err.Error()
+	} else {
+		result.ResolveReference = resolveReference
+	}
+
+	if strings.TrimSpace(req.EntityName) != "" && strings.TrimSpace(req.EntityRootPK) != "" {
+		domain := pgEscape(strings.TrimSpace(req.Domain))
+		entity := pgEscape(strings.TrimSpace(req.EntityName))
+		rootPK := pgEscape(strings.TrimSpace(req.EntityRootPK))
+
+		entityVersion, err := c.queryOptionalUint64(ctx, fmt.Sprintf("SELECT entity_version('%s', '%s', '%s')", domain, entity, rootPK))
+		if err != nil {
+			return nil, err
+		}
+		result.EntityVersion = entityVersion
+
+		entityHeadLSN, err := c.queryOptionalUint64(ctx, fmt.Sprintf("SELECT entity_head_lsn('%s', '%s', '%s')", domain, entity, rootPK))
+		if err != nil {
+			return nil, err
+		}
+		result.EntityHeadLSN = entityHeadLSN
+
+		if entityVersion != nil {
+			entityVersionLSN, err := c.queryOptionalUint64(ctx, fmt.Sprintf("SELECT entity_version_lsn('%s', '%s', '%s', %d)", domain, entity, rootPK, *entityVersion))
+			if err != nil {
+				return nil, err
+			}
+			result.EntityVersionLSN = entityVersionLSN
+		}
+	}
+
+	return result, nil
+}
+
+func (c *engineClient) ApplyFixture(ctx context.Context, fixture *fixtures.File) error {
+	if fixture == nil {
+		return fmt.Errorf("fixture is required")
+	}
+	conn, err := c.acquireConn(ctx)
+	if err != nil {
+		return fmt.Errorf("open connection: %w", err)
+	}
+	defer conn.Release()
+	if err := fixtures.Apply(ctx, fixture, poolConnExecutor{conn: conn}); err != nil {
+		return fmt.Errorf("apply fixture: %w", err)
+	}
+	return nil
+}
+
+func (c *engineClient) ExportFixture(ctx context.Context, options fixtures.ExportOptions) (*fixtures.File, error) {
+	conn, err := c.acquireConn(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("open connection: %w", err)
+	}
+	defer conn.Release()
+	fixture, err := fixtures.ExportFromPGWire(ctx, conn.Conn(), options)
+	if err != nil {
+		return nil, fmt.Errorf("export fixture: %w", err)
+	}
+	return fixture, nil
+}
+
+type poolConnExecutor struct {
+	conn *pgxpool.Conn
+}
+
+func (e poolConnExecutor) Exec(ctx context.Context, sql string) error {
+	if e.conn == nil {
+		return fmt.Errorf("connection is required")
+	}
+	_, err := e.conn.Exec(ctx, sql)
+	return err
+}
+
+func (c *engineClient) queryOptionalUint64(ctx context.Context, sql string) (*uint64, error) {
+	rows, err := c.pool.Query(ctx, sql)
+	if err != nil {
+		return nil, err
+	}
+	resultRows, err := pgxRowsToMaps(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(resultRows) == 0 || len(resultRows[0]) == 0 {
+		return nil, nil
+	}
+	for _, value := range resultRows[0] {
+		if value == nil || strings.TrimSpace(toString(value)) == "" {
+			return nil, nil
+		}
+		parsed := toUint64(value)
+		return &parsed, nil
+	}
+	return nil, nil
 }
 
 func parseUint64(s string) uint64 {

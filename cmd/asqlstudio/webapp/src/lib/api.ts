@@ -38,8 +38,21 @@ export async function api<T>(path: string, _method = 'GET', body?: unknown): Pro
       return App.RowHistory(b) as Promise<T>
     case '/api/entity-version-history':
       return App.EntityVersionHistory(b) as Promise<T>
+    case '/api/temporal-lookup':
+      return App.TemporalLookup(b) as Promise<T>
     case '/api/explain':
       return App.Explain(b) as Promise<T>
+    // ── Fixtures ───────────────────────────────────
+    case '/api/fixtures/pick-file':
+      return App.PickFixtureFile() as Promise<T>
+    case '/api/fixtures/pick-export-file':
+      return App.PickFixtureExportFile(b.suggested_name ?? '') as Promise<T>
+    case '/api/fixtures/validate':
+      return App.FixtureValidate(b.file_path ?? '') as Promise<T>
+    case '/api/fixtures/load':
+      return App.FixtureLoad(b.file_path ?? '') as Promise<T>
+    case '/api/fixtures/export':
+      return App.FixtureExport(b) as Promise<T>
     // ── Stats ──────────────────────────────────────
     case '/api/read-routing-stats':
       return App.ReadRoutingStats() as Promise<T>

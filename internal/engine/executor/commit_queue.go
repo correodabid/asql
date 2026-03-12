@@ -234,7 +234,7 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 				}
 			}
 
-			if err := engine.applyPlanToStateTracked(newState, mutation.plan, predictedCommitLSN, clonedTables, batchFKValCache); err != nil {
+			if err := engine.applyPlanToStateTracked(newState, mutation.plan, predictedCommitLSN, clonedTables, batchFKValCache, entityCollector); err != nil {
 				engine.logicalTS = savedTSBefore
 				restoreTableRefs(newState, tableRefs)
 				outcomes[i] = jobOutcome{err: err}
@@ -251,11 +251,11 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 					if tbl := ds.tables[mutation.plan.TableName]; tbl != nil {
 						if mutation.plan.Operation == planner.OperationInsert {
 							// Single-row fast path: avoid slice allocation.
-						collectEntityMutationsSingle(ds, mutation.plan, rowToMap(tbl, tbl.rows[len(tbl.rows)-1]), entityCollector, batchFKEntityCache)
-					} else {
-						var affectedRows []map[string]ast.Literal
-						for _, rowSlice := range tbl.rows {
-							row := rowToMap(tbl, rowSlice)
+							collectEntityMutationsSingle(ds, mutation.plan, rowToMap(tbl, tbl.rows[len(tbl.rows)-1]), entityCollector, batchFKEntityCache)
+						} else {
+							var affectedRows []map[string]ast.Literal
+							for _, rowSlice := range tbl.rows {
+								row := rowToMap(tbl, rowSlice)
 								if matchPredicate(row, mutation.plan.Filter, newState, engine) {
 									affectedRows = append(affectedRows, row)
 								}

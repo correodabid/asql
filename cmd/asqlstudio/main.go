@@ -82,6 +82,25 @@ type entityVersionHistoryRequest struct {
 	RootPK     string `json:"root_pk"`
 }
 
+type temporalLookupRequest struct {
+	Domain       string `json:"domain"`
+	TableName    string `json:"table_name"`
+	PrimaryKey   string `json:"primary_key"`
+	EntityName   string `json:"entity_name,omitempty"`
+	EntityRootPK string `json:"entity_root_pk,omitempty"`
+}
+
+type fixtureExportRequest struct {
+	FilePath    string   `json:"file_path"`
+	Domains     []string `json:"domains"`
+	Name        string   `json:"name,omitempty"`
+	Description string   `json:"description,omitempty"`
+}
+
+type fixtureExportPathRequest struct {
+	SuggestedName string `json:"suggested_name,omitempty"`
+}
+
 type explainRequest struct {
 	SQL     string   `json:"sql"`
 	Domains []string `json:"domains,omitempty"`
@@ -200,9 +219,9 @@ type clusterStatusResponse struct {
 }
 
 type clusterNodeInfo struct {
-	NodeID    string `json:"node_id"`   // human-readable name (e.g. "node-b"); falls back to addr if unknown
-	Addr      string `json:"addr"`      // pgwire address always present (e.g. "127.0.0.1:5434")
-	Role      string `json:"role"`      // "leader" or "follower"
+	NodeID    string `json:"node_id"` // human-readable name (e.g. "node-b"); falls back to addr if unknown
+	Addr      string `json:"addr"`    // pgwire address always present (e.g. "127.0.0.1:5434")
+	Role      string `json:"role"`    // "leader" or "follower"
 	LSN       uint64 `json:"lsn"`
 	Lag       uint64 `json:"lag"`
 	Reachable bool   `json:"reachable"`

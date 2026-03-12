@@ -6,6 +6,7 @@ import { Dashboard } from './components/Dashboard'
 import { DDLPanel } from './components/DDLPanel'
 import { DiffPanel } from './components/DiffPanel'
 import { ERDiagram } from './components/ERDiagram'
+import { FixturePanel } from './components/FixturePanel'
 import { IconDatabase, IconDownload, IconGrid, IconMoon, IconSchema, IconShield, IconSun, IconTerminal, IconTimeline } from './components/Icons'
 import { IndexEditor } from './components/IndexEditor'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
@@ -33,6 +34,7 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'dashboard',    label: 'Dashboard',     icon: <IconGrid /> },
   { id: 'cluster',      label: 'Cluster',       icon: <IconShield /> },
   { id: 'time-explorer', label: 'Time Explorer', icon: <IconTimeline /> },
+  { id: 'fixtures',      label: 'Fixtures',      icon: <IconDownload /> },
   { id: 'recovery',      label: 'Recovery',      icon: <IconDownload /> },
 ]
 
@@ -143,7 +145,7 @@ function App() {
 
       // Cmd+1/2/3/4 — main tab switching (works even in inputs)
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
-        const tabMap: Record<string, TabId> = { '1': 'workspace', '2': 'designer', '3': 'dashboard', '4': 'cluster', '5': 'time-explorer', '6': 'recovery' }
+    const tabMap: Record<string, TabId> = { '1': 'workspace', '2': 'designer', '3': 'dashboard', '4': 'cluster', '5': 'time-explorer', '6': 'fixtures', '7': 'recovery' }
         const tab = tabMap[e.key]
         if (tab) {
           e.preventDefault()
@@ -278,6 +280,10 @@ function App() {
                 <Dashboard />
               </DashboardBoundary>
             )}
+
+			{activeTab === 'fixtures' && (
+			  <FixturePanel domain={model.domain || 'default'} />
+			)}
 
             {activeTab === 'designer' && (
               <div className="designer-layout-full">

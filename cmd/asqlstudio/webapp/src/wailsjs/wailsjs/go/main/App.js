@@ -50,8 +50,28 @@ export function Explain(arg1) {
   return window['go']['main']['App']['Explain'](arg1);
 }
 
+export function FixtureExport(arg1) {
+  return window['go']['main']['App']['FixtureExport'](arg1);
+}
+
+export function FixtureLoad(arg1) {
+  return window['go']['main']['App']['FixtureLoad'](arg1);
+}
+
+export function FixtureValidate(arg1) {
+  return window['go']['main']['App']['FixtureValidate'](arg1);
+}
+
 export function Health() {
   return window['go']['main']['App']['Health']();
+}
+
+export function PickFixtureExportFile(arg1) {
+  return window['go']['main']['App']['PickFixtureExportFile'](arg1);
+}
+
+export function PickFixtureFile() {
+  return window['go']['main']['App']['PickFixtureFile']();
 }
 
 export function ReadQuery(arg1) {
@@ -152,6 +172,10 @@ export function SchemaLoadBaseline(arg1) {
 
 export function SchemaTables(arg1) {
   return window['go']['main']['App']['SchemaTables'](arg1);
+}
+
+export function TemporalLookup(arg1) {
+  return window['go']['main']['App']['TemporalLookup'](arg1);
 }
 
 export function TimeTravel(arg1) {

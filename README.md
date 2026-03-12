@@ -25,6 +25,10 @@ Every database forces you to choose: **simple** (SQLite) or **powerful** (Postgr
 
 ## Quickstart
 
+For the full multi-topic onboarding path, see:
+
+- [docs/getting-started/README.md](docs/getting-started/README.md)
+
 ### 1. Start the server
 
 ```bash
@@ -68,6 +72,28 @@ go run ./cmd/asqlstudio -http-addr :9080 -grpc-endpoint 127.0.0.1:9042
 
 Or use `make dev` to start everything at once.
 
+### 5. Validate and load a deterministic fixture
+
+```bash
+go run ./cmd/asqlctl -command fixture-validate \
+  -fixture-file fixtures/healthcare-billing-demo-v1.json
+
+go run ./cmd/asqlctl -command fixture-load \
+  -pgwire 127.0.0.1:5433 \
+  -fixture-file fixtures/healthcare-billing-demo-v1.json
+
+go run ./cmd/asqlctl -command fixture-export \
+  -pgwire 127.0.0.1:5433 \
+  -domains billing,patients,clinical \
+  -fixture-file fixtures/healthcare-billing-export-v1.json
+```
+
+Fixture validation runs on a fresh ephemeral ASQL engine before a live load, so
+broken ordering, SQL, foreign-key, or versioned-reference issues fail early.
+Fixture export produces a deterministic v1 fixture from the selected domains and
+fails fast if export would be unstable, such as missing primary keys or omitted
+dependency domains.
+
 ---
 
 ## Core features
@@ -100,10 +126,32 @@ Read data as it existed at any point in history. Every committed transaction get
 -- Read state at a specific LSN
 SELECT * FROM users AS OF LSN 42;
 
--- Row-level change history with old/new values
+-- Inspect the current visible head LSN
+SELECT current_lsn();
+
+-- Inspect the current visible row-head LSN for a specific row
+SELECT row_lsn('billing.invoices', '42');
+
+-- Inspect the latest entity version and its head commit LSN
+SELECT entity_version('recipes', 'recipe_aggregate', 'recipe-1');
+SELECT entity_head_lsn('recipes', 'recipe_aggregate', 'recipe-1');
+SELECT entity_version_lsn('recipes', 'recipe_aggregate', 'recipe-1', 3);
+
+-- Inspect the exact token a versioned foreign key would capture right now
+SELECT resolve_reference('recipes.master_recipes', '1');
+
+-- Row-level change history with a stable metadata contract
 SELECT * FROM invoices FOR HISTORY;
--- Returns: operation (INSERT/UPDATE/DELETE), commit_lsn, old values, new values
+-- Returns: __operation, __commit_lsn, and the row image at that commit
+-- INSERT => inserted row image
+-- UPDATE => post-update row image
+-- DELETE => pre-delete row image
 ```
+
+`resolve_reference(...)` returns the latest entity version for entity root
+tables, and the current row-head `_lsn` for non-entity tables.
+`entity_version_lsn(...)` lets clients translate a business-facing entity
+version into the exact replay-safe `LSN` needed for `AS OF LSN` reads.
 
 ### Entity versioning
 
@@ -123,6 +171,10 @@ CREATE TABLE process_orders (
   recipe_version INT
 );
 
+-- Explicit override remains available when you need precise historical control
+INSERT INTO process_orders (id, recipe_id, recipe_version)
+VALUES ('po-1', 'recipe-1', 3);
+
 -- JOINs across versioned references resolve to the captured version
 IMPORT master.ingredients AS ingredients;
 SELECT o.id, i.name
@@ -130,6 +182,11 @@ FROM process_orders o
 JOIN ingredients i ON o.recipe_id = i.id;
 -- Automatically reads ingredients at the version captured in recipe_version
 ```
+
+Auto-capture resolves against the transaction-visible snapshot. Later
+statements in the same transaction can reference rows or entity versions
+created earlier in that transaction, and replay reconstructs the same captured
+tokens deterministically from WAL order.
 
 ### SQL support
 
@@ -386,7 +443,7 @@ conn.Exec(ctx, "CREATE TABLE users (id INT PRIMARY KEY, name TEXT)")
 conn.Exec(ctx, "COMMIT")
 ```
 
-See [docs/postgres-compatibility-surface-v1.md](docs/postgres-compatibility-surface-v1.md) for the exact supported and unsupported behavior.
+See [docs/sql-pgwire-compatibility-policy-v1.md](docs/sql-pgwire-compatibility-policy-v1.md) for the policy stance and [docs/postgres-compatibility-surface-v1.md](docs/postgres-compatibility-surface-v1.md) for the exact supported and unsupported behavior.
 
 ### gRPC API
 
@@ -483,6 +540,7 @@ make seed-domains-10x  # 10x scale: 1K recipes, 3K orders
 | [Go SDK cookbook](docs/cookbook-go-sdk.md) | Code recipes for common operations |
 | [Architecture one-pager](docs/architecture-one-pager-v1.md) | System design overview |
 | [Benchmark one-pager](docs/benchmark-one-pager-v1.md) | Performance characteristics |
+| [Fixture format and lifecycle](docs/fixture-format-and-lifecycle-v1.md) | Deterministic scenario file contract and loader workflow |
 | [SQLite migration path](docs/migration-sqlite-quick-path.md) | Migrate from SQLite to ASQL |
 | [PostgreSQL compatibility](docs/postgres-compatibility-surface-v1.md) | pgwire protocol support matrix |
 | [SLO definitions](docs/slo-v1.md) | Service level objectives |
