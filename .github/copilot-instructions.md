@@ -1,119 +1,108 @@
 # ASQL – Copilot Instructions
 
 ## Project intent
-Build **ASQL**, a deterministic SQL engine in Go with:
-- single-node embedded core first,
-- domain isolation inside the engine,
-- deterministic append-only log and replay,
-- optional distributed execution/replication via gRPC.
+Build and maintain **ASQL**, a general-purpose deterministic SQL engine in Go.
 
-The product target is practical and commercial: edge/offline-first apps, microservice backends, and compliance/audit-heavy systems.
+Core product characteristics:
+
+- embedded-first and single-node usable,
+- explicit domain isolation,
+- append-only WAL as source of truth,
+- deterministic replay and time-travel,
+- entity/version-aware workflows when useful,
+- pgwire as the main application-facing runtime,
+- optional clustered operation via pgwire + Raft.
+
+ASQL is not a vertical product for healthcare, finance, or manufacturing. It should remain a compact database product with strong temporal and deterministic primitives that applications can build on.
 
 ## Product principles (non-negotiable)
-1. **Single-node first**: every feature must work locally before distributed mode.
-2. **Determinism first**: same input log => same state and query results.
-3. **Domain isolation**: each domain has isolated schema, storage, and rules.
-4. **Cross-domain by protocol**: explicit transaction coordinator; never implicit side effects.
-5. **Append-only truth**: WAL/event log is the source of truth; materialized state is derived.
-6. **Observability by default**: structured logs, metrics, traces, and replay tooling.
-7. **Minimal surface area**: keep the engine opinionated and compact; avoid premature extensibility.
+1. **Single-node first**: every feature must work locally before clustered mode matters.
+2. **Determinism first**: same WAL input must produce the same state and observable query results.
+3. **Explicit boundaries**: domains and cross-domain work must remain visible.
+4. **Append-only truth**: WAL is canonical; materialized state is derived.
+5. **Observability by default**: metrics, logs, replay, and diagnostic visibility are part of the product.
+6. **Minimal surface area**: add capabilities carefully; avoid accidental platform sprawl.
+7. **General-purpose scope**: improve database primitives and ergonomics, not application-specific workflow semantics.
 
-## Scope policy
-### In scope (MVP)
-- SQL subset (DDL + DML basics + transactions).
-- JSON columns/operators (minimum useful subset).
-- Domain-aware transactions:
-  - `BEGIN DOMAIN <name>`
-  - `BEGIN CROSS DOMAIN <a>, <b>`
-- Deterministic WAL and replay.
-- Time-travel reads based on log position/timestamp.
-- gRPC API for client operations.
-- Optional replication mode (single leader per domain group in v1).
+## Current product stance
 
-### Out of scope (MVP)
-- Full ANSI SQL compatibility.
-- Cost-based optimizer.
-- Arbitrary distributed sharding.
-- Multi-region consensus complexity.
-- Smart-contract-like runtime.
+Treat these as current realities unless the code or newer docs prove otherwise:
+
+- canonical local runtime is `cmd/asqld` on pgwire,
+- canonical Studio path is `cmd/asqlstudio` with `-pgwire-endpoint`,
+- compatibility stance is a pragmatic PostgreSQL-compatible subset over pgwire,
+- getting-started is the primary onboarding narrative,
+- deeper docs should support getting-started rather than duplicate it.
 
 ## Architecture constraints
 - Language: Go.
-- Internal architecture style: hexagonal/ports-and-adapters.
-- Keep pure core modules free from transport/storage framework coupling.
-- No hidden global mutable state in execution path.
-- Deterministic clocks/randomness abstraction in core (`Clock`, `Entropy` interfaces).
+- Internal style: hexagonal / ports-and-adapters where practical.
+- Keep core engine logic free from transport/framework coupling.
+- No hidden global mutable state in execution paths.
+- Deterministic abstractions for time/randomness must remain injectable in core code.
 
-## Target repository shape
-Prefer this structure as implementation starts:
+## Scope guidance
 
-```text
-/cmd
-  /asqld
-  /asqlctl
-/internal
-  /engine
-    /parser
-    /planner
-    /executor
-    /domains
-    /tx
-    /mvcc
-    /replay
-  /storage
-    /wal
-    /btree
-  /cluster
-    /coordinator
-    /replication
-  /server
-    /grpc
-  /platform
-    /clock
-    /logging
-    /telemetry
-/api
-  /proto
-/test
-  /integration
-  /determinism
-/docs
-```
+In scope:
+
+- SQL/pgwire/database capabilities that are general-purpose,
+- domain-scoped and cross-domain transaction semantics,
+- replay, time-travel, entity/version primitives,
+- fixture workflows, compatibility clarity, diagnostics, and tooling,
+- operator-facing observability and production hardening.
+
+Out of scope unless clearly reframed as database-general:
+
+- workflow engines,
+- approval systems,
+- vertical compliance object models,
+- domain-specific event taxonomies,
+- business-specific case/timeline semantics.
+
+Those belong in the application layer.
 
 ## Engineering standards
-- Go formatting/linting/tests are mandatory on every PR.
-- Public interfaces must include doc comments.
-- Every state transition must be testable deterministically.
-- Add at least one integration test for every new engine capability.
-- Preserve backward compatibility of log format once declared stable.
+- Go formatting, tests, and determinism checks are mandatory.
+- Public interfaces should include doc comments.
+- Every state transition should be testable deterministically.
+- New public capabilities should include integration tests.
+- Update docs whenever user-visible behavior changes.
 
-## Determinism checklist (apply on every PR)
-- Does this change depend on wall-clock time directly?
-- Does this change depend on map iteration order?
-- Does this change use randomness without an injected seed/source?
-- Does this change introduce non-deterministic concurrency ordering?
-- Can replay produce identical snapshots and query outputs?
+## Determinism checklist
+- Does this change depend directly on wall-clock time?
+- Does it depend on map iteration order?
+- Does it introduce randomness without a controlled source?
+- Does it rely on non-deterministic concurrency ordering?
+- Can replay still produce identical state and results?
 
-If any answer is “yes” (except the last), refactor before merging.
+If any answer is “yes” to the first four, refactor before merging.
+
+## Documentation rules
+- Prefer improving `docs/getting-started/` over creating a parallel onboarding path.
+- Keep `README.md` short; it is the front door, not the full guide.
+- Use ADRs for durable architectural/product decisions.
+- Mark stale planning docs as historical rather than silently letting them drift.
+- Keep `.github/copilot-instructions.md` aligned with the current product state.
 
 ## Agent workflow
-1. Read `docs/ai/01-product-vision.md`.
-2. Pick next task from `docs/ai/05-backlog.md`.
-3. Implement smallest vertical slice.
-4. Add/adjust tests.
-5. Update docs impacted by the change.
-6. Record ADR when architecture-significant.
+1. Read the current task context and relevant docs.
+2. Use `docs/ai/05-backlog.md` for active engineering execution unless the user asks for a docs/product audit task.
+3. Implement the smallest useful vertical slice.
+4. Add or update tests.
+5. Update affected docs.
+6. Record an ADR when the decision is durable and architectural.
 
-## Definition of done (task level)
+## Definition of done
 A task is done only if:
+
 - code compiles,
-- tests pass,
-- determinism constraints verified,
-- observability hooks added where relevant,
-- documentation updated.
+- relevant tests pass,
+- determinism constraints are preserved,
+- observability/docs are updated where relevant,
+- user-facing behavior is documented if it changed.
 
 ## Communication style for AI agents
-- Be concise and explicit about assumptions.
-- Propose incremental changes over large rewrites.
+- Be concise and explicit.
+- Prefer incremental changes over large rewrites.
 - Call out trade-offs and unresolved risks.
-- If ambiguous, choose the simplest interpretation that preserves determinism.
+- Distinguish clearly between engine-owned concerns and app-owned concerns.

@@ -11,11 +11,15 @@ ASQL is a deterministic SQL engine in Go that runs embedded first, with domain-i
 
 ```text
 Clients
-  | pgwire / gRPC
+  | pgwire (application path) / gRPC (optional cluster-admin path)
   v
-/server/pgwire  ---> /server/grpc (cluster sidecar, optional)
-      |                    |
-      v                    v
+/cmd/asqld
+  |\\
+  | \\--> /internal/server/grpc (optional)
+  v
+/internal/server/pgwire
+      |
+      v
 /internal/engine
   parser -> planner -> executor -> tx coordinator -> storage adapters
                                    |
@@ -25,8 +29,9 @@ Clients
 ```
 
 Production note:
-- clustered production runtime: `server/pgwire` + Raft + gRPC sidecar,
-- standalone `server/grpc`: admin/API surface and transitional cluster path, not the canonical production runtime.
+- canonical local and application-facing runtime: `cmd/asqld` with pgwire enabled,
+- clustered runtime layers pgwire + Raft, with gRPC retained for cluster/admin transport where enabled,
+- standalone gRPC usage is secondary and should not be treated as the default onboarding path.
 
 ## 3) Core architectural principles
 
@@ -44,7 +49,7 @@ Production note:
 - Time-travel reads support `AS OF LSN` and logical timestamp mapping.
 
 Aggregate-facing note:
-- [docs/aggregate-reference-semantics-v1.md](aggregate-reference-semantics-v1.md) describes how entity versions and aggregate references sit on top of the deterministic row-and-WAL core.
+- [docs/reference/aggregate-reference-semantics-v1.md](../reference/aggregate-reference-semantics-v1.md) describes how entity versions and aggregate references sit on top of the deterministic row-and-WAL core.
 
 ## 5) Hexagonal boundaries
 
@@ -55,7 +60,7 @@ Aggregate-facing note:
 - `LogStore`, `KVStore`, `DomainCatalog`, `Clock`, `Entropy`, `Telemetry`.
 
 ### Adapters
-- file WAL adapter, btree storage adapter, gRPC transport, optional replication adapter.
+- file WAL adapter, btree storage adapter, pgwire transport, gRPC transport, optional replication adapter.
 
 This keeps execution core free from transport/storage framework coupling.
 

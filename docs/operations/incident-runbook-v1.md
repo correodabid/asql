@@ -12,11 +12,12 @@ Severity model: P0 (service unavailable/data risk), P1 (major degradation), P2 (
 
 ---
 
-## Scenario 1: Replay/time-travel failures
+## Scenario 1: Historical query / replay failures
 
 Symptoms:
-- `ReplayToLSN` fails.
-- time-travel queries return replay mutation errors.
+- `AS OF LSN` or `FOR HISTORY` queries fail unexpectedly.
+- historical helper queries return replay/history errors.
+- replay parity tests fail.
 
 Likely causes:
 - WAL corruption or incompatible/partial history.
@@ -60,10 +61,11 @@ Exit criteria:
 
 ---
 
-## Scenario 3: Security/auth failures (token/mTLS)
+## Scenario 3: Security/auth failures (pgwire, optional gRPC, token/mTLS)
 
 Symptoms:
-- clients receive `Unauthenticated` unexpectedly,
+- pgwire clients receive unexpected auth or TLS failures,
+- optional gRPC/admin clients receive `Unauthenticated` unexpectedly,
 - mTLS handshakes fail,
 - auth audit failures spike.
 
@@ -73,14 +75,16 @@ Likely causes:
 - missing client CA configuration.
 
 Actions:
-1. Validate current server startup flags (`-auth-token`, `-tls-*`).
-2. Confirm certificate validity period and chain to configured client CA.
-3. Re-run black-box grpc tests:
-   - `go test ./internal/server/grpc -v`
-4. Roll back to last known good security config if outage is ongoing.
+1. Validate current server startup flags (`-auth-token`, `-tls-*`) on affected nodes.
+2. Confirm certificate validity period and chain to the configured client CA for each enabled listener.
+3. Re-run black-box coverage for the affected surface:
+   - `go test ./internal/server/pgwire -v`
+   - if the gRPC/admin surface is enabled, `go test ./internal/server/grpc -v`
+4. Roll back to the last known good security config if outage is ongoing.
 
 Exit criteria:
-- successful authenticated requests restored.
+- successful authenticated pgwire requests restored.
+- optional gRPC/admin requests restored if that surface is in use.
 - audit log failure rate returns to baseline.
 
 ---

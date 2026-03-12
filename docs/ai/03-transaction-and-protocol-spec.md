@@ -42,14 +42,16 @@ Record {
 - Mutation payload uses stable serialization.
 - Replay validates checksum/version before apply.
 
-## gRPC surface (MVP)
-### Service: `ASQLService`
-- `Execute(ExecuteRequest) returns (ExecuteResponse)`
-- `BeginTx(BeginTxRequest) returns (BeginTxResponse)`
-- `CommitTx(CommitTxRequest) returns (CommitTxResponse)`
-- `RollbackTx(RollbackTxRequest) returns (RollbackTxResponse)`
-- `ReplayToLSN(ReplayToLSNRequest) returns (ReplayToLSNResponse)`
-- `TimeTravelQuery(TimeTravelQueryRequest) returns (TimeTravelQueryResponse)`
+## Runtime surface notes
+
+Canonical application path:
+- PostgreSQL-compatible subset over pgwire,
+- explicit transaction scope using `BEGIN DOMAIN ...` and `BEGIN CROSS DOMAIN ...`,
+- historical reads via SQL syntax and helper functions.
+
+Secondary/admin surface:
+- internal or optional gRPC paths may still expose `Execute`, `BeginTx`, `CommitTx`, `RollbackTx`, `ReplayToLSN`, and `TimeTravelQuery`,
+- these should not be treated as the primary adoption or compatibility surface.
 
 ## Error model
 Use stable machine-readable error codes:
@@ -63,8 +65,10 @@ Use stable machine-readable error codes:
 
 ASQL exposes a pragmatic PostgreSQL-compatible subset over pgwire, but it is
 not a drop-in PostgreSQL replacement. See
-[docs/sql-pgwire-compatibility-policy-v1.md](../sql-pgwire-compatibility-policy-v1.md)
-and [docs/postgres-compatibility-surface-v1.md](../postgres-compatibility-surface-v1.md).
+[docs/reference/sql-pgwire-compatibility-policy-v1.md](../reference/sql-pgwire-compatibility-policy-v1.md)
+and [docs/reference/postgres-compatibility-surface-v1.md](../reference/postgres-compatibility-surface-v1.md).
+
+For current implementation priorities, use [docs/ai/05-backlog.md](05-backlog.md) as the source of truth rather than this MVP-era protocol note.
 
 ## Time-travel semantics
 - `AS OF LSN <n>`: read from materialized state as of log position.

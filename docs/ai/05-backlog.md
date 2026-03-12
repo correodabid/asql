@@ -227,7 +227,7 @@ Acceptance gates (must pass before closing Epic V)
 ## Epic W — Production-readiness execution kickoff (Phase 1)
 
 Reference plan:
-- `docs/production-readiness-roadmap-v1.md`
+- `docs/product/production-readiness-roadmap-v1.md`
 
 Development-stage rule:
 - Backward compatibility is not a current constraint.
@@ -262,7 +262,7 @@ Acceptance gates (must pass before closing Epic W)
 ## Epic X — Recovery and historical correctness (Phase 2)
 
 Reference plan:
-- `docs/production-readiness-roadmap-v1.md`
+- `docs/product/production-readiness-roadmap-v1.md`
 
 Time-travel indexing:
 - [x] Add a persisted timestamp -> LSN lookup structure.

@@ -17,7 +17,7 @@ Studio is best for:
 Start it with:
 
 ```bash
-go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:9042 -data-dir .asql
+go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
 
 ## Use `asqlctl` for scripts and repeatable commands

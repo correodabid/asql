@@ -1,62 +1,49 @@
 # 03. First Database
 
-This guide creates a small schema, writes data, and reads it back.
+This guide creates a small schema, writes data, and reads it back using the pgwire shell.
 
-## Option A: use `asqlctl`
-
-### 1. Open a domain transaction
+## 1. Open the shell
 
 ```bash
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 \
-  -command begin -mode domain -domains app
+go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
 ```
 
-Save the returned `tx_id`.
+## 2. Create a table and insert data
 
-### 2. Create a table
+Run this in the shell:
 
-```bash
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 \
-  -command execute -tx-id <tx_id> \
-  -sql "CREATE TABLE users (id INT PRIMARY KEY, email TEXT UNIQUE, status TEXT)"
+```sql
+BEGIN DOMAIN app;
+CREATE TABLE users (id INT PRIMARY KEY, email TEXT UNIQUE, status TEXT);
+INSERT INTO users (id, email, status) VALUES (1, 'alice@example.com', 'active');
+COMMIT;
 ```
 
-### 3. Insert data
+## 3. Read the data back
 
-```bash
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 \
-  -command execute -tx-id <tx_id> \
-  -sql "INSERT INTO users (id, email, status) VALUES (1, 'alice@example.com', 'active')"
+Still in the shell:
+
+```sql
+SELECT * FROM users;
 ```
 
-### 4. Commit
+## 4. Inspect the same data in Studio
 
-```bash
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 \
-  -command commit -tx-id <tx_id>
-```
+If Studio is running:
 
-## Option B: use the example client
-
-```bash
-go run ./examples/go-client -endpoint 127.0.0.1:9042 -domain app -table users -id 1 -email bootstrap@example.com -init-schema
-```
-
-## Read the data back
-
-Use Studio, or a pgwire-compatible client, or the Go example path.
-
-Example with Studio:
-
-- open `Workspace`,
-- select domain `app`,
-- run `SELECT * FROM users`.
+- open `Workspace`
+- select domain `app`
+- run `SELECT * FROM users`
 
 ## What you learned
 
 At this point you have already used the most important ASQL building block:
 
 - explicit transaction scope before schema or DML work.
+
+You also used the current canonical local interface:
+
+- pgwire through the built-in shell.
 
 ## Next step
 

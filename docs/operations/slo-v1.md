@@ -44,6 +44,9 @@ Alert:
 Objective:
 - Smoke onboarding pass rate >= 95% (rolling 7 days).
 
+Scope note:
+- This is an internal adoption/DX SLO for the canonical getting-started path, not a customer production SLA.
+
 SLI:
 - `smoke_onboarding_passes / smoke_onboarding_runs`
 
@@ -54,7 +57,7 @@ Alert:
 ## SLO-5: Time-to-first-transaction
 
 Objective:
-- <= 15 minutes from clean machine to first successful transaction.
+- <= 15 minutes from a clean machine to first successful transaction on the canonical local pgwire path.
 
 SLI:
 - p95 of measured onboarding duration from smoke workflow.
@@ -65,6 +68,6 @@ Alert:
 
 ## Measurement notes
 
-- Use nightly CI plus pilot environment runs as data sources.
+- Use nightly CI plus the canonical onboarding smoke workflow as data sources.
 - Treat missing telemetry as failed measurement windows.
 - Report weekly summary in ops review.

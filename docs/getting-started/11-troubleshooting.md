@@ -1,5 +1,12 @@
 # 11. Troubleshooting
 
+Most ASQL onboarding issues come from one of four places:
+
+- wrong endpoint or runtime assumption,
+- unclear domain scope,
+- missing deterministic setup,
+- or confusion between engine-owned behavior and app-owned behavior.
+
 ## `connection refused`
 
 Check:
@@ -8,6 +15,8 @@ Check:
 - the endpoint is correct,
 - Studio points to the same pgwire endpoint.
 
+For local onboarding, the canonical default is `127.0.0.1:5433`.
+
 ## `table not found`
 
 Usually one of these is true:
@@ -15,6 +24,8 @@ Usually one of these is true:
 - schema was never created,
 - you are in the wrong domain,
 - the query assumes implicit context that has not been established.
+
+If this keeps recurring, revisit the first schema and fixture steps before adding more code.
 
 ## history output looks different than expected
 
@@ -25,6 +36,8 @@ Use the stable metadata names:
 
 Do not rely on older internal field names.
 
+Also confirm you are using `FOR HISTORY` against the intended qualified table name.
+
 ## versioned reference write fails
 
 Check:
@@ -32,6 +45,8 @@ Check:
 - the referenced row is visible,
 - the referenced table is the entity root when using entity semantics,
 - the reference is not pointing to a missing historical token.
+
+If the data model is still changing quickly, simplify the workflow first and reintroduce versioned references once the aggregate boundary is stable.
 
 ## fixture validation fails
 
@@ -41,6 +56,8 @@ Typical reasons:
 - references to data not yet inserted,
 - unsupported non-deterministic tokens such as `NOW()` or `RANDOM()`,
 - transaction control statements embedded inside fixture steps.
+
+Treat fixture failures as useful design feedback, not just syntax errors.
 
 ## fixture export fails
 
@@ -60,10 +77,26 @@ Recommended sequence:
 3. inspect `FOR HISTORY`,
 4. run the exact `AS OF LSN` query.
 
+## cross-domain workflow feels awkward
+
+That usually means one of these is true:
+
+- the boundary split is premature,
+- the workflow is really application orchestration instead of atomic engine work,
+- or the audit/compliance meaning has not been modeled clearly in application code.
+
+Try rewriting the workflow in plain language first: what must commit together, and why?
+
+## Go integration feels too manual
+
+That is often normal at first.
+ASQL prefers explicit orchestration over hidden repository behavior.
+Start with a thin helper around `BEGIN DOMAIN ...` or `BEGIN CROSS DOMAIN ...`, then standardize request IDs, timestamps, and audit payload construction in the service layer.
+
 ## where to look next
 
 - [README.md](../../README.md)
-- [../getting-started-10-min.md](../getting-started-10-min.md)
-- [../cookbook-go-sdk.md](../cookbook-go-sdk.md)
-- [../fixture-format-and-lifecycle-v1.md](../fixture-format-and-lifecycle-v1.md)
-- [../temporal-introspection-surface-v1.md](../temporal-introspection-surface-v1.md)
+- [10-min.md](10-min.md)
+- [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
+- [../reference/fixture-format-and-lifecycle-v1.md](../reference/fixture-format-and-lifecycle-v1.md)
+- [../reference/temporal-introspection-surface-v1.md](../reference/temporal-introspection-surface-v1.md)

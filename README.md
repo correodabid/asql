@@ -1,9 +1,9 @@
 # ASQL
 
-**A deterministic SQL engine built in Go.** Domain isolation, append-only WAL, time-travel queries, entity versioning, and optional distributed replication -- all in a single binary.
+**A deterministic SQL engine built in Go.** Domain isolation, append-only WAL, time-travel queries, entity versioning, and optional clustered operation through pgwire + Raft.
 
-```
-go run ./cmd/asqld -addr :9042 -data-dir .asql
+```bash
+go run ./cmd/asqld -addr :5433 -data-dir .asql
 ```
 
 ---
@@ -25,52 +25,37 @@ Every database forces you to choose: **simple** (SQLite) or **powerful** (Postgr
 
 ## Quickstart
 
-For the full multi-topic onboarding path, see:
+The primary onboarding path is [docs/getting-started/README.md](docs/getting-started/README.md).
 
-- [docs/getting-started/README.md](docs/getting-started/README.md)
+Short local path:
 
-### 1. Start the server
-
-```bash
-go run ./cmd/asqld -addr :9042 -data-dir .asql
-```
-
-### 2. Create a table and insert data
+### 1. Start ASQL locally
 
 ```bash
-# Open a transaction in the "app" domain
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 \
-  -command begin -mode domain -domains app
-
-# Use the returned tx_id for subsequent commands
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 \
-  -command execute -tx-id <tx_id> \
-  -sql "CREATE TABLE users (id INT PRIMARY KEY, email TEXT UNIQUE, created_at TIMESTAMP DEFAULT UUID_V7())"
-
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 \
-  -command execute -tx-id <tx_id> \
-  -sql "INSERT INTO users (id, email) VALUES (1, 'alice@example.com')"
-
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 \
-  -command commit -tx-id <tx_id>
+go run ./cmd/asqld -addr :5433 -data-dir .asql
 ```
 
-### 3. Query historical state
+### 2. Open the interactive shell
 
 ```bash
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 \
-  -command time-travel -domains app -lsn 4 \
-  -sql "SELECT id, email FROM users"
+go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
 ```
 
-### 4. Launch the Studio UI
+### 3. Run a first transaction
+
+```sql
+BEGIN DOMAIN app;
+CREATE TABLE users (id INT PRIMARY KEY, email TEXT UNIQUE, status TEXT);
+INSERT INTO users (id, email, status) VALUES (1, 'alice@example.com', 'active');
+COMMIT;
+SELECT * FROM users;
+```
+
+### 4. Launch ASQL Studio
 
 ```bash
-go run ./cmd/asqlstudio -http-addr :9080 -grpc-endpoint 127.0.0.1:9042
-# Open http://localhost:9080
+go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
-
-Or use `make dev` to start everything at once.
 
 ### 5. Validate and load a deterministic fixture
 
@@ -81,18 +66,9 @@ go run ./cmd/asqlctl -command fixture-validate \
 go run ./cmd/asqlctl -command fixture-load \
   -pgwire 127.0.0.1:5433 \
   -fixture-file fixtures/healthcare-billing-demo-v1.json
-
-go run ./cmd/asqlctl -command fixture-export \
-  -pgwire 127.0.0.1:5433 \
-  -domains billing,patients,clinical \
-  -fixture-file fixtures/healthcare-billing-export-v1.json
 ```
 
-Fixture validation runs on a fresh ephemeral ASQL engine before a live load, so
-broken ordering, SQL, foreign-key, or versioned-reference issues fail early.
-Fixture export produces a deterministic v1 fixture from the selected domains and
-fails fast if export would be unstable, such as missing primary keys or omitted
-dependency domains.
+For time-travel, entities, fixtures, Studio, and integration patterns, continue with [docs/getting-started/README.md](docs/getting-started/README.md).
 
 ---
 
@@ -383,18 +359,24 @@ Every mutation is written to the append-only WAL before becoming visible. On res
 ### Replication
 
 ```bash
-# Leader
-go run ./cmd/asqld -addr :9042 -data-dir .asql-leader \
-  -peers follower1@127.0.0.1:9043 -groups default
+# Node A
+go run ./cmd/asqld -addr :5433 -data-dir .asql-node-a \
+  -node-id node-a -grpc-addr :6433 \
+  -peers node-b@127.0.0.1:6434,node-c@127.0.0.1:6435 \
+  -groups default
 
-# Follower
-go run ./cmd/asqld -addr :9043 -data-dir .asql-follower \
-  -peers leader@127.0.0.1:9042 -groups default
+# Node B
+go run ./cmd/asqld -addr :5434 -data-dir .asql-node-b \
+  -node-id node-b -grpc-addr :6434 \
+  -peers node-a@127.0.0.1:6433,node-c@127.0.0.1:6435 \
+  -groups default
 ```
 
 - **WAL-based streaming** -- followers replicate by streaming the leader's WAL
 - **Read routing** -- `strong` reads go to leader; `bounded-stale` reads go to follower when lag is within threshold, with automatic leader fallback
 - **Catch-up sync** -- followers read from their last LSN and apply records incrementally
+
+Cluster mode extends the single-node runtime. It should not replace the local standalone onboarding path.
 
 ---
 
@@ -402,27 +384,28 @@ go run ./cmd/asqld -addr :9043 -data-dir .asql-follower \
 
 ### ASQL Studio
 
-Web UI for managing ASQL interactively at `http://localhost:9080`.
+Desktop Studio for managing ASQL interactively over pgwire.
 
 - SQL query editor with domain selection
 - Schema browser with ER diagram visualization
 - Transaction controls (BEGIN / EXECUTE / COMMIT / ROLLBACK)
 - Time-travel query panel
 - Scan strategy statistics
-- Replication lag monitoring (with `-follower-grpc-endpoint`)
+- Replication lag monitoring (with optional `-follower-endpoint` or cluster peer endpoints)
 
 ```bash
-make dev  # Starts asqld + asqlstudio + vite HMR
+go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
 
 ### CLI (asqlctl)
 
 ```bash
-asqlctl -endpoint 127.0.0.1:9042 -command begin -mode domain -domains app
-asqlctl -endpoint 127.0.0.1:9042 -command execute -tx-id <id> -sql "..."
-asqlctl -endpoint 127.0.0.1:9042 -command commit -tx-id <id>
-asqlctl -endpoint 127.0.0.1:9042 -command time-travel -domains app -lsn 10 -sql "SELECT ..."
+go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
+go run ./cmd/asqlctl -command fixture-validate -fixture-file fixtures/healthcare-billing-demo-v1.json
+go run ./cmd/asqlctl -command fixture-load -pgwire 127.0.0.1:5433 -fixture-file fixtures/healthcare-billing-demo-v1.json
 ```
+
+The lower-level `begin` / `execute` / `commit` and `time-travel` commands still exist for engine-oriented workflows, but the normal developer path should be pgwire SQL, fixtures, and Studio.
 
 ### PostgreSQL wire protocol
 
@@ -443,11 +426,13 @@ conn.Exec(ctx, "CREATE TABLE users (id INT PRIMARY KEY, name TEXT)")
 conn.Exec(ctx, "COMMIT")
 ```
 
-See [docs/sql-pgwire-compatibility-policy-v1.md](docs/sql-pgwire-compatibility-policy-v1.md) for the policy stance and [docs/postgres-compatibility-surface-v1.md](docs/postgres-compatibility-surface-v1.md) for the exact supported and unsupported behavior.
+See [docs/reference/sql-pgwire-compatibility-policy-v1.md](docs/reference/sql-pgwire-compatibility-policy-v1.md) for the policy stance and [docs/reference/postgres-compatibility-surface-v1.md](docs/reference/postgres-compatibility-surface-v1.md) for the exact supported and unsupported behavior.
 
 ### gRPC API
 
 Native gRPC with JSON codec. Full API at `api/proto/asql/v1/service.proto`.
+
+For most services, this is a secondary integration surface. Prefer pgwire for normal application reads and writes.
 
 ```protobuf
 service ASQLService {
@@ -472,26 +457,19 @@ service ASQLService {
 
 ```bash
 # Shared pgwire password / bearer token authentication
-go run ./cmd/asqld -addr :9042 -data-dir .asql -auth-token my-secret
-
-# mTLS (mutual TLS)
-go run ./cmd/asqld -addr :9042 -data-dir .asql \
-  -tls-cert ./certs/server.pem \
-  -tls-key ./certs/server-key.pem \
-  -tls-client-ca ./certs/ca.pem
+go run ./cmd/asqld -addr :5433 -data-dir .asql -auth-token my-secret
 ```
+
+TLS transport is not part of the current local pgwire runtime surface.
+See [docs/reference/postgres-compatibility-surface-v1.md](docs/reference/postgres-compatibility-surface-v1.md) for the current compatibility stance.
 
 ---
 
 ## Docker
 
 ```bash
-make docker-build   # Build image (asql:local)
-make docker-run     # Run on :9042 with persistent volume
-
-# Or directly:
 docker build -t asql:local .
-docker run -p 9042:9042 -v $(pwd)/.data:/data asql:local
+docker run -p 5433:5433 -v $(pwd)/.data:/data asql:local
 ```
 
 Uses `gcr.io/distroless/static-debian12` as runtime base for minimal attack surface.
@@ -536,17 +514,17 @@ make seed-domains-10x  # 10x scale: 1K recipes, 3K orders
 
 | Document | Description |
 |----------|-------------|
-| [Getting started (10 min)](docs/getting-started-10-min.md) | Hands-on guide from zero to time-travel |
-| [Go SDK cookbook](docs/cookbook-go-sdk.md) | Code recipes for common operations |
-| [Architecture one-pager](docs/architecture-one-pager-v1.md) | System design overview |
-| [Benchmark one-pager](docs/benchmark-one-pager-v1.md) | Performance characteristics |
-| [Fixture format and lifecycle](docs/fixture-format-and-lifecycle-v1.md) | Deterministic scenario file contract and loader workflow |
-| [SQLite migration path](docs/migration-sqlite-quick-path.md) | Migrate from SQLite to ASQL |
-| [PostgreSQL compatibility](docs/postgres-compatibility-surface-v1.md) | pgwire protocol support matrix |
-| [SLO definitions](docs/slo-v1.md) | Service level objectives |
-| [Runbook](docs/runbook.md) | Executable demo commands |
-| [Incident runbook](docs/incident-runbook-v1.md) | Operational procedures |
-| [Security disclosure](docs/security-disclosure-policy-v1.md) | Vulnerability reporting |
+| [Getting started (10 min)](docs/getting-started/10-min.md) | Hands-on guide from zero to time-travel |
+| [Go SDK cookbook](docs/reference/cookbook-go-sdk.md) | Code recipes for common operations |
+| [Architecture one-pager](docs/architecture/architecture-one-pager-v1.md) | System design overview |
+| [Benchmark one-pager](docs/product/benchmark-one-pager-v1.md) | Performance characteristics |
+| [Fixture format and lifecycle](docs/reference/fixture-format-and-lifecycle-v1.md) | Deterministic scenario file contract and loader workflow |
+| [SQLite migration path](docs/migration/sqlite-quick-path.md) | Migrate from SQLite to ASQL |
+| [PostgreSQL compatibility](docs/reference/postgres-compatibility-surface-v1.md) | pgwire protocol support matrix |
+| [SLO definitions](docs/operations/slo-v1.md) | Service level objectives |
+| [Runbook](docs/operations/runbook.md) | Executable demo commands |
+| [Incident runbook](docs/operations/incident-runbook-v1.md) | Operational procedures |
+| [Security disclosure](docs/operations/security-disclosure-policy-v1.md) | Vulnerability reporting |
 
 ---
 

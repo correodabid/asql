@@ -19,23 +19,31 @@ This confirms the local toolchain is compatible with the repository.
 ## Start ASQL locally
 
 ```bash
-go run ./cmd/asqld -addr :9042 -data-dir .asql
+go run ./cmd/asqld -addr :5433 -data-dir .asql
 ```
 
 What this does:
 
 - starts the local engine,
 - persists WAL and snapshots in `.asql`,
-- exposes the server endpoint on `127.0.0.1:9042`.
+- exposes the pgwire endpoint on `127.0.0.1:5433`.
 
 Keep this process running while you work.
+
+## Optional interactive shell
+
+In a second terminal you can open the built-in shell:
+
+```bash
+go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
+```
 
 ## Start the desktop Studio
 
 In a second terminal:
 
 ```bash
-go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:9042 -data-dir .asql
+go run ./cmd/asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
 
 Use Studio when you want:
@@ -56,8 +64,8 @@ make smoke-onboarding
 ## Optional Docker path
 
 ```bash
-make docker-build
-make docker-run
+docker build -t asql:local .
+docker run -p 5433:5433 -v $(pwd)/.data:/data asql:local
 ```
 
 ## What to do next

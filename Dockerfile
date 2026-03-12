@@ -17,7 +17,7 @@ WORKDIR /app
 COPY --from=build /out/asqld /usr/local/bin/asqld
 COPY --from=build /out/asqlctl /usr/local/bin/asqlctl
 
-EXPOSE 9042
+EXPOSE 5433
 
 ENTRYPOINT ["/usr/local/bin/asqld"]
-CMD ["-addr", ":9042", "-data-dir", "/data/.asql"]
+CMD ["-addr", ":5433", "-data-dir", "/data/.asql"]

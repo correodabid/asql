@@ -2,6 +2,10 @@
 
 Status: draft for Beta commercialization (Epic O).
 
+Scope note:
+- ASQL is sold as a general-purpose deterministic SQL database.
+- Vertical workflow, compliance procedure, and application-specific process semantics remain part of the customer solution built on top of ASQL, not part of the ASQL product boundary by default.
+
 ## 1) Packaging and license policy
 
 ASQL is packaged as:
@@ -19,7 +23,7 @@ ASQL is packaged as:
 ## 2) Commercial entitlement boundaries
 
 ### Community includes
-- Embedded/single-node runtime.
+- Embedded and single-node runtime, with pgwire as the canonical application-facing path.
 - Deterministic WAL/replay and time-travel baseline.
 - Basic tooling (`asqld`, `asqlctl`, `asqlstudio`) and public docs.
 - Community support via public issue tracker (best effort).
@@ -29,6 +33,9 @@ ASQL is packaged as:
 - Security advisory early-access channel and coordinated patch guidance.
 - Operational guidance for HA/replication rollouts.
 - Enterprise governance artifacts and deployment assistance.
+
+Boundary note:
+- Enterprise support and packaging do not imply out-of-the-box ownership of customer-specific workflows, regulated process design, or validation documentation outside the ASQL product surface.
 
 ## 3) Pricing model (list pricing, annual)
 
@@ -72,7 +79,7 @@ Target first-response objectives:
 
 For active Enterprise subscriptions:
 - Access to all minor/patch releases.
-- Backward-compatibility guidance tied to `docs/release-upgrade-compat-checklist-v1.md`.
+- Backward-compatibility guidance tied to `docs/operations/release-upgrade-compat-checklist-v1.md`.
 - Security fix advisories and recommended upgrade windows.
 
 ## 6) Commercial guardrails for claims
@@ -81,10 +88,11 @@ When selling ASQL:
 - Performance claims must reference published benchmark methodology.
 - Determinism claims must be tied to replay-equivalence test evidence.
 - Compliance messaging must avoid claiming out-of-the-box certification; ASQL provides technical controls that support customer validation programs.
+- Runtime messaging should describe pgwire via `cmd/asqld` as the canonical application path, with gRPC treated as secondary/optional where relevant.
 
 ## 7) Next linked artifacts (Epic O)
 
-- `docs/support-policy-v1.md`.
-- `docs/security-disclosure-policy-v1.md`.
-- `docs/benchmark-one-pager-v1.md`.
-- `docs/architecture-one-pager-v1.md`.
+- `docs/commercial/support-policy-v1.md`.
+- `docs/operations/security-disclosure-policy-v1.md`.
+- `docs/product/benchmark-one-pager-v1.md`.
+- `docs/architecture/architecture-one-pager-v1.md`.

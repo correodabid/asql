@@ -2,6 +2,8 @@
 
 Date: 2026-03-01
 
+Status note (2026-03-12): this matrix is useful for strategic gap framing, but active sequencing should be taken from [docs/ai/05-backlog.md](05-backlog.md).
+
 ## Scope and intent
 
 This document prioritizes what to build next to improve technical competitiveness against PostgreSQL while preserving ASQL's wedge:
@@ -54,7 +56,7 @@ Completed since matrix refresh (U incremental):
 - deterministic repeated failover winner/term sequence checks.
 
 Implication:
-- credibility gaps moved from SQL baseline/concurrency fundamentals and HA baseline toward compatibility breadth, optimizer depth, service-level reusable read-routing, and migration/runtime ecosystem.
+- credibility gaps moved from SQL baseline/concurrency fundamentals and HA baseline toward compatibility breadth, optimizer depth, reusable read-routing beyond Studio-specific UX, and migration/runtime ecosystem.
 
 ---
 
@@ -68,16 +70,16 @@ Scale:
 
 | Gap | Impact | Effort | Risk | Score | Why it matters now |
 |---|---:|---:|---:|---:|---|
-| Replica-read routing outside Studio (service/API shared policy) | 5 | 3 | 3 | 4 | Routing logic exists; production teams need first-class API integration and policy reuse. |
+| Replica-read packaging and SDK ergonomics | 4 | 3 | 2 | 3 | Shared routing exists, but production teams still need easier client adoption, clearer policy defaults, and stronger operator guardrails. |
 | Optimizer depth (join order, multi-index choices, plan stability) | 5 | 5 | 4 | 1 | Required for predictable latency under larger real schemas/workloads. |
-| PostgreSQL wire compatibility / drivers | 5 | 5 | 4 | 1 | Largest adoption friction: tools and apps expect native Postgres protocol. |
+| Broader PostgreSQL driver/tool compatibility | 5 | 5 | 4 | 1 | Largest adoption friction: tools and apps expect deeper Postgres interoperability than the current pragmatic subset. |
 | Secondary index breadth (covering/partial/function-like paths) | 4 | 4 | 3 | 1 | Critical for complex query shapes without full scans. |
 | Online schema evolution and migration ergonomics | 4 | 4 | 3 | 1 | Real-world teams need low-risk schema changes and rollout controls. |
 | Security/compliance runtime depth (RLS-style controls, richer auditing policies) | 4 | 4 | 3 | 1 | Important in regulated industries and multi-team operations. |
 | Extended SQL coverage (subqueries, more joins, window funcs, DDL breadth) | 4 | 5 | 4 | -1 | Major parity gap for migration from mature PostgreSQL workloads. |
 
 Priority order for next 8 weeks:
-1) Promote replica-read routing from Studio-only to reusable admin/service API
+1) Improve replica-read packaging, SDK ergonomics, and operator guardrails
 2) Optimizer depth increment (deterministic join/index strategy expansion + explainability)
 3) PostgreSQL protocol compatibility spike (narrow but real tool interoperability slice)
 4) Online schema evolution + migration ergonomics baseline
@@ -86,16 +88,16 @@ Priority order for next 8 weeks:
 
 ## Recommended next 8-week technical roadmap
 
-## Sprint T1 (Weeks 1–2): Replica-read policy promotion (service/API)
+## Sprint T1 (Weeks 1–2): Replica-read packaging and operator ergonomics
 
 Deliverables:
-- Promote lag-aware routing policy into reusable server/API path (not Studio-only).
-- Expose consistency-window metadata and routing decisions for clients/operators.
-- Add deterministic tests for identical routing outcomes under identical lag/state inputs.
+- tighten reusable lag-aware routing defaults for service and SDK consumers,
+- expose consistency-window metadata and routing decisions more clearly for clients/operators,
+- add deterministic tests for identical routing outcomes under identical lag/state inputs.
 
 Acceptance gates:
 - routing decisions are deterministic across repeated seeded lag timelines,
-- stale-read boundary and leader fallback behavior are API-visible and test-covered,
+- stale-read boundary and leader fallback behavior are clearly API-visible and SDK-consumable,
 - operator telemetry includes route decisions and fallback reasons.
 
 ## Sprint T2 (Weeks 3–4): Optimizer depth increment

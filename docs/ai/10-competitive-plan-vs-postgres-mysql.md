@@ -2,6 +2,8 @@
 
 Date: 2026-02-28
 
+Status note (2026-03-12): this document is a competitive strategy snapshot. For current execution priorities, use [docs/ai/05-backlog.md](05-backlog.md) and the categorized product/operations docs.
+
 ## Strategic position
 
 ASQL should not compete first on full ANSI compatibility or ecosystem breadth. PostgreSQL/MySQL win there today.
@@ -14,9 +16,9 @@ ASQL should win first in a focused wedge:
 
 The plan below balances **must-have parity** and **clear differentiation**.
 
-## Execution status (as of 2026-02-28)
+## Execution status snapshot (as of 2026-02-28)
 
-Completed:
+Completed at the time of this snapshot:
 - Epic K (hardening) complete.
 - Epic L (security baseline) complete.
 - Epic M partially complete:
@@ -24,7 +26,7 @@ Completed:
    - Docker image + release pipeline,
    - 10-minute guide + onboarding smoke script.
 
-Remaining critical path to Month-6 target:
+Remaining critical path at the time of this snapshot:
 - Epic M: Go SDK examples/cookbook.
 - Epic N: SLO/runbooks/dashboards/pilot workflow.
 - Epic O/P: commercial + launch packaging.

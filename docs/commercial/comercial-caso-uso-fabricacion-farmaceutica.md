@@ -1,6 +1,8 @@
 # ASQL en fabricación farmacéutica
 ## Caso comercial aplicado: trazabilidad integral de lote y liberación con evidencia auditable
 
+> Nota de alcance: este documento describe una narrativa comercial sobre una solución construida sobre ASQL. ASQL sigue siendo una base de datos SQL generalista y determinista; los flujos GMP, las firmas electrónicas, la gestión de identidades y los procedimientos de calidad siguen perteneciendo a la aplicación y al sistema de calidad del cliente.
+
 ## 1) Resumen ejecutivo
 La fabricación farmacéutica exige velocidad operativa sin comprometer cumplimiento regulatorio ni calidad de datos. ASQL aporta una base de datos SQL determinista, con aislamiento por dominio, registro append-only y capacidad de reconstrucción histórica exacta, ideal para procesos críticos como ejecución de lote, revisión de excepciones y liberación QA.
 
@@ -55,6 +57,12 @@ ASQL no sustituye por sí solo el sistema de calidad, pero sí aporta capacidade
 - Integridad de cambios y reconstrucción reproducible.
 
 Esto refuerza prácticas alineadas con principios como ALCOA+ y requisitos habituales en entornos regulados (por ejemplo, 21 CFR Part 11 en combinación con controles de firma, identidad y procedimiento documental del cliente).
+
+En particular, ASQL puede aportar la base técnica de trazabilidad e historial, pero no reemplaza por sí mismo:
+- firmas electrónicas y controles de identidad,
+- segregación de funciones,
+- workflow de revisión/aprobación,
+- validación procedimental y documental del cliente.
 
 ## 7) Propuesta de implantación comercial (90 días)
 ### Fase 1 — Descubrimiento (2–3 semanas)

@@ -1,5 +1,8 @@
 # Agent Playbook
 
+Status note (2026-03-12): this remains current as the lightweight execution loop for internal agents.
+Use [docs/ai/05-backlog.md](05-backlog.md) as the active task source and [.github/copilot-instructions.md](../../.github/copilot-instructions.md) for current runtime/product constraints.
+
 ## Daily execution loop for AI agents
 1. Read `docs/ai/01-product-vision.md`.
 2. Select one unchecked item from `docs/ai/05-backlog.md`.

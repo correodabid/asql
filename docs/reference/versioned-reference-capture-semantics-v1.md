@@ -1,5 +1,11 @@
 # Versioned reference capture semantics v1
 
+This is a deeper reference note.
+
+For the primary onboarding path, start with:
+- [docs/getting-started/06-entities-and-versioned-references.md](../getting-started/06-entities-and-versioned-references.md)
+- [docs/reference/aggregate-reference-semantics-v1.md](aggregate-reference-semantics-v1.md)
+
 This note defines the supported capture semantics for `VERSIONED FOREIGN KEY`
 references.
 

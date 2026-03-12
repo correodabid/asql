@@ -11,6 +11,9 @@ Because ASQL is deterministic, reproducible setup is especially valuable for:
 - benchmark baselines,
 - debugging from known initial state.
 
+Fixtures are also one of the fastest ways to expose adoption friction.
+If a scenario is hard to encode deterministically, the modeling or workflow boundaries are usually still unclear.
+
 ## Fixture format
 
 ASQL fixtures are strict JSON scenario files.
@@ -20,9 +23,11 @@ They contain ordered transaction steps with:
 - participating domains,
 - ordered SQL statements.
 
+That structure is intentional: fixtures rehearse the same domain and transaction choices your application will make at runtime.
+
 Reference:
 
-- [../fixture-format-and-lifecycle-v1.md](../fixture-format-and-lifecycle-v1.md)
+- [../reference/fixture-format-and-lifecycle-v1.md](../reference/fixture-format-and-lifecycle-v1.md)
 
 ## Validate a fixture
 
@@ -69,6 +74,23 @@ Studio provides a dedicated `Fixtures` tab for:
 - treat fixtures as scenario assets, not just table dumps,
 - prefer small, meaningful business scenarios,
 - validate fixtures before commit.
+
+## Common expectation mismatch
+
+Do not port loose seed scripts directly and expect the same result.
+ASQL fixtures are intentionally stricter:
+
+- no hidden wall-clock values,
+- no randomness,
+- no transaction control inside steps,
+- no ambiguous dependency ordering.
+
+That strictness is part of the product, not a temporary limitation.
+
+## Adoption tip
+
+Create one fixture per important workflow, not one giant environment dump.
+Small scenarios are easier to reason about, review, replay, and evolve with the schema.
 
 ## Next step
 

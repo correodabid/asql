@@ -5,13 +5,18 @@ Audience: engineering, architecture, and procurement evaluation.
 
 ## 1) What this benchmark shows
 
-This benchmark provides a reproducible baseline for ASQL core paths:
+This benchmark provides a reproducible baseline for ASQL core and application-facing paths:
 - write + commit lifecycle,
 - historical reads (`AS OF LSN`),
 - replay execution,
-- WAL append/read/recover performance.
+- WAL append/read/recover performance,
+- pgwire transport overhead,
+- 3-node quorum write behavior.
 
 It is intended for regression tracking and comparative technical due diligence, not as a universal SLA.
+
+Interpretation note:
+- when comparing ASQL as an application-facing database, prefer the pgwire and cluster sections over engine-only microbenchmarks.
 
 ## 2) Test environment
 

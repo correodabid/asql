@@ -3,11 +3,15 @@
 ## High-level architecture
 ```text
 Clients
-  | pgwire / gRPC
+  | pgwire (application path) / gRPC (optional admin or cluster path)
   v
-/internal/server/pgwire  ---> /internal/server/grpc (cluster sidecar, optional)
-            |                           |
-            v                           v
+/cmd/asqld
+  |\\
+  | \\--> /internal/server/grpc (optional)
+  v
+/internal/server/pgwire
+            |
+            v
 /internal/engine
   parser -> planner -> executor -> tx coordinator -> storage adapters
                                    |
@@ -38,8 +42,9 @@ Clients
 - Optional replication adapter.
 
 Production runtime note:
-- clustered production runtime is `internal/server/pgwire` + Raft,
-- standalone `internal/server/grpc` may still host transitional heartbeat-led cluster behavior, but should not be treated as the canonical production cluster path.
+- canonical local and application-facing runtime is `cmd/asqld` with pgwire enabled,
+- clustered production runtime layers pgwire + Raft, with gRPC retained only where cluster/admin transport needs it,
+- standalone gRPC should not be treated as the default onboarding or application path.
 
 ## Domain model
 Each domain contains:

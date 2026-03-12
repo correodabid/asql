@@ -2,6 +2,9 @@
 
 Current state: technical MVP core is implemented (Epics A–J).
 
+Status note (2026-03-12): this document is now a strategy snapshot rather than the active execution plan.
+Use [docs/ai/05-backlog.md](05-backlog.md), [docs/product/production-readiness-roadmap-v1.md](../product/production-readiness-roadmap-v1.md), and the current categorized docs under [docs/getting-started/](../getting-started/) and [docs/operations/](../operations/) as the living sources of truth.
+
 ## Phase K — Production hardening (6–8 weeks)
 
 ### Goals
@@ -51,6 +54,9 @@ Current state: technical MVP core is implemented (Epics A–J).
 ### Exit criteria
 - New user can run local + replication demo in < 15 minutes.
 - CLI covers top 80% operational workflows.
+
+Implementation note:
+- much of this phase has already been absorbed into current docs, tooling, and onboarding work; treat remaining bullets as packaging direction, not as an up-to-date gap list.
 
 ## Phase N — Beta program (6–8 weeks)
 

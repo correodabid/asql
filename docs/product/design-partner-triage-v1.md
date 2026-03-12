@@ -30,6 +30,9 @@ Each feedback item must include:
 4. Reproduction steps or evidence
 5. Desired outcome
 6. Deadline/commitment context
+7. Classification of ownership:
+	- ASQL engine/runtime/tooling/docs
+	- customer application/integration/process layer
 
 ## Classification model
 
@@ -48,13 +51,15 @@ Type tags:
 - security
 - DX/onboarding
 - docs
+- compatibility
 
 ## Triage decision rules
 
 1. If P0/P1 with reproducible evidence -> enter current sprint hotfix lane.
 2. If issue affects >1 partner -> escalate one priority level.
 3. If feature request has no clear pilot ROI within 8 weeks -> defer to backlog parking lot.
-4. Always attach owner and target sprint before closing triage.
+4. If the request is primarily application-, workflow-, or vertical-process-specific, keep it out of the core ASQL roadmap unless it can be reframed as a general database capability.
+5. Always attach owner and target sprint before closing triage.
 
 ## Output artifacts per meeting
 
@@ -76,6 +81,7 @@ An item is considered triaged only if:
 
 1. Priority assigned
 2. Type tag assigned
-3. Owner assigned
-4. Target sprint assigned
-5. Partner communication sent
+3. Ownership classified (`ASQL` vs app/integration/process`)
+4. Owner assigned
+5. Target sprint assigned
+6. Partner communication sent

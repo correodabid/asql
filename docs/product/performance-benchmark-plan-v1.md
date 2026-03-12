@@ -74,9 +74,9 @@ Recommended outputs:
 - p50/p95/p99 per transaction
 - retries/conflicts
 
-### L2 — pgwire transport benchmarks
+### L2 — pgwire application transport benchmarks
 
-Purpose: isolate client/server round-trip overhead.
+Purpose: isolate client/server round-trip overhead on the canonical application-facing runtime.
 
 Command:
 
@@ -203,7 +203,7 @@ Observed issue:
 
 Relevant code:
 
-- [scripts/seed_domains/main.go](scripts/seed_domains/main.go)
+- [scripts/seed_domains/main.go](../../scripts/seed_domains/main.go)
 
 Likely wins:
 

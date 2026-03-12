@@ -1,5 +1,7 @@
 # Definition of Done (ASQL)
 
+Status note (2026-03-12): this remains current. Pair it with [docs/ai/05-backlog.md](05-backlog.md) for active execution tracking and [.github/copilot-instructions.md](../../.github/copilot-instructions.md) for product/runtime constraints.
+
 ## Task-level DoD
 A task is done only if all apply:
 - Implementation compiles.

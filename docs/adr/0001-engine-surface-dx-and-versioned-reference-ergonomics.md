@@ -8,6 +8,8 @@
   - make realistic multi-domain applications and fixtures practical
   - clarify product expectations around SQL and pgwire behavior
 
+Implementation update (2026-03-12): substantial portions of this direction have since been implemented or documented, including compatibility guidance, fixture workflow improvements, temporal helper surfacing, and versioned-reference ergonomics. Treat this ADR as the durable rationale; use [docs/ai/05-backlog.md](../ai/05-backlog.md) and the reference docs for current implementation state.
+
 ## Context
 
 While building and seeding Hospital MiKS on top of ASQL, several recurring frictions appeared:
@@ -166,5 +168,4 @@ This ADR is successful when:
 
 ## Related documents
 
-- [docs/asql-engine-dx-and-versioned-fk-improvement-plan-v1.md](../asql-engine-dx-and-versioned-fk-improvement-plan-v1.md)
 - [docs/ai/05-backlog.md](../ai/05-backlog.md)

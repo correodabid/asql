@@ -1,6 +1,10 @@
 # ASQL Benchmark Baseline (Phase K)
 
 Date: 2026-02-28
+
+Status note (2026-03-12): this is an internal benchmark snapshot.
+Use [docs/product/benchmark-one-pager-v1.md](../product/benchmark-one-pager-v1.md) for the current benchmark summary and [docs/product/performance-benchmark-plan-v1.md](../product/performance-benchmark-plan-v1.md) for the active layered benchmark plan.
+
 Environment:
 - OS: macOS (darwin/arm64)
 - CPU: Apple M1

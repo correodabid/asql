@@ -7,9 +7,13 @@ Applies to: ASQL Enterprise subscriptions and ASQL Community best-effort support
 
 This policy defines support channels, severity levels, response objectives, and customer responsibilities.
 
+Boundary note:
+- This policy covers the ASQL engine, runtime, official tooling, and documented product behavior.
+- It does not transfer ownership of customer application logic, workflow semantics, validation procedures, or regulated operating processes built on top of ASQL.
+
 It complements:
-- `docs/pricing-licensing-model-v1.md`
-- `docs/incident-runbook-v1.md`
+- `docs/commercial/pricing-licensing-model-v1.md`
+- `docs/operations/incident-runbook-v1.md`
 
 ## 2) Support channels
 
@@ -53,6 +57,7 @@ For Enterprise support eligibility:
 
 To receive effective support, customers should provide:
 - version, deployment topology, and runtime flags;
+- which listener surfaces are enabled (`pgwire`, optional `gRPC`, TLS/mTLS);
 - incident timestamp, impacted domains/workloads, and business impact;
 - relevant logs and reproducible steps where possible;
 - confirmation of backup status before high-risk remediation actions.
@@ -62,13 +67,14 @@ To receive effective support, customers should provide:
 Support does not include:
 - custom feature development under standard support;
 - root-cause analysis for third-party systems outside ASQL control;
+- customer-specific application workflow behavior unless the issue reproduces in the ASQL product surface itself;
 - issues from unsupported versions/environments without upgrade path.
 
 ## 8) Escalation and incident handling
 
 - S1/S2 tickets are triaged immediately under subscribed response objectives.
 - For Critical tier S1, incident bridge/escalation path is activated.
-- Incident coordination follows the practices in `docs/incident-runbook-v1.md`.
+- Incident coordination follows the practices in `docs/operations/incident-runbook-v1.md`.
 
 ## 9) Policy updates
 

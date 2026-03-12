@@ -42,11 +42,16 @@ Run on representative datasets:
 
 ## API contract checks
 
-1. Verify gRPC command paths remain functional:
-   - BeginTx, Execute, CommitTx, RollbackTx, TimeTravelQuery, ReplayToLSN.
-2. Validate auth modes:
+1. Verify the canonical pgwire / SQL path remains functional:
+   - `BEGIN DOMAIN`, `BEGIN CROSS DOMAIN`, `COMMIT`, and `ROLLBACK`.
+   - core DDL/DML flows used by getting-started and fixture import paths.
+   - historical queries through `AS OF LSN`, `FOR HISTORY`, and temporal helper functions.
+2. If the optional gRPC/admin surface is part of the shipped release, verify command paths remain functional:
+   - `BeginTx`, `Execute`, `CommitTx`, `RollbackTx`, `TimeTravelQuery`, `ReplayToLSN`.
+3. Validate auth modes across enabled listeners:
    - token mode,
-   - mTLS mode.
+   - TLS / mTLS for pgwire,
+   - TLS / mTLS for gRPC where enabled.
 
 ## Operational checks
 

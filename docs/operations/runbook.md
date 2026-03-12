@@ -1,11 +1,13 @@
 # ASQL Technical Runbook
 
-This runbook documents the current end-to-end execution path in the repository.
+This runbook documents the current operational/runtime path in the repository.
+
+For first adoption and developer onboarding, prefer [docs/getting-started/README.md](getting-started/README.md). This runbook is the deeper operator/developer reference.
 
 Related quick docs:
-- `docs/getting-started-10-min.md`
-- `docs/cookbook-go-sdk.md`
-- `docs/migration-sqlite-quick-path.md`
+- `docs/getting-started/10-min.md`
+- `docs/reference/cookbook-go-sdk.md`
+- `docs/migration/sqlite-quick-path.md`
 
 Backup and point-in-time recovery validation are covered by integration tests:
 - `test/integration/backup_restore_test.go`
@@ -30,34 +32,25 @@ This validates:
 - single-domain and cross-domain transactions,
 - WAL append/recover/checksum,
 - replay and time-travel APIs,
-- gRPC black-box behavior,
+- internal gRPC black-box behavior,
 - replication catch-up and divergence checks.
 
 ## 3) Run ASQL server manually
 
 ```bash
-go run ./cmd/asqld -addr :9042 -data-dir .asql
-go run ./cmd/asqld -addr :9042 -admin-addr :9090 -data-dir .asql
+go run ./cmd/asqld -addr :5433 -data-dir .asql
+go run ./cmd/asqld -addr :5433 -admin-addr :9090 -data-dir .asql
 
 # optional shared pgwire password / bearer token auth
-go run ./cmd/asqld -addr :9042 -data-dir .asql -auth-token my-secret
-
-# optional mTLS authn
-go run ./cmd/asqld -addr :9042 -data-dir .asql \
-	-tls-cert ./certs/server.pem \
-	-tls-key ./certs/server-key.pem \
-	-tls-client-ca ./certs/ca.pem
+go run ./cmd/asqld -addr :5433 -data-dir .asql -auth-token my-secret
 ```
 
 Runtime flags:
 
-- `-addr`: gRPC bind address
+- `-addr`: pgwire bind address
 - `-admin-addr`: optional admin HTTP bind address for `/metrics`, `/readyz`, `/livez`, `/api/v1/health`, `/api/v1/leadership-state`, `/api/v1/last-lsn`, `/api/v1/failover-history`, `/api/v1/snapshot-catalog`, and `/api/v1/wal-retention`
 - `-data-dir`: data directory path (default `.asql`)
-- `-auth-token`: optional shared secret used as the pgwire password and as the Bearer token for gRPC/admin APIs
-- `-tls-cert`: server certificate path for mTLS
-- `-tls-key`: server private key path for mTLS
-- `-tls-client-ca`: CA certificate path used to verify client certificates
+- `-auth-token`: optional shared secret used as the pgwire password and as the Bearer token for admin-compatible clients where applicable
 
 If `-auth-token` is configured, clients must send:
 
@@ -66,9 +59,6 @@ If `-auth-token` is configured, clients must send:
 Pgwire clients must connect with the same token as the password, for example:
 
 - `postgres://asql:<token>@host:5433/asql?sslmode=disable`
-
-If any TLS flag is configured, all three TLS flags are required and client certificates
-must chain to `-tls-client-ca`.
 
 ## 3.1) Admin HTTP metrics and health
 
@@ -87,7 +77,7 @@ When `-admin-addr` is enabled, the pgwire runtime exposes first-class operator e
 Example:
 
 ```bash
-go run ./cmd/asqld -addr :9042 -admin-addr :9090 -data-dir .asql
+go run ./cmd/asqld -addr :5433 -admin-addr :9090 -data-dir .asql
 curl -s http://127.0.0.1:9090/readyz
 curl -s http://127.0.0.1:9090/api/v1/leadership-state
 curl -s http://127.0.0.1:9090/api/v1/failover-history
@@ -97,7 +87,7 @@ curl -s http://127.0.0.1:9090/metrics | grep 'asql_cluster_'
 
 ## 3.2) Audit events
 
-gRPC transaction and admin APIs emit structured audit logs with message `audit_event` and fields:
+Admin and internal API paths emit structured audit logs with message `audit_event` and fields:
 
 - `event=audit`
 - `status=success|failure`
@@ -237,40 +227,35 @@ CI security pipeline also generates and uploads `sbom.spdx.json` on each run.
 On `v*` tags, CI builds release binaries, signs `checksums.txt` with Sigstore keyless
 (`cosign sign-blob`), and publishes release assets.
 
-## 9) Manual DB workflow with asqlctl
+## 9) Manual DB workflow with the pgwire shell
 
 Start server with your own WAL file:
 
 ```bash
-go run ./cmd/asqld -addr :9042 -data-dir .asql
+go run ./cmd/asqld -addr :5433 -data-dir .asql
 ```
 
-Begin transaction:
+Open the shell:
 
 ```bash
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 -command begin -mode domain -domains app
+go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
 ```
 
-Execute statements with returned `tx_id`:
+Run a small flow in the shell:
 
-```bash
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 -command execute -tx-id <tx_id> -sql "CREATE TABLE users (id INT, email TEXT)"
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 -command execute -tx-id <tx_id> -sql "INSERT INTO users (id, email) VALUES (1, 'you@example.com')"
+```sql
+BEGIN DOMAIN app;
+CREATE TABLE users (id INT PRIMARY KEY, email TEXT);
+INSERT INTO users (id, email) VALUES (1, 'you@example.com');
+COMMIT;
+SELECT * FROM users;
 ```
 
-Commit or rollback:
+Fixture workflows remain non-interactive via `asqlctl`:
 
 ```bash
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 -command commit -tx-id <tx_id>
-# or
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 -command rollback -tx-id <tx_id>
-```
-
-Time-travel and replay:
-
-```bash
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 -command time-travel -domains app -lsn 4 -sql "SELECT id, email FROM users"
-go run ./cmd/asqlctl -endpoint 127.0.0.1:9042 -command replay -lsn 4
+go run ./cmd/asqlctl -command fixture-validate -fixture-file fixtures/healthcare-billing-demo-v1.json
+go run ./cmd/asqlctl -command fixture-load -pgwire 127.0.0.1:5433 -fixture-file fixtures/healthcare-billing-demo-v1.json
 ```
 
 If server auth is enabled, add `-auth-token <token>` to all `asqlctl` commands.

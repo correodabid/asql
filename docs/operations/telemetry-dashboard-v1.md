@@ -24,7 +24,7 @@ This dashboard baseline defines the minimum operational views for Sprint 3.
 
 ## Panel group D: Onboarding and DX
 
-1. Smoke onboarding pass rate
+1. Smoke onboarding pass rate for the canonical getting-started flow
 2. Time-to-first-successful-transaction p95
 3. CI deterministic suite status trend
 
@@ -34,9 +34,10 @@ This dashboard baseline defines the minimum operational views for Sprint 3.
 - Recovery success below SLO threshold
 - Catch-up success below SLO threshold
 - Replication lag sustained above threshold
-- Onboarding pass rate below 95%
+- Onboarding pass rate below 95% on the internal DX lane
 
 ## Implementation notes
 
 - Data can initially come from CI/job outputs and structured logs.
+- Treat onboarding and DX panels as internal product-health telemetry, not customer-runtime telemetry.
 - Move to metrics backend ingestion once runtime metric exporters are finalized.

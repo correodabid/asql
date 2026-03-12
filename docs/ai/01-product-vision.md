@@ -25,15 +25,21 @@ ASQL aims to deliver:
 1. Deterministic replayable state.
 2. Domain-isolated SQL model.
 3. Cross-domain transaction coordination.
-4. Native gRPC API.
+4. Pgwire-first application runtime with deterministic semantics.
 5. Time-travel queries over append-only history.
 
 ## MVP success criteria
 - Run in-process with no external dependency.
 - Persist and replay deterministic WAL.
 - Support basic domain and cross-domain transactions.
-- Expose gRPC endpoint for CRUD + tx + replay controls.
+- Expose an application-facing SQL runtime and explicit transactional controls.
 - Demonstrate time-travel read in integration tests.
+
+## Current posture note
+
+- canonical application-facing runtime: `cmd/asqld` over pgwire,
+- gRPC remains secondary/optional for admin and cluster-related paths,
+- active execution priorities live in [docs/ai/05-backlog.md](05-backlog.md), not in this high-level vision note.
 
 ## Non-goals for MVP
 - Full distributed SQL feature parity.

@@ -83,25 +83,39 @@ COMMIT;
 Application write paths should move from implicit DB transactions to API flow:
 - `BeginTx` -> `Execute` -> `CommitTx` (or `RollbackTx`).
 
+For new application code, prefer pgwire SQL with explicit `BEGIN DOMAIN ...` or `BEGIN CROSS DOMAIN ...` statements over low-level client orchestration.
+
 ## 6) Practical migration runbook
 
 ### Step A — bootstrap ASQL and schema
 
 ```bash
-go run ./cmd/asqld -addr :9042 -data-dir .asql
-go run ./examples/go-client -endpoint 127.0.0.1:9042 -domain app -table users -init-schema -id 1 -email bootstrap@example.com
+go run ./cmd/asqld -addr :5433 -data-dir .asql
+go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
+```
+
+Then in the shell:
+
+```sql
+BEGIN DOMAIN app;
+CREATE TABLE app.users (id INT PRIMARY KEY, email TEXT);
+COMMIT;
 ```
 
 ### Step B — redirect a pilot write path
 
-```bash
-go run ./examples/go-client -endpoint 127.0.0.1:9042 -domain app -table users -id 2 -email migrated@example.com
+```sql
+BEGIN DOMAIN app;
+INSERT INTO app.users (id, email) VALUES (2, 'migrated@example.com');
+COMMIT;
 ```
 
 ### Step C — validate admin/read-history behavior
 
-```bash
-go run ./examples/go-client -endpoint 127.0.0.1:9042 -domain app -table users -id 3 -email replay@example.com -verify-admin
+```sql
+SELECT current_lsn();
+SELECT * FROM app.users FOR HISTORY WHERE id = 2;
+SELECT * FROM app.users AS OF LSN 1;
 ```
 
 ### Step D — migration preflight and rollback rehearsal (required)
@@ -196,8 +210,8 @@ Rollback execution path (recommended order):
 
 ## 10) Companion references
 
-- `docs/migration-sqlite-quick-path.md`
-- `docs/cookbook-go-sdk.md`
-- `docs/release-upgrade-compat-checklist-v1.md`
-- `docs/runbook.md`
-- `docs/benchmark-one-pager-v1.md`
+- `docs/migration/sqlite-quick-path.md`
+- `docs/reference/cookbook-go-sdk.md`
+- `docs/operations/release-upgrade-compat-checklist-v1.md`
+- `docs/operations/runbook.md`
+- `docs/product/benchmark-one-pager-v1.md`
