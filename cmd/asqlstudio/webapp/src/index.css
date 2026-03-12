@@ -1,0 +1,145 @@
+/* ── ASQL Studio Design System ─────────────────────────────── */
+
+:root {
+  /* Surface */
+  --bg-root: #08090e;
+  --bg-sidebar: #0c0e16;
+  --bg-main: #0f1119;
+  --bg-card: rgba(17, 19, 30, 0.72);
+  --bg-elevated: rgba(22, 25, 40, 0.88);
+  --bg-input: #0d0f18;
+  --bg-hover: rgba(99, 91, 255, 0.06);
+  --bg-active: rgba(99, 91, 255, 0.12);
+
+  /* Border */
+  --border: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.10);
+  --border-focus: #635bff;
+  --border-safe: #34d399;
+  --border-unsafe: #f87171;
+
+  /* Brand */
+  --accent: #635bff;
+  --accent-hover: #7c75ff;
+  --accent-subtle: rgba(99, 91, 255, 0.15);
+
+  /* Text */
+  --text-primary: #e8eaed;
+  --text-secondary: #9aa0b4;
+  --text-muted: #5e6478;
+  --text-accent: #a5a0ff;
+  --text-safe: #34d399;
+  --text-unsafe: #f87171;
+  --text-warning: #fbbf24;
+
+  /* Misc */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.5);
+  --transition: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Typography */
+  font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  color-scheme: dark;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--bg-root);
+  color: var(--text-primary);
+  overflow: hidden;
+  height: 100vh;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+::selection {
+  background: var(--accent-subtle);
+  color: var(--text-primary);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* ── Light Theme ─────────────────────────────────────────── */
+
+[data-theme="light"] {
+  /* Surface */
+  --bg-root: #f5f5f7;
+  --bg-sidebar: #ecedf0;
+  --bg-main: #ffffff;
+  --bg-card: rgba(255, 255, 255, 0.85);
+  --bg-elevated: rgba(255, 255, 255, 0.95);
+  --bg-input: #f0f0f3;
+  --bg-hover: rgba(99, 91, 255, 0.06);
+  --bg-active: rgba(99, 91, 255, 0.10);
+
+  /* Border */
+  --border: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.14);
+  --border-focus: #635bff;
+  --border-safe: #059669;
+  --border-unsafe: #dc2626;
+
+  /* Brand */
+  --accent: #635bff;
+  --accent-hover: #5046e5;
+  --accent-subtle: rgba(99, 91, 255, 0.10);
+
+  /* Text */
+  --text-primary: #1a1a2e;
+  --text-secondary: #5a5f72;
+  --text-muted: #9ca3af;
+  --text-accent: #4f46e5;
+  --text-safe: #059669;
+  --text-unsafe: #dc2626;
+  --text-warning: #d97706;
+
+  /* Misc */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 32px rgba(0, 0, 0, 0.12);
+
+  color-scheme: light;
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.12);
+}
+
+[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.20);
+}

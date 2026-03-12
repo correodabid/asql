@@ -1,0 +1,166 @@
+syntax = "proto3";
+
+package asql.v1;
+
+option go_package = "asql/api/proto/asql/v1;asqlv1";
+
+service ASQLService {
+  rpc Execute(ExecuteRequest) returns (ExecuteResponse);
+  rpc BeginTx(BeginTxRequest) returns (BeginTxResponse);
+  rpc CommitTx(CommitTxRequest) returns (CommitTxResponse);
+  rpc RollbackTx(RollbackTxRequest) returns (RollbackTxResponse);
+  rpc ReplayToLSN(ReplayToLSNRequest) returns (ReplayToLSNResponse);
+  rpc TimeTravelQuery(TimeTravelQueryRequest) returns (TimeTravelQueryResponse);
+  rpc ExplainQuery(ExplainQueryRequest) returns (ExplainQueryResponse);
+  rpc ScanStrategyStats(ScanStrategyStatsRequest) returns (ScanStrategyStatsResponse);
+  rpc EvaluateReadRoute(EvaluateReadRouteRequest) returns (EvaluateReadRouteResponse);
+  rpc ReadRoutingStats(ReadRoutingStatsRequest) returns (ReadRoutingStatsResponse);
+  rpc LeadershipState(LeadershipStateRequest) returns (LeadershipStateResponse);
+  rpc Query(QueryRequest) returns (QueryResponse);
+}
+
+service ReplicationService {
+  rpc StreamWAL(StreamWALRequest) returns (stream StreamWALResponse);
+}
+
+message ExecuteRequest {
+  string tx_id = 1;
+  string sql = 2;
+}
+
+message ExecuteResponse {
+  string tx_id = 1;
+  string status = 2;
+}
+
+message BeginTxRequest {
+  string mode = 1;
+  repeated string domains = 2;
+}
+
+message BeginTxResponse {
+  string tx_id = 1;
+}
+
+message CommitTxRequest {
+  string tx_id = 1;
+  string group = 2;
+  string node_id = 3;
+  string fencing_token = 4;
+}
+
+message CommitTxResponse {
+  string status = 1;
+  uint64 commit_lsn = 2;
+}
+
+message RollbackTxRequest {
+  string tx_id = 1;
+}
+
+message RollbackTxResponse {
+  string status = 1;
+}
+
+message ReplayToLSNRequest {
+  uint64 lsn = 1;
+}
+
+message ReplayToLSNResponse {
+  uint64 applied_lsn = 1;
+}
+
+message TimeTravelQueryRequest {
+  string sql = 1;
+  repeated string domains = 2;
+  oneof as_of {
+    uint64 lsn = 3;
+    uint64 logical_timestamp = 4;
+  }
+}
+
+message Row {
+  map<string, string> columns = 1;
+}
+
+message TimeTravelQueryResponse {
+  string status = 1;
+  repeated Row rows = 2;
+}
+
+message ExplainQueryRequest {
+  string sql = 1;
+  repeated string domains = 2;
+}
+
+message ExplainQueryResponse {
+  string status = 1;
+  repeated Row rows = 2;
+}
+
+message ScanStrategyStatsRequest {}
+
+message ScanStrategyStatsResponse {
+  map<string, uint64> counts = 1;
+}
+
+message EvaluateReadRouteRequest {
+  string consistency = 1;
+  uint64 leader_lsn = 2;
+  uint64 follower_lsn = 3;
+  bool has_follower = 4;
+  bool follower_unavailable = 5;
+  uint64 max_lag = 6;
+}
+
+message EvaluateReadRouteResponse {
+  string mode = 1;
+  string route = 2;
+  uint64 leader_lsn = 3;
+  uint64 follower_lsn = 4;
+  uint64 lag = 5;
+  string fallback_reason = 6;
+}
+
+message ReadRoutingStatsRequest {}
+
+message ReadRoutingStatsResponse {
+  map<string, uint64> counts = 1;
+}
+
+message LeadershipStateRequest {
+  string group = 1;
+}
+
+message LeadershipStateResponse {
+  string group = 1;
+  uint64 term = 2;
+  string leader_id = 3;
+  string fencing_token = 4;
+  int64 lease_expires_at_unix = 5;
+  bool lease_active = 6;
+  uint64 last_leader_lsn = 7;
+}
+
+message QueryRequest {
+  string sql = 1;
+  repeated string domains = 2;
+}
+
+message QueryResponse {
+  string status = 1;
+  repeated Row rows = 2;
+}
+
+message StreamWALRequest {
+  uint64 from_lsn = 1;
+  uint32 limit = 2;
+}
+
+message StreamWALResponse {
+  uint64 lsn = 1;
+  string tx_id = 2;
+  string type = 3;
+  uint64 timestamp = 4;
+  bytes payload = 5;
+}

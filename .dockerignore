@@ -1,0 +1,13 @@
+.git
+.github
+.vscode
+bin
+dist
+tmp
+*.wal
+*.wal.*
+.asql/
+.asql-*
+*.log
+coverage*
+sbom.spdx.json
