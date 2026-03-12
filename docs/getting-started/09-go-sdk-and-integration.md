@@ -5,6 +5,8 @@ ASQL is implemented in Go, so the most natural application integration path is t
 For ordinary application reads and writes, prefer pgwire with `pgx` or `pgxpool`.
 Use lower-level gRPC tooling only when you intentionally need engine-level administrative flows.
 
+For driver/query-mode guidance, see [../reference/pgwire-driver-guidance-v1.md](../reference/pgwire-driver-guidance-v1.md).
+
 ## Start from the example
 
 Reference implementation:
@@ -94,6 +96,18 @@ This keeps the historical read path in normal SQL instead of introducing a separ
 - wrap domain names in small application helpers,
 - add fixtures early for integration tests,
 - reserve advanced temporal logic for places that truly need it.
+
+## Recommended pgwire path for new teams
+
+Use this as the lowest-surprise baseline:
+
+- `pgx` or `pgxpool`,
+- explicit SQL over pgwire,
+- `sslmode=disable` for local development or `sslmode=prefer` for PostgreSQL-oriented tooling,
+- `default_query_exec_mode=simple_protocol` while the team is still validating compatibility and model assumptions.
+
+ASQL supports the extended query pipeline for the documented subset.
+Still, simple protocol is the recommended first adoption path because it makes compatibility issues easier to reproduce and reason about.
 
 For a reusable app-side baseline, continue with [09a-general-purpose-starter-pack.md](09a-general-purpose-starter-pack.md).
 

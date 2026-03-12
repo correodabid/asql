@@ -35,6 +35,116 @@ Conceptually:
 - if you reference a normal table, ASQL captures row-head `LSN`,
 - if you reference an entity root, ASQL captures entity version.
 
+## Row-head `LSN` capture vs entity-version capture
+
+This is one of the most important adoption choices in ASQL schema design.
+
+Two schemas can both use `VERSIONED FOREIGN KEY`, but mean very different things:
+
+- **row-head `LSN` capture** says: “I need the latest visible mutation point of this row.”
+- **entity-version capture** says: “I need the business-facing version of this aggregate.”
+
+If teams do not make this choice explicitly, they usually end up with confusing temporal columns and unclear historical expectations.
+
+### Option A: row-based reference
+
+Use this when the referenced table is mostly standalone and row history is already the clearest model.
+
+```sql
+CREATE TABLE clinical.admissions (
+  id TEXT PRIMARY KEY,
+  patient_id TEXT NOT NULL,
+  status TEXT NOT NULL,
+  patient_lsn INT,
+  VERSIONED FOREIGN KEY (patient_id)
+    REFERENCES patients.patients(id)
+    AS OF patient_lsn
+)
+```
+
+This means:
+
+- the temporal token follows the current visible row-head `LSN` of `patients.patients`,
+- downstream code is reasoning about one row snapshot,
+- historical explanation will usually start from `row_lsn(...)` and `FOR HISTORY`.
+
+Use this when:
+
+- the referenced row is mostly independent,
+- no richer aggregate lifecycle needs to be preserved,
+- capturing a row mutation point is clearer than introducing an entity.
+
+### Option B: entity-based reference
+
+Use this when the referenced table is really the root of a richer aggregate and downstream data should capture the aggregate version rather than one row mutation point.
+
+```sql
+CREATE TABLE recipe.master_recipes (
+  id TEXT PRIMARY KEY,
+  recipe_code TEXT UNIQUE,
+  title TEXT NOT NULL,
+  status TEXT NOT NULL
+);
+
+CREATE TABLE recipe.recipe_operations (
+  id TEXT PRIMARY KEY,
+  recipe_id TEXT NOT NULL REFERENCES master_recipes(id),
+  operation_code TEXT NOT NULL,
+  instruction_text TEXT NOT NULL
+);
+
+CREATE ENTITY master_recipe_entity (
+  ROOT master_recipes,
+  INCLUDES recipe_operations
+);
+
+CREATE TABLE execution.batch_orders (
+  id TEXT PRIMARY KEY,
+  recipe_id TEXT NOT NULL,
+  recipe_version INT,
+  status TEXT NOT NULL,
+  VERSIONED FOREIGN KEY (recipe_id)
+    REFERENCES recipe.master_recipes(id)
+    AS OF recipe_version
+)
+```
+
+This means:
+
+- the temporal token follows the entity version of `master_recipe_entity`,
+- downstream code is preserving a replay-safe aggregate snapshot,
+- historical explanation will usually start from `entity_version(...)`, `entity_head_lsn(...)`, and `entity_version_lsn(...)`.
+
+Use this when:
+
+- the application already thinks in one aggregate root,
+- related child tables belong to the same lifecycle,
+- downstream references should capture a business revision, not just a row mutation point.
+
+## Practical decision rule
+
+When deciding between row-head `LSN` capture and entity-version capture, ask:
+
+1. Is the referenced thing really one standalone row, or a multi-table aggregate?
+2. Will downstream code explain history in row terms or aggregate-version terms?
+3. If child rows change, should downstream references still mean “the same business version”?
+
+Use **row-head `LSN` capture** when the answer is mostly row-centric.
+Use **entity-version capture** when the answer is mostly aggregate-centric.
+
+## Common mistake to avoid
+
+Do not create an entity only because you want versioned references to look more structured.
+
+That usually creates a worse model:
+
+- temporal columns look business-meaningful, but the aggregate boundary is still fuzzy,
+- `resolve_reference(...)` returns entity semantics that the team cannot explain,
+- debugging gets harder because row history and aggregate history are now mixed without a clear reason.
+
+Likewise, do not keep everything row-based if the application already reasons in aggregate revisions.
+That usually pushes too much temporal interpretation into application code.
+
 ## Automatic capture
 
 In the normal path you do not need to manually supply the temporal token.
@@ -150,9 +260,11 @@ Avoid these common mistakes:
 ## Helpful queries
 
 ```sql
+SELECT row_lsn('patients.patients', 'patient-1');
 SELECT entity_version('billing', 'invoice_aggregate', 'inv-1');
 SELECT entity_head_lsn('billing', 'invoice_aggregate', 'inv-1');
 SELECT entity_version_lsn('billing', 'invoice_aggregate', 'inv-1', 3);
+SELECT resolve_reference('patients.patients', 'patient-1');
 SELECT resolve_reference('billing.invoices', 'inv-1');
 ```
 

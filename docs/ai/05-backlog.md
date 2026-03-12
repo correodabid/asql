@@ -189,6 +189,34 @@ Acceptance gates (must pass before closing Epic U)
 - [x] Post-failover replay hash equals baseline hash for equivalent WAL inputs.
 - [x] Observability covers election/failover events and fencing rejections.
 
+## Epic AD — Adoption-friction closure from PharmaApp (Phase 8)
+
+Reference inputs:
+- `pharmaapp/FRICTION_LOG.md`
+
+P0 — make the core model more adoptable:
+- [x] Add first-class documentation and examples that distinguish row-head `LSN` capture from entity-version capture in practical schema design.
+- [x] Add stronger pgwire compatibility guidance for driver/query-mode choices, including an explicit recommended path and known-risk path matrix.
+- [x] Add guided diagnostics for common temporal-modeling failures (`VERSIONED FOREIGN KEY` resolution, missing entity root, over-broad `CROSS DOMAIN` usage).
+- [x] Add one operator/developer-facing signal for temporal-reference and cross-domain adoption patterns, not just raw runtime health.
+
+P1 — reduce repeated integration and schema-evolution work:
+- [x] Add reusable Go-side helper patterns for temporal inspection workflows (`current -> history -> AS OF LSN -> explanation`).
+- [x] Add a schema-evolution checklist specific to entities and versioned references, including history/replay safety review points.
+- [x] Add migration/preflight validation that flags likely historical-semantics changes when entities or versioned references are altered.
+- [x] Add a dedicated troubleshooting guide for adoption-time modeling errors with recommended fixes by symptom.
+- [x] Add at least one generic Studio or CLI workflow that turns raw temporal primitives into a guided historical explanation flow.
+
+P2 — close the model/runtime feedback loop:
+- [x] Expose adoption-oriented metrics or summaries for entity churn, temporal-query usage, and cross-domain breadth.
+- [x] Add a lightweight review rubric for deciding when observed friction should become engine work vs docs/SDK/tooling work.
+
+Acceptance gates (must pass before closing Epic AD)
+- [x] Teams can choose between row-based and entity-based temporal references without relying on implicit tribal knowledge.
+- [x] At least one guided diagnostics path exists for the most common temporal and cross-domain modeling mistakes.
+- [x] Schema evolution guidance covers not just SQL validity but historical and replay-visible impact.
+- [x] Adoption review can use first-class signals instead of only manual inspection of example apps.
+
 ## Epic V — Post-Epic U competitiveness execution (8-week)
 
 Reference plan:

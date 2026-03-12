@@ -148,6 +148,9 @@ Notes:
 - Prefer additive schema changes first (`ADD COLUMN`) and postpone destructive changes.
 - Keep rollback scripts deterministic and idempotency-aware for the migration window.
 - If rollback cannot be guaranteed at SQL level, require WAL backup restore rollback as primary path.
+- If the migration changes `CREATE ENTITY` boundaries or `VERSIONED FOREIGN KEY` definitions, treat it as a historical-semantics review, not just a SQL review.
+
+Use [../reference/schema-evolution-temporal-checklist-v1.md](../reference/schema-evolution-temporal-checklist-v1.md) when entities, versioned references, or temporal token columns are involved.
 
 ### Step E — deterministic verification gates before cutover
 

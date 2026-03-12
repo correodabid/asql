@@ -31,6 +31,8 @@ flows, not a claim of broad PostgreSQL behavioral parity.
 - The policy lives here.
 - The precise supported/unsupported surface lives in
   [docs/reference/postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md).
+- Practical client guidance lives in
+  [docs/reference/pgwire-driver-guidance-v1.md](pgwire-driver-guidance-v1.md).
 - Public compatibility claims must be backed by regression tests.
 
 ## Intended usage

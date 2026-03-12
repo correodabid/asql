@@ -169,6 +169,8 @@ SELECT entity_version('billing', 'invoice_aggregate', 'inv-1');
 If the table is an entity root, `resolve_reference(...)` follows the entity/version surface.
 If the table is not an entity root, it follows row-head `LSN` semantics.
 
+If your team is still deciding which meaning it wants a versioned reference to carry, continue with [06-entities-and-versioned-references.md](06-entities-and-versioned-references.md) before locking the schema shape.
+
 ## Recommended workflow for debugging
 
 1. find the affected row,

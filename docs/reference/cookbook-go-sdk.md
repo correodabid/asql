@@ -239,6 +239,61 @@ The most reusable temporal service pattern is:
 
 That keeps temporal logic explicit without inventing a separate application API shape just for history.
 
+### Helper pattern: current -> history -> snapshot explanation
+
+Wrap the full workflow when the service repeatedly needs one explainable historical read path.
+
+```go
+type RowExplanation struct {
+	CurrentLSN  int64
+	SnapshotLSN int64
+	HistoryRows []map[string]any
+}
+
+func ExplainRowAtCurrentHead(ctx context.Context, conn *pgx.Conn, table string, pk any) (*RowExplanation, error) {
+	var currentLSN int64
+	if err := conn.QueryRow(ctx, "SELECT current_lsn()").Scan(&currentLSN); err != nil {
+		return nil, err
+	}
+
+	historyRows, err := QueryHistory(ctx, conn, table, pk)
+	if err != nil {
+		return nil, err
+	}
+	defer historyRows.Close()
+
+	result := &RowExplanation{CurrentLSN: currentLSN, SnapshotLSN: currentLSN}
+	for historyRows.Next() {
+		values, err := historyRows.Values()
+		if err != nil {
+			return nil, err
+		}
+		row := map[string]any{}
+		for i, fd := range historyRows.FieldDescriptions() {
+			row[string(fd.Name)] = values[i]
+		}
+		result.HistoryRows = append(result.HistoryRows, row)
+	}
+	if err := historyRows.Err(); err != nil {
+		return nil, err
+	}
+
+	return result, nil
+}
+```
+
+Use this pattern when the service wants one explicit place where:
+
+- the current head is captured,
+- history is collected,
+- the `LSN` used for explanation is explicit,
+- and the caller can still issue one `AS OF LSN` query with that token.
+
+For aggregate-oriented services, swap the snapshot token source to:
+
+- `entity_version(...)` when the caller wants the current business version,
+- then `entity_version_lsn(...)` when the actual snapshot read needs `AS OF LSN`.
+
 ---
 
 ## Programmatic usage reference

@@ -48,12 +48,20 @@ func BuildSchemaDiff(base schemaDDLRequest, target schemaDDLRequest) (schemaDiff
 
 	baseTables := map[string]schemaDDLTable{}
 	targetTables := map[string]schemaDDLTable{}
+	baseEntities := map[string]schemaDDLEntity{}
+	targetEntities := map[string]schemaDDLEntity{}
 
 	for _, table := range base.Tables {
 		baseTables[strings.TrimSpace(table.Name)] = table
 	}
 	for _, table := range target.Tables {
 		targetTables[strings.TrimSpace(table.Name)] = table
+	}
+	for _, entity := range base.Entities {
+		baseEntities[strings.TrimSpace(entity.Name)] = entity
+	}
+	for _, entity := range target.Entities {
+		targetEntities[strings.TrimSpace(entity.Name)] = entity
 	}
 
 	operations := make([]schemaDiffOperation, 0)
@@ -130,6 +138,52 @@ func BuildSchemaDiff(base schemaDDLRequest, target schemaDDLRequest) (schemaDiff
 			}
 		}
 
+		baseVFKs := versionedFKMap(baseTable.VersionedForeignKeys)
+		targetVFKs := versionedFKMap(targetTable.VersionedForeignKeys)
+
+		for _, vfkColumn := range sortedVersionedFKColumns(targetVFKs) {
+			targetVFK := targetVFKs[vfkColumn]
+			baseVFK, exists := baseVFKs[vfkColumn]
+			if !exists {
+				safe = false
+				operations = append(operations, schemaDiffOperation{
+					Type:   "add_versioned_foreign_key",
+					Table:  tableName,
+					Column: vfkColumn,
+					Safe:   false,
+					Reason: "versioned foreign key addition changes temporal capture semantics and requires explicit preflight review",
+				})
+				warnings = append(warnings, fmt.Sprintf("%s.%s added as VERSIONED FOREIGN KEY: review temporal capture and historical semantics", tableName, vfkColumn))
+				continue
+			}
+			if !versionedFKsEquivalent(baseVFK, targetVFK) {
+				safe = false
+				operations = append(operations, schemaDiffOperation{
+					Type:   "modify_versioned_foreign_key",
+					Table:  tableName,
+					Column: vfkColumn,
+					Safe:   false,
+					Reason: "versioned foreign key definition changed (likely historical-semantics change)",
+				})
+				warnings = append(warnings, fmt.Sprintf("%s.%s VERSIONED FOREIGN KEY changed: review captured token semantics, replay impact, and rollback path", tableName, vfkColumn))
+			}
+		}
+
+		for _, vfkColumn := range sortedVersionedFKColumns(baseVFKs) {
+			if _, stillExists := targetVFKs[vfkColumn]; stillExists {
+				continue
+			}
+			safe = false
+			operations = append(operations, schemaDiffOperation{
+				Type:   "drop_versioned_foreign_key",
+				Table:  tableName,
+				Column: vfkColumn,
+				Safe:   false,
+				Reason: "removing a versioned foreign key changes historical reference semantics",
+			})
+			warnings = append(warnings, fmt.Sprintf("%s.%s VERSIONED FOREIGN KEY removed: historical-reference behavior changes", tableName, vfkColumn))
+		}
+
 		// Index diff
 		baseIndexes := indexMap(baseTable.Indexes)
 		targetIndexes := indexMap(targetTable.Indexes)
@@ -196,6 +250,48 @@ func BuildSchemaDiff(base schemaDDLRequest, target schemaDDLRequest) (schemaDiff
 		warnings = append(warnings, fmt.Sprintf("%s removed: destructive change", tableName))
 	}
 
+	for _, entityName := range sortedEntityNames(targetEntities) {
+		targetEntity := targetEntities[entityName]
+		baseEntity, exists := baseEntities[entityName]
+		if !exists {
+			safe = false
+			operations = append(operations, schemaDiffOperation{
+				Type:   "add_entity",
+				Table:  targetEntity.RootTable,
+				Column: entityName,
+				Safe:   false,
+				Reason: "entity addition changes aggregate/version semantics and requires explicit migration review",
+			})
+			warnings = append(warnings, fmt.Sprintf("entity %s added: review versioned-reference and history semantics before rollout", entityName))
+			continue
+		}
+		if !entitiesEquivalent(baseEntity, targetEntity) {
+			safe = false
+			operations = append(operations, schemaDiffOperation{
+				Type:   "modify_entity",
+				Table:  targetEntity.RootTable,
+				Column: entityName,
+				Safe:   false,
+				Reason: "entity definition changed (root/includes affect historical semantics)",
+			})
+			warnings = append(warnings, fmt.Sprintf("entity %s changed: review aggregate boundary, captured versions, and replay-visible history", entityName))
+		}
+	}
+
+	for _, entityName := range sortedEntityNames(baseEntities) {
+		if _, exists := targetEntities[entityName]; exists {
+			continue
+		}
+		safe = false
+		operations = append(operations, schemaDiffOperation{
+			Type:   "drop_entity",
+			Column: entityName,
+			Safe:   false,
+			Reason: "removing an entity changes aggregate-version semantics",
+		})
+		warnings = append(warnings, fmt.Sprintf("entity %s removed: versioned-reference behavior and historical explanation may change", entityName))
+	}
+
 	return schemaDiffResponse{
 		Domain:     domain,
 		Safe:       safe,
@@ -225,6 +321,32 @@ func columnMap(columns []schemaDDLColumn) map[string]schemaDDLColumn {
 func sortedColumnNames(columns map[string]schemaDDLColumn) []string {
 	names := make([]string, 0, len(columns))
 	for name := range columns {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func versionedFKMap(vfks []schemaDDLVersionedFK) map[string]schemaDDLVersionedFK {
+	mapped := make(map[string]schemaDDLVersionedFK, len(vfks))
+	for _, vfk := range vfks {
+		mapped[strings.TrimSpace(vfk.Column)] = vfk
+	}
+	return mapped
+}
+
+func sortedVersionedFKColumns(vfks map[string]schemaDDLVersionedFK) []string {
+	names := make([]string, 0, len(vfks))
+	for name := range vfks {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+func sortedEntityNames(entities map[string]schemaDDLEntity) []string {
+	names := make([]string, 0, len(entities))
+	for name := range entities {
 		names = append(names, name)
 	}
 	sort.Strings(names)
@@ -304,6 +426,40 @@ func columnsEquivalent(left schemaDDLColumn, right schemaDDLColumn) bool {
 		return true
 	}
 	return strings.TrimSpace(left.References.Table) == strings.TrimSpace(right.References.Table) && strings.TrimSpace(left.References.Column) == strings.TrimSpace(right.References.Column)
+}
+
+func versionedFKsEquivalent(left schemaDDLVersionedFK, right schemaDDLVersionedFK) bool {
+	return strings.EqualFold(strings.TrimSpace(left.Column), strings.TrimSpace(right.Column)) &&
+		strings.EqualFold(strings.TrimSpace(left.LSNColumn), strings.TrimSpace(right.LSNColumn)) &&
+		strings.EqualFold(strings.TrimSpace(left.ReferencesDomain), strings.TrimSpace(right.ReferencesDomain)) &&
+		strings.EqualFold(strings.TrimSpace(left.ReferencesTable), strings.TrimSpace(right.ReferencesTable)) &&
+		strings.EqualFold(strings.TrimSpace(left.ReferencesColumn), strings.TrimSpace(right.ReferencesColumn))
+}
+
+func entitiesEquivalent(left schemaDDLEntity, right schemaDDLEntity) bool {
+	if !strings.EqualFold(strings.TrimSpace(left.Name), strings.TrimSpace(right.Name)) ||
+		!strings.EqualFold(strings.TrimSpace(left.RootTable), strings.TrimSpace(right.RootTable)) {
+		return false
+	}
+	leftTables := append([]string(nil), left.Tables...)
+	rightTables := append([]string(nil), right.Tables...)
+	for i := range leftTables {
+		leftTables[i] = strings.TrimSpace(leftTables[i])
+	}
+	for i := range rightTables {
+		rightTables[i] = strings.TrimSpace(rightTables[i])
+	}
+	sort.Strings(leftTables)
+	sort.Strings(rightTables)
+	if len(leftTables) != len(rightTables) {
+		return false
+	}
+	for i := range leftTables {
+		if !strings.EqualFold(leftTables[i], rightTables[i]) {
+			return false
+		}
+	}
+	return true
 }
 
 func indexMap(indexes []schemaDDLIndex) map[string]schemaDDLIndex {

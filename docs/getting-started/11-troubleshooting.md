@@ -17,6 +17,8 @@ Check:
 
 For local onboarding, the canonical default is `127.0.0.1:5433`.
 
+If the issue is not connectivity but temporal or modeling confusion, use [../reference/temporal-modeling-troubleshooting-v1.md](../reference/temporal-modeling-troubleshooting-v1.md).
+
 ## `table not found`
 
 Usually one of these is true:
@@ -47,6 +49,8 @@ Check:
 - the reference is not pointing to a missing historical token.
 
 If the data model is still changing quickly, simplify the workflow first and reintroduce versioned references once the aggregate boundary is stable.
+
+To distinguish row-based capture from entity-based capture, compare `resolve_reference(...)`, `row_lsn(...)`, and `entity_version(...)` for the same target.
 
 ## fixture validation fails
 
@@ -87,6 +91,8 @@ That usually means one of these is true:
 
 Try rewriting the workflow in plain language first: what must commit together, and why?
 
+Then inspect the cross-domain counters in `asql_admin.engine_stats` to see whether the model is drifting toward overly broad transaction scope.
+
 ## Go integration feels too manual
 
 That is often normal at first.
@@ -101,3 +107,5 @@ Start with a thin helper around `BEGIN DOMAIN ...` or `BEGIN CROSS DOMAIN ...`, 
 - [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
 - [../reference/fixture-format-and-lifecycle-v1.md](../reference/fixture-format-and-lifecycle-v1.md)
 - [../reference/temporal-introspection-surface-v1.md](../reference/temporal-introspection-surface-v1.md)
+- [../reference/temporal-modeling-troubleshooting-v1.md](../reference/temporal-modeling-troubleshooting-v1.md)
+- [../reference/adoption-signals-v1.md](../reference/adoption-signals-v1.md)

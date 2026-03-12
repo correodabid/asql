@@ -166,6 +166,8 @@ The correct assumption is:
 
 When in doubt, start with pgwire plus `pgx`, then validate additional tooling intentionally.
 
+For the practical driver/query-mode recommendations, see [../reference/pgwire-driver-guidance-v1.md](../reference/pgwire-driver-guidance-v1.md).
+
 ## Where adoption friction usually appears
 
 - first domain split,
@@ -175,6 +177,8 @@ When in doubt, start with pgwire plus `pgx`, then validate additional tooling in
 - first question about whether a compliance concept belongs in ASQL or in app code.
 
 Surface those questions early. They are usually design work, not blockers.
+
+If the team is unsure whether a friction should become engine work, docs, SDK helpers, or tooling, use [../reference/adoption-review-rubric-v1.md](../reference/adoption-review-rubric-v1.md).
 
 ## Team checklist
 
