@@ -4,6 +4,8 @@
 
 ASQL is a deterministic SQL engine written in Go.
 
+Before going deeper, read [00-engine-owned-vs-app-owned.md](00-engine-owned-vs-app-owned.md) if your team needs a short note on which concerns belong in the engine versus the application.
+
 It combines:
 
 - embedded-first operation,
@@ -31,6 +33,14 @@ Typical examples:
 - systems where “what did the system know at commit X?” matters.
 
 ## What is different from a typical SQL database
+
+## Responsibility boundary
+
+Use this rule early:
+
+- **Engine-owned**: explicit domains, replay-safe history, temporal queries, entity/version primitives, deterministic fixtures.
+- **App-owned**: workflow states, approvals, actor semantics, compliance meaning, projections specific to one product.
+- **Recommended integration pattern**: keep workflow meaning in the application and use ASQL to make state changes, history, and debugging explicit.
 
 ### 1. Transactions are domain-scoped
 

@@ -14,6 +14,27 @@ Because ASQL is deterministic, reproducible setup is especially valuable for:
 Fixtures are also one of the fastest ways to expose adoption friction.
 If a scenario is hard to encode deterministically, the modeling or workflow boundaries are usually still unclear.
 
+## Recommended onboarding order
+
+For many teams, fixtures should arrive before service or UI integration.
+
+Recommended sequence:
+
+1. identify the first real domains,
+2. create one small deterministic fixture for one realistic workflow,
+3. validate it until it loads cleanly,
+4. inspect the resulting state with SQL and Studio,
+5. only then wire the same workflow into service code.
+
+This is usually a better adoption path than starting with repository code or API handlers, because fixtures expose:
+
+- domain-boundary mistakes,
+- ordering mistakes,
+- schema gaps,
+- and temporal/reference assumptions,
+
+before those problems are spread across application code.
+
 ## Fixture format
 
 ASQL fixtures are strict JSON scenario files.
@@ -41,6 +62,76 @@ Validation includes:
 - spec validation,
 - non-determinism checks,
 - dry-run execution on a fresh ephemeral engine.
+
+## How to read validation failures
+
+Treat fixture validation as modeling feedback, not just syntax feedback.
+
+Common failure categories usually mean:
+
+### Non-deterministic token found
+
+Typical cause:
+
+- `NOW()`, `CURRENT_TIMESTAMP`, `RANDOM()`, generated IDs, or other runtime-derived values.
+
+What to do:
+
+- replace them with explicit IDs and timestamps,
+- make ordering and data values reviewable in the fixture itself.
+
+### Transaction-control statement found inside a step
+
+Typical cause:
+
+- carrying over seed SQL that still contains `BEGIN`, `COMMIT`, or `ROLLBACK`.
+
+What to do:
+
+- remove transaction control from statements,
+- let the fixture step own transaction boundaries.
+
+### Domain or dependency ordering failure
+
+Typical cause:
+
+- schema or seed statements are in the wrong order,
+- a referenced table or row has not been created yet,
+- a cross-domain step is missing one participating domain.
+
+What to do:
+
+- split the scenario into smaller ordered steps,
+- move parent schema/data earlier,
+- make the transaction scope match the actual invariant.
+
+### Versioned-reference resolution failure
+
+Typical cause:
+
+- the referenced row or entity is not visible at the point of capture,
+- the wrong table is modeled as an entity root,
+- the scenario needs row-based semantics but is using entity-style expectations, or vice versa.
+
+What to do:
+
+- check whether the referenced table should be an entity,
+- check whether the referenced mutation happens earlier in the same transaction or an earlier committed step,
+- verify whether you want entity version capture or row-head `LSN` capture.
+
+### Dry-run execution failure on a fresh engine
+
+Typical cause:
+
+- the fixture depends on external preloaded state,
+- hidden assumptions from local dev data leaked into the scenario,
+- the schema path is incomplete.
+
+What to do:
+
+- make the fixture self-contained,
+- include every required schema and seed dependency in ordered steps,
+- re-run validation before loading into a live server.
 
 ## Load a fixture
 
@@ -91,6 +182,8 @@ That strictness is part of the product, not a temporary limitation.
 
 Create one fixture per important workflow, not one giant environment dump.
 Small scenarios are easier to reason about, review, replay, and evolve with the schema.
+
+For a deeper fixture-first example that also exercises entities, versioned references, and temporal inspection, see [../../bankapp/README.md](../../bankapp/README.md).
 
 ## Next step
 

@@ -70,6 +70,8 @@ It reduces ambiguity around:
 - what replay should reconstruct,
 - what auditing must explain.
 
+If your team is still unsure where the first boundaries should go, continue with [04a-domain-modeling-guide.md](04a-domain-modeling-guide.md).
+
 ## Engine-owned vs app-owned concerns
 
 ASQL owns:
@@ -107,6 +109,33 @@ For explicit SQL examples, you can still use qualified names when that is cleare
 
 If domain design is still debated, start with the smallest boundary split that the team can explain clearly.
 Refining from one clear boundary to two is easier than unwinding an over-modeled schema map.
+
+## Supported visibility for cross-domain overuse
+
+ASQL now exposes a lightweight visibility path before you build custom dashboards.
+
+In SQL or `asqlctl shell`, inspect the live engine counters:
+
+```sql
+SELECT
+	total_begins,
+	total_cross_domain_begins,
+	cross_domain_begin_avg_domains,
+	cross_domain_begin_max_domains
+FROM asql_admin.engine_stats;
+```
+
+Use this as a boundary review trigger:
+
+- if `total_cross_domain_begins` keeps climbing relative to `total_begins`, re-check whether some workflows should be application orchestration instead,
+- if `cross_domain_begin_max_domains` is drifting upward, inspect whether a single transaction is accumulating too many responsibilities.
+
+Operators can watch the same signal from admin telemetry through `/metrics` with:
+
+- `asql_engine_begins_total`
+- `asql_engine_cross_domain_begins_total`
+- `asql_engine_cross_domain_begin_domains_avg`
+- `asql_engine_cross_domain_begin_domains_max`
 
 ## Next step
 

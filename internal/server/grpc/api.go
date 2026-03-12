@@ -112,13 +112,13 @@ type LeadershipStateRequest struct {
 }
 
 type LeadershipStateResponse struct {
-	Group              string     `json:"group"`
-	Term               uint64     `json:"term"`
-	LeaderID           string     `json:"leader_id"`
-	FencingToken       string     `json:"fencing_token,omitempty"`
-	LeaseExpiresAtUnix int64      `json:"lease_expires_at_unix"`
-	LeaseActive        bool       `json:"lease_active"`
-	LastLeaderLSN      uint64     `json:"last_leader_lsn"`
+	Group              string `json:"group"`
+	Term               uint64 `json:"term"`
+	LeaderID           string `json:"leader_id"`
+	FencingToken       string `json:"fencing_token,omitempty"`
+	LeaseExpiresAtUnix int64  `json:"lease_expires_at_unix"`
+	LeaseActive        bool   `json:"lease_active"`
+	LastLeaderLSN      uint64 `json:"last_leader_lsn"`
 	// Peers carries the node's known peer list for address gossip.
 	Peers []PeerInfo `json:"peers,omitempty"`
 }
@@ -240,36 +240,39 @@ type SystemInfoResponse struct {
 }
 
 type EngineStatsResponse struct {
-	TotalCommits           uint64              `json:"total_commits"`
-	TotalReads             uint64              `json:"total_reads"`
-	TotalRollbacks         uint64              `json:"total_rollbacks"`
-	TotalBegins            uint64              `json:"total_begins"`
-	TotalTimeTravelQueries uint64              `json:"total_time_travel_queries"`
-	TotalSnapshots         uint64              `json:"total_snapshots"`
-	TotalReplays           uint64              `json:"total_replays"`
-	TotalFsyncErrors       uint64              `json:"total_fsync_errors"`
-	TotalAuditErrors       uint64              `json:"total_audit_errors"`
-	ActiveTransactions     int64               `json:"active_transactions"`
-	CommitLatencyP50       float64             `json:"commit_latency_p50_ms"`
-	CommitLatencyP95       float64             `json:"commit_latency_p95_ms"`
-	CommitLatencyP99       float64             `json:"commit_latency_p99_ms"`
-	FsyncLatencyP50        float64             `json:"fsync_latency_p50_ms"`
-	FsyncLatencyP95        float64             `json:"fsync_latency_p95_ms"`
-	FsyncLatencyP99        float64             `json:"fsync_latency_p99_ms"`
-	ReadLatencyP50         float64             `json:"read_latency_p50_ms"`
-	ReadLatencyP95         float64             `json:"read_latency_p95_ms"`
-	ReadLatencyP99         float64             `json:"read_latency_p99_ms"`
-	TimeTravelLatencyP50   float64             `json:"time_travel_latency_p50_ms"`
-	TimeTravelLatencyP95   float64             `json:"time_travel_latency_p95_ms"`
-	TimeTravelLatencyP99   float64             `json:"time_travel_latency_p99_ms"`
-	ReplayDurationMS       float64             `json:"replay_duration_ms"`
-	SnapshotDurationMS     float64             `json:"snapshot_duration_ms"`
-	CommitThroughput       float64             `json:"commit_throughput_per_sec"`
-	ReadThroughput         float64             `json:"read_throughput_per_sec"`
-	WALFileSize            int64               `json:"wal_file_size_bytes"`
-	SnapshotFileSize       int64               `json:"snapshot_file_size_bytes"`
-	AuditFileSize          int64               `json:"audit_file_size_bytes"`
-	System                 *SystemInfoResponse `json:"system,omitempty"`
+	TotalCommits               uint64              `json:"total_commits"`
+	TotalReads                 uint64              `json:"total_reads"`
+	TotalRollbacks             uint64              `json:"total_rollbacks"`
+	TotalBegins                uint64              `json:"total_begins"`
+	TotalCrossDomainBegins     uint64              `json:"total_cross_domain_begins"`
+	TotalTimeTravelQueries     uint64              `json:"total_time_travel_queries"`
+	TotalSnapshots             uint64              `json:"total_snapshots"`
+	TotalReplays               uint64              `json:"total_replays"`
+	TotalFsyncErrors           uint64              `json:"total_fsync_errors"`
+	TotalAuditErrors           uint64              `json:"total_audit_errors"`
+	ActiveTransactions         int64               `json:"active_transactions"`
+	CrossDomainBeginAvgDomains float64             `json:"cross_domain_begin_avg_domains"`
+	CrossDomainBeginMaxDomains uint64              `json:"cross_domain_begin_max_domains"`
+	CommitLatencyP50           float64             `json:"commit_latency_p50_ms"`
+	CommitLatencyP95           float64             `json:"commit_latency_p95_ms"`
+	CommitLatencyP99           float64             `json:"commit_latency_p99_ms"`
+	FsyncLatencyP50            float64             `json:"fsync_latency_p50_ms"`
+	FsyncLatencyP95            float64             `json:"fsync_latency_p95_ms"`
+	FsyncLatencyP99            float64             `json:"fsync_latency_p99_ms"`
+	ReadLatencyP50             float64             `json:"read_latency_p50_ms"`
+	ReadLatencyP95             float64             `json:"read_latency_p95_ms"`
+	ReadLatencyP99             float64             `json:"read_latency_p99_ms"`
+	TimeTravelLatencyP50       float64             `json:"time_travel_latency_p50_ms"`
+	TimeTravelLatencyP95       float64             `json:"time_travel_latency_p95_ms"`
+	TimeTravelLatencyP99       float64             `json:"time_travel_latency_p99_ms"`
+	ReplayDurationMS           float64             `json:"replay_duration_ms"`
+	SnapshotDurationMS         float64             `json:"snapshot_duration_ms"`
+	CommitThroughput           float64             `json:"commit_throughput_per_sec"`
+	ReadThroughput             float64             `json:"read_throughput_per_sec"`
+	WALFileSize                int64               `json:"wal_file_size_bytes"`
+	SnapshotFileSize           int64               `json:"snapshot_file_size_bytes"`
+	AuditFileSize              int64               `json:"audit_file_size_bytes"`
+	System                     *SystemInfoResponse `json:"system,omitempty"`
 }
 
 type ExecuteBatchRequest struct {
@@ -319,10 +322,10 @@ type PeerInfo struct {
 
 // JoinClusterRequest is sent by a new node to announce itself to an existing peer.
 type JoinClusterRequest struct {
-	NodeID        string   `json:"node_id"`                // unique node identifier of the joining node
-	Address       string   `json:"address"`               // cluster gRPC address the joining node is listening on
-	PgwireAddress string   `json:"pgwire_address"`        // pgwire SQL address for Studio / client connections
-	Groups        []string `json:"groups,omitempty"`      // domain groups the joining node participates in
+	NodeID        string   `json:"node_id"`          // unique node identifier of the joining node
+	Address       string   `json:"address"`          // cluster gRPC address the joining node is listening on
+	PgwireAddress string   `json:"pgwire_address"`   // pgwire SQL address for Studio / client connections
+	Groups        []string `json:"groups,omitempty"` // domain groups the joining node participates in
 }
 
 // JoinClusterResponse is returned by the seed peer after accepting a join.

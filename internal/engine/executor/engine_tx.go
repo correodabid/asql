@@ -117,6 +117,7 @@ func (engine *Engine) beginCrossDomain(session *Session, sql string) (Result, er
 
 	session.activeTx = &transaction{id: txID, domains: domainsList, startLogicalTS: startLogicalTS, statements: make([]string, 0), plans: make([]planner.Plan, 0), savepoints: make([]savepointMarker, 0)}
 	engine.perf.recordBegin()
+	engine.perf.recordCrossDomainBegin(len(domainsList))
 	return Result{Status: "BEGIN", TxID: txID}, nil
 }
 

@@ -162,7 +162,7 @@ Lower early adoption cost with starter material rather than engine bloat.
     - getting-started points to it as the preferred starting path for real apps
 
 - [ ] Add one example app whose purpose is adoption learning, not vertical productization.
-  - Current hospital app can be one input, but the guidance must be generalized.
+  - Current bank app can be one input, but the guidance must be generalized.
   - Definition of done:
     - example explicitly calls out which parts are app-owned
     - example is presented as an extension of getting-started, not a separate learning track
@@ -280,5 +280,5 @@ When implementing documentation/example tasks in this backlog:
 ## Related documents
 
 - [docs/adr/0002-generalist-engine-boundary-and-adoption-surface.md](adr/0002-generalist-engine-boundary-and-adoption-surface.md)
-- [hospitalapp/FRICTION_LOG.md](../hospitalapp/FRICTION_LOG.md)
+- [bankapp/FRICTION_LOG.md](../../bankapp/FRICTION_LOG.md)
 - [docs/ai/05-backlog.md](ai/05-backlog.md)

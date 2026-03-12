@@ -95,6 +95,8 @@ This keeps the historical read path in normal SQL instead of introducing a separ
 - add fixtures early for integration tests,
 - reserve advanced temporal logic for places that truly need it.
 
+For a reusable app-side baseline, continue with [09a-general-purpose-starter-pack.md](09a-general-purpose-starter-pack.md).
+
 ## Common expectation mismatch
 
 Do not expect ASQL to remove application workflow code.

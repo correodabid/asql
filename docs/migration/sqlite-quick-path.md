@@ -73,3 +73,5 @@ SELECT * FROM app.users AS OF LSN 1;
 - Avoid relying on implicit SQLite behavior not explicitly represented in ASQL transaction flow.
 - For production migration, validate deterministic replay on representative data before cutover.
 - Prefer fixtures for migration rehearsals instead of ad hoc seed scripts.
+
+If the migration team is coming from SQLite/Postgres/ORM expectations, read the FAQ in [../getting-started/10-adoption-playbook.md](../getting-started/10-adoption-playbook.md).

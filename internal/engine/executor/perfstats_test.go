@@ -184,6 +184,35 @@ func TestPerfStats_RecordRollback(t *testing.T) {
 	}
 }
 
+func TestPerfStats_RecordCrossDomainBegin(t *testing.T) {
+	ps := newPerfStats()
+	ps.recordBegin()
+	ps.recordCrossDomainBegin(2)
+	ps.recordBegin()
+	ps.recordCrossDomainBegin(4)
+
+	snap := ps.snapshot()
+
+	if snap.TotalBegins != 2 {
+		t.Fatalf("expected 2 total begins, got %d", snap.TotalBegins)
+	}
+	if snap.TotalCrossDomainBegins != 2 {
+		t.Fatalf("expected 2 cross-domain begins, got %d", snap.TotalCrossDomainBegins)
+	}
+	if snap.CrossDomainBeginAvgDomains != 3 {
+		t.Fatalf("expected avg cross-domain fanout 3, got %f", snap.CrossDomainBeginAvgDomains)
+	}
+	if snap.CrossDomainBeginMaxDomains != 4 {
+		t.Fatalf("expected max cross-domain fanout 4, got %d", snap.CrossDomainBeginMaxDomains)
+	}
+
+	ps.recordCrossDomainBegin(1)
+	snap = ps.snapshot()
+	if snap.TotalCrossDomainBegins != 2 {
+		t.Fatalf("single-domain begin should not count as cross-domain, got %d", snap.TotalCrossDomainBegins)
+	}
+}
+
 func TestPerfStats_RecordTimeTravel(t *testing.T) {
 	ps := newPerfStats()
 	ps.recordTimeTravel(10 * time.Millisecond)

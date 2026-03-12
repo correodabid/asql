@@ -33,6 +33,8 @@ Start with boundaries the team already understands.
 
 If the team cannot explain why two concepts must commit together, they probably should not be separate domains yet.
 
+If the team needs a shorter modeling aid, use [04a-domain-modeling-guide.md](04a-domain-modeling-guide.md) before splitting further.
+
 ### Phase 3: adopt temporal workflows
 
 Add:
@@ -82,6 +84,88 @@ Related docs:
 - expecting ASQL to absorb business workflow or compliance semantics that should stay in the application,
 - postponing history/time-travel until after the first incident.
 
+## Adoption FAQ for SQLite/Postgres/ORM-centric teams
+
+### Is ASQL basically PostgreSQL with a few extra features?
+
+No.
+
+The pgwire runtime is intentionally PostgreSQL-shaped, but the product model is different in important ways:
+
+- domains are explicit,
+- temporal inspection is first-class,
+- fixtures are deterministic scenario assets,
+- replay is part of the normal mental model.
+
+Treat ASQL as its own product with a pragmatic PostgreSQL-compatible subset, not as drop-in PostgreSQL equivalence.
+
+### Do I really need domains for a small app?
+
+Usually yes, but often only one at first.
+
+The mistake is not “starting with one domain”.
+The mistake is pretending boundaries do not exist at all.
+
+For a narrow first rollout, one explicit domain is often the right move.
+Split later only when a second boundary is clearly justified.
+
+### Should every workflow that touches multiple tables become `BEGIN CROSS DOMAIN ...`?
+
+No.
+
+Use cross-domain scope only when atomicity across those domains is truly required.
+If the workflow is mainly orchestration, sequencing, or UI flow, that usually belongs in the application layer.
+
+### Should I model entities immediately?
+
+Only when the application already thinks in aggregates with a stable root and lifecycle.
+
+If the model is still fuzzy, start with rows, history, and fixtures first.
+Then add entities once the aggregate boundary is clear.
+
+### Can I keep using my ORM exactly as it is today?
+
+Usually not without adaptation.
+
+The biggest mismatch is not only SQL syntax.
+It is that ASQL expects explicit transaction boundaries and clearer ownership of workflow semantics.
+
+If your ORM assumes hidden transaction flow, invisible cross-boundary writes, or full PostgreSQL behavior, expect integration work.
+
+### Why does ASQL push fixtures so early?
+
+Because fixtures expose adoption problems early:
+
+- unclear domains,
+- ordering mistakes,
+- hidden runtime-generated values,
+- incorrect entity or reference assumptions.
+
+They are often a faster way to harden the model than starting from handlers or UI paths.
+
+### Should compliance or approval meaning live in ASQL?
+
+Normally no.
+
+ASQL should help store facts, history, temporal references, and deterministic audit-friendly state.
+The application should still own:
+
+- approval meaning,
+- actor semantics,
+- evidence interpretation,
+- business-specific workflow rules.
+
+### If ASQL speaks pgwire, can I assume any PostgreSQL client/tool will just work?
+
+No.
+
+The correct assumption is:
+
+- many PostgreSQL-oriented tools can work within the documented compatibility surface,
+- but teams should verify client behavior against the supported subset instead of assuming full PostgreSQL parity.
+
+When in doubt, start with pgwire plus `pgx`, then validate additional tooling intentionally.
+
 ## Where adoption friction usually appears
 
 - first domain split,
@@ -102,10 +186,29 @@ Surface those questions early. They are usually design work, not blockers.
 - [ ] Studio is part of onboarding
 - [ ] One application integration example exists
 
+For a compact baseline of IDs, timestamps, audit metadata shape, transaction helpers, and temporal read helpers, use [09a-general-purpose-starter-pack.md](09a-general-purpose-starter-pack.md).
+
+## Reference example app: BankApp
+
+The reference app in [../../bankapp/README.md](../../bankapp/README.md) is intended as an adoption-learning example rather than a vertical product template.
+
+Use it when your team needs one concrete flow that exercises several ASQL primitives together:
+
+- explicit domains across more than one bounded context,
+- `BEGIN CROSS DOMAIN ...` transaction decisions in application code,
+- entity definitions and versioned references,
+- fixture-first setup,
+- temporal helpers plus `FOR HISTORY` and `AS OF LSN` inspection.
+
+Read [../../bankapp/FRICTION_LOG.md](../../bankapp/FRICTION_LOG.md) after walking through the example. The point of that log is to separate:
+
+- friction caused by ASQL's technology surface,
+- from friction caused by the chosen business scenario.
+
 ## Reference examples
 
-- [../../hospitalapp/README.md](../../hospitalapp/README.md)
-- [../../hospitalapp/FRICTION_LOG.md](../../hospitalapp/FRICTION_LOG.md)
+- [../../bankapp/README.md](../../bankapp/README.md)
+- [../../bankapp/FRICTION_LOG.md](../../bankapp/FRICTION_LOG.md)
 - [../product/asql-adoption-friction-prioritized-backlog-v1.md](../product/asql-adoption-friction-prioritized-backlog-v1.md)
 
 ## Next step

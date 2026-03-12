@@ -59,6 +59,94 @@ For business workflows:
 - keep raw `LSN`s for debugging and advanced repair work,
 - model aggregate boundaries explicitly.
 
+## Entity modeling checklist
+
+Use this checklist before adding `CREATE ENTITY`.
+
+### 1. Should this be an entity at all?
+
+Usually yes if:
+
+- the application already thinks in one stable aggregate root,
+- several tables participate in one lifecycle,
+- historical explanation is easier at aggregate level than row level,
+- versioned references should follow business aggregate semantics instead of raw row-head `LSN`s.
+
+Usually no if:
+
+- the table is mostly standalone,
+- the boundary exists only because rows are often queried together,
+- the team still cannot explain the aggregate lifecycle,
+- raw row history is already the clearest model.
+
+### 2. Is the `ROOT` table correct?
+
+Your `ROOT` table should usually be the table that defines:
+
+- aggregate identity,
+- the primary business key for the aggregate,
+- the state transition developers talk about first.
+
+Good signs:
+
+- one row clearly anchors the aggregate,
+- related rows make sense as children of that root,
+- other tables rarely need to exist independently of the root lifecycle.
+
+Warning signs:
+
+- the chosen root is just the most convenient join point,
+- two tables could both plausibly be the root,
+- identity really lives somewhere else.
+
+### 3. Which tables belong in `INCLUDES`?
+
+Include tables when they:
+
+- participate in the same lifecycle as the root,
+- should move version history together with the root,
+- are part of the replay-safe explanation of one aggregate state.
+
+Do not include tables just because:
+
+- they are frequently joined,
+- they appear on the same screen,
+- or they reference the root without sharing the same lifecycle.
+
+### 4. Will versioned references be clearer with entity semantics?
+
+Prefer entity semantics when downstream references should capture:
+
+- the business version of the aggregate,
+- not the latest visible row-head `LSN` of one table.
+
+If downstream code only needs the latest row mutation point, a plain row-based reference may be enough.
+
+### 5. Can the team explain the lifecycle in one sentence?
+
+Before creating the entity, make sure the team can say something like:
+
+- “an invoice is rooted in `invoices` and includes `invoice_items` because both belong to one aggregate lifecycle”,
+- or “a recipe is rooted in `recipes` and includes steps/checks because versioned references should follow recipe revisions, not individual row heads”.
+
+If that sentence is still fuzzy, delay the entity and use rows first.
+
+## Quick anti-pattern list
+
+Avoid these common mistakes:
+
+- creating an entity for every table by default,
+- choosing `ROOT` based on convenience rather than identity,
+- adding `INCLUDES` tables that are only query-adjacent,
+- using entities to hide unclear application modeling,
+- forcing entity semantics where row history is already enough.
+
+## Example mental model
+
+- `billing.invoices` + `billing.invoice_items` is often a good entity boundary.
+- `identity.customers` + `identity.customer_contacts` can be a good entity if contacts belong to the same customer lifecycle.
+- a reporting table that is rebuilt from other sources is usually not a good entity root.
+
 ## Helpful queries
 
 ```sql
@@ -67,6 +155,8 @@ SELECT entity_head_lsn('billing', 'invoice_aggregate', 'inv-1');
 SELECT entity_version_lsn('billing', 'invoice_aggregate', 'inv-1', 3);
 SELECT resolve_reference('billing.invoices', 'inv-1');
 ```
+
+For a larger example that uses multiple entities and versioned references together, see [../../bankapp/README.md](../../bankapp/README.md).
 
 ## Next step
 

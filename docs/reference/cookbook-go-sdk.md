@@ -75,6 +75,42 @@ Expected:
 - domain transaction committed,
 - cross-domain scope is explicit in the service code.
 
+### Helper pattern: keep the boundary explicit, not duplicated
+
+For real services, wrap the begin/commit/rollback boilerplate without hiding the domain choice itself.
+
+```go
+func RunDomainTx(ctx context.Context, conn *pgx.Conn, domain string, fn func(*pgx.Conn) error) error {
+	return runScopedTx(ctx, conn, "BEGIN DOMAIN "+domain, fn)
+}
+
+func RunCrossDomainTx(ctx context.Context, conn *pgx.Conn, domains []string, fn func(*pgx.Conn) error) error {
+	return runScopedTx(ctx, conn, "BEGIN CROSS DOMAIN "+strings.Join(domains, ", "), fn)
+}
+
+func runScopedTx(ctx context.Context, conn *pgx.Conn, beginSQL string, fn func(*pgx.Conn) error) error {
+	if _, err := conn.Exec(ctx, beginSQL); err != nil {
+		return err
+	}
+	if err := fn(conn); err != nil {
+		_, _ = conn.Exec(ctx, "ROLLBACK")
+		return err
+	}
+	_, err := conn.Exec(ctx, "COMMIT")
+	return err
+}
+```
+
+This pattern keeps three things true at the same time:
+
+- the transaction boundary stays explicit in application code,
+- repeated boilerplate does not spread across handlers,
+- rollback behavior stays consistent.
+
+Reference example:
+
+- [bankapp/tx_helpers.go](../../bankapp/tx_helpers.go)
+
 ---
 
 ## Recipe 3: Historical inspection from Go
@@ -144,6 +180,65 @@ Use these helpers when you need:
 - the commit LSN of the latest aggregate version,
 - the exact token a versioned foreign key would capture for the current committed snapshot.
 
+### Helper pattern: snapshot lookup
+
+Wrap the `AS OF LSN` read path in a small helper when the service needs repeatable snapshot reads.
+
+```go
+func QuerySnapshot(ctx context.Context, conn *pgx.Conn, sql string, lsn int64, args ...any) (pgx.Rows, error) {
+	snapshotSQL := sql + " AS OF LSN $1"
+	snapshotArgs := append([]any{lsn}, args...)
+	return conn.Query(ctx, snapshotSQL, snapshotArgs...)
+}
+```
+
+Use this when the application already knows the replay-safe `LSN` it wants to inspect.
+
+### Helper pattern: history lookup
+
+Wrap `FOR HISTORY` when you want one reusable path for row mutation trails.
+
+```go
+func QueryHistory(ctx context.Context, conn *pgx.Conn, table string, pk any) (pgx.Rows, error) {
+	sql := fmt.Sprintf("SELECT * FROM %s FOR HISTORY WHERE id = $1", table)
+	return conn.Query(ctx, sql, pk)
+}
+```
+
+Use this when the service needs to render or analyze the chronological mutation trail for one business row.
+
+### Helper pattern: version-to-LSN bridge
+
+Use a helper like this when the application thinks in entity versions but the read path needs `AS OF LSN`.
+
+```go
+func LookupEntityVersionLSN(ctx context.Context, conn *pgx.Conn, domain, entity, rootPK string, version int64) (int64, error) {
+	var lsn int64
+	err := conn.QueryRow(
+		ctx,
+		"SELECT entity_version_lsn($1, $2, $3, $4)",
+		domain,
+		entity,
+		rootPK,
+		version,
+	).Scan(&lsn)
+	return lsn, err
+}
+```
+
+This is the clean bridge between aggregate-oriented service logic and replay-safe historical reads.
+
+### Compose the helpers into one explanation flow
+
+The most reusable temporal service pattern is:
+
+1. fetch current row or entity state,
+2. fetch history,
+3. resolve the target `LSN`,
+4. fetch the snapshot at that `LSN`.
+
+That keeps temporal logic explicit without inventing a separate application API shape just for history.
+
 ---
 
 ## Programmatic usage reference
@@ -151,6 +246,7 @@ Use these helpers when you need:
 See also:
 
 - [docs/getting-started/09-go-sdk-and-integration.md](getting-started/09-go-sdk-and-integration.md)
-- [hospitalapp/app.go](../hospitalapp/app.go)
+- [bankapp/main.go](../../bankapp/main.go)
+- [bankapp/tx_helpers.go](../../bankapp/tx_helpers.go)
 
 The older example client remains useful as a low-level reference for engine-oriented operations, but pgwire should be the default integration path for new services.

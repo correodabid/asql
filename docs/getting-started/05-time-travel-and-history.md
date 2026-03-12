@@ -100,6 +100,75 @@ SELECT * FROM app.users AS OF LSN 4 WHERE id = 1;
 
 That sequence is usually enough to explain what changed and when.
 
+## Current view + historical explanation patterns
+
+The most useful temporal workflow is usually not “show me old data” in isolation.
+It is:
+
+1. inspect the current visible state,
+2. find the relevant temporal token,
+3. inspect the mutation trail,
+4. reconstruct the historical snapshot that explains the current row or entity.
+
+### Pattern A: row-level explanation
+
+Use this when you want to explain one row's current state.
+
+```sql
+SELECT id, status FROM billing.invoices WHERE id = 'inv-1';
+SELECT row_lsn('billing.invoices', 'inv-1');
+SELECT * FROM billing.invoices FOR HISTORY WHERE id = 'inv-1';
+SELECT id, status, total_cents FROM billing.invoices AS OF LSN 12 WHERE id = 'inv-1';
+```
+
+Use this pattern when the application thinks mostly in rows and primary keys.
+
+### Pattern B: entity-level explanation
+
+Use this when the application thinks in aggregates rather than isolated rows.
+
+```sql
+SELECT id, status FROM billing.invoices WHERE id = 'inv-1';
+SELECT entity_version('billing', 'invoice_aggregate', 'inv-1');
+SELECT entity_head_lsn('billing', 'invoice_aggregate', 'inv-1');
+SELECT entity_version_lsn('billing', 'invoice_aggregate', 'inv-1', 2);
+SELECT id, status, total_cents FROM billing.invoices AS OF LSN 12 WHERE id = 'inv-1';
+```
+
+Use this when the row is the root of a richer entity lifecycle and version semantics are clearer than raw `LSN`s.
+
+### Pattern C: multi-table snapshot reconstruction
+
+Use this when the explanation spans a root row plus related rows that must be viewed at the same historical point.
+
+```sql
+SELECT entity_head_lsn('billing', 'invoice_aggregate', 'inv-1');
+
+SELECT id, invoice_number, total_cents
+FROM billing.invoices AS OF LSN 12
+WHERE id = 'inv-1';
+
+SELECT id, invoice_id, description, amount_cents
+FROM billing.invoice_items AS OF LSN 12
+WHERE invoice_id = 'inv-1'
+ORDER BY id ASC;
+```
+
+This is the normal pattern for reconstructing one replay-safe business snapshot from multiple tables.
+
+### Pattern D: reference explanation
+
+Use this when a versioned reference is involved and you need to know what the engine would capture now.
+
+```sql
+SELECT resolve_reference('billing.invoices', 'inv-1');
+SELECT row_lsn('billing.invoices', 'inv-1');
+SELECT entity_version('billing', 'invoice_aggregate', 'inv-1');
+```
+
+If the table is an entity root, `resolve_reference(...)` follows the entity/version surface.
+If the table is not an entity root, it follows row-head `LSN` semantics.
+
 ## Recommended workflow for debugging
 
 1. find the affected row,
@@ -107,6 +176,8 @@ That sequence is usually enough to explain what changed and when.
 3. inspect `FOR HISTORY`,
 4. run a targeted `AS OF LSN` query,
 5. compare historical state with current state in Studio.
+
+If the explanation spans multiple tables, repeat step 4 across every table that belongs in the reconstructed snapshot.
 
 ## Studio support
 

@@ -108,6 +108,18 @@ Validation happens in two layers:
 
 This makes fixture validation a real workflow rather than a schema-only lint.
 
+## Interpreting validation failures during adoption
+
+Validation errors should usually be read as one of four feedback types:
+
+- **determinism problem** — implicit timestamps, random values, generated identifiers,
+- **transaction-boundary problem** — fixture statements still carry manual transaction control,
+- **ordering or dependency problem** — schema, parent rows, or domains appear too late,
+- **modeling problem** — entity boundaries or versioned-reference expectations are wrong.
+
+The recommended first response is not to weaken fixture strictness.
+The recommended first response is to clarify the scenario and make the workflow self-contained.
+
 ## Import workflow
 
 `asqlctl` exposes three fixture commands:

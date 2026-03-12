@@ -179,4 +179,5 @@ This ADR is successful when:
 
 - [docs/adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md](0001-engine-surface-dx-and-versioned-reference-ergonomics.md)
 - [docs/product/asql-adoption-friction-prioritized-backlog-v1.md](../product/asql-adoption-friction-prioritized-backlog-v1.md)
-- [hospitalapp/FRICTION_LOG.md](../../hospitalapp/FRICTION_LOG.md)
+- [docs/getting-started/00-engine-owned-vs-app-owned.md](../getting-started/00-engine-owned-vs-app-owned.md)
+- [bankapp/FRICTION_LOG.md](../../bankapp/FRICTION_LOG.md)

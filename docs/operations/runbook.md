@@ -64,7 +64,7 @@ Pgwire clients must connect with the same token as the password, for example:
 
 When `-admin-addr` is enabled, the pgwire runtime exposes first-class operator endpoints:
 
-- `/metrics`: Prometheus text metrics for readiness, WAL durability, commit/fsync latency, replay and snapshot durations, audit errors, throughput, file sizes, current leader state, replication lag, and failover totals.
+- `/metrics`: Prometheus text metrics for readiness, WAL durability, commit/fsync latency, replay and snapshot durations, audit errors, throughput, file sizes, current leader state, replication lag, failover totals, and cross-domain transaction fanout (`asql_engine_begins_total`, `asql_engine_cross_domain_begins_total`, `asql_engine_cross_domain_begin_domains_avg`, `asql_engine_cross_domain_begin_domains_max`).
 - `/livez`: liveness probe for process supervision.
 - `/readyz`: readiness probe that fails closed while clustered runtime is up but no Raft leader is currently known.
 - `/api/v1/health`: JSON health summary.
@@ -83,6 +83,7 @@ curl -s http://127.0.0.1:9090/api/v1/leadership-state
 curl -s http://127.0.0.1:9090/api/v1/failover-history
 curl -s http://127.0.0.1:9090/api/v1/wal-retention
 curl -s http://127.0.0.1:9090/metrics | grep 'asql_cluster_'
+curl -s http://127.0.0.1:9090/metrics | grep 'asql_engine_cross_domain_'
 ```
 
 ## 3.2) Audit events

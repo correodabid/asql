@@ -23,7 +23,7 @@ type runtimeMetrics struct {
 
 	mu                 sync.Mutex
 	failoverPromotions map[string]uint64
-	failoverHistory     []coordinator.FailoverTransition
+	failoverHistory    []coordinator.FailoverTransition
 }
 
 func newRuntimeMetrics(nodeID string) *runtimeMetrics {
@@ -329,12 +329,20 @@ func (server *Server) renderPrometheusMetrics() []byte {
 
 	writeMetricHelp(&buf, "asql_engine_commits_total", "Total committed transactions processed by the engine.", "counter")
 	writeMetricValue(&buf, "asql_engine_commits_total", nil, float64(perf.TotalCommits))
+	writeMetricHelp(&buf, "asql_engine_begins_total", "Total transactions opened by the engine.", "counter")
+	writeMetricValue(&buf, "asql_engine_begins_total", nil, float64(perf.TotalBegins))
+	writeMetricHelp(&buf, "asql_engine_cross_domain_begins_total", "Total cross-domain transactions opened by the engine.", "counter")
+	writeMetricValue(&buf, "asql_engine_cross_domain_begins_total", nil, float64(perf.TotalCrossDomainBegins))
 	writeMetricHelp(&buf, "asql_engine_reads_total", "Total read queries processed by the engine.", "counter")
 	writeMetricValue(&buf, "asql_engine_reads_total", nil, float64(perf.TotalReads))
 	writeMetricHelp(&buf, "asql_engine_time_travel_queries_total", "Total time-travel queries processed by the engine.", "counter")
 	writeMetricValue(&buf, "asql_engine_time_travel_queries_total", nil, float64(perf.TotalTimeTravelQueries))
 	writeMetricHelp(&buf, "asql_engine_active_transactions", "Current active transaction count.", "gauge")
 	writeMetricValue(&buf, "asql_engine_active_transactions", nil, float64(perf.ActiveTransactions))
+	writeMetricHelp(&buf, "asql_engine_cross_domain_begin_domains_avg", "Average domain fanout for cross-domain transaction openings.", "gauge")
+	writeMetricValue(&buf, "asql_engine_cross_domain_begin_domains_avg", nil, perf.CrossDomainBeginAvgDomains)
+	writeMetricHelp(&buf, "asql_engine_cross_domain_begin_domains_max", "Maximum domain fanout observed for a cross-domain transaction opening.", "gauge")
+	writeMetricValue(&buf, "asql_engine_cross_domain_begin_domains_max", nil, float64(perf.CrossDomainBeginMaxDomains))
 
 	writeQuantiles(&buf, "asql_engine_commit_latency_seconds", "Commit latency percentiles in seconds.", perf.CommitLatencyP50, perf.CommitLatencyP95, perf.CommitLatencyP99)
 	writeQuantiles(&buf, "asql_engine_commit_queue_wait_seconds", "Commit queue wait percentiles in seconds.", perf.CommitQueueWaitP50, perf.CommitQueueWaitP95, perf.CommitQueueWaitP99)

@@ -14,35 +14,36 @@ const (
 
 // PerfStatsSnapshot is the exported immutable snapshot of engine performance metrics.
 type PerfStatsSnapshot struct {
-	TotalCommits           uint64 `json:"total_commits"`
-	TotalReads             uint64 `json:"total_reads"`
-	TotalRollbacks         uint64 `json:"total_rollbacks"`
-	TotalBegins            uint64 `json:"total_begins"`
-	TotalTimeTravelQueries uint64 `json:"total_time_travel_queries"`
-	TotalSnapshots         uint64 `json:"total_snapshots"`
-	TotalReplays           uint64 `json:"total_replays"`
-	TotalFsyncErrors       uint64 `json:"total_fsync_errors"`
-	TotalAuditErrors       uint64 `json:"total_audit_errors"`
-	ActiveTransactions     int64  `json:"active_transactions"`
-	CommitBatchCount       uint64 `json:"commit_batch_count"`
-	CommitBatchMaxJobs     uint64 `json:"commit_batch_max_jobs"`
+	TotalCommits             uint64 `json:"total_commits"`
+	TotalReads               uint64 `json:"total_reads"`
+	TotalRollbacks           uint64 `json:"total_rollbacks"`
+	TotalBegins              uint64 `json:"total_begins"`
+	TotalCrossDomainBegins   uint64 `json:"total_cross_domain_begins"`
+	TotalTimeTravelQueries   uint64 `json:"total_time_travel_queries"`
+	TotalSnapshots           uint64 `json:"total_snapshots"`
+	TotalReplays             uint64 `json:"total_replays"`
+	TotalFsyncErrors         uint64 `json:"total_fsync_errors"`
+	TotalAuditErrors         uint64 `json:"total_audit_errors"`
+	ActiveTransactions       int64  `json:"active_transactions"`
+	CommitBatchCount         uint64 `json:"commit_batch_count"`
+	CommitBatchMaxJobs       uint64 `json:"commit_batch_max_jobs"`
 	CommitBatchMaxWalRecords uint64 `json:"commit_batch_max_wal_records"`
 
-	CommitLatencyP50 float64 `json:"commit_latency_p50_ms"`
-	CommitLatencyP95 float64 `json:"commit_latency_p95_ms"`
-	CommitLatencyP99 float64 `json:"commit_latency_p99_ms"`
+	CommitLatencyP50   float64 `json:"commit_latency_p50_ms"`
+	CommitLatencyP95   float64 `json:"commit_latency_p95_ms"`
+	CommitLatencyP99   float64 `json:"commit_latency_p99_ms"`
 	CommitQueueWaitP50 float64 `json:"commit_queue_wait_p50_ms"`
 	CommitQueueWaitP95 float64 `json:"commit_queue_wait_p95_ms"`
 	CommitQueueWaitP99 float64 `json:"commit_queue_wait_p99_ms"`
 	CommitWriteHoldP50 float64 `json:"commit_write_hold_p50_ms"`
 	CommitWriteHoldP95 float64 `json:"commit_write_hold_p95_ms"`
 	CommitWriteHoldP99 float64 `json:"commit_write_hold_p99_ms"`
-	CommitApplyP50 float64 `json:"commit_apply_p50_ms"`
-	CommitApplyP95 float64 `json:"commit_apply_p95_ms"`
-	CommitApplyP99 float64 `json:"commit_apply_p99_ms"`
-	ReadLatencyP50   float64 `json:"read_latency_p50_ms"`
-	ReadLatencyP95   float64 `json:"read_latency_p95_ms"`
-	ReadLatencyP99   float64 `json:"read_latency_p99_ms"`
+	CommitApplyP50     float64 `json:"commit_apply_p50_ms"`
+	CommitApplyP95     float64 `json:"commit_apply_p95_ms"`
+	CommitApplyP99     float64 `json:"commit_apply_p99_ms"`
+	ReadLatencyP50     float64 `json:"read_latency_p50_ms"`
+	ReadLatencyP95     float64 `json:"read_latency_p95_ms"`
+	ReadLatencyP99     float64 `json:"read_latency_p99_ms"`
 
 	TimeTravelLatencyP50 float64 `json:"time_travel_latency_p50_ms"`
 	TimeTravelLatencyP95 float64 `json:"time_travel_latency_p95_ms"`
@@ -53,10 +54,12 @@ type PerfStatsSnapshot struct {
 	ReplayDurationMs     float64 `json:"replay_duration_ms"`
 	SnapshotDurationMs   float64 `json:"snapshot_duration_ms"`
 
-	CommitThroughput float64 `json:"commit_throughput_per_sec"`
-	ReadThroughput   float64 `json:"read_throughput_per_sec"`
-	CommitBatchAvgJobs float64 `json:"commit_batch_avg_jobs"`
-	CommitBatchAvgWalRecords float64 `json:"commit_batch_avg_wal_records"`
+	CommitThroughput           float64 `json:"commit_throughput_per_sec"`
+	ReadThroughput             float64 `json:"read_throughput_per_sec"`
+	CrossDomainBeginAvgDomains float64 `json:"cross_domain_begin_avg_domains"`
+	CrossDomainBeginMaxDomains uint64  `json:"cross_domain_begin_max_domains"`
+	CommitBatchAvgJobs         float64 `json:"commit_batch_avg_jobs"`
+	CommitBatchAvgWalRecords   float64 `json:"commit_batch_avg_wal_records"`
 
 	WALFileSize      int64 `json:"wal_file_size_bytes"`
 	SnapshotFileSize int64 `json:"snapshot_file_size_bytes"`
@@ -157,12 +160,15 @@ func (w *throughputWindow) rate() float64 {
 type perfStats struct {
 	mu sync.Mutex
 
-	totalCommits           uint64
-	totalReads             uint64
-	totalRollbacks         uint64
-	totalBegins            uint64
-	totalTimeTravelQueries uint64
-	activeTransactions     int64
+	totalCommits            uint64
+	totalReads              uint64
+	totalRollbacks          uint64
+	totalBegins             uint64
+	totalCrossDomainBegins  uint64
+	totalCrossDomainDomains uint64
+	maxCrossDomainDomains   uint64
+	totalTimeTravelQueries  uint64
+	activeTransactions      int64
 
 	commitLatency     latencyRing
 	commitQueueWait   latencyRing
@@ -271,6 +277,20 @@ func (p *perfStats) recordBegin() {
 	atomic.AddInt64(&p.activeTransactions, 1)
 }
 
+func (p *perfStats) recordCrossDomainBegin(domainCount int) {
+	if domainCount < 2 {
+		return
+	}
+
+	p.mu.Lock()
+	p.totalCrossDomainBegins++
+	p.totalCrossDomainDomains += uint64(domainCount)
+	if uint64(domainCount) > p.maxCrossDomainDomains {
+		p.maxCrossDomainDomains = uint64(domainCount)
+	}
+	p.mu.Unlock()
+}
+
 func (p *perfStats) recordEndTx() {
 	atomic.AddInt64(&p.activeTransactions, -1)
 }
@@ -295,41 +315,46 @@ func (p *perfStats) snapshot() PerfStatsSnapshot {
 	fp50, fp95, fp99 := p.fsyncLatency.percentiles()
 	avgBatchJobs := 0.0
 	avgBatchWalRecords := 0.0
+	avgCrossDomainDomains := 0.0
 	if p.commitBatchCount > 0 {
 		avgBatchJobs = float64(p.totalCommitBatchJobs) / float64(p.commitBatchCount)
 		avgBatchWalRecords = float64(p.totalCommitBatchWalRecords) / float64(p.commitBatchCount)
 	}
+	if p.totalCrossDomainBegins > 0 {
+		avgCrossDomainDomains = float64(p.totalCrossDomainDomains) / float64(p.totalCrossDomainBegins)
+	}
 
 	return PerfStatsSnapshot{
-		TotalCommits:           p.totalCommits,
-		TotalReads:             p.totalReads,
-		TotalRollbacks:         p.totalRollbacks,
-		TotalBegins:            p.totalBegins,
-		TotalTimeTravelQueries: p.totalTimeTravelQueries,
-		TotalSnapshots:         p.totalSnapshots,
-		TotalReplays:           p.totalReplays,
-		TotalFsyncErrors:       p.totalFsyncErrors,
-		TotalAuditErrors:       p.totalAuditErrors,
-		ActiveTransactions:     atomic.LoadInt64(&p.activeTransactions),
-		CommitBatchCount:       p.commitBatchCount,
-		CommitBatchMaxJobs:     p.maxCommitBatchJobs,
+		TotalCommits:             p.totalCommits,
+		TotalReads:               p.totalReads,
+		TotalRollbacks:           p.totalRollbacks,
+		TotalBegins:              p.totalBegins,
+		TotalCrossDomainBegins:   p.totalCrossDomainBegins,
+		TotalTimeTravelQueries:   p.totalTimeTravelQueries,
+		TotalSnapshots:           p.totalSnapshots,
+		TotalReplays:             p.totalReplays,
+		TotalFsyncErrors:         p.totalFsyncErrors,
+		TotalAuditErrors:         p.totalAuditErrors,
+		ActiveTransactions:       atomic.LoadInt64(&p.activeTransactions),
+		CommitBatchCount:         p.commitBatchCount,
+		CommitBatchMaxJobs:       p.maxCommitBatchJobs,
 		CommitBatchMaxWalRecords: p.maxCommitBatchWalRecords,
 
-		CommitLatencyP50: cp50,
-		CommitLatencyP95: cp95,
-		CommitLatencyP99: cp99,
+		CommitLatencyP50:   cp50,
+		CommitLatencyP95:   cp95,
+		CommitLatencyP99:   cp99,
 		CommitQueueWaitP50: cqp50,
 		CommitQueueWaitP95: cqp95,
 		CommitQueueWaitP99: cqp99,
 		CommitWriteHoldP50: cwp50,
 		CommitWriteHoldP95: cwp95,
 		CommitWriteHoldP99: cwp99,
-		CommitApplyP50: cap50,
-		CommitApplyP95: cap95,
-		CommitApplyP99: cap99,
-		ReadLatencyP50:   rp50,
-		ReadLatencyP95:   rp95,
-		ReadLatencyP99:   rp99,
+		CommitApplyP50:     cap50,
+		CommitApplyP95:     cap95,
+		CommitApplyP99:     cap99,
+		ReadLatencyP50:     rp50,
+		ReadLatencyP95:     rp95,
+		ReadLatencyP99:     rp99,
 
 		TimeTravelLatencyP50: tp50,
 		TimeTravelLatencyP95: tp95,
@@ -340,9 +365,11 @@ func (p *perfStats) snapshot() PerfStatsSnapshot {
 		ReplayDurationMs:     p.lastReplayDurationMs,
 		SnapshotDurationMs:   p.lastSnapshotDurationMs,
 
-		CommitThroughput: p.commitThroughput.rate(),
-		ReadThroughput:   p.readThroughput.rate(),
-		CommitBatchAvgJobs: avgBatchJobs,
-		CommitBatchAvgWalRecords: avgBatchWalRecords,
+		CommitThroughput:           p.commitThroughput.rate(),
+		ReadThroughput:             p.readThroughput.rate(),
+		CrossDomainBeginAvgDomains: avgCrossDomainDomains,
+		CrossDomainBeginMaxDomains: p.maxCrossDomainDomains,
+		CommitBatchAvgJobs:         avgBatchJobs,
+		CommitBatchAvgWalRecords:   avgBatchWalRecords,
 	}
 }

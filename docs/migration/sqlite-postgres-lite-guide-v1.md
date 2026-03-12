@@ -208,6 +208,8 @@ Rollback execution path (recommended order):
 - Skipping replay/time-travel verification prior to cutover.
 - Comparing benchmark numbers across non-equivalent hardware/settings.
 
+If the team is still carrying SQLite/Postgres/ORM assumptions into the migration, read the concise FAQ in [../getting-started/10-adoption-playbook.md](../getting-started/10-adoption-playbook.md).
+
 ## 10) Companion references
 
 - `docs/migration/sqlite-quick-path.md`

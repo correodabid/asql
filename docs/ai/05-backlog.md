@@ -380,3 +380,39 @@ Acceptance gates (must pass before closing Epic AA)
 Acceptance gates (must pass before closing Epic AB)
 - [ ] Performance work is benchmark-driven, not assumption-driven.
 - [ ] Benchmark suite includes failover and recovery scenarios, not only steady-state throughput.
+
+## Epic AC — Adoption-friction closure from BankApp (Phase 7)
+
+Reference inputs:
+- `bankapp/FRICTION_LOG.md`
+- `docs/product/asql-adoption-friction-prioritized-backlog-v1.md`
+
+Responsibility boundaries and expectation-setting:
+- [x] Add a concise engine-owned vs app-owned note into `docs/getting-started/` and link it from onboarding entry points.
+- [x] Add explicit responsibility-boundary callouts to `bankapp/README.md` and at least one getting-started chapter.
+- [x] Add a feature-triage rubric for deciding whether a proposed capability belongs in ASQL or the application layer.
+
+Domain and transaction ergonomics:
+- [x] Publish a concise domain-modeling guide with examples from at least three different application shapes.
+- [x] Add a Go-first reference helper pattern for domain-scoped and cross-domain transaction orchestration.
+- [x] Add one supported visibility path for cross-domain overuse (telemetry, logs, CLI diagnostics, or Studio diagnostics).
+
+Temporal and entity ergonomics:
+- [x] Add getting-started examples for `current view + historical explanation` workflows combining `FOR HISTORY`, `AS OF LSN`, and helper functions.
+- [x] Extend the Go cookbook with generic helper patterns for snapshot lookup, history lookup, and version-to-LSN resolution.
+- [x] Publish a concise entity modeling checklist covering `ROOT`, `INCLUDES`, and when not to use entities.
+
+Fixture-first onboarding and compatibility surprise reduction:
+- [x] Add a fixture-first onboarding path that starts from a deterministic scenario before service/UI integration.
+- [x] Improve fixture validation guidance so common errors point developers toward modeling or ordering fixes.
+- [x] Add a concise adoption FAQ for teams coming from SQLite/Postgres/ORM-centric stacks, including pgwire compatibility expectations.
+
+Starter kit ergonomics:
+- [x] Define a small general-purpose starter pack for IDs, timestamps, audit metadata shape, transaction helpers, and temporal read helpers.
+- [x] Ensure the BankApp example is presented as adoption-learning material subordinate to getting-started, not as a separate learning track.
+
+Acceptance gates (must pass before closing Epic AC)
+- [x] Onboarding clearly separates engine-owned and app-owned concerns.
+- [x] Teams have one reference path for domain-scoped transaction helpers and temporal query composition.
+- [x] Fixture-first onboarding is practical and documented from the main getting-started path.
+- [x] Common compatibility and expectation mismatches are documented before teams hit them by trial and error.

@@ -97,6 +97,7 @@ Start with a thin helper around `BEGIN DOMAIN ...` or `BEGIN CROSS DOMAIN ...`, 
 
 - [README.md](../../README.md)
 - [10-min.md](10-min.md)
+- [10-adoption-playbook.md](10-adoption-playbook.md)
 - [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
 - [../reference/fixture-format-and-lifecycle-v1.md](../reference/fixture-format-and-lifecycle-v1.md)
 - [../reference/temporal-introspection-surface-v1.md](../reference/temporal-introspection-surface-v1.md)

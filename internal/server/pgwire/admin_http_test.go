@@ -1,6 +1,7 @@
 package pgwire
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -42,6 +43,17 @@ func TestAdminMetricsExposeFailoverLeaderAndSafeLSN(t *testing.T) {
 		NodeID: "node-a",
 	})
 
+	for _, sql := range []string{
+		"BEGIN CROSS DOMAIN billing, risk;",
+		"ROLLBACK;",
+		"BEGIN CROSS DOMAIN billing, ledger, risk;",
+		"ROLLBACK;",
+	} {
+		if _, err := server.engine.Execute(context.Background(), server.engine.NewSession(), sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
 	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
 	res := httptest.NewRecorder()
 	server.handleMetrics(res, req)
@@ -54,6 +66,10 @@ func TestAdminMetricsExposeFailoverLeaderAndSafeLSN(t *testing.T) {
 		`asql_cluster_failovers_total{group="orders"} 1`,
 		`asql_cluster_current_leader_info{group="orders",leader_id="node-a",local_node_id="node-a"} 1`,
 		`asql_cluster_last_safe_lsn{group="orders",leader_id="node-a"} 99`,
+		`asql_engine_begins_total 2`,
+		`asql_engine_cross_domain_begins_total 2`,
+		`asql_engine_cross_domain_begin_domains_avg 2.5`,
+		`asql_engine_cross_domain_begin_domains_max 3`,
 		`asql_engine_fsync_errors_total 0`,
 		`asql_engine_audit_errors_total 0`,
 		`asql_audit_log_size_bytes`,

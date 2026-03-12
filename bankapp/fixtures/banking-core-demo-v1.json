@@ -1,0 +1,88 @@
+{
+  "version": "v1",
+  "name": "banking-core-demo",
+  "description": "Deterministic multi-domain banking scenario covering identity, ledger, payments, risk, entities, versioned foreign keys, and temporal inspection.",
+  "steps": [
+    {
+      "name": "identity schema",
+      "mode": "domain",
+      "domains": ["identity"],
+      "statements": [
+        "CREATE TABLE identity.customers (id TEXT PRIMARY KEY, legal_name TEXT NOT NULL, segment TEXT NOT NULL, risk_tier TEXT NOT NULL, status TEXT NOT NULL)",
+        "CREATE TABLE identity.customer_contacts (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL REFERENCES customers(id), kind TEXT NOT NULL, value TEXT NOT NULL)",
+        "CREATE ENTITY customer_entity (ROOT customers, INCLUDES customer_contacts)"
+      ]
+    },
+    {
+      "name": "ledger schema",
+      "mode": "cross",
+      "domains": ["ledger", "identity"],
+      "statements": [
+        "CREATE TABLE ledger.accounts (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, customer_version INT, iban TEXT UNIQUE, currency TEXT NOT NULL, status TEXT NOT NULL, booked_balance_cents INT NOT NULL DEFAULT 0, pending_debit_cents INT NOT NULL DEFAULT 0, available_balance_cents INT NOT NULL DEFAULT 0, VERSIONED FOREIGN KEY (customer_id) REFERENCES identity.customers(id) AS OF customer_version)",
+        "CREATE TABLE ledger.account_holds (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), reason TEXT NOT NULL, amount_cents INT NOT NULL DEFAULT 0, status TEXT NOT NULL)",
+        "CREATE TABLE ledger.ledger_entries (id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id), direction TEXT NOT NULL, amount_cents INT NOT NULL DEFAULT 0, balance_after_cents INT NOT NULL DEFAULT 0, reference_kind TEXT NOT NULL, reference_id TEXT NOT NULL)",
+        "CREATE ENTITY account_entity (ROOT accounts, INCLUDES account_holds, ledger_entries)"
+      ]
+    },
+    {
+      "name": "payments schema",
+      "mode": "cross",
+      "domains": ["payments", "identity", "ledger"],
+      "statements": [
+        "CREATE TABLE payments.transfer_requests (id TEXT PRIMARY KEY, customer_id TEXT NOT NULL, customer_version INT, source_account_id TEXT NOT NULL, source_account_version INT, destination_account_id TEXT NOT NULL, destination_account_version INT, amount_cents INT NOT NULL DEFAULT 0, status TEXT NOT NULL, created_reason TEXT NOT NULL, VERSIONED FOREIGN KEY (customer_id) REFERENCES identity.customers(id) AS OF customer_version, VERSIONED FOREIGN KEY (source_account_id) REFERENCES ledger.accounts(id) AS OF source_account_version, VERSIONED FOREIGN KEY (destination_account_id) REFERENCES ledger.accounts(id) AS OF destination_account_version)",
+        "CREATE TABLE payments.transfer_events (id TEXT PRIMARY KEY, transfer_id TEXT NOT NULL REFERENCES transfer_requests(id), event_type TEXT NOT NULL, note TEXT NOT NULL)",
+        "CREATE ENTITY transfer_entity (ROOT transfer_requests, INCLUDES transfer_events)"
+      ]
+    },
+    {
+      "name": "risk schema",
+      "mode": "cross",
+      "domains": ["risk", "payments"],
+      "statements": [
+        "CREATE TABLE risk.risk_reviews (id TEXT PRIMARY KEY, transfer_id TEXT NOT NULL, transfer_version INT, decision TEXT NOT NULL, analyst_note TEXT NOT NULL, VERSIONED FOREIGN KEY (transfer_id) REFERENCES payments.transfer_requests(id) AS OF transfer_version)",
+        "CREATE ENTITY risk_review_entity (ROOT risk_reviews)"
+      ]
+    },
+    {
+      "name": "onboard alice and bob",
+      "mode": "cross",
+      "domains": ["identity", "ledger"],
+      "statements": [
+        "INSERT INTO identity.customers (id, legal_name, segment, risk_tier, status) VALUES ('cust-001', 'Alice Example', 'retail', 'standard', 'active')",
+        "INSERT INTO identity.customer_contacts (id, customer_id, kind, value) VALUES ('contact-001', 'cust-001', 'email', 'alice@example.bank')",
+        "INSERT INTO ledger.accounts (id, customer_id, iban, currency, status, booked_balance_cents, pending_debit_cents, available_balance_cents) VALUES ('acct-001', 'cust-001', 'ES1000000000000000000001', 'EUR', 'ACTIVE', 125000, 0, 125000)",
+        "INSERT INTO identity.customers (id, legal_name, segment, risk_tier, status) VALUES ('cust-002', 'Bob Example', 'retail', 'standard', 'active')",
+        "INSERT INTO identity.customer_contacts (id, customer_id, kind, value) VALUES ('contact-002', 'cust-002', 'email', 'bob@example.bank')",
+        "INSERT INTO ledger.accounts (id, customer_id, iban, currency, status, booked_balance_cents, pending_debit_cents, available_balance_cents) VALUES ('acct-002', 'cust-002', 'ES1000000000000000000002', 'EUR', 'ACTIVE', 50000, 0, 50000)"
+      ]
+    },
+    {
+      "name": "submit approve and settle transfer",
+      "mode": "cross",
+      "domains": ["payments", "identity", "ledger", "risk"],
+      "statements": [
+        "INSERT INTO payments.transfer_requests (id, customer_id, source_account_id, destination_account_id, amount_cents, status, created_reason) VALUES ('tr-001', 'cust-001', 'acct-001', 'acct-002', 2500, 'PENDING_RISK', 'scheduled rent payment')",
+        "INSERT INTO payments.transfer_events (id, transfer_id, event_type, note) VALUES ('te-001', 'tr-001', 'SUBMITTED', 'transfer submitted to risk queue')",
+        "UPDATE ledger.accounts SET pending_debit_cents = 2500, available_balance_cents = 122500 WHERE id = 'acct-001'",
+        "INSERT INTO ledger.ledger_entries (id, account_id, direction, amount_cents, balance_after_cents, reference_kind, reference_id) VALUES ('le-001', 'acct-001', 'PENDING_DEBIT', 2500, 122500, 'transfer_request', 'tr-001')",
+        "INSERT INTO risk.risk_reviews (id, transfer_id, decision, analyst_note) VALUES ('rr-001', 'tr-001', 'APPROVE', 'ruleset v1 accepted deterministic transfer profile')",
+        "UPDATE payments.transfer_requests SET status = 'RISK_APPROVED' WHERE id = 'tr-001'",
+        "INSERT INTO payments.transfer_events (id, transfer_id, event_type, note) VALUES ('te-002', 'tr-001', 'RISK_APPROVED', 'risk team approved transfer')",
+        "UPDATE payments.transfer_requests SET status = 'SETTLED' WHERE id = 'tr-001'",
+        "INSERT INTO payments.transfer_events (id, transfer_id, event_type, note) VALUES ('te-003', 'tr-001', 'SETTLED', 'ledger balances moved to booked state')",
+        "UPDATE ledger.accounts SET booked_balance_cents = 122500, pending_debit_cents = 0, available_balance_cents = 122500 WHERE id = 'acct-001'",
+        "UPDATE ledger.accounts SET booked_balance_cents = 52500, available_balance_cents = 52500 WHERE id = 'acct-002'",
+        "INSERT INTO ledger.ledger_entries (id, account_id, direction, amount_cents, balance_after_cents, reference_kind, reference_id) VALUES ('le-002', 'acct-001', 'BOOKED_DEBIT', 2500, 122500, 'transfer_request', 'tr-001')",
+        "INSERT INTO ledger.ledger_entries (id, account_id, direction, amount_cents, balance_after_cents, reference_kind, reference_id) VALUES ('le-003', 'acct-002', 'BOOKED_CREDIT', 2500, 52500, 'transfer_request', 'tr-001')"
+      ]
+    },
+    {
+      "name": "raise customer risk tier",
+      "mode": "domain",
+      "domains": ["identity"],
+      "statements": [
+        "UPDATE identity.customers SET risk_tier = 'enhanced' WHERE id = 'cust-001'"
+      ]
+    }
+  ]
+}
