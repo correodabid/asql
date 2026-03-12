@@ -51,8 +51,11 @@ export type EngineStats = {
   total_reads: number
   total_rollbacks: number
   total_begins: number
+  total_cross_domain_begins: number
   total_time_travel_queries: number
   active_transactions: number
+  cross_domain_begin_avg_domains: number
+  cross_domain_begin_max_domains: number
   commit_latency_p50_ms: number
   commit_latency_p95_ms: number
   commit_latency_p99_ms: number
@@ -78,8 +81,11 @@ const emptyEngineStats: EngineStats = {
   total_reads: 0,
   total_rollbacks: 0,
   total_begins: 0,
+  total_cross_domain_begins: 0,
   total_time_travel_queries: 0,
   active_transactions: 0,
+  cross_domain_begin_avg_domains: 0,
+  cross_domain_begin_max_domains: 0,
   commit_latency_p50_ms: 0,
   commit_latency_p95_ms: 0,
   commit_latency_p99_ms: 0,

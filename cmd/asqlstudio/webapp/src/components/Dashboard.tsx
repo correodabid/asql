@@ -830,7 +830,20 @@ export function Dashboard() {
           icon={<IconDatabase />}
           label="Active Tx"
           value={<AnimNum value={engineStats.active_transactions} />}
-          sub={<>{engineStats.total_begins.toLocaleString()} begins</>}
+          sub={
+            <>
+              {engineStats.total_begins.toLocaleString()} begins · {engineStats.total_cross_domain_begins.toLocaleString()} cross
+            </>
+          }
+          trend={
+            engineStats.total_cross_domain_begins > 0 ? (
+              <span className="text-muted">
+                avg {engineStats.cross_domain_begin_avg_domains.toFixed(1)} domains · max {engineStats.cross_domain_begin_max_domains}
+              </span>
+            ) : (
+              <span className="text-muted">no cross-domain begins yet</span>
+            )
+          }
           accentColor="var(--text-warning)"
           delay={120}
         />
