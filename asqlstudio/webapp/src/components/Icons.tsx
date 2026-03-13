@@ -102,6 +102,20 @@ export const IconGrid = () => (
   <svg {...sz}><rect x="3" y="3" width="7" height="7" /><rect x="14" y="3" width="7" height="7" /><rect x="14" y="14" width="7" height="7" /><rect x="3" y="14" width="7" height="7" /></svg>
 )
 
+export const IconUndo = () => (
+  <svg {...sz} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 7v6h6" />
+    <path d="M21 17A9 9 0 0 0 6.3 7.3L3 10" />
+  </svg>
+)
+
+export const IconRedo = () => (
+  <svg {...sz} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 7v6h-6" />
+    <path d="M3 17A9 9 0 0 1 17.7 7.3L21 10" />
+  </svg>
+)
+
 export const IconHistory = () => (
   <svg {...sz}><circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" /></svg>
 )

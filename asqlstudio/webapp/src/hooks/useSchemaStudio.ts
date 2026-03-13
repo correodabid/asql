@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useUndoHistory } from './useUndoHistory'
 import { api } from '../lib/api'
 import {
   clone,
@@ -26,7 +27,15 @@ type AllBaselinesResponse = {
 export const ALL_DOMAINS_KEY = '__all__'
 
 export function useSchemaStudio() {
-  const [model, setModel] = useState<SchemaModel>(clone(DEFAULT_MODEL))
+  const {
+    value: model,
+    setValue: setModel,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
+    reset: resetModel,
+  } = useUndoHistory<SchemaModel>(clone(DEFAULT_MODEL))
   const [baseline, setBaseline] = useState<SchemaModel>(clone(DEFAULT_MODEL))
   const [selectedTable, setSelectedTable] = useState(0)
   const [selectedColumn, setSelectedColumn] = useState(0)
@@ -124,11 +133,11 @@ export function useSchemaStudio() {
       const nextBaseline = clone(response.baseline)
       setBaseline(nextBaseline)
       if (nextBaseline.tables.length > 0) {
-        setModel(nextBaseline)
+        resetModel(nextBaseline)
         setSelectedTable(0)
         setSelectedColumn(0)
       } else {
-        setModel({ ...clone(DEFAULT_MODEL), domain: targetDomain })
+        resetModel({ ...clone(DEFAULT_MODEL), domain: targetDomain })
       }
       setDiffSummary(`Baseline loaded from ASQL for domain ${nextBaseline.domain}`)
       setDiffSafe(true)
@@ -148,7 +157,7 @@ export function useSchemaStudio() {
       try {
         const response = await api<AllBaselinesResponse>('/api/schema/load-all-baselines', 'GET')
         setAllDomainsModel({ domains: response.baselines || [] })
-        setModel({ domain: ALL_DOMAINS_KEY, tables: [] })
+        resetModel({ domain: ALL_DOMAINS_KEY, tables: [] })
         setDesignerStatus(`All domains loaded (${response.baselines?.length || 0} domain(s))`)
       } catch (error) {
         setDesignerStatus((error as Error).message)
@@ -415,6 +424,10 @@ export function useSchemaStudio() {
   return {
     model,
     setModel,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
     selectedTable,
     setSelectedTable,
     selectedColumn,

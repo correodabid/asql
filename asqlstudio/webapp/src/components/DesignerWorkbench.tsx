@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import type { StatementState } from './DDLPanel'
 import { ColumnEditor } from './ColumnEditor'
 import { ERDiagram } from './ERDiagram'
-import { IconAlertTriangle, IconArrowRight, IconCheckCircle, IconChevronDown, IconChevronUp, IconCode, IconPlay, IconRefresh, IconSchema, IconShield, IconX } from './Icons'
+import { IconAlertTriangle, IconArrowRight, IconCheckCircle, IconChevronDown, IconChevronUp, IconCode, IconPlay, IconRefresh, IconRedo, IconSchema, IconShield, IconUndo, IconX } from './Icons'
 import { IndexEditor } from './IndexEditor'
 import { ResizeHandle } from './ResizeHandle'
 import { useResizable } from '../hooks/useResizable'
@@ -52,6 +52,10 @@ type Props = {
   onExecuteAll: () => void
   onOpenDDL: () => void
   onOpenDiff: () => void
+  undo: () => void
+  redo: () => void
+  canUndo: boolean
+  canRedo: boolean
 }
 
 function summarizeOps(diffOperations: DiffOperation[]) {
@@ -87,6 +91,10 @@ export function DesignerWorkbench({
   onExecuteAll,
   onOpenDDL,
   onOpenDiff,
+  undo,
+  redo,
+  canUndo,
+  canRedo,
 }: Props) {
   const stats = summarizeOps(diffOperations)
   const executedStatements = statementStates.filter((state) => state.status === 'success').length
@@ -98,6 +106,19 @@ export function DesignerWorkbench({
   const isFirstRender = useRef(true)
   const silentDiffRef = useRef(onSilentDiff)
   useEffect(() => { silentDiffRef.current = onSilentDiff }, [onSilentDiff])
+
+  // Keyboard shortcuts: Cmd/Ctrl+Z = undo, Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y = redo
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey
+      if (!mod) return
+      if (e.key === 'z' && !e.shiftKey) { e.preventDefault(); undo() }
+      else if (e.key === 'z' && e.shiftKey) { e.preventDefault(); redo() }
+      else if (e.key === 'y') { e.preventDefault(); redo() }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [undo, redo])
 
   // Auto-diff: debounce 700ms after any model change
   useEffect(() => {
@@ -249,6 +270,13 @@ export function DesignerWorkbench({
       </div>
 
       <div className="designer-footer-bar">
+        <div className="designer-footer-section">
+          <button className="designer-history-btn" onClick={undo} disabled={!canUndo} title="Undo (⌘Z)"><IconUndo /></button>
+          <button className="designer-history-btn" onClick={redo} disabled={!canRedo} title="Redo (⌘⇧Z)"><IconRedo /></button>
+        </div>
+
+        <div className="designer-footer-sep" />
+
         <div className="designer-footer-section">
           <span className={`designer-footer-indicator${diffSafe === true ? ' safe' : diffSafe === false ? ' unsafe' : ''}`}>
             {isDiffing

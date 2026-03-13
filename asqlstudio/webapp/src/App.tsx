@@ -121,6 +121,10 @@ function App() {
   const {
     model,
     setModel,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
     selectedTable,
     setSelectedTable,
     selectedColumn,
@@ -439,6 +443,10 @@ function App() {
                     onExecuteAll={onExecuteAll}
                     onOpenDDL={() => setDesignerView('ddl')}
                     onOpenDiff={() => setDesignerView('diff')}
+                    undo={undo}
+                    redo={redo}
+                    canUndo={canUndo}
+                    canRedo={canRedo}
                   />
                 )}
 

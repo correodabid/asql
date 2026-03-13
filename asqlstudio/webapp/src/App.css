@@ -869,6 +869,35 @@
   margin: 0 8px;
 }
 
+/* ── Undo / Redo buttons ─────────────────────────────────── */
+.designer-history-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--transition), background var(--transition);
+}
+.designer-history-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+.designer-history-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.designer-history-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
 .designer-footer-indicator {
   display: inline-flex;
   align-items: center;
