@@ -749,7 +749,7 @@ function EntityContour({ group, isHovered, onHover }: {
 
 function TableCard({
   pos, isActive, isBeingDragged, onMouseDown, rootEntityColor, dimmed, rowCount,
-  walHeatBg, highlightedColumns, onColumnHover, onTableContextMenu,
+  walHeatBg, highlightedColumns, fkHighlightedColumns, onColumnHover, onTableContextMenu,
   annotation, onAnnotationDblClick, onAddColumnClick, onFKDragStart,
   onSelectColumn, onSelectIndex,
 }: {
@@ -764,6 +764,8 @@ function TableCard({
   walHeatBg?: string
   /** Column names whose rows should be highlighted (search match) */
   highlightedColumns?: Set<string>
+  /** Column names to highlight as FK relationship endpoints (on rel hover) */
+  fkHighlightedColumns?: Set<string>
   /** Fired on column row hover — null colName = mouse left */
   onColumnHover?: (colName: string | null, cx: number, cy: number) => void
   /** Fired on right-click of the table card */
@@ -967,6 +969,7 @@ function TableCard({
           const cy = pos.y + TABLE_HEADER_H + ci * COL_ROW_H + COL_ROW_H / 2
           const isVFK = vfkCols.has(col.name)
           const isHL = highlightedColumns?.has(col.name) ?? false
+          const isFKHL = fkHighlightedColumns?.has(col.name) ?? false
           const canDragFK = !!onFKDragStart && !col.primary_key
           return (
             <g
@@ -984,9 +987,20 @@ function TableCard({
                 y={cy - COL_ROW_H / 2}
                 width={pos.w - 2}
                 height={COL_ROW_H}
-                fill={isHL ? 'rgba(34,211,238,0.09)' : 'transparent'}
+                fill={isFKHL ? 'rgba(99,91,255,0.18)' : isHL ? 'rgba(34,211,238,0.09)' : 'transparent'}
                 rx={3}
               />
+              {/* FK-hover: left accent bar */}
+              {isFKHL && (
+                <rect
+                  x={pos.x + 1}
+                  y={cy - COL_ROW_H / 2 + 2}
+                  width={3}
+                  height={COL_ROW_H - 4}
+                  fill="var(--accent)"
+                  rx={1.5}
+                />
+              )}
 
               {/* PK / FK / VK badge */}
               {col.primary_key && (
@@ -1305,7 +1319,21 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
     })
   }, [isolatedEntity, allRels, visibleTableKeySet])
 
-  // ── Search: also match column names, not just table names
+  // ── FK highlight map: which column in each table to accent when a rel is hovered
+  const fkHighlightMap = useMemo(() => {
+    if (hoveredRelationship === null) return null
+    const rel = visibleRels[hoveredRelationship]
+    if (!rel) return null
+    const map = new Map<string, Set<string>>()
+    const fromKey = rel.from.tableKey || rel.from.table.name
+    const toKey   = rel.to.tableKey   || rel.to.table.name
+    map.set(fromKey, new Set([rel.fromCol]))
+    // merge in case from === to (self-ref)
+    const existing = map.get(toKey)
+    if (existing) existing.add(rel.toCol)
+    else map.set(toKey, new Set([rel.toCol]))
+    return map
+  }, [hoveredRelationship, visibleRels])
   const searchMatchedKeys = useMemo(() => {
     if (!erSearch.trim()) return null
     const q = erSearch.trim().toLowerCase()
@@ -1604,6 +1632,7 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
                 rowCount={tableCounts?.[pos.table.name]}
                 walHeatBg={walHeatBgFor(pos.table.name)}
                 highlightedColumns={searchMatchedCols ?? undefined}
+                fkHighlightedColumns={fkHighlightMap?.get(tableKey)}
                 onColumnHover={(colName, cx, cy) => handleColumnHover(tableKey, colName, cx, cy)}
                 onTableContextMenu={(cx, cy) => handleTableContextMenu(tableKey, pos.table.name, cx, cy)}
                 annotation={annotations[tableKey]}
