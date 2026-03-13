@@ -44,6 +44,8 @@ type Props = {
   domain: string
   onScrub: (lsn: number) => void
   onRefresh: () => void
+  /** Called whenever playback state changes */
+  onPlayingChange?: (playing: boolean) => void
 }
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -53,10 +55,10 @@ const TOOLTIP_DELAY_MS = 180
 const DDL_OPS = new Set(['create_table', 'drop_table', 'alter_table', 'create_index', 'drop_index'])
 
 const PLAYBACK_SPEEDS: { label: string; ms: number }[] = [
-  { label: '0.5×', ms: 800 },
-  { label: '1×', ms: 400 },
-  { label: '2×', ms: 200 },
-  { label: '4×', ms: 100 },
+  { label: '0.5×', ms: 200 },
+  { label: '1×',   ms:  80 },
+  { label: '2×',   ms:  35 },
+  { label: '4×',   ms:  15 },
 ]
 const DEFAULT_SPEED_IDX = 1
 
@@ -122,13 +124,18 @@ function formatTickLabel(n: number): string {
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function TimelineScrubber({ maxLSN, currentLSN, domain, onScrub, onRefresh }: Props) {
+export function TimelineScrubber({ maxLSN, currentLSN, domain, onScrub, onRefresh, onPlayingChange }: Props) {
   const trackRef = useRef<HTMLDivElement>(null)
   const minimapRef = useRef<HTMLDivElement>(null)
   const isDragging = useRef(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const playRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
   const tooltipTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  // Ref so the play interval always reads the latest LSN without a stale closure
+  const currentLSNRef = useRef(currentLSN)
+  useEffect(() => { currentLSNRef.current = currentLSN }, [currentLSN])
+  const maxLSNRef = useRef(maxLSN)
+  useEffect(() => { maxLSNRef.current = maxLSN }, [maxLSN])
 
   const [commits, setCommits] = useState<TimelineCommit[]>([])
   const [memSnapshots, setMemSnapshots] = useState<number[]>([])
@@ -258,20 +265,31 @@ export function TimelineScrubber({ maxLSN, currentLSN, domain, onScrub, onRefres
   const togglePlayback = useCallback(() => setPlaying(p => !p), [])
 
   useEffect(() => {
+    onPlayingChange?.(playing)
+  }, [playing, onPlayingChange])
+
+  useEffect(() => {
     if (playing) {
       const ms = PLAYBACK_SPEEDS[speedIdx].ms
-      playRef.current = setInterval(stepToNextCommit, ms)
+      playRef.current = setInterval(() => {
+        const next = currentLSNRef.current + 1
+        if (next > maxLSNRef.current) {
+          setPlaying(false)
+        } else {
+          onScrub(next)
+        }
+      }, ms)
     } else {
       if (playRef.current) clearInterval(playRef.current)
     }
     return () => { if (playRef.current) clearInterval(playRef.current) }
-  }, [playing, speedIdx, stepToNextCommit])
+  }, [playing, speedIdx, onScrub])
 
   useEffect(() => {
-    if (playing && allLSNs.length && currentLSN >= allLSNs[allLSNs.length - 1]) {
+    if (playing && currentLSN >= maxLSN) {
       setPlaying(false)
     }
-  }, [playing, currentLSN, allLSNs])
+  }, [playing, currentLSN, maxLSN])
 
   // ─── Keyboard ─────────────────────────────────────────────────────────────
 

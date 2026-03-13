@@ -63,6 +63,12 @@ export function TimeExplorer({ domain }: Props) {
   const [diffMap, setDiffMap]         = useState<Map<string, RowStatus>>(new Map())
   const [snapLoading, setSnapLoading] = useState(false)
 
+  // playback — live silent updates during scrub
+  const [isPlaying, setIsPlaying] = useState(false)
+  const isPlayingRef = useRef(false)
+  const currentLSNRef = useRef(0)
+  const scrubDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
   // Snapshot table UX
   const [sortCol, setSortCol]           = useState<string | null>(null)
   const [sortDir, setSortDir]           = useState<'asc' | 'desc'>('asc')
@@ -122,17 +128,25 @@ export function TimeExplorer({ domain }: Props) {
     loadTables(domain)
   }, [domain, loadTables])
 
-  // ─── Snapshot query ────────────────────────────────────
+  // ─── Snapshot query ────────────────────────────────────────────────────────
+
+  // Keep refs in sync so runSnapshot reads fresh values without closure deps
+  useEffect(() => { currentLSNRef.current = currentLSN }, [currentLSN])
+  useEffect(() => { isPlayingRef.current = isPlaying }, [isPlaying])
 
   const runSnapshot = useCallback(async () => {
-    if (!selectedTable || currentLSN === 0 || maxLSN === 0) return
+    const lsn = currentLSNRef.current
+    if (!selectedTable || lsn === 0 || maxLSN === 0) return
     const seq = ++querySeq.current
-    setSnapLoading(true)
+    // During playback: silent update — keep old rows visible until new data lands
+    // to avoid any loading overlay flicker.
+    const silent = isPlayingRef.current
+    if (!silent) setSnapLoading(true)
     try {
       const sql = `SELECT * FROM ${selectedTable} LIMIT 500;`
       const [snapResp, headResp] = await Promise.all([
         api<{ rows?: Record<string, unknown>[]; columns?: string[] }>('/api/time-travel', 'POST', {
-          sql, domains: [domain], lsn: currentLSN,
+          sql, domains: [domain], lsn,
         }),
         api<{ rows?: Record<string, unknown>[]; columns?: string[] }>('/api/time-travel', 'POST', {
           sql, domains: [domain], lsn: maxLSN,
@@ -169,13 +183,29 @@ export function TimeExplorer({ domain }: Props) {
       }
       setDiffMap(dm)
     } catch { /* ignore */ } finally {
-      if (seq === querySeq.current) setSnapLoading(false)
+      if (!silent && seq === querySeq.current) setSnapLoading(false)
     }
-  }, [selectedTable, currentLSN, maxLSN, domain])
+  }, [selectedTable, maxLSN, domain])
 
+  // Manual scrub: trailing 120 ms debounce (only when not playing)
   useEffect(() => {
-    if (view === 'snapshot') runSnapshot()
-  }, [view, selectedTable, currentLSN, runSnapshot])
+    if (isPlaying || view !== 'snapshot') return
+    if (scrubDebounceRef.current) clearTimeout(scrubDebounceRef.current)
+    scrubDebounceRef.current = setTimeout(runSnapshot, 120)
+    return () => { if (scrubDebounceRef.current) clearTimeout(scrubDebounceRef.current) }
+  }, [currentLSN, selectedTable, view, isPlaying, runSnapshot])
+
+  // Playback: silent periodic refresh every 350 ms.
+  // runSnapshot reads currentLSNRef.current at call time → always latest LSN.
+  // querySeq ensures stale responses are discarded.
+  // No loading overlay (silent=true) → old rows stay visible until new data
+  // lands, giving a smooth flicker-free update.
+  useEffect(() => {
+    if (!isPlaying || view !== 'snapshot') return
+    runSnapshot() // fire immediately when playback starts
+    const id = setInterval(runSnapshot, 350)
+    return () => clearInterval(id)
+  }, [isPlaying, view, runSnapshot])
 
   // ─── History query ─────────────────────────────────────
 
@@ -662,6 +692,7 @@ export function TimeExplorer({ domain }: Props) {
               currentLSN={currentLSN || maxLSN}
               domain={domain}
               onScrub={lsn => setCurrentLSN(lsn)}
+              onPlayingChange={setIsPlaying}
               onRefresh={() => { refreshMaxLSN(); loadStats() }}
             />
           )
