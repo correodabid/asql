@@ -31,7 +31,7 @@ Una planta produce un lote estéril. Durante la ejecución hay eventos de proces
 1. Cada acción relevante (registro, corrección, aprobación) se persiste como secuencia determinista en WAL append-only.
 2. Los datos se organizan por dominios (por ejemplo: `produccion`, `qa`, `laboratorio`) con aislamiento explícito.
 3. Los procesos cross-domain se controlan por transacciones explícitas, evitando efectos laterales implícitos.
-4. QA puede consultar estado histórico exacto por LSN/timestamp (time-travel) para re-evaluar decisiones con el contexto real del momento.
+4. QA puede consultar estado histórico exacto por LSN (time-travel) y apoyarse en recovery/admin cuando necesita reconstrucciones acotadas por timestamp lógico.
 5. Ante incidente, se puede reproducir el estado desde log para análisis forense y evidencia auditable.
 
 ## 4) Diferencial de ASQL frente a una base de datos SQL convencional

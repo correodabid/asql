@@ -57,7 +57,7 @@ For Enterprise support eligibility:
 
 To receive effective support, customers should provide:
 - version, deployment topology, and runtime flags;
-- which listener surfaces are enabled (`pgwire`, optional `gRPC`, TLS/mTLS);
+- which listener surfaces are enabled (`pgwire`, optional `gRPC`) and any external transport-security layers or auth controls in front of them;
 - incident timestamp, impacted domains/workloads, and business impact;
 - relevant logs and reproducible steps where possible;
 - confirmation of backup status before high-risk remediation actions.
