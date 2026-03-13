@@ -1,20 +1,19 @@
 import { Component, type ErrorInfo, useEffect, useState } from 'react'
 import { ClusterPanel } from './components/ClusterPanel'
-import { ColumnEditor } from './components/ColumnEditor'
 import { CommandPalette } from './components/CommandPalette'
 import { Dashboard } from './components/Dashboard'
 import { DDLPanel } from './components/DDLPanel'
+import { DesignerWorkbench } from './components/DesignerWorkbench'
 import { DiffPanel } from './components/DiffPanel'
 import { ERDiagram } from './components/ERDiagram'
 import { FixturePanel } from './components/FixturePanel'
-import { IconDatabase, IconDownload, IconGrid, IconMoon, IconSchema, IconShield, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
-import { IndexEditor } from './components/IndexEditor'
+import { IconDatabase, IconDownload, IconGrid, IconMoon, IconRefresh, IconSchema, IconShield, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { RecoveryPanel } from './components/RecoveryPanel'
 import { Sidebar } from './components/Sidebar'
 import { StartHerePanel } from './components/StartHerePanel'
 import { StatusBar } from './components/StatusBar'
-import { TabBar, type TabId } from './components/Tabs'
+import { TabBar, type GroupDef, type TabId } from './components/Tabs'
 import { TimeExplorer } from './components/TimeExplorer'
 import { ToastContainer } from './components/Toast'
 import { Workspace } from './components/Workspace'
@@ -25,19 +24,33 @@ import { ALL_DOMAINS_KEY } from './hooks/useSchemaStudio'
 import { useToast } from './hooks/useToast'
 import { useTheme } from './hooks/useTheme'
 import { useHeartbeat } from './hooks/useHeartbeat'
-import { clone } from './schema'
 import { api } from './lib/api'
 import './App.css'
 
-const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
-  { id: 'home',          label: 'Start Here',    icon: <IconZap /> },
-  { id: 'workspace',     label: 'Workspace',     icon: <IconTerminal /> },
-  { id: 'designer',     label: 'Designer',      icon: <IconSchema /> },
-  { id: 'dashboard',    label: 'Dashboard',     icon: <IconGrid /> },
-  { id: 'cluster',      label: 'Cluster',       icon: <IconShield /> },
-  { id: 'time-explorer', label: 'Time Explorer', icon: <IconTimeline /> },
-  { id: 'fixtures',      label: 'Fixtures',      icon: <IconDownload /> },
-  { id: 'recovery',      label: 'Recovery',      icon: <IconDownload /> },
+const GROUPS: GroupDef[] = [
+  { kind: 'standalone', id: 'home', label: 'Start Here', icon: <IconZap /> },
+  {
+    kind: 'group', id: 'query', label: 'Query', icon: <IconTerminal />,
+    items: [
+      { id: 'workspace',     label: 'Workspace',     icon: <IconTerminal /> },
+      { id: 'time-explorer', label: 'Time Explorer', icon: <IconTimeline /> },
+    ],
+  },
+  {
+    kind: 'group', id: 'schema', label: 'Schema', icon: <IconSchema />,
+    items: [
+      { id: 'designer',  label: 'Designer',  icon: <IconSchema /> },
+      { id: 'fixtures',  label: 'Fixtures',  icon: <IconDownload /> },
+    ],
+  },
+  {
+    kind: 'group', id: 'ops', label: 'Ops', icon: <IconGrid />,
+    items: [
+      { id: 'dashboard', label: 'Dashboard', icon: <IconGrid /> },
+      { id: 'cluster',   label: 'Cluster',   icon: <IconShield /> },
+      { id: 'recovery',  label: 'Recovery',  icon: <IconRefresh /> },
+    ],
+  },
 ]
 
 const QUERY_HISTORY_KEY = 'asql_query_history'
@@ -243,13 +256,16 @@ function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab, designerView, isAllDomains, model.domain, model.tables.length])
 
-  const tabsWithBadges = TABS.map((t) => ({
-    ...t,
-    badge:
-      t.id === 'designer' && diffOperations.length > 0
-        ? diffOperations.length
-        : undefined,
-  }))
+  const groups: GroupDef[] = GROUPS.map((g) => {
+    if (g.kind === 'standalone') return g
+    return {
+      ...g,
+      items: g.items.map((item) => ({
+        ...item,
+        badge: item.id === 'designer' && diffOperations.length > 0 ? diffOperations.length : undefined,
+      })),
+    }
+  })
 
   const tableCountInScope = isAllDomains
     ? (allDomainsModel?.domains.reduce((n, d) => n + d.tables.length, 0) ?? 0)
@@ -318,7 +334,7 @@ function App() {
         )}
 
         <div className="main-area">
-          <TabBar tabs={tabsWithBadges} active={activeTab} onChange={setActiveTab} />
+          <TabBar groups={groups} active={activeTab} onChange={setActiveTab} />
 
           <div className="main-content">
             {activeTab === 'home' && (
@@ -360,19 +376,19 @@ function App() {
                     className={`designer-sub-btn ${designerView === 'canvas' ? 'active' : ''}`}
                     onClick={() => setDesignerView('canvas')}
                   >
-                    Canvas
+                    Builder
                   </button>
                   <button
                     className={`designer-sub-btn ${designerView === 'ddl' ? 'active' : ''}`}
                     onClick={() => setDesignerView('ddl')}
                   >
-                    DDL
+                    SQL Details
                   </button>
                   <button
                     className={`designer-sub-btn ${designerView === 'diff' ? 'active' : ''}`}
                     onClick={() => setDesignerView('diff')}
                   >
-                    Diff
+                    Change Review
                     {diffOperations.length > 0 && (
                       <span className="tab-badge" style={{ marginLeft: 6 }}>
                         {diffOperations.length}
@@ -397,57 +413,33 @@ function App() {
                 ) : (
                 <>
                 {designerView === 'canvas' && (
-                  <div className="designer-layout">
-                    <div className="designer-canvas">
-                      <ERDiagram
-                        model={model}
-                        selectedTable={selectedTable}
-                        onSelectTable={(i) => {
-                          setSelectedTable(i)
-                          setSelectedColumn(0)
-                        }}
-                        tableCounts={designerTableCounts}
-                        onAddColumn={(tableName) => {
-                          const idx = model.tables.findIndex((t) => t.name === tableName)
-                          if (idx !== -1) { setSelectedTable(idx); setSelectedColumn(0) }
-                        }}
-                        onCreateFK={(fromTable, fromCol, toTable, toCol) => {
-                          const tableIdx = model.tables.findIndex((t) => t.name === fromTable)
-                          if (tableIdx < 0) return
-                          const colIdx = model.tables[tableIdx].columns.findIndex((c) => c.name === fromCol)
-                          if (colIdx < 0) return
-                          setModel((prev) => {
-                            const next = clone(prev)
-                            next.tables[tableIdx].columns[colIdx] = {
-                              ...next.tables[tableIdx].columns[colIdx],
-                              references: { table: toTable, column: toCol },
-                            }
-                            return next
-                          })
-                        }}
-                      />
-                    </div>
-                    <div className="designer-editor">
-                      <ColumnEditor
-                        model={model}
-                        setModel={setModel}
-                        selectedTable={selectedTable}
-                        selectedColumn={selectedColumn}
-                        setSelectedColumn={setSelectedColumn}
-                        activeTable={activeTable}
-                        activeColumn={activeColumn}
-                        updateTable={updateTable}
-                        updateColumn={updateColumn}
-                      />
-                      <div className="designer-editor-divider" />
-                      <IndexEditor
-                        activeTable={activeTable}
-                        updateTable={updateTable}
-                        selectedIndex={selectedIndex}
-                        setSelectedIndex={setSelectedIndex}
-                      />
-                    </div>
-                  </div>
+                  <DesignerWorkbench
+                    model={model}
+                    setModel={setModel}
+                    selectedTable={selectedTable}
+                    setSelectedTable={setSelectedTable}
+                    selectedColumn={selectedColumn}
+                    setSelectedColumn={setSelectedColumn}
+                    selectedIndex={selectedIndex}
+                    setSelectedIndex={setSelectedIndex}
+                    activeTable={activeTable}
+                    activeColumn={activeColumn}
+                    updateTable={updateTable}
+                    updateColumn={updateColumn}
+                    designerTableCounts={designerTableCounts}
+                    ddlStatements={ddlStatements}
+                    statementStates={statementStates}
+                    diffSummary={diffSummary}
+                    diffSafe={diffSafe}
+                    diffOperations={diffOperations}
+                    diffWarnings={diffWarnings}
+                    onGenerateDDL={onGenerateDDL}
+                    onPreviewDiff={onPreviewDiff}
+                    onApplySafeDiff={onApplySafeDiff}
+                    onExecuteAll={onExecuteAll}
+                    onOpenDDL={() => setDesignerView('ddl')}
+                    onOpenDiff={() => setDesignerView('diff')}
+                  />
                 )}
 
                 {designerView === 'ddl' && (
