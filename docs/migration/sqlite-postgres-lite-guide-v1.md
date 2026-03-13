@@ -136,6 +136,14 @@ ALTER TABLE users ADD COLUMN email TEXT;
 COMMIT;
 ```
 
+Or, when existing rows must be backfilled during the same online-safe change:
+
+```sql
+BEGIN DOMAIN app;
+ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'planned' NOT NULL;
+COMMIT;
+```
+
 Rollback (for the same window):
 
 ```sql
@@ -144,8 +152,11 @@ UPDATE users SET email = NULL;
 COMMIT;
 ```
 
+For additive columns introduced with a literal default, keep the rollback story explicit. Existing rows are deterministically backfilled during the forward migration, so the rollback script must account for that state transition instead of assuming a metadata-only change.
+
 Notes:
 - Prefer additive schema changes first (`ADD COLUMN`) and postpone destructive changes.
+- Current online-safe `ADD COLUMN` support covers plain additive columns and additive columns with literal `DEFAULT` plus `NOT NULL` backfill. Non-literal defaults remain intentionally rejected.
 - Keep rollback scripts deterministic and idempotency-aware for the migration window.
 - If rollback cannot be guaranteed at SQL level, require WAL backup restore rollback as primary path.
 - If the migration changes `CREATE ENTITY` boundaries or `VERSIONED FOREIGN KEY` definitions, treat it as a historical-semantics review, not just a SQL review.
@@ -165,6 +176,7 @@ Suggested commands:
 ```bash
 go test ./test/integration -run TestReplayToLSNAndTimeTravelQueries -v
 go test ./test/integration -run TestBackupWipeRestorePreservesQueryParity -v
+go test ./test/integration -run TestSchemaEvolutionAddColumnDefaultReplayRestartParity -v
 ```
 
 Promotion rule:

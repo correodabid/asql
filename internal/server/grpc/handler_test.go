@@ -105,6 +105,26 @@ func TestASQLServiceBlackBox(t *testing.T) {
 		t.Fatalf("unexpected table in snapshot: %s", schemaSnapshot.Domains[0].Tables[0].Name)
 	}
 
+	migrationPreflight := new(MigrationPreflightResponse)
+	if err := connection.Invoke(ctx, "/asql.v1.ASQLService/MigrationPreflight", &MigrationPreflightRequest{
+		Domain:     "accounts",
+		ForwardSQL: []string{"ALTER TABLE users ADD COLUMN status TEXT"},
+	}, migrationPreflight); err != nil {
+		t.Fatalf("migration preflight invoke: %v", err)
+	}
+	if migrationPreflight.Status != "PREFLIGHT" {
+		t.Fatalf("unexpected migration preflight status: %s", migrationPreflight.Status)
+	}
+	if !migrationPreflight.AutoRollback {
+		t.Fatalf("expected auto rollback in migration preflight, got %+v", migrationPreflight)
+	}
+	if !migrationPreflight.RollbackSafe || !migrationPreflight.RollbackChecked {
+		t.Fatalf("expected rollback-safe generated plan, got %+v", migrationPreflight)
+	}
+	if len(migrationPreflight.RollbackSQL) != 1 || migrationPreflight.RollbackSQL[0] != "ALTER TABLE users DROP COLUMN status" {
+		t.Fatalf("unexpected rollback sql: %+v", migrationPreflight.RollbackSQL)
+	}
+
 	replayResp := new(ReplayToLSNResponse)
 	if err := connection.Invoke(ctx, "/asql.v1.ASQLService/ReplayToLSN", &ReplayToLSNRequest{LSN: 4}, replayResp); err != nil {
 		t.Fatalf("replay invoke: %v", err)

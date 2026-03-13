@@ -296,9 +296,6 @@ func parseAlterTable(sql string) (ast.Statement, error) {
 	if len(parts) < 2 {
 		return nil, fmt.Errorf("%w: ADD COLUMN requires name and type", errInvalidSQL)
 	}
-	if len(parts) > 2 {
-		return nil, fmt.Errorf("%w: ADD COLUMN constraints are not supported in online-safe mode", errInvalidSQL)
-	}
 
 	columnName := canonicalIdentifier(parts[0])
 	if columnName == "" {
@@ -310,13 +307,57 @@ func parseAlterTable(sql string) (ast.Statement, error) {
 		return nil, err
 	}
 
+	column := ast.ColumnDefinition{
+		Name: columnName,
+		Type: dataType,
+	}
+
+	if err := parseOnlineSafeAddColumnSuffix(parts[2:], &column); err != nil {
+		return nil, err
+	}
+
 	return ast.AlterTableAddColumnStatement{
 		TableName: table,
-		Column: ast.ColumnDefinition{
-			Name: columnName,
-			Type: dataType,
-		},
+		Column:    column,
 	}, nil
+}
+
+func parseOnlineSafeAddColumnSuffix(suffix []string, column *ast.ColumnDefinition) error {
+	if column == nil || len(suffix) == 0 {
+		return nil
+	}
+
+	for index := 0; index < len(suffix); {
+		token := strings.ToUpper(suffix[index])
+		switch token {
+		case "DEFAULT":
+			if index+1 >= len(suffix) {
+				return fmt.Errorf("%w: DEFAULT requires a value", errInvalidSQL)
+			}
+			defaultToken := strings.ToUpper(suffix[index+1])
+			switch defaultToken {
+			case "AUTOINCREMENT", "UUID_V7":
+				return fmt.Errorf("%w: online-safe ADD COLUMN supports only literal DEFAULT values", errInvalidSQL)
+			default:
+				lit, err := parseLiteral(suffix[index+1])
+				if err != nil {
+					return fmt.Errorf("%w: invalid DEFAULT value %q", errInvalidSQL, suffix[index+1])
+				}
+				column.DefaultValue = &ast.DefaultExpr{Kind: ast.DefaultLiteral, Value: lit}
+			}
+			index += 2
+		case "NOT":
+			if index+1 >= len(suffix) || strings.ToUpper(suffix[index+1]) != "NULL" {
+				return fmt.Errorf("%w: expected NOT NULL", errInvalidSQL)
+			}
+			column.NotNull = true
+			index += 2
+		default:
+			return fmt.Errorf("%w: unsupported ADD COLUMN constraint %q in online-safe mode", errInvalidSQL, suffix[index])
+		}
+	}
+
+	return nil
 }
 
 func parseDropTable(sql string, ifExists bool) (ast.Statement, error) {

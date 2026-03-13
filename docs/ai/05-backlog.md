@@ -411,15 +411,15 @@ Acceptance gates (must pass before closing Epic Z)
 
 ## Epic AA — Schema operations and compliance depth (Phase 5)
 
-- [ ] Expand online-safe schema evolution beyond the current baseline.
-- [ ] Add migration preflight checks as first-class commands.
-- [ ] Add rollback planning/reporting for schema changes.
-- [ ] Add audit policy, retention, and export/report workflows.
-- [ ] Add stronger operational access-control controls for admin APIs.
+- [x] Expand online-safe schema evolution beyond the current baseline.
+- [x] Add migration preflight checks as first-class commands.
+- [x] Add rollback planning/reporting for schema changes.
+- [x] Add audit policy, retention, and export/report workflows.
+- [x] Add stronger operational access-control controls for admin APIs.
 
 Acceptance gates (must pass before closing Epic AA)
-- [ ] Schema evolution supports deterministic rollback and replay parity.
-- [ ] Audit outputs are usable for external evidence workflows.
+- [x] Schema evolution supports deterministic rollback and replay parity.
+- [x] Audit outputs are usable for external evidence workflows.
 
 ## Epic AB — Performance after correctness (Phase 6)
 

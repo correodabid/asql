@@ -659,6 +659,45 @@ func (service *service) SchemaSnapshot(_ context.Context, request *SchemaSnapsho
 	return &SchemaSnapshotResponse{Status: "SNAPSHOT", Domains: domains}, nil
 }
 
+func (service *service) MigrationPreflight(_ context.Context, request *MigrationPreflightRequest) (*MigrationPreflightResponse, error) {
+	if request == nil || strings.TrimSpace(request.Domain) == "" {
+		service.auditFailure("admin.migration_preflight", "domain is required")
+		return nil, status.Error(codes.InvalidArgument, "domain is required")
+	}
+	if len(request.ForwardSQL) == 0 {
+		service.auditFailure("admin.migration_preflight", "forward_sql is required", slog.String("domain", request.Domain))
+		return nil, status.Error(codes.InvalidArgument, "forward_sql is required")
+	}
+
+	report, err := service.engine.PreflightMigrationPlan(request.Domain, request.ForwardSQL, request.RollbackSQL)
+	if err != nil {
+		service.auditFailure("admin.migration_preflight", err.Error(), slog.String("domain", request.Domain))
+		return nil, status.Error(codes.Internal, err.Error())
+	}
+
+	service.auditSuccess(
+		"admin.migration_preflight",
+		slog.String("domain", report.Domain),
+		slog.Int("forward_count", report.ForwardCount),
+		slog.Int("rollback_count", report.RollbackCount),
+		slog.Bool("rollback_safe", report.RollbackSafe),
+		slog.Bool("auto_rollback", report.AutoRollback),
+	)
+
+	return &MigrationPreflightResponse{
+		Status:          "PREFLIGHT",
+		Domain:          report.Domain,
+		ForwardCount:    report.ForwardCount,
+		RollbackCount:   report.RollbackCount,
+		RollbackSafe:    report.RollbackSafe,
+		ForwardAccepted: report.ForwardAccepted,
+		RollbackChecked: report.RollbackChecked,
+		AutoRollback:    report.AutoRollback,
+		RollbackSQL:     append([]string(nil), report.RollbackSQL...),
+		Issues:          append([]string(nil), report.Issues...),
+	}, nil
+}
+
 func (service *service) Query(ctx context.Context, request *QueryRequest) (*QueryResponse, error) {
 	if strings.TrimSpace(request.SQL) == "" {
 		service.auditFailure("query.execute", "sql is required")

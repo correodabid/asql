@@ -407,6 +407,100 @@ func TestValidateMigrationPlanDetectsNonRestoringRollback(t *testing.T) {
 	}
 }
 
+func TestPreflightMigrationPlanAutoGeneratesRollbackForAddColumn(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "migration-preflight-add-column.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	report, err := engine.PreflightMigrationPlan("accounts", []string{"ALTER TABLE users ADD COLUMN status TEXT"}, nil)
+	if err != nil {
+		t.Fatalf("preflight migration plan: %v", err)
+	}
+	if !report.AutoRollback {
+		t.Fatalf("expected auto rollback enabled, got %+v", report)
+	}
+	if len(report.RollbackSQL) != 1 || report.RollbackSQL[0] != "ALTER TABLE users DROP COLUMN status" {
+		t.Fatalf("unexpected rollback sql: %+v", report.RollbackSQL)
+	}
+	if !report.RollbackChecked || !report.RollbackSafe {
+		t.Fatalf("expected rollback-checked and rollback-safe report, got %+v", report)
+	}
+	if len(report.Issues) != 0 {
+		t.Fatalf("expected no issues, got %+v", report.Issues)
+	}
+}
+
+func TestPreflightMigrationPlanFlagsIrreversibleStatements(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "migration-preflight-irreversible.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	report, err := engine.PreflightMigrationPlan("accounts", []string{"UPDATE users SET email = 'two@asql.dev' WHERE id = 1"}, nil)
+	if err != nil {
+		t.Fatalf("preflight migration plan: %v", err)
+	}
+	if report.AutoRollback {
+		t.Fatalf("expected no auto rollback for UPDATE, got %+v", report)
+	}
+	if report.RollbackSafe {
+		t.Fatalf("expected rollback unsafe for UPDATE without explicit rollback, got %+v", report)
+	}
+	found := false
+	for _, issue := range report.Issues {
+		if strings.Contains(issue, "UPDATE requires explicit rollback SQL") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected explicit rollback issue, got %+v", report.Issues)
+	}
+}
+
 func TestExecuteRollbackToDropsNestedSavepoints(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "savepoint-nested-drop.wal")
@@ -1229,6 +1323,85 @@ func TestAlterTableAddColumnRejectsDuplicateColumn(t *testing.T) {
 	}
 	if _, err := engine.Execute(ctx, session, "COMMIT"); err == nil {
 		t.Fatal("expected duplicate column error at commit")
+	}
+}
+
+func TestAlterTableAddColumnBackfillsLiteralDefaultAndNotNull(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "alter-table-add-column-default-not-null.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT)",
+		"INSERT INTO users (id) VALUES (1)",
+		"COMMIT",
+		"BEGIN DOMAIN accounts",
+		"ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'planned' NOT NULL",
+		"INSERT INTO users (id) VALUES (2)",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	result, err := engine.Query(ctx, "SELECT id, status FROM users ORDER BY id ASC", []string{"accounts"})
+	if err != nil {
+		t.Fatalf("select after add column with default: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("unexpected row count: got %d want 2", len(result.Rows))
+	}
+	for index, row := range result.Rows {
+		if row["status"].Kind != ast.LiteralString || row["status"].StringValue != "planned" {
+			t.Fatalf("unexpected status at row %d: %+v", index, row["status"])
+		}
+	}
+}
+
+func TestAlterTableAddColumnNotNullRequiresBackfillDefault(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "alter-table-add-column-not-null-requires-default.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT)",
+		"INSERT INTO users (id) VALUES (1)",
+		"COMMIT",
+		"BEGIN DOMAIN accounts",
+		"ALTER TABLE users ADD COLUMN status TEXT NOT NULL",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	if _, err := engine.Execute(ctx, session, "COMMIT"); err == nil {
+		t.Fatal("expected add column not null without default to fail on non-empty table")
 	}
 }
 

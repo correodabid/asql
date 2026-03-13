@@ -92,7 +92,7 @@ func TestSchemaEvolutionMigrationReplayRestartParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("replayed query: %v", err)
 	}
-	assertRowParity(t, baselineResult.Rows, replayedResult.Rows)
+	assertRowParityForColumns(t, baselineResult.Rows, replayedResult.Rows, "id", "email")
 
 	if err := store.Close(); err != nil {
 		t.Fatalf("close store before restart: %v", err)
@@ -113,10 +113,10 @@ func TestSchemaEvolutionMigrationReplayRestartParity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("restarted query: %v", err)
 	}
-	assertRowParity(t, baselineResult.Rows, restartedResult.Rows)
+	assertRowParityForColumns(t, baselineResult.Rows, restartedResult.Rows, "id", "email")
 }
 
-func assertRowParity(t *testing.T, expected []map[string]ast.Literal, actual []map[string]ast.Literal) {
+func assertRowParityForColumns(t *testing.T, expected []map[string]ast.Literal, actual []map[string]ast.Literal, columns ...string) {
 	t.Helper()
 
 	if len(expected) != len(actual) {
@@ -126,23 +126,83 @@ func assertRowParity(t *testing.T, expected []map[string]ast.Literal, actual []m
 	for index := range expected {
 		expectedRow := expected[index]
 		actualRow := actual[index]
-
-		expectedID, expectedOK := expectedRow["id"]
-		actualID, actualOK := actualRow["id"]
-		if !expectedOK || !actualOK {
-			t.Fatalf("missing id column at row %d: expected=%+v actual=%+v", index, expectedRow, actualRow)
-		}
-		if expectedID.Kind != actualID.Kind || expectedID.NumberValue != actualID.NumberValue {
-			t.Fatalf("id mismatch at row %d: expected=%+v actual=%+v", index, expectedID, actualID)
-		}
-
-		expectedEmail, expectedEmailOK := expectedRow["email"]
-		actualEmail, actualEmailOK := actualRow["email"]
-		if !expectedEmailOK || !actualEmailOK {
-			t.Fatalf("missing email column at row %d: expected=%+v actual=%+v", index, expectedRow, actualRow)
-		}
-		if expectedEmail.Kind != actualEmail.Kind || expectedEmail.StringValue != actualEmail.StringValue {
-			t.Fatalf("email mismatch at row %d: expected=%+v actual=%+v", index, expectedEmail, actualEmail)
+		for _, column := range columns {
+			expectedValue, expectedOK := expectedRow[column]
+			actualValue, actualOK := actualRow[column]
+			if !expectedOK || !actualOK {
+				t.Fatalf("missing %s column at row %d: expected=%+v actual=%+v", column, index, expectedRow, actualRow)
+			}
+			if expectedValue != actualValue {
+				t.Fatalf("%s mismatch at row %d: expected=%+v actual=%+v", column, index, expectedValue, actualValue)
+			}
 		}
 	}
+}
+
+func TestSchemaEvolutionAddColumnDefaultReplayRestartParity(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "schema-evolution-add-column-default-parity.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+
+	engine, err := executor.New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT)",
+		"INSERT INTO users (id) VALUES (1)",
+		"COMMIT",
+		"BEGIN DOMAIN accounts",
+		"ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'planned' NOT NULL",
+		"INSERT INTO users (id) VALUES (2)",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	finalLSN := store.LastLSN()
+	baselineResult, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, status FROM users ORDER BY id ASC", []string{"accounts"}, finalLSN)
+	if err != nil {
+		t.Fatalf("baseline query: %v", err)
+	}
+	if len(baselineResult.Rows) != 2 {
+		t.Fatalf("unexpected baseline row count: got %d want 2", len(baselineResult.Rows))
+	}
+
+	if err := engine.ReplayToLSN(ctx, finalLSN); err != nil {
+		t.Fatalf("replay to final lsn: %v", err)
+	}
+	replayedResult, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, status FROM users ORDER BY id ASC", []string{"accounts"}, finalLSN)
+	if err != nil {
+		t.Fatalf("replayed query: %v", err)
+	}
+	assertRowParityForColumns(t, baselineResult.Rows, replayedResult.Rows, "id", "status")
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("close store before restart: %v", err)
+	}
+	reopenedStore, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("reopen file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = reopenedStore.Close() })
+
+	restartedEngine, err := executor.New(ctx, reopenedStore, "")
+	if err != nil {
+		t.Fatalf("new restarted engine: %v", err)
+	}
+	restartedResult, err := restartedEngine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, status FROM users ORDER BY id ASC", []string{"accounts"}, reopenedStore.LastLSN())
+	if err != nil {
+		t.Fatalf("restarted query: %v", err)
+	}
+	assertRowParityForColumns(t, baselineResult.Rows, restartedResult.Rows, "id", "status")
 }

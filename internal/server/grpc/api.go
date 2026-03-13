@@ -175,6 +175,25 @@ type SchemaSnapshotResponse struct {
 	Domains []SchemaSnapshotDomain `json:"domains"`
 }
 
+type MigrationPreflightRequest struct {
+	Domain      string   `json:"domain"`
+	ForwardSQL  []string `json:"forward_sql"`
+	RollbackSQL []string `json:"rollback_sql,omitempty"`
+}
+
+type MigrationPreflightResponse struct {
+	Status          string   `json:"status"`
+	Domain          string   `json:"domain"`
+	ForwardCount    int      `json:"forward_count"`
+	RollbackCount   int      `json:"rollback_count"`
+	RollbackSafe    bool     `json:"rollback_safe"`
+	ForwardAccepted bool     `json:"forward_accepted"`
+	RollbackChecked bool     `json:"rollback_checked"`
+	AutoRollback    bool     `json:"auto_rollback"`
+	RollbackSQL     []string `json:"rollback_sql,omitempty"`
+	Issues          []string `json:"issues,omitempty"`
+}
+
 type RowHistoryRequest struct {
 	SQL     string   `json:"sql"`
 	Domains []string `json:"domains,omitempty"`
@@ -350,6 +369,7 @@ type ASQLServiceServer interface {
 	ReadRoutingStats(context.Context, *ReadRoutingStatsRequest) (*ReadRoutingStatsResponse, error)
 	LeadershipState(context.Context, *LeadershipStateRequest) (*LeadershipStateResponse, error)
 	SchemaSnapshot(context.Context, *SchemaSnapshotRequest) (*SchemaSnapshotResponse, error)
+	MigrationPreflight(context.Context, *MigrationPreflightRequest) (*MigrationPreflightResponse, error)
 	RowHistory(context.Context, *RowHistoryRequest) (*RowHistoryResponse, error)
 	EntityVersionHistory(context.Context, *EntityVersionHistoryRequest) (*EntityVersionHistoryResponse, error)
 	EngineStats(context.Context, *EngineStatsRequest) (*EngineStatsResponse, error)
@@ -376,6 +396,7 @@ func registerASQLServiceServer(server *grpcgo.Server, implementation ASQLService
 			{MethodName: "ReadRoutingStats", Handler: readRoutingStatsHandler},
 			{MethodName: "LeadershipState", Handler: leadershipStateHandler},
 			{MethodName: "SchemaSnapshot", Handler: schemaSnapshotHandler},
+			{MethodName: "MigrationPreflight", Handler: migrationPreflightHandler},
 			{MethodName: "RowHistory", Handler: rowHistoryHandler},
 			{MethodName: "EntityVersionHistory", Handler: entityVersionHistoryHandler},
 			{MethodName: "EngineStats", Handler: engineStatsHandler},
@@ -615,6 +636,24 @@ func schemaSnapshotHandler(service interface{}, ctx context.Context, decode func
 	info := &grpcgo.UnaryServerInfo{Server: service, FullMethod: "/asql.v1.ASQLService/SchemaSnapshot"}
 	handler := func(innerCtx context.Context, innerReq interface{}) (interface{}, error) {
 		return service.(ASQLServiceServer).SchemaSnapshot(innerCtx, innerReq.(*SchemaSnapshotRequest))
+	}
+
+	return interceptor(ctx, request, info, handler)
+}
+
+func migrationPreflightHandler(service interface{}, ctx context.Context, decode func(interface{}) error, interceptor grpcgo.UnaryServerInterceptor) (interface{}, error) {
+	request := new(MigrationPreflightRequest)
+	if err := decode(request); err != nil {
+		return nil, err
+	}
+
+	if interceptor == nil {
+		return service.(ASQLServiceServer).MigrationPreflight(ctx, request)
+	}
+
+	info := &grpcgo.UnaryServerInfo{Server: service, FullMethod: "/asql.v1.ASQLService/MigrationPreflight"}
+	handler := func(innerCtx context.Context, innerReq interface{}) (interface{}, error) {
+		return service.(ASQLServiceServer).MigrationPreflight(innerCtx, innerReq.(*MigrationPreflightRequest))
 	}
 
 	return interceptor(ctx, request, info, handler)

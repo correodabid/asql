@@ -1,7 +1,7 @@
 {
   "version": "v1",
   "name": "pharma-manufacturing-demo",
-  "description": "Deterministic multi-domain pharma manufacturing scenario covering master recipes, inventory lots, batch execution, deviations, signatures, entities, versioned foreign keys, and temporal inspection.",
+  "description": "Deterministic multi-domain pharma manufacturing scenario covering ISA-88 recipe hierarchy, ISA-95 physical model, compliance/eBR review records, entities, versioned foreign keys, and temporal inspection.",
   "steps": [
     {
       "name": "recipe schema",
@@ -9,9 +9,26 @@
       "domains": ["recipe"],
       "statements": [
         "CREATE TABLE recipe.master_recipes (id TEXT PRIMARY KEY, recipe_code TEXT UNIQUE, title TEXT NOT NULL, status TEXT NOT NULL, target_batch_size_kg INT NOT NULL DEFAULT 0)",
-        "CREATE TABLE recipe.recipe_operations (id TEXT PRIMARY KEY, recipe_id TEXT NOT NULL REFERENCES master_recipes(id), operation_code TEXT NOT NULL, instruction_text TEXT NOT NULL, sequence_no INT NOT NULL DEFAULT 0)",
-        "CREATE TABLE recipe.recipe_parameters (id TEXT PRIMARY KEY, recipe_id TEXT NOT NULL REFERENCES master_recipes(id), parameter_name TEXT NOT NULL, target_value TEXT NOT NULL)",
-        "CREATE ENTITY master_recipe_entity (ROOT master_recipes, INCLUDES recipe_operations, recipe_parameters)"
+        "CREATE TABLE recipe.recipe_unit_procedures (id TEXT PRIMARY KEY, recipe_id TEXT NOT NULL REFERENCES master_recipes(id), unit_procedure_code TEXT NOT NULL, title TEXT NOT NULL, sequence_no INT NOT NULL DEFAULT 0)",
+        "CREATE TABLE recipe.recipe_operations (id TEXT PRIMARY KEY, recipe_id TEXT NOT NULL REFERENCES master_recipes(id), unit_procedure_code TEXT NOT NULL, operation_code TEXT NOT NULL, instruction_text TEXT NOT NULL, sequence_no INT NOT NULL DEFAULT 0)",
+        "CREATE TABLE recipe.recipe_phases (id TEXT PRIMARY KEY, recipe_id TEXT NOT NULL REFERENCES master_recipes(id), unit_procedure_code TEXT NOT NULL, operation_code TEXT NOT NULL, phase_code TEXT NOT NULL, instruction_text TEXT NOT NULL, sequence_no INT NOT NULL DEFAULT 0)",
+        "CREATE TABLE recipe.recipe_parameters (id TEXT PRIMARY KEY, recipe_id TEXT NOT NULL REFERENCES master_recipes(id), applies_to_phase_code TEXT NOT NULL DEFAULT '', parameter_name TEXT NOT NULL, target_value TEXT NOT NULL)",
+        "CREATE TABLE recipe.phase_blocks (id TEXT PRIMARY KEY, phase_id TEXT NOT NULL REFERENCES recipe_phases(id), block_code TEXT NOT NULL, title TEXT NOT NULL, sequence_no INT NOT NULL DEFAULT 0, layout JSON NOT NULL DEFAULT '{}')",
+        "CREATE TABLE recipe.block_components (id TEXT PRIMARY KEY, block_id TEXT NOT NULL REFERENCES phase_blocks(id), component_code TEXT NOT NULL, component_type TEXT NOT NULL, definition JSON NOT NULL DEFAULT '{}', sequence_no INT NOT NULL DEFAULT 0, layout JSON NOT NULL DEFAULT '{}')",
+        "CREATE ENTITY master_recipe_entity (ROOT master_recipes, INCLUDES recipe_unit_procedures, recipe_operations, recipe_phases, recipe_parameters, phase_blocks, block_components)"
+      ]
+    },
+    {
+      "name": "operations schema",
+      "mode": "domain",
+      "domains": ["operations"],
+      "statements": [
+        "CREATE TABLE operations.sites (id TEXT PRIMARY KEY, site_code TEXT UNIQUE, title TEXT NOT NULL, gxp_status TEXT NOT NULL)",
+        "CREATE TABLE operations.areas (id TEXT PRIMARY KEY, site_id TEXT NOT NULL REFERENCES sites(id), area_code TEXT NOT NULL, title TEXT NOT NULL, isa95_level TEXT NOT NULL)",
+        "CREATE TABLE operations.process_cells (id TEXT PRIMARY KEY, area_id TEXT NOT NULL REFERENCES areas(id), cell_code TEXT NOT NULL, title TEXT NOT NULL)",
+        "CREATE TABLE operations.units (id TEXT PRIMARY KEY, process_cell_id TEXT NOT NULL REFERENCES process_cells(id), unit_code TEXT NOT NULL, title TEXT NOT NULL, unit_class TEXT NOT NULL)",
+        "CREATE TABLE operations.equipment_assets (id TEXT PRIMARY KEY, unit_id TEXT NOT NULL REFERENCES units(id), equipment_code TEXT NOT NULL, title TEXT NOT NULL, asset_role TEXT NOT NULL, calibration_state TEXT NOT NULL)",
+        "CREATE ENTITY manufacturing_model_entity (ROOT sites, INCLUDES areas, process_cells)"
       ]
     },
     {
@@ -27,21 +44,31 @@
     {
       "name": "execution schema",
       "mode": "cross",
-      "domains": ["execution", "recipe", "inventory"],
+      "domains": ["execution", "recipe", "inventory", "operations"],
       "statements": [
-        "CREATE TABLE execution.batch_orders (id TEXT PRIMARY KEY, batch_number TEXT UNIQUE, recipe_id TEXT NOT NULL, recipe_version INT, planned_quantity_kg INT NOT NULL DEFAULT 0, status TEXT NOT NULL, opened_by TEXT NOT NULL, VERSIONED FOREIGN KEY (recipe_id) REFERENCES recipe.master_recipes(id) AS OF recipe_version)",
-        "CREATE TABLE execution.batch_steps (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES batch_orders(id), operation_code TEXT NOT NULL, status TEXT NOT NULL, recorded_by TEXT NOT NULL, note TEXT NOT NULL)",
+        "CREATE TABLE execution.batch_orders (id TEXT PRIMARY KEY, batch_number TEXT UNIQUE, recipe_id TEXT NOT NULL, recipe_version INT, unit_id TEXT NOT NULL, unit_lsn INT, planned_quantity_kg INT NOT NULL DEFAULT 0, status TEXT NOT NULL, ebr_status TEXT NOT NULL, opened_by TEXT NOT NULL, VERSIONED FOREIGN KEY (recipe_id) REFERENCES recipe.master_recipes(id) AS OF recipe_version, VERSIONED FOREIGN KEY (unit_id) REFERENCES operations.units(id) AS OF unit_lsn)",
+        "CREATE TABLE execution.batch_steps (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES batch_orders(id), unit_procedure_code TEXT NOT NULL, operation_code TEXT NOT NULL, status TEXT NOT NULL, recorded_by TEXT NOT NULL, note TEXT NOT NULL)",
+        "CREATE TABLE execution.batch_phase_records (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES batch_orders(id), unit_procedure_code TEXT NOT NULL, operation_code TEXT NOT NULL, phase_code TEXT NOT NULL, phase_state TEXT NOT NULL, equipment_id TEXT NOT NULL, equipment_lsn INT, recorded_by TEXT NOT NULL, note TEXT NOT NULL, VERSIONED FOREIGN KEY (equipment_id) REFERENCES operations.equipment_assets(id) AS OF equipment_lsn)",
         "CREATE TABLE execution.batch_material_links (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES batch_orders(id), lot_id TEXT NOT NULL, lot_version INT, material_role TEXT NOT NULL, consumed_grams INT NOT NULL DEFAULT 0, VERSIONED FOREIGN KEY (lot_id) REFERENCES inventory.material_lots(id) AS OF lot_version)",
-        "CREATE ENTITY batch_record_entity (ROOT batch_orders, INCLUDES batch_steps, batch_material_links)"
+        "CREATE TABLE execution.block_records (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES batch_orders(id), phase_record_id TEXT NOT NULL REFERENCES batch_phase_records(id), block_code TEXT NOT NULL, status TEXT NOT NULL, recorded_by TEXT NOT NULL, note TEXT NOT NULL DEFAULT '')",
+        "CREATE TABLE execution.component_records (id TEXT PRIMARY KEY, block_record_id TEXT NOT NULL REFERENCES block_records(id), component_code TEXT NOT NULL, value TEXT NOT NULL DEFAULT '', recorded_by TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT '')",
+        "CREATE ENTITY batch_record_entity (ROOT batch_orders, INCLUDES batch_steps, batch_phase_records, batch_material_links, block_records, component_records)"
       ]
     },
     {
       "name": "quality schema",
       "mode": "cross",
-      "domains": ["quality", "execution", "inventory"],
+      "domains": ["quality", "execution", "inventory", "operations"],
       "statements": [
-        "CREATE TABLE quality.deviations (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, batch_version INT, lot_id TEXT NOT NULL, lot_version INT, status TEXT NOT NULL, severity TEXT NOT NULL, summary TEXT NOT NULL, VERSIONED FOREIGN KEY (batch_id) REFERENCES execution.batch_orders(id) AS OF batch_version, VERSIONED FOREIGN KEY (lot_id) REFERENCES inventory.material_lots(id) AS OF lot_version)",
-        "CREATE TABLE quality.quality_reviews (id TEXT PRIMARY KEY, deviation_id TEXT NOT NULL REFERENCES deviations(id), decision TEXT NOT NULL, rationale TEXT NOT NULL)",
+        "CREATE TABLE quality.deviations (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, batch_version INT, phase_record_id TEXT NOT NULL, lot_id TEXT NOT NULL, lot_version INT, equipment_id TEXT NOT NULL, equipment_lsn INT, status TEXT NOT NULL, severity TEXT NOT NULL, summary TEXT NOT NULL, VERSIONED FOREIGN KEY (batch_id) REFERENCES execution.batch_orders(id) AS OF batch_version, VERSIONED FOREIGN KEY (lot_id) REFERENCES inventory.material_lots(id) AS OF lot_version, VERSIONED FOREIGN KEY (equipment_id) REFERENCES operations.equipment_assets(id) AS OF equipment_lsn)",
+        "CREATE TABLE quality.quality_reviews (id TEXT PRIMARY KEY, deviation_id TEXT NOT NULL REFERENCES deviations(id), review_stage TEXT NOT NULL, decision TEXT NOT NULL, rationale TEXT NOT NULL)"
+      ]
+    },
+    {
+      "name": "quality entity schema",
+      "mode": "domain",
+      "domains": ["quality"],
+      "statements": [
         "CREATE ENTITY deviation_entity (ROOT deviations, INCLUDES quality_reviews)"
       ]
     },
@@ -50,62 +77,166 @@
       "mode": "cross",
       "domains": ["compliance", "execution", "quality"],
       "statements": [
-        "CREATE TABLE compliance.batch_signatures (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, batch_version INT, step_code TEXT NOT NULL, meaning TEXT NOT NULL, signer_id TEXT NOT NULL, signer_role TEXT NOT NULL, reason TEXT NOT NULL, VERSIONED FOREIGN KEY (batch_id) REFERENCES execution.batch_orders(id) AS OF batch_version)",
-        "CREATE TABLE compliance.deviation_attestations (id TEXT PRIMARY KEY, deviation_id TEXT NOT NULL, deviation_version INT, meaning TEXT NOT NULL, signer_id TEXT NOT NULL, signer_role TEXT NOT NULL, reason TEXT NOT NULL, VERSIONED FOREIGN KEY (deviation_id) REFERENCES quality.deviations(id) AS OF deviation_version)"
+        "CREATE TABLE compliance.batch_signatures (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, batch_version INT, signature_scope TEXT NOT NULL, step_code TEXT NOT NULL, meaning TEXT NOT NULL, signer_id TEXT NOT NULL, signer_role TEXT NOT NULL, reason TEXT NOT NULL, VERSIONED FOREIGN KEY (batch_id) REFERENCES execution.batch_orders(id) AS OF batch_version)",
+        "CREATE TABLE compliance.deviation_attestations (id TEXT PRIMARY KEY, deviation_id TEXT NOT NULL, deviation_version INT, meaning TEXT NOT NULL, signer_id TEXT NOT NULL, signer_role TEXT NOT NULL, reason TEXT NOT NULL, VERSIONED FOREIGN KEY (deviation_id) REFERENCES quality.deviations(id) AS OF deviation_version)",
+        "CREATE TABLE compliance.ebr_reviews (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL, batch_version INT, review_stage TEXT NOT NULL, decision TEXT NOT NULL, reviewer_id TEXT NOT NULL, reviewer_role TEXT NOT NULL, summary TEXT NOT NULL, VERSIONED FOREIGN KEY (batch_id) REFERENCES execution.batch_orders(id) AS OF batch_version)"
       ]
     },
     {
-      "name": "seed recipe and lots",
-      "mode": "cross",
-      "domains": ["recipe", "inventory"],
+      "name": "seed master recipe",
+      "mode": "domain",
+      "domains": ["recipe"],
       "statements": [
         "INSERT INTO recipe.master_recipes (id, recipe_code, title, status, target_batch_size_kg) VALUES ('recipe-001', 'MR-IBU-200', 'Ibuprofen Suspension 200 mg/5mL', 'EFFECTIVE', 100)",
-        "INSERT INTO recipe.recipe_operations (id, recipe_id, operation_code, instruction_text, sequence_no) VALUES ('recipe-op-001', 'recipe-001', 'DISPENSE', 'Dispense verified materials to the pre-mix vessel', 10)",
-        "INSERT INTO recipe.recipe_operations (id, recipe_id, operation_code, instruction_text, sequence_no) VALUES ('recipe-op-002', 'recipe-001', 'MIX', 'Mix suspension until torque and appearance are within target', 20)",
-        "INSERT INTO recipe.recipe_operations (id, recipe_id, operation_code, instruction_text, sequence_no) VALUES ('recipe-op-003', 'recipe-001', 'FILL', 'Transfer bulk to filling line and reconcile yield', 30)",
-        "INSERT INTO recipe.recipe_parameters (id, recipe_id, parameter_name, target_value) VALUES ('recipe-param-001', 'recipe-001', 'mix_speed_rpm', '450')",
-        "INSERT INTO recipe.recipe_parameters (id, recipe_id, parameter_name, target_value) VALUES ('recipe-param-002', 'recipe-001', 'hold_time_min', '35')",
+        "INSERT INTO recipe.recipe_unit_procedures (id, recipe_id, unit_procedure_code, title, sequence_no) VALUES ('recipe-up-001', 'recipe-001', 'UP-DISPENSE', 'Dispense and verify materials', 10)",
+        "INSERT INTO recipe.recipe_unit_procedures (id, recipe_id, unit_procedure_code, title, sequence_no) VALUES ('recipe-up-002', 'recipe-001', 'UP-BLEND-FILL', 'Blend and fill suspension', 20)",
+        "INSERT INTO recipe.recipe_operations (id, recipe_id, unit_procedure_code, operation_code, instruction_text, sequence_no) VALUES ('recipe-op-001', 'recipe-001', 'UP-DISPENSE', 'DISPENSE', 'Dispense verified materials to the pre-mix vessel', 10)",
+        "INSERT INTO recipe.recipe_operations (id, recipe_id, unit_procedure_code, operation_code, instruction_text, sequence_no) VALUES ('recipe-op-002', 'recipe-001', 'UP-BLEND-FILL', 'MIX', 'Mix suspension until torque and appearance are within target', 20)",
+        "INSERT INTO recipe.recipe_operations (id, recipe_id, unit_procedure_code, operation_code, instruction_text, sequence_no) VALUES ('recipe-op-003', 'recipe-001', 'UP-BLEND-FILL', 'FILL', 'Transfer bulk to filling line and reconcile yield', 30)",
+        "INSERT INTO recipe.recipe_phases (id, recipe_id, unit_procedure_code, operation_code, phase_code, instruction_text, sequence_no) VALUES ('recipe-phase-001', 'recipe-001', 'UP-DISPENSE', 'DISPENSE', 'DISPENSE_VERIFY', 'Verify released lots and line clearance before charging', 11)",
+        "INSERT INTO recipe.recipe_phases (id, recipe_id, unit_procedure_code, operation_code, phase_code, instruction_text, sequence_no) VALUES ('recipe-phase-002', 'recipe-001', 'UP-BLEND-FILL', 'MIX', 'MIX_BLEND', 'Blend suspension at validated speed until uniformity target is met', 21)",
+        "INSERT INTO recipe.recipe_phases (id, recipe_id, unit_procedure_code, operation_code, phase_code, instruction_text, sequence_no) VALUES ('recipe-phase-003', 'recipe-001', 'UP-BLEND-FILL', 'FILL', 'FILL_RUN', 'Fill approved bulk and reconcile yield by line order', 31)",
+        "INSERT INTO recipe.recipe_parameters (id, recipe_id, applies_to_phase_code, parameter_name, target_value) VALUES ('recipe-param-001', 'recipe-001', 'MIX_BLEND', 'mix_speed_rpm', '450')",
+        "INSERT INTO recipe.recipe_parameters (id, recipe_id, applies_to_phase_code, parameter_name, target_value) VALUES ('recipe-param-002', 'recipe-001', 'MIX_BLEND', 'hold_time_min', '35')",
+
+        "INSERT INTO recipe.phase_blocks (id, phase_id, block_code, title, sequence_no, layout) VALUES ('block-001', 'recipe-phase-001', 'LINE_CLEARANCE', 'Line clearance verification', 10, '{\"row\":0,\"col\":0,\"colSpan\":12,\"rowSpan\":1}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-001', 'block-001', 'line_clear_check', 'checkbox', '{\"label\":\"Line clearance confirmed\",\"required\":true,\"helpText\":\"Verify area is clean and previous product removed\"}', 10, '{\"row\":0,\"col\":0,\"colSpan\":6}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-002', 'block-001', 'area_photo', 'image', '{\"label\":\"Area photo evidence\",\"required\":false,\"helpText\":\"Capture photo of clean area\"}', 20, '{\"row\":0,\"col\":6,\"colSpan\":6}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-003', 'block-001', 'operator_signature', 'signature', '{\"label\":\"Operator signature\",\"required\":true,\"helpText\":\"Sign to confirm line clearance\"}', 30, '{\"row\":1,\"col\":0,\"colSpan\":12}')",
+        "INSERT INTO recipe.phase_blocks (id, phase_id, block_code, title, sequence_no, layout) VALUES ('block-002', 'recipe-phase-001', 'LOT_VERIFICATION', 'Lot verification and weighing', 20, '{\"row\":1,\"col\":0,\"colSpan\":12,\"rowSpan\":1}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-004', 'block-002', 'api_lot_code', 'text_input', '{\"label\":\"API lot code\",\"required\":true,\"placeholder\":\"Scan or enter lot code\"}', 10, '{\"row\":0,\"col\":0,\"colSpan\":6}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-005', 'block-002', 'api_weight_grams', 'number_input', '{\"label\":\"API weight (g)\",\"required\":true,\"unit\":\"g\",\"validation\":{\"min\":1,\"max\":100000}}', 20, '{\"row\":0,\"col\":6,\"colSpan\":6}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-006', 'block-002', 'vehicle_lot_code', 'text_input', '{\"label\":\"Vehicle lot code\",\"required\":true,\"placeholder\":\"Scan or enter lot code\"}', 30, '{\"row\":1,\"col\":0,\"colSpan\":6}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-007', 'block-002', 'vehicle_weight_grams', 'number_input', '{\"label\":\"Vehicle weight (g)\",\"required\":true,\"unit\":\"g\",\"validation\":{\"min\":1,\"max\":100000}}', 40, '{\"row\":1,\"col\":6,\"colSpan\":6}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-008', 'block-002', 'weighing_verification', 'signature', '{\"label\":\"Weighing verified by\",\"required\":true}', 50, '{\"row\":2,\"col\":0,\"colSpan\":12}')",
+
+        "INSERT INTO recipe.phase_blocks (id, phase_id, block_code, title, sequence_no, layout) VALUES ('block-003', 'recipe-phase-002', 'MIXING_PARAMS', 'Mixing parameters', 10, '{\"row\":0,\"col\":0,\"colSpan\":12,\"rowSpan\":1}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-009', 'block-003', 'mix_speed_rpm', 'number_input', '{\"label\":\"Mixing speed (RPM)\",\"required\":true,\"unit\":\"RPM\",\"validation\":{\"min\":100,\"max\":1000},\"defaultValue\":\"450\"}', 10, '{\"row\":0,\"col\":0,\"colSpan\":4}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-010', 'block-003', 'mix_duration_min', 'number_input', '{\"label\":\"Mix duration (min)\",\"required\":true,\"unit\":\"min\",\"validation\":{\"min\":1,\"max\":120},\"defaultValue\":\"35\"}', 20, '{\"row\":0,\"col\":4,\"colSpan\":4}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-011', 'block-003', 'torque_reading', 'number_input', '{\"label\":\"Final torque reading (Nm)\",\"required\":true,\"unit\":\"Nm\",\"validation\":{\"min\":0,\"max\":100}}', 30, '{\"row\":0,\"col\":8,\"colSpan\":4}')",
+        "INSERT INTO recipe.phase_blocks (id, phase_id, block_code, title, sequence_no, layout) VALUES ('block-004', 'recipe-phase-002', 'UNIFORMITY_CHECK', 'Uniformity check', 20, '{\"row\":1,\"col\":0,\"colSpan\":12,\"rowSpan\":1}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-012', 'block-004', 'uniformity_result', 'select', '{\"label\":\"Uniformity test result\",\"required\":true,\"options\":[{\"value\":\"PASS\",\"label\":\"Pass\"},{\"value\":\"FAIL\",\"label\":\"Fail\"},{\"value\":\"MARGINAL\",\"label\":\"Marginal - needs review\"}]}', 10, '{\"row\":0,\"col\":0,\"colSpan\":6}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-013', 'block-004', 'uniformity_note', 'textarea', '{\"label\":\"Observation notes\",\"required\":false,\"placeholder\":\"Enter observations...\"}', 20, '{\"row\":0,\"col\":6,\"colSpan\":6}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-014', 'block-004', 'mix_sign_off', 'signature', '{\"label\":\"Mixing sign-off\",\"required\":true}', 30, '{\"row\":1,\"col\":0,\"colSpan\":12}')",
+
+        "INSERT INTO recipe.phase_blocks (id, phase_id, block_code, title, sequence_no, layout) VALUES ('block-005', 'recipe-phase-003', 'FILL_SETUP', 'Fill line setup', 10, '{\"row\":0,\"col\":0,\"colSpan\":12,\"rowSpan\":1}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-015', 'block-005', 'fill_speed', 'select', '{\"label\":\"Fill speed\",\"required\":true,\"options\":[{\"value\":\"LOW\",\"label\":\"Low (50 u/min)\"},{\"value\":\"MEDIUM\",\"label\":\"Medium (100 u/min)\"},{\"value\":\"HIGH\",\"label\":\"High (150 u/min)\"}]}', 10, '{\"row\":0,\"col\":0,\"colSpan\":6}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-016', 'block-005', 'target_fill_volume_ml', 'number_input', '{\"label\":\"Target fill volume (mL)\",\"required\":true,\"unit\":\"mL\",\"validation\":{\"min\":1,\"max\":1000}}', 20, '{\"row\":0,\"col\":6,\"colSpan\":6}')",
+        "INSERT INTO recipe.phase_blocks (id, phase_id, block_code, title, sequence_no, layout) VALUES ('block-006', 'recipe-phase-003', 'YIELD_RECONCILIATION', 'Yield reconciliation', 20, '{\"row\":1,\"col\":0,\"colSpan\":12,\"rowSpan\":1}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-017', 'block-006', 'units_produced', 'number_input', '{\"label\":\"Units produced\",\"required\":true,\"validation\":{\"min\":0}}', 10, '{\"row\":0,\"col\":0,\"colSpan\":4}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-018', 'block-006', 'units_rejected', 'number_input', '{\"label\":\"Units rejected\",\"required\":true,\"validation\":{\"min\":0}}', 20, '{\"row\":0,\"col\":4,\"colSpan\":4}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-019', 'block-006', 'yield_percent', 'calculated', '{\"label\":\"Yield %\",\"formula\":\"(units_produced - units_rejected) / units_produced * 100\",\"unit\":\"%\"}', 30, '{\"row\":0,\"col\":8,\"colSpan\":4}')",
+        "INSERT INTO recipe.block_components (id, block_id, component_code, component_type, definition, sequence_no, layout) VALUES ('comp-020', 'block-006', 'fill_sign_off', 'signature', '{\"label\":\"Fill & reconciliation sign-off\",\"required\":true}', 40, '{\"row\":1,\"col\":0,\"colSpan\":12}')"
+      ]
+    },
+    {
+      "name": "seed ISA-95 plant model",
+      "mode": "domain",
+      "domains": ["operations"],
+      "statements": [
+        "INSERT INTO operations.sites (id, site_code, title, gxp_status) VALUES ('site-001', 'BCN-PHARMA', 'Barcelona Oral Liquids Plant', 'QUALIFIED')",
+        "INSERT INTO operations.areas (id, site_id, area_code, title, isa95_level) VALUES ('area-001', 'site-001', 'MFG', 'Manufacturing Area', 'area')",
+        "INSERT INTO operations.process_cells (id, area_id, cell_code, title) VALUES ('cell-001', 'area-001', 'ORAL-LIQ', 'Oral Liquids Process Cell')",
+        "INSERT INTO operations.units (id, process_cell_id, unit_code, title, unit_class) VALUES ('unit-001', 'cell-001', 'MIX-SKID-01', 'Main Mixing Skid 01', 'mixing-unit')",
+        "INSERT INTO operations.equipment_assets (id, unit_id, equipment_code, title, asset_role, calibration_state) VALUES ('equip-001', 'unit-001', 'PMV-01', 'Pre-mix vessel 01', 'dispense-vessel', 'CALIBRATED')",
+        "INSERT INTO operations.equipment_assets (id, unit_id, equipment_code, title, asset_role, calibration_state) VALUES ('equip-002', 'unit-001', 'BLEND-01', 'Inline blender 01', 'mixer', 'CALIBRATED')",
+        "INSERT INTO operations.equipment_assets (id, unit_id, equipment_code, title, asset_role, calibration_state) VALUES ('equip-003', 'unit-001', 'FILL-01', 'Filling line 01', 'filler', 'CALIBRATED')"
+      ]
+    },
+    {
+      "name": "seed material lots",
+      "mode": "domain",
+      "domains": ["inventory"],
+      "statements": [
         "INSERT INTO inventory.material_lots (id, material_code, supplier_lot_code, status, quantity_grams, expiry_day) VALUES ('lot-api-001', 'IBUPROFEN_API', 'SUP-API-7781', 'RELEASED', 80000, '2027-06-30')",
         "INSERT INTO inventory.material_lots (id, material_code, supplier_lot_code, status, quantity_grams, expiry_day) VALUES ('lot-veh-001', 'SUSPENSION_VEHICLE', 'SUP-VEH-1120', 'RELEASED', 36000, '2027-08-31')"
       ]
     },
     {
-      "name": "create batch and start execution",
+      "name": "create batch and reserve lots",
       "mode": "cross",
-      "domains": ["execution", "recipe", "inventory", "compliance"],
+      "domains": ["execution", "recipe", "inventory", "operations"],
       "statements": [
-        "INSERT INTO execution.batch_orders (id, batch_number, recipe_id, planned_quantity_kg, status, opened_by) VALUES ('batch-001', 'PO-2026-0001', 'recipe-001', 100, 'PLANNED', 'planner-001')",
-        "INSERT INTO execution.batch_steps (id, batch_id, operation_code, status, recorded_by, note) VALUES ('batch-step-001', 'batch-001', 'DISPENSE', 'PENDING', 'system', 'awaiting shop-floor execution')",
-        "INSERT INTO execution.batch_steps (id, batch_id, operation_code, status, recorded_by, note) VALUES ('batch-step-002', 'batch-001', 'MIX', 'PENDING', 'system', 'awaiting shop-floor execution')",
-        "INSERT INTO execution.batch_steps (id, batch_id, operation_code, status, recorded_by, note) VALUES ('batch-step-003', 'batch-001', 'FILL', 'PENDING', 'system', 'awaiting shop-floor execution')",
+        "INSERT INTO execution.batch_orders (id, batch_number, recipe_id, unit_id, planned_quantity_kg, status, ebr_status, opened_by) VALUES ('batch-001', 'PO-2026-0001', 'recipe-001', 'unit-001', 100, 'PLANNED', 'DRAFT', 'planner-001')",
+        "INSERT INTO execution.batch_steps (id, batch_id, unit_procedure_code, operation_code, status, recorded_by, note) VALUES ('batch-step-001', 'batch-001', 'UP-DISPENSE', 'DISPENSE', 'PENDING', 'system', 'awaiting shop-floor execution')",
+        "INSERT INTO execution.batch_steps (id, batch_id, unit_procedure_code, operation_code, status, recorded_by, note) VALUES ('batch-step-002', 'batch-001', 'UP-BLEND-FILL', 'MIX', 'PENDING', 'system', 'awaiting shop-floor execution')",
+        "INSERT INTO execution.batch_steps (id, batch_id, unit_procedure_code, operation_code, status, recorded_by, note) VALUES ('batch-step-003', 'batch-001', 'UP-BLEND-FILL', 'FILL', 'PENDING', 'system', 'awaiting shop-floor execution')",
+        "INSERT INTO execution.batch_phase_records (id, batch_id, unit_procedure_code, operation_code, phase_code, phase_state, equipment_id, recorded_by, note) VALUES ('phase-rec-001', 'batch-001', 'UP-DISPENSE', 'DISPENSE', 'DISPENSE_VERIFY', 'PENDING', 'equip-001', 'system', 'line clearance and lot verification pending')",
+        "INSERT INTO execution.batch_phase_records (id, batch_id, unit_procedure_code, operation_code, phase_code, phase_state, equipment_id, recorded_by, note) VALUES ('phase-rec-002', 'batch-001', 'UP-BLEND-FILL', 'MIX', 'MIX_BLEND', 'PENDING', 'equip-002', 'system', 'mixing step awaiting start')",
+        "INSERT INTO execution.batch_phase_records (id, batch_id, unit_procedure_code, operation_code, phase_code, phase_state, equipment_id, recorded_by, note) VALUES ('phase-rec-003', 'batch-001', 'UP-BLEND-FILL', 'FILL', 'FILL_RUN', 'PENDING', 'equip-003', 'system', 'filling line not yet released')",
         "INSERT INTO execution.batch_material_links (id, batch_id, lot_id, material_role, consumed_grams) VALUES ('batch-mat-001', 'batch-001', 'lot-api-001', 'API', 8000)",
         "INSERT INTO execution.batch_material_links (id, batch_id, lot_id, material_role, consumed_grams) VALUES ('batch-mat-002', 'batch-001', 'lot-veh-001', 'VEHICLE', 5000)",
         "INSERT INTO inventory.lot_reservations (id, lot_id, reserved_for_kind, reserved_for_id, reserved_grams, status) VALUES ('reservation-001', 'lot-api-001', 'batch_order', 'batch-001', 8000, 'ACTIVE')",
         "INSERT INTO inventory.lot_reservations (id, lot_id, reserved_for_kind, reserved_for_id, reserved_grams, status) VALUES ('reservation-002', 'lot-veh-001', 'batch_order', 'batch-001', 5000, 'ACTIVE')",
-        "UPDATE execution.batch_orders SET status = 'IN_EXECUTION' WHERE id = 'batch-001'",
-        "UPDATE execution.batch_steps SET status = 'COMPLETE', recorded_by = 'op-001', note = 'dispense completed within tolerance' WHERE id = 'batch-step-001'",
-        "INSERT INTO compliance.batch_signatures (id, batch_id, step_code, meaning, signer_id, signer_role, reason) VALUES ('sig-001', 'batch-001', 'DISPENSE', 'step-verification', 'op-001', 'operator', 'materials dispensed and verified')"
+
+        "INSERT INTO execution.block_records (id, batch_id, phase_record_id, block_code, status, recorded_by) VALUES ('blkrec-001', 'batch-001', 'phase-rec-001', 'LINE_CLEARANCE', 'PENDING', 'system')",
+        "INSERT INTO execution.block_records (id, batch_id, phase_record_id, block_code, status, recorded_by) VALUES ('blkrec-002', 'batch-001', 'phase-rec-001', 'LOT_VERIFICATION', 'PENDING', 'system')",
+        "INSERT INTO execution.block_records (id, batch_id, phase_record_id, block_code, status, recorded_by) VALUES ('blkrec-003', 'batch-001', 'phase-rec-002', 'MIXING_PARAMS', 'PENDING', 'system')",
+        "INSERT INTO execution.block_records (id, batch_id, phase_record_id, block_code, status, recorded_by) VALUES ('blkrec-004', 'batch-001', 'phase-rec-002', 'UNIFORMITY_CHECK', 'PENDING', 'system')",
+        "INSERT INTO execution.block_records (id, batch_id, phase_record_id, block_code, status, recorded_by) VALUES ('blkrec-005', 'batch-001', 'phase-rec-003', 'FILL_SETUP', 'PENDING', 'system')",
+        "INSERT INTO execution.block_records (id, batch_id, phase_record_id, block_code, status, recorded_by) VALUES ('blkrec-006', 'batch-001', 'phase-rec-003', 'YIELD_RECONCILIATION', 'PENDING', 'system')"
       ]
     },
     {
-      "name": "deviation open recipe revise and release",
+      "name": "start batch with signature",
       "mode": "cross",
-      "domains": ["quality", "execution", "inventory", "compliance", "recipe"],
+      "domains": ["execution", "compliance"],
       "statements": [
-        "INSERT INTO quality.deviations (id, batch_id, lot_id, status, severity, summary) VALUES ('dev-001', 'batch-001', 'lot-api-001', 'OPEN', 'MAJOR', 'blend uniformity sample drifted outside pre-alert band')",
-        "INSERT INTO quality.quality_reviews (id, deviation_id, decision, rationale) VALUES ('review-001', 'dev-001', 'OPEN', 'investigation started while batch is held')",
-        "UPDATE execution.batch_orders SET status = 'ON_HOLD' WHERE id = 'batch-001'",
+        "UPDATE execution.batch_orders SET status = 'IN_EXECUTION', ebr_status = 'EXECUTION_STARTED' WHERE id = 'batch-001'",
+        "UPDATE execution.batch_steps SET status = 'COMPLETE', recorded_by = 'op-001', note = 'dispense completed within tolerance and recipe phase followed' WHERE id = 'batch-step-001'",
+        "UPDATE execution.batch_phase_records SET phase_state = 'COMPLETE', recorded_by = 'op-001', note = 'ISA-88 phase executed with verified released lots' WHERE id = 'phase-rec-001'",
+        "INSERT INTO compliance.batch_signatures (id, batch_id, signature_scope, step_code, meaning, signer_id, signer_role, reason) VALUES ('sig-001', 'batch-001', 'PHASE', 'DISPENSE_VERIFY', 'step-verification', 'op-001', 'operator', 'materials dispensed and verified with e-signature')",
+        "INSERT INTO compliance.ebr_reviews (id, batch_id, review_stage, decision, reviewer_id, reviewer_role, summary) VALUES ('ebr-001', 'batch-001', 'EXECUTION-START', 'RECORDED', 'mbr-001', 'manufacturing-reviewer', 'electronic batch record opened with ISA-88 context and equipment traceability')",
+
+        "UPDATE execution.block_records SET status = 'COMPLETE', recorded_by = 'op-001' WHERE id = 'blkrec-001'",
+        "UPDATE execution.block_records SET status = 'COMPLETE', recorded_by = 'op-001' WHERE id = 'blkrec-002'",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-001', 'blkrec-001', 'line_clear_check', 'true', 'op-001', '2026-01-15T08:00:00Z')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-002', 'blkrec-001', 'operator_signature', '{\"signerId\":\"op-001\",\"signerRole\":\"operator\",\"timestamp\":\"2026-01-15T08:01:00Z\"}', 'op-001', '2026-01-15T08:01:00Z')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-003', 'blkrec-002', 'api_lot_code', 'SUP-API-7781', 'op-001', '2026-01-15T08:05:00Z')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-004', 'blkrec-002', 'api_weight_grams', '8000', 'op-001', '2026-01-15T08:05:30Z')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-005', 'blkrec-002', 'vehicle_lot_code', 'SUP-VEH-1120', 'op-001', '2026-01-15T08:06:00Z')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-006', 'blkrec-002', 'vehicle_weight_grams', '5000', 'op-001', '2026-01-15T08:06:30Z')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-007', 'blkrec-002', 'weighing_verification', '{\"signerId\":\"op-001\",\"signerRole\":\"operator\",\"timestamp\":\"2026-01-15T08:07:00Z\"}', 'op-001', '2026-01-15T08:07:00Z')"
+      ]
+    },
+    {
+      "name": "raise deviation and hold batch",
+      "mode": "cross",
+      "domains": ["quality", "execution", "inventory", "compliance", "operations"],
+      "statements": [
+        "INSERT INTO quality.deviations (id, batch_id, phase_record_id, lot_id, equipment_id, status, severity, summary) VALUES ('dev-001', 'batch-001', 'phase-rec-002', 'lot-api-001', 'equip-002', 'OPEN', 'MAJOR', 'blend uniformity sample drifted outside pre-alert band during mixing phase')",
+        "INSERT INTO quality.quality_reviews (id, deviation_id, review_stage, decision, rationale) VALUES ('review-001', 'dev-001', 'INITIAL_TRIAGE', 'OPEN', 'investigation started while batch is held')",
+        "UPDATE execution.batch_orders SET status = 'ON_HOLD', ebr_status = 'UNDER_QA_REVIEW' WHERE id = 'batch-001'",
         "UPDATE execution.batch_steps SET status = 'ON_HOLD', recorded_by = 'op-002', note = 'mixing paused pending investigation' WHERE id = 'batch-step-002'",
-        "INSERT INTO compliance.deviation_attestations (id, deviation_id, meaning, signer_id, signer_role, reason) VALUES ('attest-001', 'dev-001', 'deviation-opened', 'qa-001', 'quality-reviewer', 'formal investigation opened')",
+        "UPDATE execution.batch_phase_records SET phase_state = 'ON_HOLD', recorded_by = 'op-002', note = 'ISA-88 mixing phase paused pending QA investigation' WHERE id = 'phase-rec-002'",
+        "INSERT INTO compliance.deviation_attestations (id, deviation_id, meaning, signer_id, signer_role, reason) VALUES ('attest-001', 'dev-001', 'deviation-opened', 'qa-001', 'quality-reviewer', 'formal investigation opened')"
+      ]
+    },
+    {
+      "name": "revise master recipe after batch start",
+      "mode": "domain",
+      "domains": ["recipe"],
+      "statements": [
         "UPDATE recipe.master_recipes SET title = 'Ibuprofen Suspension 200 mg/5mL - Rev B' WHERE id = 'recipe-001'",
         "UPDATE recipe.recipe_parameters SET target_value = '480' WHERE id = 'recipe-param-001'",
+        "UPDATE recipe.recipe_phases SET instruction_text = 'Blend suspension at revised validated speed until uniformity target is met' WHERE id = 'recipe-phase-002'"
+      ]
+    },
+    {
+      "name": "close deviation and release batch",
+      "mode": "cross",
+      "domains": ["quality", "execution", "compliance", "inventory"],
+      "statements": [
         "UPDATE quality.deviations SET status = 'CLOSED' WHERE id = 'dev-001'",
-        "UPDATE quality.quality_reviews SET decision = 'USE_AS_IS', rationale = 'investigation confirmed no impact to potency or traceability' WHERE id = 'review-001'",
-        "UPDATE execution.batch_orders SET status = 'RELEASED' WHERE id = 'batch-001'",
+        "UPDATE quality.quality_reviews SET review_stage = 'FINAL_DISPOSITION', decision = 'USE_AS_IS', rationale = 'investigation confirmed no impact to potency, ISA-95 equipment traceability, or eBR completeness' WHERE id = 'review-001'",
+        "UPDATE execution.batch_orders SET status = 'RELEASED', ebr_status = 'QA_APPROVED' WHERE id = 'batch-001'",
         "UPDATE execution.batch_steps SET status = 'COMPLETE', recorded_by = 'op-003', note = 'mixing resumed and met revised instruction check' WHERE id = 'batch-step-002'",
         "UPDATE execution.batch_steps SET status = 'COMPLETE', recorded_by = 'op-004', note = 'fill and pack completed with reconciliation check' WHERE id = 'batch-step-003'",
-        "INSERT INTO compliance.batch_signatures (id, batch_id, step_code, meaning, signer_id, signer_role, reason) VALUES ('sig-002', 'batch-001', 'RELEASE', 'batch-release', 'qa-002', 'qualified-person', 'batch released after deviation closure')",
+        "UPDATE execution.batch_phase_records SET phase_state = 'COMPLETE', recorded_by = 'op-003', note = 'mixing resumed under revised recipe instruction' WHERE id = 'phase-rec-002'",
+        "UPDATE execution.batch_phase_records SET phase_state = 'COMPLETE', recorded_by = 'op-004', note = 'filling run completed with reconciliation check' WHERE id = 'phase-rec-003'",
+        "INSERT INTO compliance.batch_signatures (id, batch_id, signature_scope, step_code, meaning, signer_id, signer_role, reason) VALUES ('sig-002', 'batch-001', 'BATCH', 'RELEASE', 'batch-release', 'qa-002', 'qualified-person', 'batch released after deviation closure and eBR review')",
         "INSERT INTO compliance.deviation_attestations (id, deviation_id, meaning, signer_id, signer_role, reason) VALUES ('attest-002', 'dev-001', 'deviation-closed', 'qa-002', 'qualified-person', 'final disposition recorded')",
+        "INSERT INTO compliance.ebr_reviews (id, batch_id, review_stage, decision, reviewer_id, reviewer_role, summary) VALUES ('ebr-002', 'batch-001', 'QA_BATCH_RECORD_REVIEW', 'APPROVED', 'qa-002', 'qualified-person', 'batch record completeness, signatures, and traceability verified')",
         "UPDATE inventory.material_lots SET status = 'PARTIALLY_CONSUMED', quantity_grams = 72000 WHERE id = 'lot-api-001'",
         "UPDATE inventory.material_lots SET status = 'PARTIALLY_CONSUMED', quantity_grams = 31000 WHERE id = 'lot-veh-001'"
       ]

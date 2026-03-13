@@ -269,6 +269,236 @@ func (engine *Engine) ValidateMigrationPlan(domain string, forwardSQL []string, 
 	return report, nil
 }
 
+// PreflightMigrationPlan runs migration validation and automatically generates
+// a rollback plan for reversible schema-only operations when the caller does
+// not provide one explicitly.
+func (engine *Engine) PreflightMigrationPlan(domain string, forwardSQL []string, rollbackSQL []string) (MigrationValidationReport, error) {
+	normalizedDomain := strings.TrimSpace(strings.ToLower(domain))
+	normalizedForward := normalizeMigrationStatements(forwardSQL)
+	normalizedRollback := normalizeMigrationStatements(rollbackSQL)
+
+	autoIssues := make([]string, 0)
+	autoRollback := false
+	if len(normalizedRollback) == 0 {
+		generatedRollback, issues, err := engine.generateRollbackSQL(normalizedDomain, normalizedForward)
+		if err != nil {
+			return MigrationValidationReport{}, err
+		}
+		normalizedRollback = generatedRollback
+		autoIssues = append(autoIssues, issues...)
+		autoRollback = len(generatedRollback) > 0
+	}
+
+	report, err := engine.ValidateMigrationPlan(normalizedDomain, normalizedForward, normalizedRollback)
+	if err != nil {
+		return report, err
+	}
+	report.AutoRollback = autoRollback
+	report.RollbackSQL = append([]string(nil), normalizedRollback...)
+	report.RollbackCount = len(normalizedRollback)
+	if len(autoIssues) > 0 {
+		report.Issues = append(autoIssues, report.Issues...)
+	}
+	report.Issues = uniqueMigrationIssues(report.Issues)
+	return report, nil
+}
+
+func normalizeMigrationStatements(statements []string) []string {
+	if len(statements) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(statements))
+	for _, statement := range statements {
+		trimmed := strings.TrimSpace(statement)
+		trimmed = strings.TrimSuffix(trimmed, ";")
+		trimmed = strings.TrimSpace(trimmed)
+		if trimmed == "" {
+			continue
+		}
+		out = append(out, trimmed)
+	}
+	return out
+}
+
+func uniqueMigrationIssues(issues []string) []string {
+	if len(issues) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(issues))
+	out := make([]string, 0, len(issues))
+	for _, issue := range issues {
+		issue = strings.TrimSpace(issue)
+		if issue == "" {
+			continue
+		}
+		if _, exists := seen[issue]; exists {
+			continue
+		}
+		seen[issue] = struct{}{}
+		out = append(out, issue)
+	}
+	return out
+}
+
+func (engine *Engine) generateRollbackSQL(domain string, forwardSQL []string) ([]string, []string, error) {
+	issues := make([]string, 0)
+	if strings.TrimSpace(domain) == "" {
+		return nil, []string{"domain is required"}, nil
+	}
+	if len(forwardSQL) == 0 {
+		return nil, []string{"at least one forward migration statement is required"}, nil
+	}
+
+	forwardPlans := make([]planner.Plan, 0, len(forwardSQL))
+	for index, sql := range forwardSQL {
+		statement, err := parser.Parse(sql)
+		if err != nil {
+			issues = append(issues, fmt.Sprintf("forward[%d] parse failed: %v", index, err))
+			continue
+		}
+		plan, err := planner.BuildForDomains(statement, []string{domain})
+		if err != nil {
+			issues = append(issues, fmt.Sprintf("forward[%d] plan failed: %v", index, err))
+			continue
+		}
+		if !isMigrationMutationOperation(plan.Operation) {
+			issues = append(issues, fmt.Sprintf("forward[%d] unsupported migration operation: %s", index, plan.Operation))
+			continue
+		}
+		forwardPlans = append(forwardPlans, plan)
+	}
+	if len(issues) > 0 {
+		return nil, issues, nil
+	}
+
+	state := engine.readState.Load()
+	var baselineDomain *domainState
+	if state != nil {
+		baselineDomain = state.domains[domain]
+	}
+
+	createdTables := make(map[string]struct{})
+	addedColumns := make(map[string]map[string]struct{})
+	for _, plan := range forwardPlans {
+		switch plan.Operation {
+		case planner.OperationCreateTable:
+			createdTables[plan.TableName] = struct{}{}
+		case planner.OperationAlterTableAddColumn:
+			if addedColumns[plan.TableName] == nil {
+				addedColumns[plan.TableName] = make(map[string]struct{})
+			}
+			if plan.AlterColumn != nil {
+				addedColumns[plan.TableName][strings.ToLower(plan.AlterColumn.Name)] = struct{}{}
+			}
+		}
+	}
+
+	rollback := make([]string, 0, len(forwardPlans))
+	for index := len(forwardPlans) - 1; index >= 0; index-- {
+		plan := forwardPlans[index]
+		skipBecauseTableDropped := false
+		if _, created := createdTables[plan.TableName]; created {
+			switch plan.Operation {
+			case planner.OperationInsert,
+				planner.OperationUpdate,
+				planner.OperationDelete,
+				planner.OperationCreateIndex,
+				planner.OperationAlterTableAddColumn,
+				planner.OperationAlterTableRenameColumn,
+				planner.OperationDropIndex,
+				planner.OperationTruncateTable:
+				if plan.Operation != planner.OperationCreateTable {
+					skipBecauseTableDropped = true
+				}
+			}
+		}
+		if skipBecauseTableDropped {
+			continue
+		}
+
+		switch plan.Operation {
+		case planner.OperationCreateTable:
+			rollback = append(rollback, fmt.Sprintf("DROP TABLE %s", plan.TableName))
+		case planner.OperationAlterTableAddColumn:
+			if plan.AlterColumn == nil {
+				issues = append(issues, fmt.Sprintf("forward[%d] missing column definition for ADD COLUMN rollback generation", index))
+				continue
+			}
+			rollback = append(rollback, fmt.Sprintf("ALTER TABLE %s DROP COLUMN %s", plan.TableName, plan.AlterColumn.Name))
+		case planner.OperationAlterTableRenameColumn:
+			rollback = append(rollback, fmt.Sprintf("ALTER TABLE %s RENAME COLUMN %s TO %s", plan.TableName, plan.RenameNewColumn, plan.RenameOldColumn))
+		case planner.OperationCreateIndex:
+			rollback = append(rollback, fmt.Sprintf("DROP INDEX %s", plan.IndexName))
+		case planner.OperationDropIndex:
+			statement, issue := buildCreateIndexRollback(plan, baselineDomain)
+			if issue != "" {
+				issues = append(issues, fmt.Sprintf("forward[%d] %s", index, issue))
+				continue
+			}
+			rollback = append(rollback, statement)
+		case planner.OperationUpdate:
+			if updateTouchesOnlyAddedColumns(plan, addedColumns[plan.TableName]) {
+				continue
+			}
+			issues = append(issues, fmt.Sprintf("forward[%d] UPDATE requires explicit rollback SQL", index))
+		case planner.OperationInsert:
+			issues = append(issues, fmt.Sprintf("forward[%d] INSERT requires explicit rollback SQL", index))
+		case planner.OperationDelete:
+			issues = append(issues, fmt.Sprintf("forward[%d] DELETE requires explicit rollback SQL", index))
+		case planner.OperationDropTable:
+			issues = append(issues, fmt.Sprintf("forward[%d] DROP TABLE is not auto-reversible", index))
+		case planner.OperationAlterTableDropColumn:
+			issues = append(issues, fmt.Sprintf("forward[%d] DROP COLUMN is not auto-reversible because prior values cannot be reconstructed", index))
+		case planner.OperationTruncateTable:
+			issues = append(issues, fmt.Sprintf("forward[%d] TRUNCATE TABLE is not auto-reversible", index))
+		case planner.OperationCreateEntity:
+			issues = append(issues, fmt.Sprintf("forward[%d] CREATE ENTITY requires explicit rollback planning", index))
+		default:
+			issues = append(issues, fmt.Sprintf("forward[%d] unsupported auto-rollback operation: %s", index, plan.Operation))
+		}
+	}
+
+	return rollback, uniqueMigrationIssues(issues), nil
+}
+
+func updateTouchesOnlyAddedColumns(plan planner.Plan, added map[string]struct{}) bool {
+	if len(plan.UpdateExprs) == 0 || len(added) == 0 {
+		return false
+	}
+	for _, expr := range plan.UpdateExprs {
+		if _, ok := added[strings.ToLower(expr.Column)]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+func buildCreateIndexRollback(plan planner.Plan, domain *domainState) (string, string) {
+	if domain == nil {
+		return "", fmt.Sprintf("cannot reconstruct dropped index %q without baseline domain state", plan.IndexName)
+	}
+	table, exists := domain.tables[plan.TableName]
+	if !exists || table == nil {
+		return "", fmt.Sprintf("cannot reconstruct dropped index %q on missing table %s", plan.IndexName, plan.TableName)
+	}
+	idx, exists := table.indexes[plan.IndexName]
+	if !exists {
+		return "", fmt.Sprintf("cannot reconstruct dropped index %q because it does not exist in baseline schema", plan.IndexName)
+	}
+	columns := append([]string(nil), idx.columns...)
+	if len(columns) == 0 && idx.column != "" {
+		columns = append(columns, idx.column)
+	}
+	if len(columns) == 0 {
+		return "", fmt.Sprintf("cannot reconstruct dropped index %q because baseline columns are empty", plan.IndexName)
+	}
+	method := strings.ToUpper(strings.TrimSpace(idx.kind))
+	if method == "" {
+		method = "BTREE"
+	}
+	return fmt.Sprintf("CREATE INDEX %s ON %s (%s) USING %s", plan.IndexName, plan.TableName, strings.Join(columns, ", "), method), ""
+}
+
 func buildShadowEngine(state *readableState, catalog *domains.Catalog, logicalTS uint64) *Engine {
 	shadow := &Engine{
 		catalog:   catalog,
@@ -886,6 +1116,9 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		if plan.AlterColumn == nil {
 			return fmt.Errorf("alter table add column requires column definition")
 		}
+		if plan.AlterColumn.DefaultValue != nil && plan.AlterColumn.DefaultValue.Kind != ast.DefaultLiteral {
+			return fmt.Errorf("online-safe add column supports only literal defaults")
+		}
 
 		column := strings.TrimSpace(strings.ToLower(plan.AlterColumn.Name))
 		if column == "" {
@@ -896,6 +1129,14 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			if existing == column {
 				return errColumnExists
 			}
+		}
+
+		backfillValue := ast.Literal{Kind: ast.LiteralNull}
+		if plan.AlterColumn.DefaultValue != nil {
+			backfillValue = plan.AlterColumn.DefaultValue.Value
+		}
+		if plan.AlterColumn.NotNull && len(table.rows) > 0 && backfillValue.Kind == ast.LiteralNull {
+			return fmt.Errorf("%w: ADD COLUMN %s requires a non-null DEFAULT for existing rows", errConstraint, column)
 		}
 
 		// COW: clone only if not already cloned in this transaction.
@@ -920,10 +1161,10 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		rebuildNotNullColumns(table)
 		rebuildUniqueColumnList(table)
 		rebuildPKAutoUUID(table)
-		// Extend every existing row with a null value for the new column.
+		// Extend every existing row with the deterministic backfill value.
 		// Since the column was appended to table.columns, its position is len-1.
 		for rowID := range table.rows {
-			table.rows[rowID] = append(table.rows[rowID], ast.Literal{Kind: ast.LiteralNull})
+			table.rows[rowID] = append(table.rows[rowID], backfillValue)
 		}
 		table.lastMutationTS = engine.logicalTS
 		return nil

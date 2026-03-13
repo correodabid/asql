@@ -16,6 +16,7 @@ service ASQLService {
   rpc EvaluateReadRoute(EvaluateReadRouteRequest) returns (EvaluateReadRouteResponse);
   rpc ReadRoutingStats(ReadRoutingStatsRequest) returns (ReadRoutingStatsResponse);
   rpc LeadershipState(LeadershipStateRequest) returns (LeadershipStateResponse);
+  rpc MigrationPreflight(MigrationPreflightRequest) returns (MigrationPreflightResponse);
   rpc Query(QueryRequest) returns (QueryResponse);
 }
 
@@ -47,6 +48,25 @@ message CommitTxRequest {
   string group = 2;
   string node_id = 3;
   string fencing_token = 4;
+}
+
+message MigrationPreflightRequest {
+  string domain = 1;
+  repeated string forward_sql = 2;
+  repeated string rollback_sql = 3;
+}
+
+message MigrationPreflightResponse {
+  string status = 1;
+  string domain = 2;
+  int32 forward_count = 3;
+  int32 rollback_count = 4;
+  bool rollback_safe = 5;
+  bool forward_accepted = 6;
+  bool rollback_checked = 7;
+  bool auto_rollback = 8;
+  repeated string rollback_sql = 9;
+  repeated string issues = 10;
 }
 
 message CommitTxResponse {

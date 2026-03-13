@@ -93,10 +93,34 @@ func TestParseAlterTableAddColumnSnapshot(t *testing.T) {
 	}
 }
 
-func TestParseAlterTableAddColumnRejectsConstraints(t *testing.T) {
+func TestParseAlterTableAddColumnWithDefaultNotNullSnapshot(t *testing.T) {
+	statement, err := Parse("ALTER TABLE users ADD COLUMN status TEXT DEFAULT 'planned' NOT NULL;")
+	if err != nil {
+		t.Fatalf("parse alter table add column with default/not null: %v", err)
+	}
+
+	bytes, err := json.Marshal(statement)
+	if err != nil {
+		t.Fatalf("marshal ast: %v", err)
+	}
+
+	expected := `{"table_name":"users","column":{"name":"status","type":"TEXT","not_null":true,"default_value":{"kind":"literal","value":{"kind":"string","string_value":"planned"}}}}`
+	if string(bytes) != expected {
+		t.Fatalf("snapshot mismatch\n got: %s\nwant: %s", string(bytes), expected)
+	}
+}
+
+func TestParseAlterTableAddColumnRejectsUnsupportedConstraints(t *testing.T) {
 	_, err := Parse("ALTER TABLE users ADD COLUMN email TEXT UNIQUE;")
 	if err == nil {
 		t.Fatal("expected add column constraints to be rejected")
+	}
+}
+
+func TestParseAlterTableAddColumnRejectsNonLiteralDefault(t *testing.T) {
+	_, err := Parse("ALTER TABLE users ADD COLUMN id TEXT DEFAULT UUID_V7;")
+	if err == nil {
+		t.Fatal("expected non-literal add column default to be rejected")
 	}
 }
 

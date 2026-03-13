@@ -51,10 +51,17 @@ Runtime flags:
 - `-admin-addr`: optional admin HTTP bind address for `/metrics`, `/readyz`, `/livez`, `/api/v1/health`, `/api/v1/leadership-state`, `/api/v1/last-lsn`, `/api/v1/failover-history`, `/api/v1/snapshot-catalog`, and `/api/v1/wal-retention`
 - `-data-dir`: data directory path (default `.asql`)
 - `-auth-token`: optional shared secret used as the pgwire password and as the Bearer token for admin-compatible clients where applicable
+- `-admin-read-token`: optional bearer token for read-only admin JSON endpoints; falls back to `-auth-token`
+- `-admin-write-token`: optional bearer token for mutating admin JSON endpoints such as backup creation and restore; falls back to `-auth-token`
 
 If `-auth-token` is configured, clients must send:
 
 - `authorization: Bearer <token>`
+
+If scoped admin tokens are configured instead, use:
+
+- `authorization: Bearer <admin-read-token>` for read-only `/api/v1/*` admin JSON endpoints
+- `authorization: Bearer <admin-write-token>` for mutating recovery/admin endpoints
 
 Pgwire clients must connect with the same token as the password, for example:
 
@@ -94,6 +101,20 @@ Admin and internal API paths emit structured audit logs with message `audit_even
 - `status=success|failure`
 - `operation` (for example `tx.begin`, `tx.execute`, `tx.commit`, `admin.time_travel_query`, `admin.replay_to_lsn`, `admin.replication_stream`)
 - contextual fields such as `tx_id`, `lsn`, `domains`, and `reason` for failures
+
+For retained row-level audit evidence in the data directory, use `asqlctl` local commands:
+
+```bash
+go run ./cmd/asqlctl -command audit-report -data-dir .asql
+go run ./cmd/asqlctl -command audit-export -data-dir .asql -output audit-evidence.json -format json
+go run ./cmd/asqlctl -command audit-export -data-dir .asql -domains billing -table invoices -operation UPDATE -output audit-evidence.jsonl -format jsonl
+```
+
+Current audit policy is explicit and fail-closed:
+
+- retention mode is `retain_forever`,
+- pruning is not active,
+- exports include a file SHA-256 digest for external evidence handoff.
 
 ## 4) Single-node transaction flow (verified)
 
@@ -179,6 +200,8 @@ go run ./cmd/asqlctl -command restore-lsn -backup-dir .asql-backup -data-dir .as
 go run ./cmd/asqlctl -command restore-timestamp -backup-dir .asql-backup -data-dir .asql-restore-ts -logical-ts 123
 go run ./cmd/asqlctl -command snapshot-catalog -data-dir .asql
 go run ./cmd/asqlctl -command wal-retention -data-dir .asql
+go run ./cmd/asqlctl -command audit-report -data-dir .asql
+go run ./cmd/asqlctl -command audit-export -data-dir .asql -output audit-evidence.json
 ```
 
 Operational notes:

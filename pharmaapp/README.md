@@ -17,10 +17,16 @@ El objetivo es forzar una adopción profunda de primitivas propias de ASQL en un
 - fixtures deterministas,
 - integración Go vía pgwire con `pgx`.
 
+Además, la muestra modela explícitamente un caso app-owned donde el equipo necesita representar:
+
+- controles de cumplimiento inspirados en 21 CFR Part 11, ALCOA+ y revisión eBR,
+- jerarquía ISA-88 (`master recipe -> unit procedure -> operation -> phase`),
+- jerarquía ISA-95 (`site -> area -> process cell -> unit -> equipment`).
+
 ## Responsibility boundary
 
 - **Engine-owned concern**: fronteras explícitas, referencias versionadas, historia, replay-safe snapshots, fixtures deterministas, observabilidad temporal.
-- **App-owned concern**: significado regulatorio de firmas, clasificación de desviaciones, semántica de revisión QA, políticas GxP y vocabulario de cumplimiento.
+- **App-owned concern**: significado regulatorio de firmas, clasificación de desviaciones, semántica de revisión QA, políticas GxP, modelado ISA-88/ISA-95 y vocabulario de cumplimiento.
 - **Recommended integration pattern**: usar la muestra para aprender a componer primitivas de ASQL, no para empujar semántica farmacéutica al motor.
 
 ## Qué incluye
@@ -45,20 +51,22 @@ Orden recomendado:
 ## Dominios usados
 
 - `recipe`: master recipes, operaciones y parámetros de proceso.
+- `operations`: modelo físico ISA-95 de site, area, process cell, unit y equipment.
 - `inventory`: lotes de materiales y reservas.
 - `execution`: process orders, pasos de batch y materiales consumidos.
 - `quality`: desviaciones y revisiones QA.
-- `compliance`: firmas y atestaciones asociadas a snapshots versionados.
+- `compliance`: firmas, atestaciones y revisiones eBR asociadas a snapshots versionados.
 
 ## Flujo que se ejercita
 
-1. alta de una master recipe versionada en `recipe`,
-2. carga de lotes liberados en `inventory`,
-3. creación de un batch order que captura la versión exacta de la recipe y de los lotes reservados,
-4. arranque del batch con firma en `compliance`,
-5. apertura de una desviación y puesta en hold del batch,
-6. revisión posterior de la recipe para demostrar separación entre la versión capturada por el batch y la versión actual,
-7. cierre de desviación y liberación del batch con nuevas atestaciones.
+1. alta de una master recipe versionada con jerarquía ISA-88 en `recipe`,
+2. carga del modelo físico ISA-95 en `operations`,
+3. carga de lotes liberados en `inventory`,
+4. creación de un batch order que captura la versión exacta de la recipe, el `LSN` visible de la unidad ISA-95 y los lotes reservados,
+5. arranque del batch con firma de fase y apertura del eBR en `compliance`,
+6. apertura de una desviación ligada a una phase record y puesta en hold del batch,
+7. revisión posterior de la recipe para demostrar separación entre la versión capturada por el batch y la versión actual,
+8. cierre de desviación, revisión final eBR y liberación del batch con nuevas atestaciones.
 
 ## Arranque local
 
@@ -113,10 +121,14 @@ Tras ejecutar `-mode all`, conviene fijarse en:
 
 - la obligación de declarar los dominios antes de cada unidad de trabajo,
 - las columnas de captura temporal (`recipe_version`, `lot_version`, `batch_version`, `deviation_version`),
+- la diferencia entre captura por versión de entidad (`recipe_version`, `batch_version`, `lot_version`) y captura por row-head `LSN` en ISA-95 (`unit_lsn`, `equipment_lsn`),
+- que `manufacturing_model_entity` se usa solo para la jerarquía alta del site (`site -> area -> process cell`), mientras `unit` y `equipment` se referencian como filas directas para no forzar semánticas de aggregate equivocadas,
+- la separación entre recipe ISA-88 vigente y la recipe/version realmente capturada por el batch,
+- la relación entre phase execution (`batch_phase_records`) y equipment físico (`operations.equipment_assets`),
 - la diferencia entre la recipe actual y la recipe capturada por el batch,
 - el uso de `FOR HISTORY` para explicar estados de batch, recipe y deviation,
 - cómo `resolve_reference(...)` devuelve el token temporal actual de una fila o entidad,
-- cómo la app necesita helpers propios para convertir primitivas temporales en explicaciones de negocio.
+- cómo la app necesita helpers propios para convertir primitivas temporales en explicaciones de negocio y evidencias de cumplimiento.
 
 ## Consultas manuales útiles
 
@@ -126,8 +138,11 @@ SELECT row_lsn('execution.batch_orders', 'batch-001');
 SELECT entity_version('execution', 'batch_record_entity', 'batch-001');
 SELECT entity_version_lsn('execution', 'batch_record_entity', 'batch-001', 3);
 SELECT entity_version('recipe', 'master_recipe_entity', 'recipe-001');
+SELECT entity_version('operations', 'manufacturing_model_entity', 'site-001');
 SELECT resolve_reference('recipe.master_recipes', 'recipe-001');
+SELECT resolve_reference('operations.units', 'unit-001');
 SELECT * FROM execution.batch_orders FOR HISTORY WHERE id = 'batch-001';
+SELECT * FROM execution.batch_phase_records FOR HISTORY WHERE id = 'phase-rec-002';
 SELECT * FROM recipe.master_recipes AS OF LSN 8 WHERE id = 'recipe-001';
 ```
 

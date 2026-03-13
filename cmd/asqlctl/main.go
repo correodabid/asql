@@ -42,15 +42,21 @@ func main() {
 	pgwireAddr := flag.String("pgwire", "127.0.0.1:5433", "ASQL pgwire endpoint (used by shell)")
 	authToken := flag.String("auth-token", "", "optional bearer token for authenticated APIs")
 	demo := flag.Bool("demo", false, "run end-to-end gRPC demo flow")
-	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|fixture-validate|fixture-load|fixture-export")
+	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|audit-report|audit-export|fixture-validate|fixture-load|fixture-export")
 	mode := flag.String("mode", "domain", "tx mode for begin: domain|cross")
 	domains := flag.String("domains", "", "comma-separated domains (required for begin and usually for time-travel)")
+	tableName := flag.String("table", "", "table filter for audit commands")
+	operation := flag.String("operation", "", "operation filter for audit commands (INSERT|UPDATE|DELETE)")
 	txID := flag.String("tx-id", "", "transaction id for execute/commit/rollback")
 	sql := flag.String("sql", "", "sql for execute or time-travel")
+	rollbackSQL := flag.String("rollback-sql", "", "semicolon-separated rollback SQL for migration-preflight")
 	lsn := flag.Uint64("lsn", 0, "lsn for replay or time-travel")
+	limit := flag.Int("limit", 0, "row limit for audit commands (0 = unlimited)")
 	logicalTS := flag.Uint64("logical-ts", 0, "logical timestamp for time-travel when lsn is not provided")
 	dataDir := flag.String("data-dir", "", "local ASQL data directory for backup/restore commands")
 	backupDir := flag.String("backup-dir", "", "backup directory for backup/restore commands")
+	outputPath := flag.String("output", "", "output file for export commands")
+	outputFormat := flag.String("format", "json", "output format for export commands: json|jsonl")
 	fixtureFile := flag.String("fixture-file", "", "path to a deterministic fixture JSON file")
 	flag.Parse()
 
@@ -62,7 +68,7 @@ func main() {
 	if !*demo {
 		if strings.TrimSpace(*command) == "" {
 			fmt.Fprintf(os.Stdout, "asqlctl ready (endpoint=%s).\n", *endpoint)
-			fmt.Fprintln(os.Stdout, "Use -demo, 'shell', or -command shell|begin|execute|commit|rollback|time-travel|replay|...")
+			fmt.Fprintln(os.Stdout, "Use -demo, 'shell', or -command shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|audit-report|audit-export|...")
 			return
 		}
 
@@ -86,7 +92,24 @@ func main() {
 			return
 		}
 
-		if err := runCommand(os.Stdout, *endpoint, *authToken, *command, *mode, *domains, *txID, *sql, *dataDir, *backupDir, *lsn, *logicalTS); err != nil {
+		if isLocalAuditCommand(*command) {
+			if err := runLocalAuditCommand(context.Background(), os.Stdout, *command, auditCommandOptions{
+				DataDir:   *dataDir,
+				Domains:   parseDomains(*domains),
+				Table:     *tableName,
+				Operation: *operation,
+				FromLSN:   *lsn,
+				Limit:     *limit,
+				Output:    *outputPath,
+				Format:    *outputFormat,
+			}); err != nil {
+				fmt.Fprintf(os.Stderr, "command failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+
+		if err := runCommand(os.Stdout, *endpoint, *authToken, *command, *mode, *domains, *txID, *sql, *rollbackSQL, *dataDir, *backupDir, *lsn, *logicalTS); err != nil {
 			fmt.Fprintf(os.Stderr, "command failed: %v\n", err)
 			os.Exit(1)
 		}
@@ -155,7 +178,7 @@ func runDemo(endpoint, authToken string) error {
 	return nil
 }
 
-func runCommand(out io.Writer, endpoint, authToken, command, mode, domainsCSV, txID, sql, dataDir, backupDir string, lsn, logicalTS uint64) error {
+func runCommand(out io.Writer, endpoint, authToken, command, mode, domainsCSV, txID, sql, rollbackSQL, dataDir, backupDir string, lsn, logicalTS uint64) error {
 	if isLocalRecoveryCommand(command) {
 		return runLocalRecoveryCommand(context.Background(), out, command, dataDir, backupDir, lsn, logicalTS)
 	}
@@ -233,9 +256,63 @@ func runCommand(out io.Writer, endpoint, authToken, command, mode, domainsCSV, t
 			return err
 		}
 		return printJSONTo(out, response)
+	case "migration-preflight":
+		if len(domains) != 1 {
+			return errors.New("migration-preflight requires exactly one domain in -domains")
+		}
+		forward := splitSQLStatements(sql)
+		if len(forward) == 0 {
+			return errors.New("migration-preflight requires -sql with at least one statement")
+		}
+		rollback := splitSQLStatements(rollbackSQL)
+		response := new(api.MigrationPreflightResponse)
+		if err := connection.Invoke(ctx, "/asql.v1.ASQLService/MigrationPreflight", &api.MigrationPreflightRequest{
+			Domain:      domains[0],
+			ForwardSQL:  forward,
+			RollbackSQL: rollback,
+		}, response); err != nil {
+			return err
+		}
+		return printJSONTo(out, response)
 	default:
 		return fmt.Errorf("unsupported -command %q", command)
 	}
+}
+
+func splitSQLStatements(sql string) []string {
+	trimmed := strings.TrimSpace(sql)
+	if trimmed == "" {
+		return nil
+	}
+
+	segments := make([]string, 0)
+	var current strings.Builder
+	inString := false
+	for i := 0; i < len(trimmed); i++ {
+		ch := trimmed[i]
+		if ch == '\'' {
+			if inString && i+1 < len(trimmed) && trimmed[i+1] == '\'' {
+				current.WriteByte(ch)
+				current.WriteByte(ch)
+				i++
+				continue
+			}
+			inString = !inString
+		}
+		if ch == ';' && !inString {
+			segment := strings.TrimSpace(current.String())
+			if segment != "" {
+				segments = append(segments, segment)
+			}
+			current.Reset()
+			continue
+		}
+		current.WriteByte(ch)
+	}
+	if segment := strings.TrimSpace(current.String()); segment != "" {
+		segments = append(segments, segment)
+	}
+	return segments
 }
 
 func isLocalRecoveryCommand(command string) bool {
@@ -250,6 +327,15 @@ func isLocalRecoveryCommand(command string) bool {
 func isFixtureCommand(command string) bool {
 	switch strings.ToLower(strings.TrimSpace(command)) {
 	case "fixture-validate", "fixture-load", "fixture-export":
+		return true
+	default:
+		return false
+	}
+}
+
+func isLocalAuditCommand(command string) bool {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "audit-report", "audit-export":
 		return true
 	default:
 		return false

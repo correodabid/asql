@@ -30,6 +30,8 @@ func main() {
 	addr := flag.String("addr", ":5433", "pgwire listen address")
 	dataDir := flag.String("data-dir", ".asql", "data directory path")
 	authToken := flag.String("auth-token", "", "optional pgwire password and cluster/admin bearer token")
+	adminReadToken := flag.String("admin-read-token", "", "optional bearer token for read-only admin API endpoints; falls back to -auth-token")
+	adminWriteToken := flag.String("admin-write-token", "", "optional bearer token for mutating admin API endpoints; falls back to -auth-token")
 	nodeID := flag.String("node-id", "", "unique node identifier for cluster mode (e.g. node-a)")
 	peers := flag.String("peers", "", "comma-separated peer list in nodeID@host:port format (cluster gRPC ports)")
 	groups := flag.String("groups", "", "comma-separated domain groups for heartbeat monitoring")
@@ -83,6 +85,8 @@ func main() {
 		DataDirPath:      *dataDir,
 		Logger:           logger,
 		AuthToken:        *authToken,
+		AdminReadToken:   *adminReadToken,
+		AdminWriteToken:  *adminWriteToken,
 		NodeID:           *nodeID,
 		ClusterGRPCAddr:  *grpcAddr,
 		PeerProbeTimeout: *probeTimeout,

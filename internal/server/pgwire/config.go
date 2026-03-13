@@ -8,11 +8,13 @@ import (
 
 // Config holds all configuration for the pgwire (PostgreSQL-wire) server.
 type Config struct {
-	Address       string
-	AdminHTTPAddr string // optional admin HTTP listen address for /metrics, /readyz, /livez
-	DataDirPath   string // path to .asql/ data directory
-	Logger        *slog.Logger
-	AuthToken     string // optional pgwire password and cluster/admin bearer token
+	Address         string
+	AdminHTTPAddr   string // optional admin HTTP listen address for /metrics, /readyz, /livez
+	DataDirPath     string // path to .asql/ data directory
+	Logger          *slog.Logger
+	AuthToken       string // optional pgwire password and cluster/admin bearer token
+	AdminReadToken  string // optional bearer token for read-only admin API endpoints; falls back to AuthToken
+	AdminWriteToken string // optional bearer token for mutating admin API endpoints; falls back to AuthToken
 
 	// Cluster fields — optional. When NodeID, Peers, and ClusterGRPCAddr are
 	// all set the server starts the production cluster runtime: pgwire + Raft,

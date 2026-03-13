@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -14,17 +15,45 @@ import (
 
 type snapshotMap map[string]int64
 
+// Step name constants used by inspectScenario for LSN lookups.
+const (
+	stepCreateBatch        = "create batch and reserve lots"
+	stepStartBatch         = "start batch with signature"
+	stepRaiseDeviation     = "raise deviation and hold batch"
+	stepReviseMasterRecipe = "revise master recipe after batch start"
+	stepReleaseBatch       = "close deviation and release batch"
+)
+
 func main() {
 	var (
-		pgwireAddr = flag.String("pgwire", "127.0.0.1:5433", "ASQL pgwire endpoint")
-		mode       = flag.String("mode", "all", "schema|scenario|inspect|all|print-sql")
-		timeout    = flag.Duration("timeout", 30*time.Second, "execution timeout")
+		pgwireAddr  = flag.String("pgwire", "127.0.0.1:5433", "ASQL pgwire endpoint")
+		mode        = flag.String("mode", "all", "schema|scenario|inspect|all|print-sql")
+		timeout     = flag.Duration("timeout", 30*time.Second, "execution timeout")
+		fixtureFile = flag.String("fixture", "", "path to fixture JSON (default: embedded pharma-manufacturing-demo-v1.json)")
 	)
 	flag.Parse()
 
+	// Load fixture steps.
+	var fixtureData []byte
+	if *fixtureFile != "" {
+		var err error
+		fixtureData, err = os.ReadFile(*fixtureFile)
+		if err != nil {
+			log.Fatalf("read fixture %q: %v", *fixtureFile, err)
+		}
+	} else {
+		fixtureData = defaultFixtureJSON
+	}
+
+	allSteps, err := loadFixtureSteps(fixtureData)
+	if err != nil {
+		log.Fatalf("load fixture: %v", err)
+	}
+	schemaSteps, workflowSteps := splitSteps(allSteps)
+
 	switch *mode {
 	case "print-sql":
-		printSQL()
+		printSQL(allSteps)
 		return
 	case "schema", "scenario", "inspect", "all":
 	default:
@@ -46,12 +75,12 @@ func main() {
 
 	switch *mode {
 	case "schema":
-		if _, err := executeSteps(ctx, conn, schemaSteps(), true); err != nil {
+		if _, err := executeSteps(ctx, conn, schemaSteps, true); err != nil {
 			log.Fatalf("apply schema: %v", err)
 		}
 		fmt.Println("schema applied")
 	case "scenario":
-		if _, err := executeSteps(ctx, conn, workflowSteps(), true); err != nil {
+		if _, err := executeSteps(ctx, conn, workflowSteps, true); err != nil {
 			log.Fatalf("run scenario: %v", err)
 		}
 		fmt.Println("scenario executed")
@@ -60,14 +89,14 @@ func main() {
 			log.Fatalf("inspect scenario: %v", err)
 		}
 	case "all":
-		schemaSnapshots, err := executeSteps(ctx, conn, schemaSteps(), true)
+		schemaSnapshots, err := executeSteps(ctx, conn, schemaSteps, true)
 		if err != nil {
 			log.Fatalf("apply schema: %v", err)
 		}
 		for k, v := range schemaSnapshots {
 			snapshots[k] = v
 		}
-		workflowSnapshots, err := executeSteps(ctx, conn, workflowSteps(), true)
+		workflowSnapshots, err := executeSteps(ctx, conn, workflowSteps, true)
 		if err != nil {
 			log.Fatalf("run scenario: %v", err)
 		}
@@ -138,6 +167,30 @@ func inspectScenario(ctx context.Context, conn *pgx.Conn, snapshots snapshotMap)
 	printSnapshots(snapshots)
 
 	fmt.Println()
+	fmt.Println("== ISA-95 physical model ==")
+	if err := printQuery(ctx, conn, "SELECT id, site_code, title, gxp_status FROM operations.sites ORDER BY id"); err != nil {
+		return err
+	}
+	if err := printQuery(ctx, conn, "SELECT id, unit_code, title, unit_class FROM operations.units ORDER BY id"); err != nil {
+		return err
+	}
+	if err := printQuery(ctx, conn, "SELECT id, equipment_code, title, asset_role, calibration_state FROM operations.equipment_assets ORDER BY id"); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("== ISA-88 recipe hierarchy ==")
+	if err := printQuery(ctx, conn, "SELECT id, unit_procedure_code, title, sequence_no FROM recipe.recipe_unit_procedures ORDER BY sequence_no, id"); err != nil {
+		return err
+	}
+	if err := printQuery(ctx, conn, "SELECT id, unit_procedure_code, operation_code, instruction_text, sequence_no FROM recipe.recipe_operations ORDER BY sequence_no, id"); err != nil {
+		return err
+	}
+	if err := printQuery(ctx, conn, "SELECT id, unit_procedure_code, operation_code, phase_code, instruction_text, sequence_no FROM recipe.recipe_phases ORDER BY sequence_no, id"); err != nil {
+		return err
+	}
+
+	fmt.Println()
 	fmt.Println("== current recipe state ==")
 	if err := printQuery(ctx, conn, "SELECT id, recipe_code, title, status, target_batch_size_kg FROM recipe.master_recipes ORDER BY id"); err != nil {
 		return err
@@ -145,7 +198,19 @@ func inspectScenario(ctx context.Context, conn *pgx.Conn, snapshots snapshotMap)
 
 	fmt.Println()
 	fmt.Println("== current batch state ==")
-	if err := printQuery(ctx, conn, "SELECT id, batch_number, recipe_id, recipe_version, planned_quantity_kg, status FROM execution.batch_orders ORDER BY id"); err != nil {
+	if err := printQuery(ctx, conn, "SELECT id, batch_number, recipe_id, recipe_version, unit_id, unit_lsn, planned_quantity_kg, status, ebr_status FROM execution.batch_orders ORDER BY id"); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("== current batch operations ==")
+	if err := printQuery(ctx, conn, "SELECT id, batch_id, unit_procedure_code, operation_code, status, recorded_by, note FROM execution.batch_steps ORDER BY id"); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("== current batch phases ==")
+	if err := printQuery(ctx, conn, "SELECT id, batch_id, unit_procedure_code, operation_code, phase_code, phase_state, equipment_id, equipment_lsn, recorded_by FROM execution.batch_phase_records ORDER BY id"); err != nil {
 		return err
 	}
 
@@ -163,13 +228,19 @@ func inspectScenario(ctx context.Context, conn *pgx.Conn, snapshots snapshotMap)
 
 	fmt.Println()
 	fmt.Println("== current deviations ==")
-	if err := printQuery(ctx, conn, "SELECT id, batch_id, batch_version, lot_id, lot_version, status, severity FROM quality.deviations ORDER BY id"); err != nil {
+	if err := printQuery(ctx, conn, "SELECT id, batch_id, batch_version, phase_record_id, lot_id, lot_version, equipment_id, equipment_lsn, status, severity FROM quality.deviations ORDER BY id"); err != nil {
 		return err
 	}
 
 	fmt.Println()
 	fmt.Println("== compliance signatures ==")
-	if err := printQuery(ctx, conn, "SELECT id, batch_id, batch_version, step_code, meaning, signer_id, signer_role FROM compliance.batch_signatures ORDER BY id"); err != nil {
+	if err := printQuery(ctx, conn, "SELECT id, batch_id, batch_version, signature_scope, step_code, meaning, signer_id, signer_role FROM compliance.batch_signatures ORDER BY id"); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("== eBR reviews ==")
+	if err := printQuery(ctx, conn, "SELECT id, batch_id, batch_version, review_stage, decision, reviewer_id, reviewer_role FROM compliance.ebr_reviews ORDER BY id"); err != nil {
 		return err
 	}
 
@@ -194,6 +265,12 @@ func inspectScenario(ctx context.Context, conn *pgx.Conn, snapshots snapshotMap)
 	fmt.Println()
 	fmt.Println("== deviation history ==")
 	if err := printQuery(ctx, conn, "SELECT * FROM quality.deviations FOR HISTORY WHERE id = 'dev-001'"); err != nil {
+		return err
+	}
+
+	fmt.Println()
+	fmt.Println("== phase history ==")
+	if err := printQuery(ctx, conn, "SELECT * FROM execution.batch_phase_records FOR HISTORY WHERE id = 'phase-rec-002'"); err != nil {
 		return err
 	}
 
@@ -253,7 +330,10 @@ func printHelpers(ctx context.Context, conn *pgx.Conn) error {
 		"SELECT entity_version('recipe', 'master_recipe_entity', 'recipe-001')",
 		"SELECT entity_version_lsn('recipe', 'master_recipe_entity', 'recipe-001', 1)",
 		"SELECT entity_version_lsn('recipe', 'master_recipe_entity', 'recipe-001', 2)",
+		"SELECT entity_version('operations', 'manufacturing_model_entity', 'site-001')",
 		"SELECT resolve_reference('recipe.master_recipes', 'recipe-001')",
+		"SELECT resolve_reference('operations.units', 'unit-001')",
+		"SELECT resolve_reference('operations.equipment_assets', 'equip-002')",
 		"SELECT resolve_reference('inventory.material_lots', 'lot-api-001')",
 	}
 	for _, query := range queries {
@@ -317,8 +397,8 @@ func printSnapshots(snapshots snapshotMap) {
 	}
 }
 
-func printSQL() {
-	for _, step := range allSteps() {
+func printSQL(steps []scenarioStep) {
+	for _, step := range steps {
 		beginSQL, err := step.BeginSQL()
 		if err != nil {
 			log.Fatal(err)

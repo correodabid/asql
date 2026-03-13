@@ -248,6 +248,84 @@ func TestAdminRecoveryBackupEndpoints(t *testing.T) {
 	}
 }
 
+func TestAdminAPIAuthScopes(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server, err := New(Config{
+		Address:         "127.0.0.1:0",
+		DataDirPath:     filepath.Join(t.TempDir(), "data"),
+		Logger:          logger,
+		AdminReadToken:  "read-secret",
+		AdminWriteToken: "write-secret",
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	readHandler := server.withAdminAuth(adminScopeRead, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	writeHandler := server.withAdminAuth(adminScopeWrite, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/last-lsn", nil)
+	res := httptest.NewRecorder()
+	readHandler(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized read request, got %d", res.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/api/v1/last-lsn", nil)
+	req.Header.Set("Authorization", "Bearer read-secret")
+	res = httptest.NewRecorder()
+	readHandler(res, req)
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("expected read token to pass, got %d", res.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/recovery/restore-lsn", nil)
+	req.Header.Set("Authorization", "Bearer read-secret")
+	res = httptest.NewRecorder()
+	writeHandler(res, req)
+	if res.Code != http.StatusUnauthorized {
+		t.Fatalf("expected read token to fail write scope, got %d", res.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/v1/recovery/restore-lsn", nil)
+	req.Header.Set("Authorization", "Bearer write-secret")
+	res = httptest.NewRecorder()
+	writeHandler(res, req)
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("expected write token to pass, got %d", res.Code)
+	}
+}
+
+func TestAdminAPIAuthFallsBackToSharedToken(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: filepath.Join(t.TempDir(), "data"),
+		Logger:      logger,
+		AuthToken:   "shared-secret",
+	})
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	handler := server.withAdminAuth(adminScopeWrite, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/recovery/backup-create", nil)
+	req.Header.Set("Authorization", "Bearer shared-secret")
+	res := httptest.NewRecorder()
+	handler(res, req)
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("expected shared auth token to authorize admin write path, got %d", res.Code)
+	}
+}
+
 func TestAdminRecoveryInspectionAndValidationEndpoints(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	dataDir := filepath.Join(t.TempDir(), "data")

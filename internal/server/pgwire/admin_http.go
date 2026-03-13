@@ -20,6 +20,13 @@ import (
 
 const maxFailoverHistoryEntries = 64
 
+type adminScope string
+
+const (
+	adminScopeRead  adminScope = "read"
+	adminScopeWrite adminScope = "write"
+)
+
 type runtimeMetrics struct {
 	nodeID string
 
@@ -120,19 +127,19 @@ func (server *Server) startAdminHTTP() error {
 	mux.HandleFunc("/metrics", server.handleMetrics)
 	mux.HandleFunc("/livez", server.handleLivez)
 	mux.HandleFunc("/readyz", server.handleReadyz)
-	mux.HandleFunc("/api/v1/health", server.handleAdminHealth)
-	mux.HandleFunc("/api/v1/leadership-state", server.handleAdminLeadershipState)
-	mux.HandleFunc("/api/v1/last-lsn", server.handleAdminLastLSN)
-	mux.HandleFunc("/api/v1/failover-history", server.handleAdminFailoverHistory)
-	mux.HandleFunc("/api/v1/snapshot-catalog", server.handleAdminSnapshotCatalog)
-	mux.HandleFunc("/api/v1/wal-retention", server.handleAdminWALRetention)
-	mux.HandleFunc("/api/v1/recovery/backup-create", server.handleAdminRecoveryCreateBackup)
-	mux.HandleFunc("/api/v1/recovery/backup-manifest", server.handleAdminRecoveryBackupManifest)
-	mux.HandleFunc("/api/v1/recovery/backup-verify", server.handleAdminRecoveryVerifyBackup)
-	mux.HandleFunc("/api/v1/recovery/restore-lsn", server.handleAdminRecoveryRestoreLSN)
-	mux.HandleFunc("/api/v1/recovery/restore-timestamp", server.handleAdminRecoveryRestoreTimestamp)
-	mux.HandleFunc("/api/v1/recovery/snapshot-catalog", server.handleAdminRecoverySnapshotCatalog)
-	mux.HandleFunc("/api/v1/recovery/wal-retention", server.handleAdminRecoveryWALRetention)
+	mux.HandleFunc("/api/v1/health", server.withAdminAuth(adminScopeRead, server.handleAdminHealth))
+	mux.HandleFunc("/api/v1/leadership-state", server.withAdminAuth(adminScopeRead, server.handleAdminLeadershipState))
+	mux.HandleFunc("/api/v1/last-lsn", server.withAdminAuth(adminScopeRead, server.handleAdminLastLSN))
+	mux.HandleFunc("/api/v1/failover-history", server.withAdminAuth(adminScopeRead, server.handleAdminFailoverHistory))
+	mux.HandleFunc("/api/v1/snapshot-catalog", server.withAdminAuth(adminScopeRead, server.handleAdminSnapshotCatalog))
+	mux.HandleFunc("/api/v1/wal-retention", server.withAdminAuth(adminScopeRead, server.handleAdminWALRetention))
+	mux.HandleFunc("/api/v1/recovery/backup-create", server.withAdminAuth(adminScopeWrite, server.handleAdminRecoveryCreateBackup))
+	mux.HandleFunc("/api/v1/recovery/backup-manifest", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryBackupManifest))
+	mux.HandleFunc("/api/v1/recovery/backup-verify", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryVerifyBackup))
+	mux.HandleFunc("/api/v1/recovery/restore-lsn", server.withAdminAuth(adminScopeWrite, server.handleAdminRecoveryRestoreLSN))
+	mux.HandleFunc("/api/v1/recovery/restore-timestamp", server.withAdminAuth(adminScopeWrite, server.handleAdminRecoveryRestoreTimestamp))
+	mux.HandleFunc("/api/v1/recovery/snapshot-catalog", server.withAdminAuth(adminScopeRead, server.handleAdminRecoverySnapshotCatalog))
+	mux.HandleFunc("/api/v1/recovery/wal-retention", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryWALRetention))
 
 	server.adminListener = listener
 	server.adminServer = &http.Server{Handler: mux}
@@ -145,6 +152,69 @@ func (server *Server) startAdminHTTP() error {
 
 	server.config.Logger.Info("admin http server listening", "address", listener.Addr().String())
 	return nil
+}
+
+func (server *Server) withAdminAuth(scope adminScope, next http.HandlerFunc) http.HandlerFunc {
+	if next == nil {
+		return func(w http.ResponseWriter, _ *http.Request) {
+			writeAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": "admin handler unavailable"})
+		}
+	}
+	token := server.adminToken(scope)
+	if token == "" {
+		return next
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !validateAdminAuthorization(r, token) {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="asql-admin"`)
+			writeAdminJSON(w, http.StatusUnauthorized, map[string]string{"error": "admin authorization is required"})
+			return
+		}
+		next(w, r)
+	}
+}
+
+func (server *Server) adminToken(scope adminScope) string {
+	if server == nil {
+		return ""
+	}
+	readToken := strings.TrimSpace(server.config.AdminReadToken)
+	writeToken := strings.TrimSpace(server.config.AdminWriteToken)
+	sharedToken := strings.TrimSpace(server.config.AuthToken)
+	if readToken == "" {
+		if sharedToken != "" {
+			readToken = sharedToken
+		} else {
+			readToken = writeToken
+		}
+	}
+	if writeToken == "" {
+		if sharedToken != "" {
+			writeToken = sharedToken
+		} else {
+			writeToken = readToken
+		}
+	}
+	if scope == adminScopeWrite {
+		return writeToken
+	}
+	return readToken
+}
+
+func validateAdminAuthorization(r *http.Request, expected string) bool {
+	if strings.TrimSpace(expected) == "" {
+		return true
+	}
+	auth := strings.TrimSpace(r.Header.Get("Authorization"))
+	if auth == "" {
+		return false
+	}
+	const bearerPrefix = "Bearer "
+	if !strings.HasPrefix(auth, bearerPrefix) {
+		return false
+	}
+	provided := strings.TrimSpace(auth[len(bearerPrefix):])
+	return provided == expected
 }
 
 func (server *Server) handleMetrics(w http.ResponseWriter, _ *http.Request) {

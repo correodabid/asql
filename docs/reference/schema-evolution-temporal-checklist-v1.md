@@ -58,6 +58,10 @@ If Studio schema diff is being used, treat warnings about entities and versioned
 
 Those warnings are there because the migration may be SQL-valid while still changing replay-visible semantics.
 
+For CLI-driven rollouts, run `asqlctl -command migration-preflight` before approval. It now emits generated rollback SQL for reversible schema operations and flags statements that still require an explicit rollback narrative.
+
+For online-safe additive columns, current support includes plain `ADD COLUMN` and `ADD COLUMN ... DEFAULT <literal> NOT NULL`. Treat the latter as a data backfill operation for review purposes, because replay and restart must preserve the same filled values for pre-existing rows.
+
 ## 6. Rehearse the explanation path
 
 For affected tables, rehearse this before production rollout:
@@ -75,10 +79,12 @@ If the team cannot explain the before/after story clearly, the migration is not 
 A reviewable migration package should include:
 
 - forward SQL,
-- rollback SQL,
+- rollback SQL (generated or explicit, but always reviewed),
 - temporal-semantics review notes,
 - verification queries,
 - replay/history parity checks.
+
+When using `ADD COLUMN ... DEFAULT <literal> NOT NULL`, include at least one replay/restart parity assertion that validates both pre-existing rows and newly inserted rows observe the same column value semantics after recovery.
 
 ## 8. Approval rule
 

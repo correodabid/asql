@@ -930,6 +930,8 @@ type MigrationValidationReport struct {
 	RollbackSafe    bool
 	ForwardAccepted bool
 	RollbackChecked bool
+	AutoRollback    bool
+	RollbackSQL     []string
 	Issues          []string
 }
 

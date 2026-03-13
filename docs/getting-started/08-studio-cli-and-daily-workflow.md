@@ -30,7 +30,21 @@ go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 - CI or smoke tests,
 - scripted transactions,
 - fixture workflows,
+- migration preflight and rollback review,
+- audit evidence export and retention review,
 - reproducible team instructions.
+
+Before applying schema changes, run migration preflight from the CLI:
+
+```bash
+go run ./cmd/asqlctl \
+	-endpoint 127.0.0.1:9042 \
+	-command migration-preflight \
+	-domains accounts \
+	-sql "ALTER TABLE users ADD COLUMN status TEXT; CREATE INDEX idx_users_status ON users (status) USING HASH;"
+```
+
+When rollback SQL is omitted, ASQL generates a best-effort rollback plan for reversible schema operations and reports whether replay-visible rollback is actually safe. For destructive or data-changing statements, provide explicit `-rollback-sql`.
 
 ## Guided CLI workflow: explain one state transition
 

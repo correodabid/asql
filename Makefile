@@ -219,7 +219,7 @@ dev-cluster: kill-dev
 		done; \
 		if [ $$OK -eq 0 ]; then echo "node-c timeout"; cat /tmp/asql-dev-node-c.log; exit 1; fi
 	@echo "metrics: node-a=http://127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_A)) node-b=http://127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_B)) node-c=http://127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_C))"
-	cd ./cmd/asqlstudio && \
+	cd ./asqlstudio && \
 		ASQL_PGWIRE_ENDPOINT=127.0.0.1:5433 \
 		ASQL_PEER_ENDPOINTS=127.0.0.1:5433,127.0.0.1:5434,127.0.0.1:5435 \
 		ASQL_ADMIN_ENDPOINTS=127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_A)),127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_B)),127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_C)) \

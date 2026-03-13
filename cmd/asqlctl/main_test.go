@@ -14,6 +14,7 @@ import (
 
 	"asql/internal/engine/executor"
 	"asql/internal/platform/datadir"
+	grpcserver "asql/internal/server/grpc"
 	pgwire "asql/internal/server/pgwire"
 	"asql/internal/storage/wal"
 
@@ -257,5 +258,49 @@ func TestFixtureExportCommand(t *testing.T) {
 	var validateOutput bytes.Buffer
 	if err := runFixtureCommand(ctx, &validateOutput, "fixture-validate", outputPath, "", "", ""); err != nil {
 		t.Fatalf("validate exported fixture: %v", err)
+	}
+}
+
+func TestRunCommandMigrationPreflight(t *testing.T) {
+	server, err := grpcserver.New(grpcserver.Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: filepath.Join(t.TempDir(), "grpc-migration-preflight-data"),
+		Logger:      slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new grpc server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	go func() { _ = server.ServeOnListener(listener) }()
+
+	var output bytes.Buffer
+	if err := runCommand(&output, listener.Addr().String(), "", "migration-preflight", "domain", "accounts", "", "CREATE TABLE users (id INT); ALTER TABLE users ADD COLUMN email TEXT", "", "", "", 0, 0); err != nil {
+		t.Fatalf("migration-preflight: %v", err)
+	}
+	if !strings.Contains(output.String(), "\"auto_rollback\": true") {
+		t.Fatalf("expected auto rollback in output, got %q", output.String())
+	}
+	if !strings.Contains(output.String(), "DROP TABLE users") {
+		t.Fatalf("expected generated drop table rollback in output, got %q", output.String())
+	}
+}
+
+func TestSplitSQLStatements(t *testing.T) {
+	statements := splitSQLStatements("INSERT INTO demo.items VALUES ('a;b'); UPDATE demo.items SET name = 'x';")
+	if len(statements) != 2 {
+		t.Fatalf("expected 2 statements, got %d (%+v)", len(statements), statements)
+	}
+	if statements[0] != "INSERT INTO demo.items VALUES ('a;b')" {
+		t.Fatalf("unexpected first statement: %q", statements[0])
+	}
+	if statements[1] != "UPDATE demo.items SET name = 'x'" {
+		t.Fatalf("unexpected second statement: %q", statements[1])
 	}
 }
