@@ -83,6 +83,10 @@ If any answer is “yes” to the first four, refactor before merging.
 - Use ADRs for durable architectural/product decisions.
 - Mark stale planning docs as historical rather than silently letting them drift.
 - Keep `.github/copilot-instructions.md` aligned with the current product state.
+- Treat `README.md`, `docs/getting-started/`, `docs/reference/`, and `site/` as the primary external truth surfaces and keep them synchronized.
+- Do not leave public SQL examples on syntax that the current parser rejects.
+- Do not describe partial compatibility as full parity; use explicit supported/partial/unsupported language.
+- When runtime paths differ (pgwire vs gRPC vs recovery/admin), state the canonical path first and demote secondary flows clearly.
 
 ## Agent workflow
 1. Read the current task context and relevant docs.
