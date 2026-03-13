@@ -274,11 +274,12 @@
 
 <span class="c">-- Versioned FK captures exact version</span>
 <span class="k">CREATE TABLE</span> process_orders (
-  id <span class="t">TEXT</span> <span class="k">PRIMARY KEY</span> <span class="k">DEFAULT</span> <span class="f">UUID_V7</span>(),
-  recipe_id <span class="t">TEXT</span> <span class="k">REFERENCES VERSIONED</span>
-    master.ingredients(id)
-    <span class="k">AS OF</span> recipe_version,
-  recipe_version <span class="t">INT</span>
+  id <span class="t">TEXT</span> <span class="k">PRIMARY KEY</span> <span class="k">DEFAULT</span> <span class="f">UUID_V7</span>,
+  recipe_id <span class="t">TEXT</span>,
+  recipe_version <span class="t">INT</span>,
+  <span class="k">VERSIONED FOREIGN KEY</span> (recipe_id)
+    <span class="k">REFERENCES</span> master.ingredients(id)
+    <span class="k">AS OF</span> recipe_version
 );</code></pre>
           </div>
         </div>
@@ -569,7 +570,7 @@ conn.Exec(ctx, "COMMIT")</code></pre>
         <div class="sql-card">
           <h4>DDL</h4>
           <pre><code><span class="k">CREATE TABLE</span> products (
-  id <span class="t">TEXT</span> <span class="k">PRIMARY KEY</span> <span class="k">DEFAULT</span> <span class="f">UUID_V7</span>(),
+  id <span class="t">TEXT</span> <span class="k">PRIMARY KEY</span> <span class="k">DEFAULT</span> <span class="f">UUID_V7</span>,
   name <span class="t">TEXT</span> <span class="k">NOT NULL</span>,
   price <span class="t">FLOAT</span> <span class="k">CHECK</span> (price > <span class="n">0</span>),
   category_id <span class="t">INT</span> <span class="k">REFERENCES</span> categories(id)
