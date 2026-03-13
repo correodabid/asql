@@ -760,7 +760,7 @@ function EntityContour({ group, isHovered, onHover }: {
 
 function TableCard({
   pos, isActive, isBeingDragged, onMouseDown, rootEntityColor, dimmed, rowCount,
-  walHeatBg, highlightedColumns, fkHighlightedColumns, onColumnHover, onTableContextMenu,
+  walHeatBg, highlightedColumns, fkHighlightedColumns, fkDropTargetCol, onColumnHover, onTableContextMenu,
   annotation, onAnnotationDblClick, onAddColumnClick, onFKDragStart,
   onSelectColumn, onSelectIndex,
 }: {
@@ -777,6 +777,8 @@ function TableCard({
   highlightedColumns?: Set<string>
   /** Column names to highlight as FK relationship endpoints (on rel hover) */
   fkHighlightedColumns?: Set<string>
+  /** Column name being hovered as a FK drop target during drag-to-create */
+  fkDropTargetCol?: string
   /** Fired on column row hover — null colName = mouse left */
   onColumnHover?: (colName: string | null, cx: number, cy: number) => void
   /** Fired on right-click of the table card */
@@ -981,6 +983,7 @@ function TableCard({
           const isVFK = vfkCols.has(col.name)
           const isHL = highlightedColumns?.has(col.name) ?? false
           const isFKHL = fkHighlightedColumns?.has(col.name) ?? false
+          const isDropTarget = fkDropTargetCol === col.name
           const canDragFK = !!onFKDragStart && !col.primary_key
           return (
             <g
@@ -998,7 +1001,7 @@ function TableCard({
                 y={cy - COL_ROW_H / 2}
                 width={pos.w - 2}
                 height={COL_ROW_H}
-                fill={isFKHL ? 'rgba(99,91,255,0.18)' : isHL ? 'rgba(34,211,238,0.09)' : 'transparent'}
+                fill={isDropTarget ? 'rgba(34,197,94,0.20)' : isFKHL ? 'rgba(99,91,255,0.18)' : isHL ? 'rgba(34,211,238,0.09)' : 'transparent'}
                 rx={3}
               />
               {/* FK-hover: left accent bar */}
@@ -1009,6 +1012,17 @@ function TableCard({
                   width={3}
                   height={COL_ROW_H - 4}
                   fill="var(--accent)"
+                  rx={1.5}
+                />
+              )}
+              {/* FK drop-target: green left accent bar */}
+              {isDropTarget && (
+                <rect
+                  x={pos.x + 1}
+                  y={cy - COL_ROW_H / 2 + 2}
+                  width={3}
+                  height={COL_ROW_H - 4}
+                  fill="#22c55e"
                   rx={1.5}
                 />
               )}
@@ -1249,6 +1263,7 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
     fromTableKey: string; fromCol: string
     svgX: number; svgY: number; curSVGX: number; curSVGY: number
   } | null>(null)
+  const [fkDragTarget, setFkDragTarget] = useState<{ tableKey: string; colName: string } | null>(null)
 
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -1495,6 +1510,8 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
     if (fkDrag) {
       const pt = clientToSVG(e.clientX, e.clientY)
       setFkDrag(prev => prev ? { ...prev, curSVGX: pt.x, curSVGY: pt.y } : null)
+      const target = findColumnAtSVGPoint(pt.x, pt.y, fkDrag.fromTableKey)
+      setFkDragTarget(target ? { tableKey: target.tableKey, colName: target.colName } : null)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleMouseMove, fkDrag, pan, zoom])
@@ -1509,6 +1526,7 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
         onCreateFK(fromPos?.table.name ?? fkDrag.fromTableKey, fkDrag.fromCol, target.tableName, target.colName)
       }
       setFkDrag(null)
+      setFkDragTarget(null)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [handleMouseUp, fkDrag, onCreateFK, visibleTablePositions, pan, zoom])
@@ -1644,6 +1662,7 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
                 walHeatBg={walHeatBgFor(pos.table.name)}
                 highlightedColumns={searchMatchedCols ?? undefined}
                 fkHighlightedColumns={fkHighlightMap?.get(tableKey)}
+                fkDropTargetCol={fkDragTarget?.tableKey === tableKey ? fkDragTarget.colName : undefined}
                 onColumnHover={(colName, cx, cy) => handleColumnHover(tableKey, colName, cx, cy)}
                 onTableContextMenu={(cx, cy) => handleTableContextMenu(tableKey, pos.table.name, cx, cy)}
                 annotation={annotations[tableKey]}
