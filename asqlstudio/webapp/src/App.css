@@ -1019,7 +1019,7 @@
 
 .er-toolbar {
   position: absolute;
-  bottom: 48px;
+  bottom: 8px;
   left: 16px;
   display: flex;
   align-items: center;
@@ -7980,7 +7980,7 @@ select.editor-input {
 
 .er-minimap {
   position: absolute;
-  bottom: 48px;
+  bottom: 8px;
   right: 16px;
   z-index: 10;
   border-radius: var(--radius-md);

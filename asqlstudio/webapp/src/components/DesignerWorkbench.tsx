@@ -56,6 +56,7 @@ type Props = {
   redo: () => void
   canUndo: boolean
   canRedo: boolean
+  normalizeSelection: (next: SchemaModel) => void
 }
 
 function summarizeOps(diffOperations: DiffOperation[]) {
@@ -95,6 +96,7 @@ export function DesignerWorkbench({
   redo,
   canUndo,
   canRedo,
+  normalizeSelection,
 }: Props) {
   const stats = summarizeOps(diffOperations)
   const executedStatements = statementStates.filter((state) => state.status === 'success').length
@@ -106,6 +108,34 @@ export function DesignerWorkbench({
   const isFirstRender = useRef(true)
   const silentDiffRef = useRef(onSilentDiff)
   useEffect(() => { silentDiffRef.current = onSilentDiff }, [onSilentDiff])
+
+  const handleAddTable = () => {
+    setModel((current) => {
+      const next = clone(current)
+      next.tables.push({
+        name: `table_${next.tables.length + 1}`,
+        columns: [{ name: 'id', type: 'INT', nullable: false, primary_key: true, unique: false, default_value: '' }],
+      })
+      normalizeSelection(next)
+      return next
+    })
+    setSelectedTable(model.tables.length)
+    setSelectedColumn(0)
+  }
+
+  const handleDeleteTable = (tableName: string) => {
+    if (model.tables.length <= 1) return
+    const idx = model.tables.findIndex((t) => t.name === tableName)
+    if (idx < 0) return
+    setModel((current) => {
+      const next = clone(current)
+      next.tables.splice(idx, 1)
+      normalizeSelection(next)
+      return next
+    })
+    setSelectedTable(Math.max(0, idx - 1))
+    setSelectedColumn(0)
+  }
 
   // Keyboard shortcuts: Cmd/Ctrl+Z = undo, Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y = redo
   useEffect(() => {
@@ -228,6 +258,8 @@ export function DesignerWorkbench({
               setSelectedTable(tableIndex)
               setSelectedIndex(idxIndex)
             }}
+            onAddTable={handleAddTable}
+            onDeleteTable={handleDeleteTable}
             onCreateFK={(fromTable, fromCol, toTable, toCol) => {
               const tableIdx = model.tables.findIndex((t) => t.name === fromTable)
               if (tableIdx < 0) return

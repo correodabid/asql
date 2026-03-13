@@ -23,6 +23,10 @@ type Props = {
   onSelectColumn?: (tableIndex: number, colIndex: number) => void
   /** Called when user clicks an index row — passes model table index and index index */
   onSelectIndex?: (tableIndex: number, idxIndex: number) => void
+  /** Called when the user wants to add a new table from the canvas toolbar */
+  onAddTable?: () => void
+  /** Called when the user wants to delete a table via context menu (name = table to remove) */
+  onDeleteTable?: (tableName: string) => void
 }
 
 const TABLE_W = 220
@@ -1182,7 +1186,7 @@ function EntityLegend({ groups, hoveredEntity, onHover, onFocus, isolatedEntity,
 
 // ─── Main component ───────────────────────────────────────
 
-export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onDomainClick, tableCounts, walMutationCounts, onAddColumn, onCreateFK, onSelectColumn, onSelectIndex }: Props) {
+export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onDomainClick, tableCounts, walMutationCounts, onAddColumn, onCreateFK, onSelectColumn, onSelectIndex, onAddTable, onDeleteTable }: Props) {
   const isMulti = !!multiModel && multiModel.domains.length > 0
 
   // ── Search
@@ -1726,6 +1730,17 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
               Remove note
             </button>
           )}
+          {onDeleteTable && model.tables.length > 1 && (
+            <>
+              <div className="er-context-menu-sep" />
+              <button className="er-context-menu-item er-context-menu-item-danger" onClick={() => {
+                onDeleteTable(contextMenu.tableName)
+                setContextMenu(null)
+              }}>
+                Delete table…
+              </button>
+            </>
+          )}
           <div className="er-context-menu-sep" />
           <button className="er-context-menu-item" onClick={() => {
             const p = visibleTablePositions.find(p => (p.tableKey || p.table.name) === contextMenu.tableKey)
@@ -1780,6 +1795,15 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
 
       {/* ── Canvas toolbar ────────────────────────── */}
       <div className="er-toolbar">
+        {/* Add table */}
+        {onAddTable && (
+          <>
+            <button className="er-toolbar-btn" onClick={onAddTable} title="Add table">
+              <IconPlus />
+            </button>
+            <span className="er-toolbar-sep" />
+          </>
+        )}
         {/* Search */}
         <button
           className="er-toolbar-btn"

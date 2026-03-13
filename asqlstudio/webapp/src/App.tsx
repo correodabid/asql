@@ -10,7 +10,6 @@ import { FixturePanel } from './components/FixturePanel'
 import { IconDatabase, IconDownload, IconGrid, IconMoon, IconRefresh, IconSchema, IconShield, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { RecoveryPanel } from './components/RecoveryPanel'
-import { Sidebar } from './components/Sidebar'
 import { StartHerePanel } from './components/StartHerePanel'
 import { StatusBar } from './components/StatusBar'
 import { TabBar, type GroupDef, type TabId } from './components/Tabs'
@@ -326,18 +325,6 @@ function App() {
 
       {/* Body */}
       <div className="app-body">
-        {/* Sidebar only shown for Designer tab (not in all-domains mode) */}
-        {activeTab === 'designer' && !isAllDomains && (
-          <Sidebar
-            model={model}
-            setModel={setModel}
-            selectedTable={selectedTable}
-            setSelectedTable={setSelectedTable}
-            setSelectedColumn={setSelectedColumn}
-            normalizeSelection={normalizeSelection}
-          />
-        )}
-
         <div className="main-area">
           <TabBar groups={groups} active={activeTab} onChange={setActiveTab} />
 
@@ -447,6 +434,7 @@ function App() {
                     redo={redo}
                     canUndo={canUndo}
                     canRedo={canRedo}
+                    normalizeSelection={normalizeSelection}
                   />
                 )}
 
