@@ -1,6 +1,7 @@
-import type { Dispatch, SetStateAction } from 'react'
+import { useEffect, useState } from 'react'
+import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { clone, type SchemaIndex, type SchemaTable } from '../schema'
-import { IconPlus, IconTrash } from './Icons'
+import { IconChevronRight, IconPlus, IconTrash } from './Icons'
 
 type Props = {
   activeTable: SchemaTable | null
@@ -11,19 +12,60 @@ type Props = {
 
 const INDEX_METHODS = ['btree', 'hash'] as const
 
+function SectionPanel({
+  label,
+  badge,
+  open,
+  onToggle,
+  actions,
+  children,
+}: {
+  label: string
+  badge?: string | null
+  open: boolean
+  onToggle: () => void
+  actions?: ReactNode
+  children: ReactNode
+}) {
+  return (
+    <div className={`ce-section${open ? ' open' : ''}`}>
+      <button className="ce-section-hd" onClick={onToggle}>
+        <span className={`ce-chevron${open ? ' open' : ''}`}><IconChevronRight /></span>
+        <span className="ce-section-label">{label}</span>
+        {badge != null && badge !== '' && <span className="ce-section-badge">{badge}</span>}
+        {actions && (
+          <span className="ce-section-acts" onClick={(e) => e.stopPropagation()}>
+            {actions}
+          </span>
+        )}
+      </button>
+      {open && <div className="ce-section-body">{children}</div>}
+    </div>
+  )
+}
+
 export function IndexEditor({ activeTable, updateTable, selectedIndex, setSelectedIndex }: Props) {
+  const [listOpen, setListOpen] = useState(true)
+  const [propsOpen, setPropsOpen] = useState(true)
+
+  const indexes = activeTable?.indexes || []
+  const activeIndex = indexes[selectedIndex] || null
+
+  // Auto-open properties when selection changes
+  useEffect(() => {
+    if (activeIndex) setPropsOpen(true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIndex])
+
   if (!activeTable) {
     return (
-      <div className="index-editor">
+      <div className="column-editor">
         <div className="panel-empty">
           <span className="text-muted">Select a table to manage indexes</span>
         </div>
       </div>
     )
   }
-
-  const indexes = activeTable.indexes || []
-  const activeIndex = indexes[selectedIndex] || null
 
   const addIndex = () => {
     const name = `idx_${activeTable.name}_${indexes.length + 1}`
@@ -88,18 +130,23 @@ export function IndexEditor({ activeTable, updateTable, selectedIndex, setSelect
   }
 
   return (
-    <div className="index-editor">
-      <div className="editor-section">
-        <div className="editor-section-header">
-          <label className="editor-label">Indexes</label>
-          <div className="editor-actions">
+    <div className="column-editor">
+
+      {/* ── Index list ──────────────────────────────────────── */}
+      <SectionPanel
+        label="Indexes"
+        badge={indexes.length > 0 ? String(indexes.length) : null}
+        open={listOpen}
+        onToggle={() => setListOpen((v) => !v)}
+        actions={
+          <>
             <button className="icon-btn" onClick={addIndex} title="Add index"><IconPlus /></button>
             <button className="icon-btn danger" onClick={removeIndex} title="Remove index" disabled={indexes.length === 0}><IconTrash /></button>
-          </div>
-        </div>
-
+          </>
+        }
+      >
         {indexes.length === 0 ? (
-          <div className="panel-empty" style={{ padding: '12px 0' }}>
+          <div className="panel-empty" style={{ padding: '8px 0' }}>
             <span className="text-muted">No indexes defined</span>
           </div>
         ) : (
@@ -110,21 +157,23 @@ export function IndexEditor({ activeTable, updateTable, selectedIndex, setSelect
                 className={`column-list-item ${i === selectedIndex ? 'active' : ''}`}
                 onClick={() => setSelectedIndex(i)}
               >
-                <span className="col-indicator">
-                  <IconIndex />
-                </span>
+                <span className="col-indicator"><IconIndex /></span>
                 <span className="col-list-name">{idx.name || '—'}</span>
                 <span className="col-list-type">{idx.method}</span>
               </button>
             ))}
           </div>
         )}
-      </div>
+      </SectionPanel>
 
+      {/* ── Index properties ────────────────────────────────── */}
       {activeIndex && (
-        <div className="editor-section column-detail">
-          <label className="editor-label">Index Properties</label>
-
+        <SectionPanel
+          label={activeIndex.name || 'index'}
+          badge={activeIndex.method}
+          open={propsOpen}
+          onToggle={() => setPropsOpen((v) => !v)}
+        >
           <div className="editor-field">
             <label className="editor-field-label">Name</label>
             <input
@@ -147,19 +196,17 @@ export function IndexEditor({ activeTable, updateTable, selectedIndex, setSelect
             </select>
           </div>
 
-          <div className="editor-section">
-            <div className="editor-section-header">
-              <label className="editor-field-label">Indexed Columns</label>
-              <div className="editor-actions">
-                <button
-                  className="icon-btn"
-                  onClick={addColumnToIndex}
-                  title="Add column to index"
-                  disabled={activeIndex.columns.length >= activeTable.columns.length}
-                >
-                  <IconPlus />
-                </button>
-              </div>
+          <div className="editor-field">
+            <div className="editor-section-header" style={{ marginBottom: 6 }}>
+              <label className="editor-field-label">Columns</label>
+              <button
+                className="icon-btn"
+                onClick={addColumnToIndex}
+                title="Add column to index"
+                disabled={activeIndex.columns.length >= activeTable.columns.length}
+              >
+                <IconPlus />
+              </button>
             </div>
 
             <div className="index-columns-list">
@@ -187,8 +234,9 @@ export function IndexEditor({ activeTable, updateTable, selectedIndex, setSelect
               ))}
             </div>
           </div>
-        </div>
+        </SectionPanel>
       )}
+
     </div>
   )
 }
@@ -199,3 +247,4 @@ const IconIndex = () => (
     <path d="M4 6h16M4 12h10M4 18h6" />
   </svg>
 )
+

@@ -959,6 +959,33 @@
   opacity: 0.92;
 }
 
+/* ── Column row interactivity ───────────────────────────── */
+.er-col-row-bg {
+  transition: fill 100ms;
+}
+.er-col-row:hover .er-col-row-bg {
+  fill: rgba(255, 255, 255, 0.04) !important;
+}
+
+/* ── Index row interactivity ────────────────────────────── */
+.er-idx-row-bg {
+  transition: fill 100ms;
+}
+.er-idx-row:hover .er-idx-row-bg {
+  fill: rgba(255, 255, 255, 0.05);
+}
+
+/* ── FK drag handle: visible on parent row hover ────────── */
+.er-fk-drag-handle {
+  transition: opacity 150ms;
+}
+.er-col-row:hover .er-fk-drag-handle {
+  opacity: 0.75 !important;
+}
+.er-fk-drag-handle:hover {
+  opacity: 1 !important;
+}
+
 /* ── Canvas Toolbar ─────────────────────────────────────── */
 
 .er-toolbar {
@@ -1141,31 +1168,120 @@
 /* ── Column Editor ───────────────────────────────────────── */
 
 .column-editor {
-  padding: 16px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
 }
 
-.editor-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+/* ── Collapsible section panels (ColumnEditor / IndexEditor) ── */
+
+.ce-section {
+  border-bottom: 1px solid var(--border);
 }
 
-.editor-section-header {
+.ce-section.ce-indent {
+  border-bottom: none;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+.ce-section-hd {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 6px;
+  width: 100%;
+  padding: 8px 12px 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition);
+  min-height: 36px;
 }
 
-.editor-label {
+.ce-section-hd:hover {
+  background: var(--bg-hover);
+}
+
+.ce-indent .ce-section-hd {
+  padding-left: 8px;
+  min-height: 32px;
+}
+
+.ce-chevron {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform var(--transition);
+}
+
+.ce-chevron svg { width: 13px; height: 13px; }
+
+.ce-chevron.open {
+  transform: rotate(90deg);
+}
+
+.ce-section-label {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.ce-indent .ce-section-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: inherit;
+}
+
+.ce-section-badge {
   font-size: 10px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
   color: var(--text-muted);
+  background: rgba(255,255,255,0.06);
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+  font-family: 'JetBrains Mono', monospace;
 }
+
+.ce-section-acts {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.ce-section-body {
+  padding: 8px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ce-indent .ce-section-body {
+  padding: 6px 0 8px;
+}
+
+/* fk-row: horizontal flex for FK inputs */
+.fk-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+.fk-row .editor-field {
+  flex: 1;
+  min-width: 0;
+}
+
+
 
 .editor-field-label {
   font-size: 11px;

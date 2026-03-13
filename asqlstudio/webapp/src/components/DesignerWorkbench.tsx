@@ -199,6 +199,14 @@ export function DesignerWorkbench({
                 setSelectedColumn(0)
               }
             }}
+            onSelectColumn={(tableIndex, colIndex) => {
+              setSelectedTable(tableIndex)
+              setSelectedColumn(colIndex)
+            }}
+            onSelectIndex={(tableIndex, idxIndex) => {
+              setSelectedTable(tableIndex)
+              setSelectedIndex(idxIndex)
+            }}
             onCreateFK={(fromTable, fromCol, toTable, toCol) => {
               const tableIdx = model.tables.findIndex((t) => t.name === fromTable)
               if (tableIdx < 0) return

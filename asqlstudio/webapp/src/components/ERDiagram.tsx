@@ -19,6 +19,10 @@ type Props = {
   onAddColumn?: (tableName: string) => void
   /** Called when user drag-creates an FK from canvas */
   onCreateFK?: (fromTable: string, fromCol: string, toTable: string, toCol: string) => void
+  /** Called when user clicks a column row — passes model table index and column index */
+  onSelectColumn?: (tableIndex: number, colIndex: number) => void
+  /** Called when user clicks an index row — passes model table index and index index */
+  onSelectIndex?: (tableIndex: number, idxIndex: number) => void
 }
 
 const TABLE_W = 220
@@ -737,6 +741,7 @@ function TableCard({
   pos, isActive, isBeingDragged, onMouseDown, rootEntityColor, dimmed, rowCount,
   walHeatBg, highlightedColumns, onColumnHover, onTableContextMenu,
   annotation, onAnnotationDblClick, onAddColumnClick, onFKDragStart,
+  onSelectColumn, onSelectIndex,
 }: {
   pos: TablePos
   isActive: boolean
@@ -761,6 +766,10 @@ function TableCard({
   onAddColumnClick?: () => void
   /** Fired when user starts dragging an FK handle from a column */
   onFKDragStart?: (colName: string, cx: number, cy: number) => void
+  /** Fired when user clicks a column row to select it */
+  onSelectColumn?: (colIndex: number) => void
+  /** Fired when user clicks an index row to select it */
+  onSelectIndex?: (idxIndex: number) => void
 }) {
   const accentColor = pos.domainColor
   const headerFill = walHeatBg || (isActive ? 'var(--accent-subtle)' : (accentColor ? accentColor + '18' : 'rgba(255,255,255,0.03)'))
@@ -952,20 +961,22 @@ function TableCard({
           return (
             <g
               key={`col-${ci}`}
+              className="er-col-row"
               onMouseEnter={(e) => onColumnHover?.(col.name, e.clientX, e.clientY)}
               onMouseLeave={() => onColumnHover?.(null, 0, 0)}
+              onClick={(e) => { if (onSelectColumn) { e.stopPropagation(); onSelectColumn(ci) } }}
+              style={{ cursor: onSelectColumn ? 'pointer' : 'default' }}
             >
-              {/* Search highlight background */}
-              {isHL && (
-                <rect
-                  x={pos.x + 1}
-                  y={cy - COL_ROW_H / 2}
-                  width={pos.w - 2}
-                  height={COL_ROW_H}
-                  fill="rgba(34,211,238,0.09)"
-                  rx={3}
-                />
-              )}
+              {/* Hover / search highlight background */}
+              <rect
+                className="er-col-row-bg"
+                x={pos.x + 1}
+                y={cy - COL_ROW_H / 2}
+                width={pos.w - 2}
+                height={COL_ROW_H}
+                fill={isHL ? 'rgba(34,211,238,0.09)' : 'transparent'}
+                rx={3}
+              />
 
               {/* PK / FK / VK badge */}
               {col.primary_key && (
@@ -1054,7 +1065,22 @@ function TableCard({
             {pos.table.indexes!.map((idx, ii) => {
               const iy = idxBaseY + IDX_HEADER_H + ii * IDX_ROW_H + IDX_ROW_H / 2
               return (
-                <g key={`idx-${ii}`}>
+                <g
+                  key={`idx-${ii}`}
+                  className="er-idx-row"
+                  onClick={(e) => { if (onSelectIndex) { e.stopPropagation(); onSelectIndex(ii) } }}
+                  style={{ cursor: onSelectIndex ? 'pointer' : 'default' }}
+                >
+                  {/* Hover background */}
+                  <rect
+                    className="er-idx-row-bg"
+                    x={pos.x + 1}
+                    y={iy - IDX_ROW_H / 2}
+                    width={pos.w - 2}
+                    height={IDX_ROW_H}
+                    fill="transparent"
+                    rx={3}
+                  />
                   <text
                     x={pos.x + 32}
                     y={iy}
@@ -1156,7 +1182,7 @@ function EntityLegend({ groups, hoveredEntity, onHover, onFocus, isolatedEntity,
 
 // ─── Main component ───────────────────────────────────────
 
-export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onDomainClick, tableCounts, walMutationCounts, onAddColumn, onCreateFK }: Props) {
+export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onDomainClick, tableCounts, walMutationCounts, onAddColumn, onCreateFK, onSelectColumn, onSelectIndex }: Props) {
   const isMulti = !!multiModel && multiModel.domains.length > 0
 
   // ── Search
@@ -1585,6 +1611,14 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
                 }}
                 onAddColumnClick={onAddColumn ? () => onAddColumn(pos.table.name) : undefined}
                 onFKDragStart={onCreateFK ? (colName, cx, cy) => handleFKDragStart(tableKey, colName, cx, cy) : undefined}
+                onSelectColumn={onSelectColumn ? (ci) => {
+                  const modelIdx = model.tables.findIndex(t => t.name === pos.table.name)
+                  if (modelIdx >= 0) onSelectColumn(modelIdx, ci)
+                } : undefined}
+                onSelectIndex={onSelectIndex ? (ii) => {
+                  const modelIdx = model.tables.findIndex(t => t.name === pos.table.name)
+                  if (modelIdx >= 0) onSelectIndex(modelIdx, ii)
+                } : undefined}
               />
             )
           })}

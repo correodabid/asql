@@ -1,6 +1,7 @@
-import type { Dispatch, SetStateAction } from 'react'
+import { useEffect, useState } from 'react'
+import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import { clone, type SchemaColumn, type SchemaModel, type SchemaTable } from '../schema'
-import { IconKey, IconLink, IconNullable, IconPlus, IconTrash, IconUnique } from './Icons'
+import { IconChevronRight, IconKey, IconLink, IconNullable, IconPlus, IconTrash, IconUnique } from './Icons'
 
 type Props = {
   model: SchemaModel
@@ -25,6 +26,40 @@ function inferDefaultMode(value: string): string {
   return 'value'
 }
 
+function SectionPanel({
+  label,
+  badge,
+  open,
+  onToggle,
+  actions,
+  children,
+  indent,
+}: {
+  label: string
+  badge?: string | null
+  open: boolean
+  onToggle: () => void
+  actions?: ReactNode
+  children: ReactNode
+  indent?: boolean
+}) {
+  return (
+    <div className={`ce-section${open ? ' open' : ''}${indent ? ' ce-indent' : ''}`}>
+      <button className="ce-section-hd" onClick={onToggle}>
+        <span className={`ce-chevron${open ? ' open' : ''}`}><IconChevronRight /></span>
+        <span className="ce-section-label">{label}</span>
+        {badge != null && badge !== '' && <span className="ce-section-badge">{badge}</span>}
+        {actions && (
+          <span className="ce-section-acts" onClick={(e) => e.stopPropagation()}>
+            {actions}
+          </span>
+        )}
+      </button>
+      {open && <div className="ce-section-body">{children}</div>}
+    </div>
+  )
+}
+
 export function ColumnEditor({
   model,
   setModel,
@@ -36,6 +71,24 @@ export function ColumnEditor({
   updateTable,
   updateColumn,
 }: Props) {
+  const [tableOpen, setTableOpen] = useState(true)
+  const [colsOpen, setColsOpen] = useState(true)
+  const [propsOpen, setPropsOpen] = useState(true)
+  const [fkOpen, setFkOpen] = useState(false)
+  const [vfkOpen, setVfkOpen] = useState(false)
+
+  // Auto-open properties panel when a different column is selected
+  useEffect(() => {
+    if (activeColumn) setPropsOpen(true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedColumn])
+
+  // Auto-open FK panel if the selected column already has a reference set
+  useEffect(() => {
+    if (activeColumn?.references?.table) setFkOpen(true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedColumn])
+
   if (!activeTable) {
     return (
       <div className="column-editor">
@@ -67,38 +120,49 @@ export function ColumnEditor({
     setSelectedColumn(Math.max(0, selectedColumn - 1))
   }
 
+  const vfks = activeTable.versioned_foreign_keys || []
+
   return (
     <div className="column-editor">
-      {/* Table name editor */}
-      <div className="editor-section">
-        <label className="editor-label">Table Name</label>
-        <input
-          className="editor-input"
-          value={activeTable.name}
-          onChange={(e) => updateTable((t) => ({ ...t, name: e.target.value }))}
-        />
-      </div>
 
-      {/* Domain editor */}
-      <div className="editor-section">
-        <label className="editor-label">Domain</label>
-        <input
-          className="editor-input"
-          value={model.domain}
-          onChange={(e) => setModel((c) => ({ ...c, domain: e.target.value }))}
-        />
-      </div>
+      {/* ── Table identity ──────────────────────────────────── */}
+      <SectionPanel
+        label={activeTable.name || 'untitled'}
+        badge={model.domain || null}
+        open={tableOpen}
+        onToggle={() => setTableOpen((v) => !v)}
+      >
+        <div className="editor-field">
+          <label className="editor-field-label">Table Name</label>
+          <input
+            className="editor-input"
+            value={activeTable.name}
+            onChange={(e) => updateTable((t) => ({ ...t, name: e.target.value }))}
+          />
+        </div>
+        <div className="editor-field">
+          <label className="editor-field-label">Domain</label>
+          <input
+            className="editor-input"
+            value={model.domain}
+            onChange={(e) => setModel((c) => ({ ...c, domain: e.target.value }))}
+          />
+        </div>
+      </SectionPanel>
 
-      {/* Column list */}
-      <div className="editor-section">
-        <div className="editor-section-header">
-          <label className="editor-label">Columns</label>
-          <div className="editor-actions">
+      {/* ── Columns list ────────────────────────────────────── */}
+      <SectionPanel
+        label="Columns"
+        badge={String(activeTable.columns.length)}
+        open={colsOpen}
+        onToggle={() => setColsOpen((v) => !v)}
+        actions={
+          <>
             <button className="icon-btn" onClick={addColumn} title="Add column"><IconPlus /></button>
             <button className="icon-btn danger" onClick={removeColumn} title="Remove column" disabled={activeTable.columns.length <= 1}><IconTrash /></button>
-          </div>
-        </div>
-
+          </>
+        }
+      >
         <div className="column-list">
           {activeTable.columns.map((col, i) => (
             <button
@@ -114,13 +178,16 @@ export function ColumnEditor({
             </button>
           ))}
         </div>
-      </div>
+      </SectionPanel>
 
-      {/* Column detail editor */}
+      {/* ── Column properties ───────────────────────────────── */}
       {activeColumn && (
-        <div className="editor-section column-detail">
-          <label className="editor-label">Column Properties</label>
-
+        <SectionPanel
+          label={activeColumn.name || 'column'}
+          badge={activeColumn.type}
+          open={propsOpen}
+          onToggle={() => setPropsOpen((v) => !v)}
+        >
           <div className="editor-row">
             <div className="editor-field">
               <label className="editor-field-label">Name</label>
@@ -193,11 +260,17 @@ export function ColumnEditor({
             </label>
           </div>
 
-          {/* Foreign Key */}
-          <div className="editor-fk">
-            <label className="editor-field-label"><IconLink /> Foreign Key Reference</label>
-            <div className="editor-row">
+          {/* FK Reference — nested collapsible */}
+          <SectionPanel
+            label="FK Reference"
+            badge={activeColumn.references?.table ? `→ ${activeColumn.references.table}` : null}
+            open={fkOpen}
+            onToggle={() => setFkOpen((v) => !v)}
+            indent
+          >
+            <div className="fk-row">
               <div className="editor-field">
+                <label className="editor-field-label">Table</label>
                 <input
                   className="editor-input mono"
                   placeholder="table"
@@ -207,6 +280,7 @@ export function ColumnEditor({
               </div>
               <span className="fk-dot">.</span>
               <div className="editor-field">
+                <label className="editor-field-label">Column</label>
                 <input
                   className="editor-input mono"
                   placeholder="column"
@@ -215,145 +289,155 @@ export function ColumnEditor({
                 />
               </div>
             </div>
-          </div>
-        </div>
+          </SectionPanel>
+        </SectionPanel>
       )}
 
-      {/* Versioned Foreign Keys (table-level) */}
-      <div className="editor-section">
-        <div className="editor-section-header">
-          <label className="editor-label">Versioned Foreign Keys</label>
-          <div className="editor-actions">
-            <button
-              className="icon-btn"
-              onClick={() =>
-                updateTable((t) => ({
-                  ...t,
-                  versioned_foreign_keys: [
-                    ...(t.versioned_foreign_keys || []),
-                    { column: '', lsn_column: '', references_domain: '', references_table: '', references_column: '' },
-                  ],
-                }))
-              }
-              title="Add versioned FK"
-            >
-              <IconPlus />
-            </button>
+      {/* ── Versioned FKs ───────────────────────────────────── */}
+      <SectionPanel
+        label="Versioned FKs"
+        badge={vfks.length > 0 ? String(vfks.length) : null}
+        open={vfkOpen}
+        onToggle={() => setVfkOpen((v) => !v)}
+        actions={
+          <button
+            className="icon-btn"
+            onClick={() =>
+              updateTable((t) => ({
+                ...t,
+                versioned_foreign_keys: [
+                  ...(t.versioned_foreign_keys || []),
+                  { column: '', lsn_column: '', references_domain: '', references_table: '', references_column: '' },
+                ],
+              }))
+            }
+            title="Add versioned FK"
+          >
+            <IconPlus />
+          </button>
+        }
+      >
+        {vfks.length === 0 ? (
+          <div className="panel-empty" style={{ padding: '8px 0' }}>
+            <span className="text-muted">No versioned FKs defined</span>
           </div>
-        </div>
+        ) : (
+          vfks.map((vfk, i) => (
+            <div key={i} className="vfk-entry">
+              <div className="editor-row">
+                <div className="editor-field">
+                  <label className="editor-field-label">Column</label>
+                  <input
+                    className="editor-input mono"
+                    placeholder="fk_column"
+                    value={vfk.column}
+                    onChange={(e) =>
+                      updateTable((t) => {
+                        const next = clone(t)
+                        const fks = next.versioned_foreign_keys || []
+                        fks[i] = { ...fks[i], column: e.target.value }
+                        next.versioned_foreign_keys = fks
+                        return next
+                      })
+                    }
+                  />
+                </div>
+                <div className="editor-field">
+                  <label className="editor-field-label">LSN Column</label>
+                  <input
+                    className="editor-input mono"
+                    placeholder="lsn_column"
+                    value={vfk.lsn_column}
+                    onChange={(e) =>
+                      updateTable((t) => {
+                        const next = clone(t)
+                        const fks = next.versioned_foreign_keys || []
+                        fks[i] = { ...fks[i], lsn_column: e.target.value }
+                        next.versioned_foreign_keys = fks
+                        return next
+                      })
+                    }
+                  />
+                </div>
+              </div>
 
-        {(activeTable.versioned_foreign_keys || []).map((vfk, i) => (
-          <div key={i} className="vfk-entry">
-            <div className="editor-row">
-              <div className="editor-field">
-                <label className="editor-field-label">Column</label>
-                <input
-                  className="editor-input mono"
-                  placeholder="fk_column"
-                  value={vfk.column}
-                  onChange={(e) =>
+              <div className="fk-row">
+                <div className="editor-field" style={{ flex: 1 }}>
+                  <label className="editor-field-label">Domain</label>
+                  <input
+                    className="editor-input mono"
+                    placeholder="domain"
+                    value={vfk.references_domain}
+                    onChange={(e) =>
+                      updateTable((t) => {
+                        const next = clone(t)
+                        const fks = next.versioned_foreign_keys || []
+                        fks[i] = { ...fks[i], references_domain: e.target.value }
+                        next.versioned_foreign_keys = fks
+                        return next
+                      })
+                    }
+                  />
+                </div>
+                <span className="fk-dot">.</span>
+                <div className="editor-field" style={{ flex: 1 }}>
+                  <label className="editor-field-label">Table</label>
+                  <input
+                    className="editor-input mono"
+                    placeholder="table"
+                    value={vfk.references_table}
+                    onChange={(e) =>
+                      updateTable((t) => {
+                        const next = clone(t)
+                        const fks = next.versioned_foreign_keys || []
+                        fks[i] = { ...fks[i], references_table: e.target.value }
+                        next.versioned_foreign_keys = fks
+                        return next
+                      })
+                    }
+                  />
+                </div>
+                <span className="fk-dot">(</span>
+                <div className="editor-field" style={{ flex: 1 }}>
+                  <label className="editor-field-label">Column</label>
+                  <input
+                    className="editor-input mono"
+                    placeholder="column"
+                    value={vfk.references_column}
+                    onChange={(e) =>
+                      updateTable((t) => {
+                        const next = clone(t)
+                        const fks = next.versioned_foreign_keys || []
+                        fks[i] = { ...fks[i], references_column: e.target.value }
+                        next.versioned_foreign_keys = fks
+                        return next
+                      })
+                    }
+                  />
+                </div>
+                <span className="fk-dot">)</span>
+                <button
+                  className="icon-btn danger"
+                  title="Remove versioned FK"
+                  onClick={() =>
                     updateTable((t) => {
                       const next = clone(t)
-                      const vfks = next.versioned_foreign_keys || []
-                      vfks[i] = { ...vfks[i], column: e.target.value }
-                      next.versioned_foreign_keys = vfks
+                      const fks = next.versioned_foreign_keys || []
+                      fks.splice(i, 1)
+                      next.versioned_foreign_keys = fks.length > 0 ? fks : undefined
                       return next
                     })
                   }
-                />
-              </div>
-              <div className="editor-field">
-                <label className="editor-field-label">LSN Column</label>
-                <input
-                  className="editor-input mono"
-                  placeholder="lsn_column"
-                  value={vfk.lsn_column}
-                  onChange={(e) =>
-                    updateTable((t) => {
-                      const next = clone(t)
-                      const vfks = next.versioned_foreign_keys || []
-                      vfks[i] = { ...vfks[i], lsn_column: e.target.value }
-                      next.versioned_foreign_keys = vfks
-                      return next
-                    })
-                  }
-                />
+                >
+                  <IconTrash />
+                </button>
               </div>
             </div>
-            <div className="editor-row">
-              <div className="editor-field">
-                <label className="editor-field-label">Domain</label>
-                <input
-                  className="editor-input mono"
-                  placeholder="domain"
-                  value={vfk.references_domain}
-                  onChange={(e) =>
-                    updateTable((t) => {
-                      const next = clone(t)
-                      const vfks = next.versioned_foreign_keys || []
-                      vfks[i] = { ...vfks[i], references_domain: e.target.value }
-                      next.versioned_foreign_keys = vfks
-                      return next
-                    })
-                  }
-                />
-              </div>
-              <span className="fk-dot">.</span>
-              <div className="editor-field">
-                <label className="editor-field-label">Table</label>
-                <input
-                  className="editor-input mono"
-                  placeholder="table"
-                  value={vfk.references_table}
-                  onChange={(e) =>
-                    updateTable((t) => {
-                      const next = clone(t)
-                      const vfks = next.versioned_foreign_keys || []
-                      vfks[i] = { ...vfks[i], references_table: e.target.value }
-                      next.versioned_foreign_keys = vfks
-                      return next
-                    })
-                  }
-                />
-              </div>
-              <span className="fk-dot">(</span>
-              <div className="editor-field">
-                <label className="editor-field-label">Column</label>
-                <input
-                  className="editor-input mono"
-                  placeholder="column"
-                  value={vfk.references_column}
-                  onChange={(e) =>
-                    updateTable((t) => {
-                      const next = clone(t)
-                      const vfks = next.versioned_foreign_keys || []
-                      vfks[i] = { ...vfks[i], references_column: e.target.value }
-                      next.versioned_foreign_keys = vfks
-                      return next
-                    })
-                  }
-                />
-              </div>
-              <span className="fk-dot">)</span>
-              <button
-                className="icon-btn danger"
-                title="Remove versioned FK"
-                onClick={() =>
-                  updateTable((t) => {
-                    const next = clone(t)
-                    const vfks = next.versioned_foreign_keys || []
-                    vfks.splice(i, 1)
-                    next.versioned_foreign_keys = vfks.length > 0 ? vfks : undefined
-                    return next
-                  })
-                }
-              >
-                <IconTrash />
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
+          ))
+        )}
+      </SectionPanel>
+
     </div>
   )
 }
+
