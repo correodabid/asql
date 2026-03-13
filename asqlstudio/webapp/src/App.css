@@ -1901,6 +1901,210 @@ select.editor-input {
 }
 
 /* ══════════════════════════════════════════════════════════
+   Schema Panel  —  DDL + Change Review sub-tabs
+   ══════════════════════════════════════════════════════════ */
+
+.schema-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── Scrollable body ──────────────────────────────────────── */
+
+.schema-panel-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+/* ── Empty state (no diff ops yet) ───────────────────────── */
+
+.schema-panel-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 56px 32px;
+  text-align: center;
+  color: var(--text-muted);
+  flex: 1;
+}
+
+.schema-panel-empty svg {
+  width: 36px;
+  height: 36px;
+  opacity: 0.3;
+}
+
+.schema-panel-empty h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.schema-panel-empty p {
+  margin: 0;
+  max-width: 340px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+/* ── Full DDL collapsible section ─────────────────────────── */
+
+.schema-ddl-section {
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.schema-ddl-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  text-align: left;
+  transition: background var(--transition);
+  border-bottom: 1px solid var(--border);
+}
+
+.schema-ddl-toggle:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.schema-ddl-toggle > span:first-child {
+  /* "Full DDL" text */
+  flex: 1;
+}
+
+.schema-ddl-progress-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: var(--accent-subtle);
+  color: var(--text-accent);
+  flex-shrink: 0;
+}
+
+.schema-ddl-toggle-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+/* ── DDL section revealed body ────────────────────────────── */
+
+.schema-ddl-body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  max-height: 50vh;
+}
+
+.schema-ddl-body .ddl-groups,
+.schema-ddl-body .ddl-raw-code {
+  max-height: calc(50vh - 60px);
+  overflow-y: auto;
+}
+
+/* ─────────────────────────────────────────────────────────── */
+
+.schema-panel-subtabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  flex-shrink: 0;
+}
+
+.schema-subtab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--transition);
+  position: relative;
+  bottom: -1px;
+  border-bottom: 2px solid transparent;
+}
+
+.schema-subtab svg {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+
+.schema-subtab:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.schema-subtab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+  background: var(--bg-main);
+}
+
+.schema-subtab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  border-radius: 8px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.schema-subtab-badge.safe {
+  background: rgba(52, 211, 153, 0.15);
+  color: #34d399;
+}
+
+.schema-subtab-badge.breaking {
+  background: rgba(251, 191, 36, 0.15);
+  color: #fbbf24;
+}
+
+.schema-subtab-badge.unsafe {
+  background: rgba(248, 113, 113, 0.15);
+  color: #f87171;
+}
+
+.schema-panel-content {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ══════════════════════════════════════════════════════════
    DDL Panel v2  —  Redesigned interactive DDL view
    ══════════════════════════════════════════════════════════ */
 
@@ -2567,6 +2771,7 @@ select.editor-input {
 .diff-stat-value.modifies { color: #f59e42; }
 .diff-stat-value.drops { color: #f87171; }
 .diff-stat-value.safe-count { color: #34d399; }
+.diff-stat-value.breaking-count { color: #fbbf24; }
 .diff-stat-value.unsafe-count { color: #f87171; }
 
 .diff-stat-label {
@@ -2622,6 +2827,10 @@ select.editor-input {
   border-left: 3px solid rgba(52, 211, 153, 0.35);
 }
 
+.diff-table-group.has-breaking {
+  border-left: 3px solid rgba(251, 191, 36, 0.35);
+}
+
 .diff-table-group.has-unsafe {
   border-left: 3px solid rgba(248, 113, 113, 0.35);
 }
@@ -2655,6 +2864,10 @@ select.editor-input {
 
 .diff-table-safety.safe {
   background: #34d399;
+}
+
+.diff-table-safety.breaking {
+  background: #fbbf24;
 }
 
 .diff-table-safety.unsafe {
@@ -2693,6 +2906,10 @@ select.editor-input {
 
 .diff-op-card-v2.safe {
   border-left: 3px solid rgba(52, 211, 153, 0.5);
+}
+
+.diff-op-card-v2.breaking {
+  border-left: 3px solid rgba(251, 191, 36, 0.5);
 }
 
 .diff-op-card-v2.unsafe {
@@ -2780,6 +2997,14 @@ select.editor-input {
   color: #34d399;
 }
 
+.diff-op-card-v2.breaking .diff-op-icon-wrap {
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.diff-op-card-v2.breaking .diff-op-icon-wrap svg {
+  color: #fbbf24;
+}
+
 .diff-op-card-v2.unsafe .diff-op-icon-wrap {
   background: rgba(248, 113, 113, 0.1);
 }
@@ -2820,6 +3045,11 @@ select.editor-input {
 .diff-op-safety-badge.safe {
   background: rgba(52, 211, 153, 0.12);
   color: #34d399;
+}
+
+.diff-op-safety-badge.breaking {
+  background: rgba(251, 191, 36, 0.12);
+  color: #fbbf24;
 }
 
 .diff-op-safety-badge.unsafe {

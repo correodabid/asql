@@ -110,6 +110,21 @@ func TestParseAlterTableAddColumnWithDefaultNotNullSnapshot(t *testing.T) {
 	}
 }
 
+func TestParseAlterTableAddColumnWithReferencesSnapshot(t *testing.T) {
+	statement, err := Parse("ALTER TABLE orders ADD COLUMN user_id INT NOT NULL REFERENCES users(id);")
+	if err != nil {
+		t.Fatalf("parse alter table add column with references: %v", err)
+	}
+	bytes, err := json.Marshal(statement)
+	if err != nil {
+		t.Fatalf("marshal ast: %v", err)
+	}
+	expected := `{"table_name":"orders","column":{"name":"user_id","type":"INT","not_null":true,"references_table":"users","references_column":"id"}}`
+	if string(bytes) != expected {
+		t.Fatalf("snapshot mismatch\n got: %s\nwant: %s", string(bytes), expected)
+	}
+}
+
 func TestParseAlterTableAddColumnRejectsUnsupportedConstraints(t *testing.T) {
 	_, err := Parse("ALTER TABLE users ADD COLUMN email TEXT UNIQUE;")
 	if err == nil {

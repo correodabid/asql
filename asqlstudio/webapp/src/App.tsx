@@ -3,14 +3,13 @@ import { ClusterPanel } from './components/ClusterPanel'
 import { CommandPalette } from './components/CommandPalette'
 import { Dashboard } from './components/Dashboard'
 import { EntityExplorer } from './components/EntityExplorer'
-import { DDLPanel } from './components/DDLPanel'
 import { DesignerWorkbench } from './components/DesignerWorkbench'
-import { DiffPanel } from './components/DiffPanel'
 import { ERDiagram } from './components/ERDiagram'
 import { FixturePanel } from './components/FixturePanel'
-import { IconDatabase, IconDiffDoc, IconDownload, IconGrid, IconLayers, IconMoon, IconRefresh, IconSchema, IconShield, IconSQLDoc, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
+import { IconDatabase, IconDownload, IconGrid, IconLayers, IconMoon, IconRefresh, IconSchema, IconShield, IconSQLDoc, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { RecoveryPanel } from './components/RecoveryPanel'
+import { SchemaPanel } from './components/SchemaPanel'
 import { StartHerePanel } from './components/StartHerePanel'
 import { StatusBar } from './components/StatusBar'
 import { TabBar, type GroupDef, type TabId } from './components/Tabs'
@@ -40,10 +39,8 @@ const GROUPS: GroupDef[] = [
   {
     kind: 'group', id: 'schema', label: 'Schema', icon: <IconSchema />,
     items: [
-      { id: 'designer',      label: 'Builder',       icon: <IconSchema /> },
-      { id: 'sql-details',   label: 'SQL Details',   icon: <IconSQLDoc /> },
-      { id: 'change-review', label: 'Change Review', icon: <IconDiffDoc /> },
-      { id: 'fixtures',      label: 'Fixtures',      icon: <IconDownload /> },
+      { id: 'designer',    label: 'Builder',    icon: <IconSchema /> },
+      { id: 'schema-ddl', label: 'Schema DDL', icon: <IconSQLDoc /> },
     ],
   },
   {
@@ -52,6 +49,7 @@ const GROUPS: GroupDef[] = [
       { id: 'dashboard', label: 'Dashboard', icon: <IconGrid /> },
       { id: 'cluster',   label: 'Cluster',   icon: <IconShield /> },
       { id: 'recovery',  label: 'Recovery',  icon: <IconRefresh /> },
+      { id: 'fixtures',  label: 'Fixtures',  icon: <IconDownload /> },
     ],
   },
 ]
@@ -269,7 +267,7 @@ function App() {
       items: g.items.map((item) => ({
         ...item,
         badge: item.id === 'designer' && diffOperations.length > 0 ? diffOperations.length
-             : item.id === 'change-review' && diffOperations.length > 0 ? diffOperations.length
+             : item.id === 'schema-ddl' && diffOperations.length > 0 ? diffOperations.length
              : undefined,
       })),
     }
@@ -284,7 +282,7 @@ function App() {
   }
 
   const openDesignerDDL = () => {
-    setActiveTab('sql-details')
+    setActiveTab('schema-ddl')
   }
 
   return (
@@ -399,8 +397,8 @@ function App() {
                     onPreviewDiff={onPreviewDiff}
                     onApplySafeDiff={onApplySafeDiff}
                     onExecuteAll={onExecuteAll}
-                    onOpenDDL={() => setActiveTab('sql-details')}
-                    onOpenDiff={() => setActiveTab('change-review')}
+                    onOpenDDL={() => setActiveTab('schema-ddl')}
+                    onOpenDiff={() => setActiveTab('schema-ddl')}
                     undo={undo}
                     redo={redo}
                     canUndo={canUndo}
@@ -411,8 +409,8 @@ function App() {
               </div>
             )}
 
-            {activeTab === 'sql-details' && (
-              <DDLPanel
+            {activeTab === 'schema-ddl' && (
+              <SchemaPanel
                 ddl={ddl}
                 ddlStatements={ddlStatements}
                 statementStates={statementStates}
@@ -425,17 +423,11 @@ function App() {
                 onRefreshAutoDiffApplySafe={onRefreshAutoDiffApplySafe}
                 onExecuteStatement={onExecuteStatement}
                 onExecuteAll={onExecuteAll}
-              />
-            )}
-
-            {activeTab === 'change-review' && (
-              <DiffPanel
                 diffSummary={diffSummary}
                 diffSafe={diffSafe}
                 diffOperations={diffOperations}
                 diffWarnings={diffWarnings}
                 onApplySelected={onApplySelectedDiff}
-                onRefreshDiff={onPreviewDiff}
               />
             )}
 

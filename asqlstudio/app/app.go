@@ -956,7 +956,7 @@ func (a *App) SchemaLoadBaseline(req schemaLoadBaselineRequest) (map[string]inte
 
 	invoker := a.schemaInvoker
 	if invoker == nil {
-		invoker = a.engine
+		invoker = a.getLeaderClient()
 	}
 
 	snapshot, err := invoker.SchemaSnapshot(ctx, &api.SchemaSnapshotRequest{Domains: []string{domain}})
@@ -978,7 +978,7 @@ func (a *App) SchemaLoadAllBaselines() (map[string]interface{}, error) {
 
 	invoker := a.schemaInvoker
 	if invoker == nil {
-		invoker = a.engine
+		invoker = a.getLeaderClient()
 	}
 
 	snapshot, err := invoker.SchemaSnapshot(ctx, &api.SchemaSnapshotRequest{})
@@ -1019,7 +1019,7 @@ func (a *App) SchemaApply(req schemaDDLRequest) (map[string]interface{}, error) 
 
 	invoker := a.schemaInvoker
 	if invoker == nil {
-		invoker = a.engine
+		invoker = a.getLeaderClient()
 	}
 
 	resp, err := applySchemaDDLPlan(ctx, invoker, domain, plan)
@@ -1054,7 +1054,7 @@ func (a *App) SchemaApplyStatements(req schemaApplyStatementsRequest) (map[strin
 
 	invoker := a.schemaInvoker
 	if invoker == nil {
-		invoker = a.engine
+		invoker = a.getLeaderClient()
 	}
 
 	resp, err := applySchemaDDLPlan(ctx, invoker, domain, plan)
@@ -1076,7 +1076,7 @@ func (a *App) SchemaApplySafeDiff(req schemaDiffRequest) (map[string]interface{}
 
 	invoker := a.schemaInvoker
 	if invoker == nil {
-		invoker = a.engine
+		invoker = a.getLeaderClient()
 	}
 
 	resp, err := applySafeSchemaDiff(ctx, invoker, diff)
@@ -1097,7 +1097,7 @@ func (a *App) SchemaTables(domain string) (map[string]interface{}, error) {
 
 	invoker := a.schemaInvoker
 	if invoker == nil {
-		invoker = a.engine
+		invoker = a.getLeaderClient()
 	}
 
 	snapshot, err := invoker.SchemaSnapshot(ctx, &api.SchemaSnapshotRequest{Domains: []string{domain}})

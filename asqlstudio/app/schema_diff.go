@@ -25,6 +25,7 @@ type schemaDiffOperation struct {
 	Column    string `json:"column,omitempty"`
 	Statement string `json:"statement,omitempty"`
 	Safe      bool   `json:"safe"`
+	Breaking  bool   `json:"breaking,omitempty"`
 	Reason    string `json:"reason,omitempty"`
 }
 
@@ -99,6 +100,8 @@ func BuildSchemaDiff(base schemaDDLRequest, target schemaDDLRequest) (schemaDiff
 			targetColumn := targetColumns[columnName]
 			baseColumn, columnExists := baseColumns[columnName]
 			if !columnExists {
+				// FK REFERENCES is folded inline into the ADD COLUMN statement.
+				// The parser supports: ALTER TABLE t ADD COLUMN col TYPE REFERENCES ref(col)
 				statement := buildAddColumnStatement(tableName, targetColumn)
 				operations = append(operations, schemaDiffOperation{
 					Type:      "add_column",
@@ -112,15 +115,54 @@ func BuildSchemaDiff(base schemaDDLRequest, target schemaDDLRequest) (schemaDiff
 			}
 
 			if !columnsEquivalent(baseColumn, targetColumn) {
-				safe = false
-				operations = append(operations, schemaDiffOperation{
-					Type:   "modify_column",
-					Table:  tableName,
-					Column: columnName,
-					Safe:   false,
-					Reason: "column definition changed (requires manual migration)",
-				})
-				warnings = append(warnings, fmt.Sprintf("%s.%s changed: manual migration required", tableName, columnName))
+				// FK-only changes on existing columns cannot be applied automatically —
+				// the engine has no ALTER COLUMN or ADD/DROP CONSTRAINT SQL.
+				// Classify by impact and show a clear reason; no Statement emitted.
+				if columnCoreEquivalent(baseColumn, targetColumn) {
+					switch {
+					case baseColumn.References == nil && targetColumn.References != nil:
+						safe = false
+						operations = append(operations, schemaDiffOperation{
+							Type:   "add_foreign_key",
+							Table:  tableName,
+							Column: columnName,
+							Safe:   false,
+							Reason: fmt.Sprintf("FK REFERENCES %s(%s) added to existing column — cannot apply automatically; drop and re-add the column with the REFERENCES clause", strings.TrimSpace(targetColumn.References.Table), strings.TrimSpace(targetColumn.References.Column)),
+						})
+						warnings = append(warnings, fmt.Sprintf("%s.%s: FK added to existing column — requires drop + re-add", tableName, columnName))
+					case baseColumn.References != nil && targetColumn.References == nil:
+						safe = false
+						operations = append(operations, schemaDiffOperation{
+							Type:     "drop_foreign_key",
+							Table:    tableName,
+							Column:   columnName,
+							Safe:     false,
+							Breaking: true,
+							Reason:   "FK constraint removed from existing column — cannot apply automatically; drop and re-add the column without the REFERENCES clause",
+						})
+						warnings = append(warnings, fmt.Sprintf("%s.%s: FK removed — requires drop + re-add", tableName, columnName))
+					default:
+						safe = false
+						operations = append(operations, schemaDiffOperation{
+							Type:   "modify_foreign_key",
+							Table:  tableName,
+							Column: columnName,
+							Safe:   false,
+							Reason: "FK target changed on existing column — cannot apply automatically; drop and re-add the column with the new REFERENCES clause",
+						})
+						warnings = append(warnings, fmt.Sprintf("%s.%s: FK target changed — requires drop + re-add", tableName, columnName))
+					}
+				} else {
+					safe = false
+					operations = append(operations, schemaDiffOperation{
+						Type:   "modify_column",
+						Table:  tableName,
+						Column: columnName,
+						Safe:   false,
+						Reason: "column definition changed; type or constraint changes cannot be applied automatically — manual migration (add new column, backfill, drop old) required to avoid data integrity issues",
+					})
+					warnings = append(warnings, fmt.Sprintf("%s.%s definition changed — requires manual migration", tableName, columnName))
+				}
 			}
 		}
 
@@ -128,13 +170,14 @@ func BuildSchemaDiff(base schemaDDLRequest, target schemaDDLRequest) (schemaDiff
 			if _, stillExists := targetColumns[columnName]; !stillExists {
 				safe = false
 				operations = append(operations, schemaDiffOperation{
-					Type:   "drop_column",
-					Table:  tableName,
-					Column: columnName,
-					Safe:   false,
-					Reason: "column drop is potentially destructive",
+					Type:     "drop_column",
+					Table:    tableName,
+					Column:   columnName,
+					Safe:     false,
+					Breaking: true,
+					Reason:   "live queries referencing this column will fail immediately; WAL retains all historical values so time-travel still works and data is recoverable via replay — no WAL-level data loss",
 				})
-				warnings = append(warnings, fmt.Sprintf("%s.%s removed: destructive change", tableName, columnName))
+				warnings = append(warnings, fmt.Sprintf("%s.%s dropped — current data lost, WAL history preserved; rollback requires manual re-add with backfill", tableName, columnName))
 			}
 		}
 
@@ -209,14 +252,22 @@ func BuildSchemaDiff(base schemaDDLRequest, target schemaDDLRequest) (schemaDiff
 				continue
 			}
 			if !indexesEquivalent(baseIdx, targetIdx) {
+				colList := strings.Join(targetIdx.Columns, ", ")
+				method := strings.ToLower(strings.TrimSpace(targetIdx.Method))
+				if method == "" {
+					method = "btree"
+				}
+				modifyStmt := fmt.Sprintf("DROP INDEX %s;\nCREATE INDEX %s ON %s (%s) USING %s;", idxName, idxName, tableName, colList, method)
 				operations = append(operations, schemaDiffOperation{
-					Type:   "modify_index",
-					Table:  tableName,
-					Column: idxName,
-					Safe:   false,
-					Reason: "index definition changed (drop and recreate manually)",
+					Type:      "modify_index",
+					Table:     tableName,
+					Column:    idxName,
+					Statement: modifyStmt,
+					Safe:      false,
+					Breaking:  true,
+					Reason:    "index must be dropped and recreated — indexes are derived projections with no stored data, so no WAL-level data loss; queries fall back to full scan during the window",
 				})
-				warnings = append(warnings, fmt.Sprintf("%s.%s index changed: manual migration required", tableName, idxName))
+				warnings = append(warnings, fmt.Sprintf("%s: index %s changed — drop and recreate required", tableName, idxName))
 				safe = false
 			}
 		}
@@ -224,13 +275,15 @@ func BuildSchemaDiff(base schemaDDLRequest, target schemaDDLRequest) (schemaDiff
 		for _, idxName := range sortedIndexNames(baseIndexes) {
 			if _, stillExists := targetIndexes[idxName]; !stillExists {
 				operations = append(operations, schemaDiffOperation{
-					Type:   "drop_index",
-					Table:  tableName,
-					Column: idxName,
-					Safe:   false,
-					Reason: "index drop is potentially destructive",
+					Type:      "drop_index",
+					Table:     tableName,
+					Column:    idxName,
+					Statement: fmt.Sprintf("DROP INDEX %s;", idxName),
+					Safe:      false,
+					Breaking:  true,
+					Reason:    "indexes are derived projections with no stored data — no WAL-level data loss; live queries fall back to full scans until the index is recreated",
 				})
-				warnings = append(warnings, fmt.Sprintf("%s.%s index removed: destructive change", tableName, idxName))
+				warnings = append(warnings, fmt.Sprintf("%s: index %s removed — no data loss, but queries using this index will fall back to full scan", tableName, idxName))
 				safe = false
 			}
 		}
@@ -242,12 +295,14 @@ func BuildSchemaDiff(base schemaDDLRequest, target schemaDDLRequest) (schemaDiff
 		}
 		safe = false
 		operations = append(operations, schemaDiffOperation{
-			Type:   "drop_table",
-			Table:  tableName,
-			Safe:   false,
-			Reason: "table drop is potentially destructive",
+			Type:      "drop_table",
+			Table:     tableName,
+			Statement: fmt.Sprintf("DROP TABLE %s;", tableName),
+			Safe:      false,
+			Breaking:  true,
+			Reason:    "live queries against this table will fail immediately; WAL retains all historical rows so time-travel still works and data is recoverable via replay — no WAL-level data loss",
 		})
-		warnings = append(warnings, fmt.Sprintf("%s removed: destructive change", tableName))
+		warnings = append(warnings, fmt.Sprintf("%s dropped — current data lost, WAL history preserved", tableName))
 	}
 
 	for _, entityName := range sortedEntityNames(targetEntities) {
@@ -260,9 +315,9 @@ func BuildSchemaDiff(base schemaDDLRequest, target schemaDDLRequest) (schemaDiff
 				Table:  targetEntity.RootTable,
 				Column: entityName,
 				Safe:   false,
-				Reason: "entity addition changes aggregate/version semantics and requires explicit migration review",
+				Reason: "no data loss, but entity version tracking begins from this LSN forward; rows written before this point will not have captured entity versions and time-travel explanation for those rows will be incomplete — requires explicit migration review",
 			})
-			warnings = append(warnings, fmt.Sprintf("entity %s added: review versioned-reference and history semantics before rollout", entityName))
+			warnings = append(warnings, fmt.Sprintf("entity %s added — version tracking starts from this LSN; historical rows pre-date entity capture", entityName))
 			continue
 		}
 		if !entitiesEquivalent(baseEntity, targetEntity) {
@@ -378,6 +433,24 @@ func buildAddColumnStatement(tableName string, column schemaDDLColumn) string {
 	return fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s;", tableName, def)
 }
 
+// columnCoreEquivalent checks column equivalence ignoring the FK References field.
+// Use this to detect whether a diff is purely a FK change vs. an actual type/constraint change.
+func columnCoreEquivalent(left, right schemaDDLColumn) bool {
+	if strings.TrimSpace(left.Name) != strings.TrimSpace(right.Name) {
+		return false
+	}
+	if !strings.EqualFold(strings.TrimSpace(left.Type), strings.TrimSpace(right.Type)) {
+		return false
+	}
+	if left.Nullable != right.Nullable || left.PrimaryKey != right.PrimaryKey || left.Unique != right.Unique {
+		return false
+	}
+	if strings.TrimSpace(left.DefaultValue) != strings.TrimSpace(right.DefaultValue) {
+		return false
+	}
+	return true
+}
+
 func columnDefinition(column schemaDDLColumn) (string, error) {
 	name := strings.TrimSpace(column.Name)
 	if !isValidIdentifier(name) {
@@ -400,6 +473,13 @@ func columnDefinition(column schemaDDLColumn) (string, error) {
 	}
 	if value := strings.TrimSpace(column.DefaultValue); value != "" {
 		def += " DEFAULT " + value
+	}
+	if column.References != nil {
+		refTable := strings.TrimSpace(column.References.Table)
+		refColumn := strings.TrimSpace(column.References.Column)
+		if refTable != "" && refColumn != "" {
+			def += fmt.Sprintf(" REFERENCES %s(%s)", refTable, refColumn)
+		}
 	}
 	return def, nil
 }

@@ -14,18 +14,34 @@ type Props = {
 /* ── Operation type helpers ──────────────────────────────── */
 
 const OP_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
+  // ── Structural DDL ────────────────────────────────────────
   add_table:      { label: 'Add Table',      color: 'safe',    icon: <IconPlus /> },
   add_column:     { label: 'Add Column',     color: 'safe',    icon: <IconPlus /> },
   add_index:      { label: 'Add Index',      color: 'safe',    icon: <IconPlus /> },
-  modify_column:  { label: 'Modify Column',  color: 'unsafe',  icon: <IconRefresh /> },
-  modify_index:   { label: 'Modify Index',   color: 'unsafe',  icon: <IconRefresh /> },
-  drop_column:    { label: 'Drop Column',    color: 'unsafe',  icon: <IconTrash /> },
-  drop_table:     { label: 'Drop Table',     color: 'unsafe',  icon: <IconTrash /> },
-  drop_index:     { label: 'Drop Index',     color: 'unsafe',  icon: <IconTrash /> },
+  modify_column:  { label: 'Modify Column',  color: 'unsafe',    icon: <IconRefresh /> },
+  modify_index:   { label: 'Modify Index',   color: 'breaking',  icon: <IconRefresh /> },
+  drop_column:    { label: 'Drop Column',    color: 'breaking',  icon: <IconTrash /> },
+  drop_table:     { label: 'Drop Table',     color: 'breaking',  icon: <IconTrash /> },
+  drop_index:     { label: 'Drop Index',     color: 'breaking',  icon: <IconTrash /> },
+  rename_column:  { label: 'Rename Column',  color: 'safe',    icon: <IconRefresh /> },
+  // ── Versioned Foreign Keys (temporal semantics) ───────────
+  add_versioned_foreign_key:    { label: 'Add Versioned FK',    color: 'unsafe', icon: <IconRefresh /> },
+  modify_versioned_foreign_key: { label: 'Modify Versioned FK', color: 'unsafe', icon: <IconRefresh /> },
+  drop_versioned_foreign_key:   { label: 'Drop Versioned FK',   color: 'unsafe', icon: <IconTrash /> },
+  // ── Entities (aggregate / version-tracking semantics) ─────
+  add_entity:     { label: 'Add Entity',     color: 'unsafe',  icon: <IconPlus /> },
+  modify_entity:  { label: 'Modify Entity',  color: 'unsafe',  icon: <IconRefresh /> },
+  drop_entity:    { label: 'Drop Entity',    color: 'unsafe',  icon: <IconTrash /> },
 }
 
 function opMeta(type: string) {
   return OP_META[type] || { label: type, color: 'neutral', icon: null }
+}
+
+function opLevel(op: DiffOperation): 'safe' | 'breaking' | 'unsafe' {
+  if (op.safe) return 'safe'
+  if (op.breaking) return 'breaking'
+  return 'unsafe'
 }
 
 /* ── SQL keyword highlighting (shared) ───────────────────── */
@@ -57,6 +73,7 @@ type OpGroup = {
   table: string
   ops: (DiffOperation & { originalIndex: number })[]
   allSafe: boolean
+  worstLevel: 'safe' | 'breaking' | 'unsafe'
 }
 
 function groupByTable(ops: DiffOperation[]): OpGroup[] {
@@ -64,10 +81,13 @@ function groupByTable(ops: DiffOperation[]): OpGroup[] {
   ops.forEach((op, i) => {
     const key = op.table || '(global)'
     if (!map.has(key)) {
-      map.set(key, { table: key, ops: [], allSafe: true })
+      map.set(key, { table: key, ops: [], allSafe: true, worstLevel: 'safe' })
     }
     const g = map.get(key)!
     g.ops.push({ ...op, originalIndex: i })
+    const lv = opLevel(op)
+    if (lv === 'unsafe') g.worstLevel = 'unsafe'
+    else if (lv === 'breaking' && g.worstLevel !== 'unsafe') g.worstLevel = 'breaking'
     if (!op.safe) g.allSafe = false
   })
   return Array.from(map.values())
@@ -90,11 +110,12 @@ export function DiffPanel({ diffSummary, diffSafe, diffOperations, diffWarnings,
 
   const stats = useMemo(() => {
     const safe = diffOperations.filter(op => op.safe).length
-    const unsafe = diffOperations.filter(op => !op.safe).length
+    const breaking = diffOperations.filter(op => !op.safe && op.breaking).length
+    const unsafe = diffOperations.filter(op => !op.safe && !op.breaking).length
     const adds = diffOperations.filter(op => op.type.startsWith('add_')).length
     const modifies = diffOperations.filter(op => op.type.startsWith('modify_')).length
     const drops = diffOperations.filter(op => op.type.startsWith('drop_')).length
-    return { safe, unsafe, adds, modifies, drops, total: diffOperations.length }
+    return { safe, breaking, unsafe, adds, modifies, drops, total: diffOperations.length }
   }, [diffOperations])
 
   const toggleTable = (table: string) => {
@@ -198,6 +219,10 @@ export function DiffPanel({ diffSummary, diffSafe, diffOperations, diffWarnings,
           <span className="diff-stat-label">safe</span>
         </div>
         <div className="diff-stat">
+          <span className="diff-stat-value breaking-count">{stats.breaking}</span>
+          <span className="diff-stat-label">breaking</span>
+        </div>
+        <div className="diff-stat">
           <span className="diff-stat-value unsafe-count">{stats.unsafe}</span>
           <span className="diff-stat-label">unsafe</span>
         </div>
@@ -220,9 +245,9 @@ export function DiffPanel({ diffSummary, diffSafe, diffOperations, diffWarnings,
         {groups.map(group => {
           const isCollapsed = collapsedTables.has(group.table)
           return (
-            <div key={group.table} className={`diff-table-group ${group.allSafe ? 'safe' : 'has-unsafe'}`}>
+            <div key={group.table} className={`diff-table-group ${group.worstLevel === 'safe' ? 'safe' : group.worstLevel === 'breaking' ? 'has-breaking' : 'has-unsafe'}`}>
               <button className="diff-table-header" onClick={() => toggleTable(group.table)}>
-                <span className={`diff-table-safety ${group.allSafe ? 'safe' : 'unsafe'}`} />
+                <span className={`diff-table-safety ${group.worstLevel}`} />
                 <span className="diff-table-name">{group.table}</span>
                 <span className="diff-table-count">{group.ops.length} change{group.ops.length !== 1 ? 's' : ''}</span>
                 <span className="ddl-group-chevron">
@@ -260,8 +285,8 @@ export function DiffPanel({ diffSummary, diffSafe, diffOperations, diffWarnings,
                             )}
                           </div>
 
-                          <span className={`diff-op-safety-badge ${op.safe ? 'safe' : 'unsafe'}`}>
-                            {op.safe ? 'SAFE' : 'UNSAFE'}
+                          <span className={`diff-op-safety-badge ${opLevel(op)}`}>
+                            {op.safe ? 'SAFE' : op.breaking ? 'BREAKING' : 'UNSAFE'}
                           </span>
 
                           {/* Actions */}

@@ -352,6 +352,17 @@ func parseOnlineSafeAddColumnSuffix(suffix []string, column *ast.ColumnDefinitio
 			}
 			column.NotNull = true
 			index += 2
+		case "REFERENCES":
+			if index+1 >= len(suffix) {
+				return fmt.Errorf("%w: REFERENCES target required", errInvalidSQL)
+			}
+			referencesTable, referencesColumn, err := parseReferencesTarget(suffix[index+1])
+			if err != nil {
+				return fmt.Errorf("%w: invalid REFERENCES target: %v", errInvalidSQL, err)
+			}
+			column.ReferencesTable = referencesTable
+			column.ReferencesColumn = referencesColumn
+			index += 2
 		default:
 			return fmt.Errorf("%w: unsupported ADD COLUMN constraint %q in online-safe mode", errInvalidSQL, suffix[index])
 		}

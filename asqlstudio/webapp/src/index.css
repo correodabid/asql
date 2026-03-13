@@ -17,6 +17,7 @@
   --border-focus: #635bff;
   --border-safe: #34d399;
   --border-unsafe: #f87171;
+  --border-breaking: #fbbf24;
 
   /* Brand */
   --accent: #635bff;
@@ -30,6 +31,7 @@
   --text-accent: #a5a0ff;
   --text-safe: #34d399;
   --text-unsafe: #f87171;
+  --text-breaking: #fbbf24;
   --text-warning: #fbbf24;
 
   /* Misc */
@@ -113,6 +115,7 @@ body {
   --border-focus: #635bff;
   --border-safe: #059669;
   --border-unsafe: #dc2626;
+  --border-breaking: #d97706;
 
   /* Brand */
   --accent: #635bff;
@@ -126,6 +129,7 @@ body {
   --text-accent: #4f46e5;
   --text-safe: #059669;
   --text-unsafe: #dc2626;
+  --text-breaking: #d97706;
   --text-warning: #d97706;
 
   /* Misc */

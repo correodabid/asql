@@ -56,6 +56,7 @@ export type DiffOperation = {
   column?: string
   statement?: string
   safe: boolean
+  breaking?: boolean
   reason?: string
 }
 
