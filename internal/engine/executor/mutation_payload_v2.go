@@ -8,8 +8,7 @@ package executor
 // Wire format:
 //   [0x02]                      — version marker
 //   [uvarint domainLen][domain] — domain name
-//   [1B op]                     — 1=INSERT, 2=UPDATE, 3=DELETE, 4=DDL(SQL text)
-//   [uvarint tableLen][table]   — table name
+//   [1B op]                     — 1=INSERT, 2=UPDATE, 3=DELETE, 4=DDL-SQL(legacy), 5=DDL-struct
 //   op-specific body (see inline docs below)
 //
 // INSERT body:
@@ -24,9 +23,27 @@ package executor
 // DELETE body:
 //   [predicate]
 //
-// DDL body:
+// DDL-SQL body (op=0x04, legacy — backward compat only, never written by new code):
 //   [uvarint sqlLen][sql bytes]
 //   (decoded by parsing SQL into a Plan at replay time)
+//
+// DDL-struct body (op=0x05, current format — parser-free at replay):
+//   [1B ddl_sub_op]  — identifies the DDL operation
+//   sub-op-specific binary fields (see inline docs and encodeDDLStructPayload)
+//
+// DDL sub-op codes:
+//   0x01 CreateTable          0x02 AlterTableAddColumn
+//   0x03 AlterTableDropColumn 0x04 AlterTableRenameColumn
+//   0x05 CreateIndex          0x06 CreateEntity
+//   0x07 DropTable            0x08 DropIndex
+//   0x09 TruncateTable
+//
+// ColumnDefinition flags byte (bitmask in encodeColumnDef):
+//   bit0 PrimaryKey  bit1 Unique  bit2 NotNull
+//   bit3 HasRefs     bit4 HasCheck  bit5 HasDefault
+//
+// DefaultExpr kind byte:
+//   0x01 literal  0x02 autoincrement  0x03 uuid_v7
 //
 // UpdateExpr encoding — 1B kind tag (used in UPDATE SET body):
 //   0x01 literal     — [literal]
@@ -85,10 +102,41 @@ const payloadVersion byte = 0x02
 
 // op codes
 const (
-	v2OpInsert byte = 0x01
-	v2OpUpdate byte = 0x02
-	v2OpDelete byte = 0x03
-	v2OpDDL    byte = 0x04 // SQL text payload; decoded via parser+planner at replay
+	v2OpInsert    byte = 0x01
+	v2OpUpdate    byte = 0x02
+	v2OpDelete    byte = 0x03
+	v2OpDDL       byte = 0x04 // legacy: SQL text payload (backward compat, never written by new code)
+	v2OpDDLStruct byte = 0x05 // structured DDL: parser-free binary encoding
+)
+
+// DDL sub-operation codes (written after v2OpDDLStruct)
+const (
+	ddlSubCreateTable       byte = 0x01
+	ddlSubAlterAddColumn    byte = 0x02
+	ddlSubAlterDropColumn   byte = 0x03
+	ddlSubAlterRenameColumn byte = 0x04
+	ddlSubCreateIndex       byte = 0x05
+	ddlSubCreateEntity      byte = 0x06
+	ddlSubDropTable         byte = 0x07
+	ddlSubDropIndex         byte = 0x08
+	ddlSubTruncateTable     byte = 0x09
+)
+
+// ColumnDefinition flag bits (used in encodeColumnDef)
+const (
+	colFlagPrimaryKey byte = 0x01
+	colFlagUnique     byte = 0x02
+	colFlagNotNull    byte = 0x04
+	colFlagHasRefs    byte = 0x08
+	colFlagHasCheck   byte = 0x10
+	colFlagHasDefault byte = 0x20
+)
+
+// DefaultExpr kind bytes (used in encodeDefaultExpr)
+const (
+	defaultKindLiteral       byte = 0x01
+	defaultKindAutoIncrement byte = 0x02
+	defaultKindUUIDv7        byte = 0x03
 )
 
 // literal kind bytes
@@ -485,11 +533,11 @@ func encodePred(w *v2Buf, p *ast.Predicate) bool {
 // ─── public API ───────────────────────────────────────────────────────────────
 
 // encodeMutationPayload serialises a mutation into a binary v2 payload.
-// DML (INSERT/UPDATE/DELETE) is always fully binary-encoded.
-// DDL and any DML predicate with unsupported constructs (JsonAccess, subqueries,
-// LIKE, BETWEEN) fall back to SQL text under op code v2OpDDL.
+// DML (INSERT/UPDATE/DELETE) is fully binary-encoded; rare predicate constructs
+// (JsonAccess, subqueries, LIKE, BETWEEN) fall back to legacy SQL text.
+// DDL is always structurally binary-encoded (v2OpDDLStruct); no SQL text stored.
 //
-// sql must be provided; it is stored only for DDL and the rare predicate fallback.
+// sql is only consumed for the rare DML predicate fallback; it is ignored for DDL.
 func encodeMutationPayloadV2(domain string, plan planner.Plan, sql string) []byte {
 	switch plan.Operation {
 	case planner.OperationInsert, planner.OperationUpdate, planner.OperationDelete:
@@ -498,7 +546,18 @@ func encodeMutationPayloadV2(domain string, plan planner.Plan, sql string) []byt
 		}
 		// Predicate contained JsonAccess/subquery/LIKE/BETWEEN — store as SQL.
 		return encodeDDLPayload(domain, sql)
+	case planner.OperationCreateTable,
+		planner.OperationAlterTableAddColumn,
+		planner.OperationAlterTableDropColumn,
+		planner.OperationAlterTableRenameColumn,
+		planner.OperationCreateIndex,
+		planner.OperationCreateEntity,
+		planner.OperationDropTable,
+		planner.OperationDropIndex,
+		planner.OperationTruncateTable:
+		return encodeDDLStructPayload(domain, plan)
 	default:
+		// SELECT, SetOp, or future ops not yet handled — fall back to SQL.
 		return encodeDDLPayload(domain, sql)
 	}
 }
@@ -560,6 +619,184 @@ func encodeDMLPayload(domain string, plan planner.Plan) ([]byte, bool) {
 	return w.b, true
 }
 
+// encodeDDLStructPayload serialises a DDL plan into a structured binary payload
+// (op code v2OpDDLStruct). No SQL text is stored; the plan is reconstructed
+// directly from the binary data at replay — no parser involvement.
+func encodeDDLStructPayload(domain string, plan planner.Plan) []byte {
+	w := &v2Buf{b: make([]byte, 0, 64)}
+	w.writeByte(payloadVersion)
+	w.writeStr(domain)
+	w.writeByte(v2OpDDLStruct)
+
+	switch plan.Operation {
+	case planner.OperationCreateTable:
+		w.writeByte(ddlSubCreateTable)
+		var flags byte
+		if plan.IfNotExists {
+			flags |= 0x01
+		}
+		w.writeByte(flags)
+		w.writeStr(plan.TableName)
+		w.writeUv(uint64(len(plan.Schema)))
+		for _, col := range plan.Schema {
+			encodeColumnDef(w, col)
+		}
+		w.writeUv(uint64(len(plan.VersionedForeignKeys)))
+		for _, vfk := range plan.VersionedForeignKeys {
+			encodeVersionedFK(w, vfk)
+		}
+
+	case planner.OperationAlterTableAddColumn:
+		w.writeByte(ddlSubAlterAddColumn)
+		w.writeStr(plan.TableName)
+		if plan.AlterColumn != nil {
+			encodeColumnDef(w, *plan.AlterColumn)
+		} else {
+			encodeColumnDef(w, ast.ColumnDefinition{})
+		}
+
+	case planner.OperationAlterTableDropColumn:
+		w.writeByte(ddlSubAlterDropColumn)
+		w.writeStr(plan.TableName)
+		w.writeStr(plan.DropColumnName)
+
+	case planner.OperationAlterTableRenameColumn:
+		w.writeByte(ddlSubAlterRenameColumn)
+		w.writeStr(plan.TableName)
+		w.writeStr(plan.RenameOldColumn)
+		w.writeStr(plan.RenameNewColumn)
+
+	case planner.OperationCreateIndex:
+		w.writeByte(ddlSubCreateIndex)
+		var flags byte
+		if plan.IfNotExists {
+			flags |= 0x01
+		}
+		w.writeByte(flags)
+		w.writeStr(plan.TableName)
+		w.writeStr(plan.IndexName)
+		w.writeStr(plan.IndexColumn)
+		w.writeUv(uint64(len(plan.IndexColumns)))
+		for _, col := range plan.IndexColumns {
+			w.writeStr(col)
+		}
+		w.writeStr(plan.IndexMethod)
+
+	case planner.OperationCreateEntity:
+		w.writeByte(ddlSubCreateEntity)
+		var flags byte
+		if plan.IfNotExists {
+			flags |= 0x01
+		}
+		w.writeByte(flags)
+		w.writeStr(plan.EntityName)
+		w.writeStr(plan.EntityRootTable)
+		w.writeUv(uint64(len(plan.EntityTables)))
+		for _, t := range plan.EntityTables {
+			w.writeStr(t)
+		}
+
+	case planner.OperationDropTable:
+		w.writeByte(ddlSubDropTable)
+		var flags byte
+		if plan.IfExists {
+			flags |= 0x01
+		}
+		if plan.Cascade {
+			flags |= 0x02
+		}
+		w.writeByte(flags)
+		w.writeStr(plan.TableName)
+
+	case planner.OperationDropIndex:
+		w.writeByte(ddlSubDropIndex)
+		var flags byte
+		if plan.IfExists {
+			flags |= 0x01
+		}
+		w.writeByte(flags)
+		w.writeStr(plan.IndexName)
+		w.writeStr(plan.TableName)
+
+	case planner.OperationTruncateTable:
+		w.writeByte(ddlSubTruncateTable)
+		w.writeStr(plan.TableName)
+
+	default:
+		// should not happen: caller must only pass DDL operations
+		panic(fmt.Sprintf("encodeDDLStructPayload: unhandled DDL operation %q", plan.Operation))
+	}
+
+	return w.b
+}
+
+// encodeColumnDef serialises an ast.ColumnDefinition into w.
+func encodeColumnDef(w *v2Buf, col ast.ColumnDefinition) {
+	w.writeStr(col.Name)
+	w.writeStr(string(col.Type))
+	var flags byte
+	if col.PrimaryKey {
+		flags |= colFlagPrimaryKey
+	}
+	if col.Unique {
+		flags |= colFlagUnique
+	}
+	if col.NotNull {
+		flags |= colFlagNotNull
+	}
+	if col.ReferencesTable != "" {
+		flags |= colFlagHasRefs
+	}
+	if col.Check != nil {
+		flags |= colFlagHasCheck
+	}
+	if col.DefaultValue != nil {
+		flags |= colFlagHasDefault
+	}
+	w.writeByte(flags)
+	if flags&colFlagHasRefs != 0 {
+		w.writeStr(col.ReferencesTable)
+		w.writeStr(col.ReferencesColumn)
+	}
+	if flags&colFlagHasCheck != 0 {
+		// CHECK predicates in column definitions are always simple comparisons;
+		// encodePred is always able to encode them (no JsonAccess/subquery/LIKE).
+		encodePred(w, col.Check)
+	}
+	if flags&colFlagHasDefault != 0 {
+		encodeDefaultExpr(w, col.DefaultValue)
+	}
+}
+
+// encodeDefaultExpr serialises an ast.DefaultExpr into w.
+func encodeDefaultExpr(w *v2Buf, d *ast.DefaultExpr) {
+	switch d.Kind {
+	case ast.DefaultLiteral:
+		w.writeByte(defaultKindLiteral)
+		encodeLit(w, d.Value)
+	case ast.DefaultAutoIncrement:
+		w.writeByte(defaultKindAutoIncrement)
+	case ast.DefaultUUIDv7:
+		w.writeByte(defaultKindUUIDv7)
+	default:
+		w.writeByte(defaultKindLiteral)
+		encodeLit(w, ast.Literal{Kind: ast.LiteralNull})
+	}
+}
+
+// encodeVersionedFK serialises an ast.VersionedForeignKey into w.
+func encodeVersionedFK(w *v2Buf, vfk ast.VersionedForeignKey) {
+	w.writeStr(vfk.Column)
+	w.writeStr(vfk.LSNColumn)
+	w.writeStr(vfk.ReferencesDomain)
+	w.writeStr(vfk.ReferencesTable)
+	w.writeStr(vfk.ReferencesColumn)
+}
+
+// encodeDDLPayload stores raw SQL text under the legacy op code v2OpDDL.
+// Only used as a fallback for DML statements whose predicates contain
+// non-binary-encodable constructs (LIKE, BETWEEN, JsonAccess, subqueries).
+// DDL operations always use encodeDDLStructPayload instead.
 func encodeDDLPayload(domain, sql string) []byte {
 	w := &v2Buf{b: make([]byte, 0, 8+len(domain)+len(sql))}
 	w.writeByte(payloadVersion)
@@ -587,6 +824,7 @@ func decodeMutationPayloadV2(data []byte) (domain string, plan planner.Plan, err
 		return "", planner.Plan{}, fmt.Errorf("payloadv2: read op: %w", err)
 	}
 
+	// Legacy SQL-text DDL (backward compat — old WAL records only).
 	if op == v2OpDDL {
 		sql, err := r.readStr()
 		if err != nil {
@@ -599,6 +837,15 @@ func decodeMutationPayloadV2(data []byte) (domain string, plan planner.Plan, err
 		plan, err = planner.BuildForDomains(stmt, []string{domain})
 		if err != nil {
 			return "", planner.Plan{}, fmt.Errorf("payloadv2: build DDL plan: %w", err)
+		}
+		return domain, plan, nil
+	}
+
+	// Structured DDL (current format — parser-free).
+	if op == v2OpDDLStruct {
+		plan.DomainName = domain
+		if err := decodeDDLStructPayload(r, domain, &plan); err != nil {
+			return "", planner.Plan{}, err
 		}
 		return domain, plan, nil
 	}
@@ -909,4 +1156,289 @@ func firstOrZero(b []byte) byte {
 		return 0
 	}
 	return b[0]
+}
+
+// ─── DDL struct decode ────────────────────────────────────────────────────────
+
+// decodeDDLStructPayload reads the structured DDL body (after v2OpDDLStruct has
+// been consumed) and fills plan. domain must already be set on plan.DomainName
+// before this call.
+func decodeDDLStructPayload(r *v2Reader, domain string, plan *planner.Plan) error {
+	subOp, err := r.readByte()
+	if err != nil {
+		return fmt.Errorf("payloadv2: ddl_struct sub-op: %w", err)
+	}
+
+	switch subOp {
+	case ddlSubCreateTable:
+		flags, err := r.readByte()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE TABLE flags: %w", err)
+		}
+		plan.Operation = planner.OperationCreateTable
+		plan.IfNotExists = flags&0x01 != 0
+		plan.TableName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE TABLE tableName: %w", err)
+		}
+		numCols, err := r.readUv()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE TABLE numCols: %w", err)
+		}
+		plan.Schema = make([]ast.ColumnDefinition, numCols)
+		for i := range plan.Schema {
+			plan.Schema[i], err = decodeColumnDef(r)
+			if err != nil {
+				return fmt.Errorf("payloadv2: CREATE TABLE col[%d]: %w", i, err)
+			}
+		}
+		numVFKs, err := r.readUv()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE TABLE numVFKs: %w", err)
+		}
+		plan.VersionedForeignKeys = make([]ast.VersionedForeignKey, numVFKs)
+		for i := range plan.VersionedForeignKeys {
+			plan.VersionedForeignKeys[i], err = decodeVersionedFK(r)
+			if err != nil {
+				return fmt.Errorf("payloadv2: CREATE TABLE vfk[%d]: %w", i, err)
+			}
+		}
+
+	case ddlSubAlterAddColumn:
+		plan.Operation = planner.OperationAlterTableAddColumn
+		plan.TableName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: ALTER ADD COLUMN tableName: %w", err)
+		}
+		col, err := decodeColumnDef(r)
+		if err != nil {
+			return fmt.Errorf("payloadv2: ALTER ADD COLUMN col: %w", err)
+		}
+		plan.AlterColumn = &col
+
+	case ddlSubAlterDropColumn:
+		plan.Operation = planner.OperationAlterTableDropColumn
+		plan.TableName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: ALTER DROP COLUMN tableName: %w", err)
+		}
+		plan.DropColumnName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: ALTER DROP COLUMN columnName: %w", err)
+		}
+
+	case ddlSubAlterRenameColumn:
+		plan.Operation = planner.OperationAlterTableRenameColumn
+		plan.TableName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: ALTER RENAME COLUMN tableName: %w", err)
+		}
+		plan.RenameOldColumn, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: ALTER RENAME COLUMN old: %w", err)
+		}
+		plan.RenameNewColumn, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: ALTER RENAME COLUMN new: %w", err)
+		}
+
+	case ddlSubCreateIndex:
+		flags, err := r.readByte()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE INDEX flags: %w", err)
+		}
+		plan.Operation = planner.OperationCreateIndex
+		plan.IfNotExists = flags&0x01 != 0
+		plan.TableName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE INDEX tableName: %w", err)
+		}
+		plan.IndexName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE INDEX indexName: %w", err)
+		}
+		plan.IndexColumn, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE INDEX indexColumn: %w", err)
+		}
+		numCols, err := r.readUv()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE INDEX numCols: %w", err)
+		}
+		if numCols > 0 {
+			plan.IndexColumns = make([]string, numCols)
+			for i := range plan.IndexColumns {
+				plan.IndexColumns[i], err = r.readStr()
+				if err != nil {
+					return fmt.Errorf("payloadv2: CREATE INDEX col[%d]: %w", i, err)
+				}
+			}
+		}
+		plan.IndexMethod, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE INDEX indexMethod: %w", err)
+		}
+
+	case ddlSubCreateEntity:
+		flags, err := r.readByte()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE ENTITY flags: %w", err)
+		}
+		plan.Operation = planner.OperationCreateEntity
+		plan.IfNotExists = flags&0x01 != 0
+		plan.EntityName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE ENTITY entityName: %w", err)
+		}
+		plan.EntityRootTable, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE ENTITY entityRootTable: %w", err)
+		}
+		numTables, err := r.readUv()
+		if err != nil {
+			return fmt.Errorf("payloadv2: CREATE ENTITY numTables: %w", err)
+		}
+		plan.EntityTables = make([]string, numTables)
+		for i := range plan.EntityTables {
+			plan.EntityTables[i], err = r.readStr()
+			if err != nil {
+				return fmt.Errorf("payloadv2: CREATE ENTITY table[%d]: %w", i, err)
+			}
+		}
+
+	case ddlSubDropTable:
+		flags, err := r.readByte()
+		if err != nil {
+			return fmt.Errorf("payloadv2: DROP TABLE flags: %w", err)
+		}
+		plan.Operation = planner.OperationDropTable
+		plan.IfExists = flags&0x01 != 0
+		plan.Cascade = flags&0x02 != 0
+		plan.TableName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: DROP TABLE tableName: %w", err)
+		}
+
+	case ddlSubDropIndex:
+		flags, err := r.readByte()
+		if err != nil {
+			return fmt.Errorf("payloadv2: DROP INDEX flags: %w", err)
+		}
+		plan.Operation = planner.OperationDropIndex
+		plan.IfExists = flags&0x01 != 0
+		plan.IndexName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: DROP INDEX indexName: %w", err)
+		}
+		plan.TableName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: DROP INDEX tableName: %w", err)
+		}
+
+	case ddlSubTruncateTable:
+		plan.Operation = planner.OperationTruncateTable
+		plan.TableName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: TRUNCATE TABLE tableName: %w", err)
+		}
+
+	default:
+		return fmt.Errorf("payloadv2: unknown DDL struct sub-op 0x%02x", subOp)
+	}
+
+	return nil
+}
+
+// decodeColumnDef deserialises a ColumnDefinition written by encodeColumnDef.
+func decodeColumnDef(r *v2Reader) (ast.ColumnDefinition, error) {
+	var col ast.ColumnDefinition
+	var err error
+	col.Name, err = r.readStr()
+	if err != nil {
+		return col, fmt.Errorf("col name: %w", err)
+	}
+	typStr, err := r.readStr()
+	if err != nil {
+		return col, fmt.Errorf("col type: %w", err)
+	}
+	col.Type = ast.DataType(typStr)
+	flags, err := r.readByte()
+	if err != nil {
+		return col, fmt.Errorf("col flags: %w", err)
+	}
+	col.PrimaryKey = flags&colFlagPrimaryKey != 0
+	col.Unique = flags&colFlagUnique != 0
+	col.NotNull = flags&colFlagNotNull != 0
+	if flags&colFlagHasRefs != 0 {
+		col.ReferencesTable, err = r.readStr()
+		if err != nil {
+			return col, fmt.Errorf("col referencesTable: %w", err)
+		}
+		col.ReferencesColumn, err = r.readStr()
+		if err != nil {
+			return col, fmt.Errorf("col referencesColumn: %w", err)
+		}
+	}
+	if flags&colFlagHasCheck != 0 {
+		col.Check, err = decodePred(r)
+		if err != nil {
+			return col, fmt.Errorf("col check: %w", err)
+		}
+	}
+	if flags&colFlagHasDefault != 0 {
+		col.DefaultValue, err = decodeDefaultExpr(r)
+		if err != nil {
+			return col, fmt.Errorf("col default: %w", err)
+		}
+	}
+	return col, nil
+}
+
+// decodeDefaultExpr deserialises a DefaultExpr written by encodeDefaultExpr.
+func decodeDefaultExpr(r *v2Reader) (*ast.DefaultExpr, error) {
+	kind, err := r.readByte()
+	if err != nil {
+		return nil, fmt.Errorf("default kind: %w", err)
+	}
+	switch kind {
+	case defaultKindLiteral:
+		lit, err := decodeLit(r)
+		if err != nil {
+			return nil, fmt.Errorf("default literal: %w", err)
+		}
+		return &ast.DefaultExpr{Kind: ast.DefaultLiteral, Value: lit}, nil
+	case defaultKindAutoIncrement:
+		return &ast.DefaultExpr{Kind: ast.DefaultAutoIncrement}, nil
+	case defaultKindUUIDv7:
+		return &ast.DefaultExpr{Kind: ast.DefaultUUIDv7}, nil
+	default:
+		return nil, fmt.Errorf("payloadv2: unknown default kind 0x%02x", kind)
+	}
+}
+
+// decodeVersionedFK deserialises a VersionedForeignKey written by encodeVersionedFK.
+func decodeVersionedFK(r *v2Reader) (ast.VersionedForeignKey, error) {
+	var vfk ast.VersionedForeignKey
+	var err error
+	vfk.Column, err = r.readStr()
+	if err != nil {
+		return vfk, fmt.Errorf("vfk column: %w", err)
+	}
+	vfk.LSNColumn, err = r.readStr()
+	if err != nil {
+		return vfk, fmt.Errorf("vfk lsn_column: %w", err)
+	}
+	vfk.ReferencesDomain, err = r.readStr()
+	if err != nil {
+		return vfk, fmt.Errorf("vfk references_domain: %w", err)
+	}
+	vfk.ReferencesTable, err = r.readStr()
+	if err != nil {
+		return vfk, fmt.Errorf("vfk references_table: %w", err)
+	}
+	vfk.ReferencesColumn, err = r.readStr()
+	if err != nil {
+		return vfk, fmt.Errorf("vfk references_column: %w", err)
+	}
+	return vfk, nil
 }

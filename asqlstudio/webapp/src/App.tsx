@@ -2,12 +2,13 @@ import { Component, type ErrorInfo, useEffect, useState } from 'react'
 import { ClusterPanel } from './components/ClusterPanel'
 import { CommandPalette } from './components/CommandPalette'
 import { Dashboard } from './components/Dashboard'
+import { EntityExplorer } from './components/EntityExplorer'
 import { DDLPanel } from './components/DDLPanel'
 import { DesignerWorkbench } from './components/DesignerWorkbench'
 import { DiffPanel } from './components/DiffPanel'
 import { ERDiagram } from './components/ERDiagram'
 import { FixturePanel } from './components/FixturePanel'
-import { IconDatabase, IconDiffDoc, IconDownload, IconGrid, IconMoon, IconRefresh, IconSchema, IconShield, IconSQLDoc, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
+import { IconDatabase, IconDiffDoc, IconDownload, IconGrid, IconLayers, IconMoon, IconRefresh, IconSchema, IconShield, IconSQLDoc, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { RecoveryPanel } from './components/RecoveryPanel'
 import { StartHerePanel } from './components/StartHerePanel'
@@ -33,6 +34,7 @@ const GROUPS: GroupDef[] = [
     items: [
       { id: 'workspace',     label: 'Workspace',     icon: <IconTerminal /> },
       { id: 'time-explorer', label: 'Time Explorer', icon: <IconTimeline /> },
+      { id: 'entities',      label: 'Entities',      icon: <IconLayers /> },
     ],
   },
   {
@@ -441,6 +443,10 @@ function App() {
 
             {activeTab === 'time-explorer' && (
               <TimeExplorer domain={model.domain || 'default'} />
+            )}
+
+            {activeTab === 'entities' && (
+              <EntityExplorer domain={model.domain || 'default'} />
             )}
 
             {activeTab === 'recovery' && <RecoveryPanel />}
