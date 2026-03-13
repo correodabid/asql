@@ -7,7 +7,7 @@ import { DesignerWorkbench } from './components/DesignerWorkbench'
 import { DiffPanel } from './components/DiffPanel'
 import { ERDiagram } from './components/ERDiagram'
 import { FixturePanel } from './components/FixturePanel'
-import { IconDatabase, IconDownload, IconGrid, IconMoon, IconRefresh, IconSchema, IconShield, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
+import { IconDatabase, IconDiffDoc, IconDownload, IconGrid, IconMoon, IconRefresh, IconSchema, IconShield, IconSQLDoc, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { RecoveryPanel } from './components/RecoveryPanel'
 import { StartHerePanel } from './components/StartHerePanel'
@@ -38,8 +38,10 @@ const GROUPS: GroupDef[] = [
   {
     kind: 'group', id: 'schema', label: 'Schema', icon: <IconSchema />,
     items: [
-      { id: 'designer',  label: 'Designer',  icon: <IconSchema /> },
-      { id: 'fixtures',  label: 'Fixtures',  icon: <IconDownload /> },
+      { id: 'designer',      label: 'Builder',       icon: <IconSchema /> },
+      { id: 'sql-details',   label: 'SQL Details',   icon: <IconSQLDoc /> },
+      { id: 'change-review', label: 'Change Review', icon: <IconDiffDoc /> },
+      { id: 'fixtures',      label: 'Fixtures',      icon: <IconDownload /> },
     ],
   },
   {
@@ -133,8 +135,6 @@ function App() {
     activeTable,
     activeColumn,
     designerStatus,
-    designerView,
-    setDesignerView,
     ddl,
     ddlStatements,
     diffSummary,
@@ -237,7 +237,7 @@ function App() {
 
   // Fetch row counts per table when the canvas designer is active
   useEffect(() => {
-    if (activeTab !== 'designer' || designerView !== 'canvas' || isAllDomains) return
+    if (activeTab !== 'designer' || isAllDomains) return
     if (model.tables.length === 0) return
     const domain = model.domain || 'default'
     const fetchCounts = async () => {
@@ -258,7 +258,7 @@ function App() {
     }
     void fetchCounts()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, designerView, isAllDomains, model.domain, model.tables.length])
+  }, [activeTab, isAllDomains, model.domain, model.tables.length])
 
   const groups: GroupDef[] = GROUPS.map((g) => {
     if (g.kind === 'standalone') return g
@@ -266,7 +266,9 @@ function App() {
       ...g,
       items: g.items.map((item) => ({
         ...item,
-        badge: item.id === 'designer' && diffOperations.length > 0 ? diffOperations.length : undefined,
+        badge: item.id === 'designer' && diffOperations.length > 0 ? diffOperations.length
+             : item.id === 'change-review' && diffOperations.length > 0 ? diffOperations.length
+             : undefined,
       })),
     }
   })
@@ -276,13 +278,11 @@ function App() {
     : model.tables.length
 
   const openDesignerCanvas = () => {
-    setDesignerView('canvas')
     setActiveTab('designer')
   }
 
   const openDesignerDDL = () => {
-    setDesignerView('ddl')
-    setActiveTab('designer')
+    setActiveTab('sql-details')
   }
 
   return (
@@ -361,35 +361,6 @@ function App() {
 
             {activeTab === 'designer' && (
               <div className="designer-layout-full">
-                {/* Designer sub-nav */}
-                {!isAllDomains && (
-                <div className="designer-sub-nav">
-                  <button
-                    className={`designer-sub-btn ${designerView === 'canvas' ? 'active' : ''}`}
-                    onClick={() => setDesignerView('canvas')}
-                  >
-                    Builder
-                  </button>
-                  <button
-                    className={`designer-sub-btn ${designerView === 'ddl' ? 'active' : ''}`}
-                    onClick={() => setDesignerView('ddl')}
-                  >
-                    SQL Details
-                  </button>
-                  <button
-                    className={`designer-sub-btn ${designerView === 'diff' ? 'active' : ''}`}
-                    onClick={() => setDesignerView('diff')}
-                  >
-                    Change Review
-                    {diffOperations.length > 0 && (
-                      <span className="tab-badge" style={{ marginLeft: 6 }}>
-                        {diffOperations.length}
-                      </span>
-                    )}
-                  </button>
-                </div>
-                )}
-
                 {isAllDomains ? (
                   <div className="designer-layout" style={{ flex: 1 }}>
                     <div className="designer-canvas" style={{ flex: 1 }}>
@@ -403,8 +374,6 @@ function App() {
                     </div>
                   </div>
                 ) : (
-                <>
-                {designerView === 'canvas' && (
                   <DesignerWorkbench
                     model={model}
                     setModel={setModel}
@@ -428,8 +397,8 @@ function App() {
                     onPreviewDiff={onPreviewDiff}
                     onApplySafeDiff={onApplySafeDiff}
                     onExecuteAll={onExecuteAll}
-                    onOpenDDL={() => setDesignerView('ddl')}
-                    onOpenDiff={() => setDesignerView('diff')}
+                    onOpenDDL={() => setActiveTab('sql-details')}
+                    onOpenDiff={() => setActiveTab('change-review')}
                     undo={undo}
                     redo={redo}
                     canUndo={canUndo}
@@ -437,37 +406,35 @@ function App() {
                     normalizeSelection={normalizeSelection}
                   />
                 )}
-
-                {designerView === 'ddl' && (
-                  <DDLPanel
-                    ddl={ddl}
-                    ddlStatements={ddlStatements}
-                    statementStates={statementStates}
-                    onGenerateDDL={onGenerateDDL}
-                    onLoadBaseline={onLoadBaseline}
-                    onSetBaseline={onSetBaseline}
-                    onPreviewDiff={onPreviewDiff}
-                    onApplySafeDiff={onApplySafeDiff}
-                    onRefreshAutoDiff={onRefreshAutoDiff}
-                    onRefreshAutoDiffApplySafe={onRefreshAutoDiffApplySafe}
-                    onExecuteStatement={onExecuteStatement}
-                    onExecuteAll={onExecuteAll}
-                  />
-                )}
-
-                {designerView === 'diff' && (
-                  <DiffPanel
-                    diffSummary={diffSummary}
-                    diffSafe={diffSafe}
-                    diffOperations={diffOperations}
-                    diffWarnings={diffWarnings}
-                    onApplySelected={onApplySelectedDiff}
-                    onRefreshDiff={onPreviewDiff}
-                  />
-                )}
-                </>
-                )}
               </div>
+            )}
+
+            {activeTab === 'sql-details' && (
+              <DDLPanel
+                ddl={ddl}
+                ddlStatements={ddlStatements}
+                statementStates={statementStates}
+                onGenerateDDL={onGenerateDDL}
+                onLoadBaseline={onLoadBaseline}
+                onSetBaseline={onSetBaseline}
+                onPreviewDiff={onPreviewDiff}
+                onApplySafeDiff={onApplySafeDiff}
+                onRefreshAutoDiff={onRefreshAutoDiff}
+                onRefreshAutoDiffApplySafe={onRefreshAutoDiffApplySafe}
+                onExecuteStatement={onExecuteStatement}
+                onExecuteAll={onExecuteAll}
+              />
+            )}
+
+            {activeTab === 'change-review' && (
+              <DiffPanel
+                diffSummary={diffSummary}
+                diffSafe={diffSafe}
+                diffOperations={diffOperations}
+                diffWarnings={diffWarnings}
+                onApplySelected={onApplySelectedDiff}
+                onRefreshDiff={onPreviewDiff}
+              />
             )}
 
             {activeTab === 'cluster' && <ClusterPanel />}

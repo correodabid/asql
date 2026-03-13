@@ -274,6 +274,28 @@ export const IconList = () => (
   <svg {...sz}><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><line x1="3" y1="6" x2="3.01" y2="6" /><line x1="3" y1="12" x2="3.01" y2="12" /><line x1="3" y1="18" x2="3.01" y2="18" /></svg>
 )
 
+/** File with diff +/− lines — change review */
+export const IconDiffDoc = () => (
+  <svg {...sz}>
+    <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z" />
+    <polyline points="13 2 13 9 20 9" />
+    <line x1="9" y1="13" x2="15" y2="13" />
+    <line x1="12" y1="10" x2="12" y2="16" />
+    <line x1="9" y1="17" x2="13" y2="17" />
+  </svg>
+)
+
+/** File with &lt;/&gt; brackets — SQL source / DDL view */
+export const IconSQLDoc = () => (
+  <svg {...sz}>
+    <path d="M13 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V9z" />
+    <polyline points="13 2 13 9 20 9" />
+    <path d="M9 13l-2 1.5 2 1.5" />
+    <path d="M15 13l2 1.5-2 1.5" />
+    <line x1="12.5" y1="12.5" x2="11.5" y2="16.5" />
+  </svg>
+)
+
 /** Two diverging arrows — row comparison / diff */
 export const IconCompare = () => (
   <svg {...sz}>
