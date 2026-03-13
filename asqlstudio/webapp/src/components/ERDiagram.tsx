@@ -548,6 +548,17 @@ function computeMultiDomainEntityGroups(
 
 // ─── Relationship path ────────────────────────────────────
 
+/**
+ * Truncate `text` to fit within `maxPx` using an approximate per-character
+ * pixel width. Appends '\u2026' (ellipsis) when truncated.
+ * Good enough for monospace (JetBrains Mono) and Inter at typical canvas sizes.
+ */
+function truncText(text: string, maxPx: number, charPx: number): string {
+  const maxChars = Math.floor(maxPx / charPx)
+  if (text.length <= maxChars) return text
+  return text.slice(0, Math.max(1, maxChars - 1)) + '\u2026'
+}
+
 function colY(pos: TablePos, colName: string) {
   const idx = pos.table.columns.findIndex((c) => c.name === colName)
   return pos.y + TABLE_HEADER_H + (idx >= 0 ? idx : 0) * COL_ROW_H + COL_ROW_H / 2
@@ -863,7 +874,7 @@ function TableCard({
         onDoubleClick={onAnnotationDblClick}
         style={onAnnotationDblClick ? { cursor: 'text' } : undefined}
       >
-        {pos.table.name}
+        {truncText(pos.table.name, pos.w - 74, 6.0)}
       </text>
 
       {/* Annotation indicator ✎ */}
@@ -1022,7 +1033,7 @@ function TableCard({
                 fontSize="11"
                 fontFamily="'JetBrains Mono', monospace"
               >
-                {col.name}
+                {truncText(col.name, pos.w - 106, 6.7)}
               </text>
 
               {/* Column type */}
@@ -1113,7 +1124,7 @@ function TableCard({
                     fontSize="10"
                     fontFamily="'JetBrains Mono', monospace"
                   >
-                    {idx.name}
+                    {truncText(idx.name, pos.w - 84, 6.1)}
                   </text>
                   <text
                     x={pos.x + pos.w - 12}
