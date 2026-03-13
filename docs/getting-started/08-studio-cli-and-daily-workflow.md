@@ -6,6 +6,7 @@ A practical ASQL adoption usually uses both Studio and `asqlctl`.
 
 Studio is best for:
 
+- starting from the guided `Start Here` overview,
 - browsing schema,
 - running ad hoc queries,
 - inspecting row detail,
@@ -21,6 +22,13 @@ Start it with:
 ```bash
 go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
+
+After launch, the most useful first-run surfaces are usually:
+
+- `Workspace` for pgwire SQL and explicit transaction controls,
+- `Time Explorer` for history and snapshot comparison,
+- `Fixtures` for deterministic sample data workflows,
+- `Dashboard`, `Cluster`, and `Recovery` when you need operator-facing visibility.
 
 ## Use `asqlctl` for scripts and repeatable commands
 

@@ -392,12 +392,14 @@ Cluster mode extends the single-node runtime. It should not replace the local st
 
 Desktop Studio for managing ASQL interactively over pgwire.
 
-- SQL query editor with domain selection
-- Schema browser with ER diagram visualization
-- Transaction controls (BEGIN / EXECUTE / COMMIT / ROLLBACK)
-- Time-travel query panel
-- Scan strategy statistics
-- Replication lag monitoring (with optional `-follower-endpoint` or cluster peer endpoints)
+Current first-run path and surfaces:
+
+- guided `Start Here` overview,
+- `Workspace` for SQL queries and transaction controls (`Begin`, `Run`, `Commit`, `Rollback`),
+- `Time Explorer` for temporal history and diffs,
+- `Fixtures` for validate/load/export flows,
+- `Dashboard`, `Cluster`, and `Recovery` panels for engine and cluster visibility,
+- query-plan / scan-strategy inspection and replication-lag monitoring when follower or peer endpoints are configured.
 
 ```bash
 go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
