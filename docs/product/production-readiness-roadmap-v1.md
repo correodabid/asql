@@ -312,7 +312,7 @@ Goal: prove that ASQL survives bad days, not just happy-path restarts.
 - Add PITR primitives:
   - base backup metadata,
   - WAL segment catalog,
-  - restore-to-LSN / restore-to-timestamp workflow.
+  - restore-to-LSN / restore-to-logical-timestamp workflow.
 - Keep these storage/recovery formats free to change until stabilization; prioritize correctness and simpler internals over migration compatibility.
 - Expand corruption and crash testing:
   - torn write simulation,
@@ -322,7 +322,7 @@ Goal: prove that ASQL survives bad days, not just happy-path restarts.
 - Add an operator recovery command set to `asqlctl`.
 
 ### Exit criteria
-- Restore to exact LSN/timestamp is documented and test-covered.
+- Restore to exact LSN or logical timestamp is documented and test-covered.
 - Recovery runbook is executable without internal knowledge.
 - Corruption paths fail closed and are observable.
 
@@ -331,8 +331,8 @@ Goal: prove that ASQL survives bad days, not just happy-path restarts.
 Goal: make ASQL monitorable, debuggable, and supportable in real deployments.
 
 ### Deliverables
-- Native Prometheus metrics endpoint.
-- Stable metric families for:
+- Harden and document the existing Prometheus/admin observability surface.
+- Stabilize metric families for:
   - commit latency,
   - Raft term/election/failover,
   - replication lag,
@@ -341,7 +341,7 @@ Goal: make ASQL monitorable, debuggable, and supportable in real deployments.
   - WAL fsync latency/errors,
   - audit backlog/errors,
   - routing decisions and stale-read fallbacks.
-- Structured health endpoints and readiness/liveness semantics.
+- Harden readiness/liveness and structured health endpoints.
 - Better admin surfaces in Studio and CLI for:
   - leader/follower state,
   - last durable LSN,
@@ -363,7 +363,7 @@ Goal: remove friction for real applications evaluating ASQL.
 - Add protocol cancellation.
 - Add narrow `COPY` support for the highest-value ingest/export path.
 - Expand auth/TLS and catalog compatibility where it most improves tool interoperability.
-- Add an interactive `asqlctl shell` mode with history, transactions, explain, replay, and cluster admin commands.
+- Extend the interactive `asqlctl shell` with stronger explain, replay, and cluster-admin workflows.
 
 Note:
 - This phase is about external interoperability, not backward compatibility of ASQL internals.
@@ -445,7 +445,7 @@ ASQL should not call itself production-ready until all of these are true:
 
 - quorum-backed writes are the only supported cluster write path,
 - failover tests pass repeatedly under seeded and adversarial timelines,
-- restore-to-LSN and restore-to-timestamp are documented and tested,
+- restore-to-LSN and restore-to-logical-timestamp are documented and tested,
 - Prometheus metrics and operational dashboards exist,
 - compatibility surface is explicit and tested,
 - backup + rollback procedures are release-blocking,
