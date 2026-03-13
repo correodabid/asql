@@ -15,7 +15,7 @@ Every database forces you to choose: **simple** (SQLite) or **powerful** (Postgr
 | Problem | ASQL's answer |
 |---|---|
 | You need multi-tenant data isolation but embedded simplicity | **Domain isolation** -- each domain has its own schema, constraints, and rules inside a single engine |
-| You need to audit who changed what and when | **Time-travel queries** -- read any historical state by LSN or timestamp |
+| You need to audit who changed what and when | **Time-travel queries** -- read historical state by commit LSN |
 | You need cross-service consistency without distributed transactions | **Cross-domain transactions** -- atomic commits across domain boundaries |
 | You need to debug production issues by reproducing exact state | **Deterministic replay** -- same WAL input always produces identical state |
 | You need to track aggregate versions across related tables | **Entity versioning** -- automatic version tracking with versioned foreign keys |
@@ -142,9 +142,12 @@ CREATE ENTITY recipe (
 
 -- Versioned foreign keys capture the entity version at insert time
 CREATE TABLE process_orders (
-  id TEXT PRIMARY KEY DEFAULT UUID_V7(),
-  recipe_id TEXT REFERENCES VERSIONED master.ingredients(id) AS OF recipe_version,
-  recipe_version INT
+  id TEXT PRIMARY KEY DEFAULT UUID_V7,
+  recipe_id TEXT,
+  recipe_version INT,
+  VERSIONED FOREIGN KEY (recipe_id)
+    REFERENCES master.ingredients(id)
+    AS OF recipe_version
 );
 
 -- Explicit override remains available when you need precise historical control
@@ -169,7 +172,7 @@ tokens deterministically from WAL order.
 **DDL**
 ```sql
 CREATE TABLE products (
-  id TEXT PRIMARY KEY DEFAULT UUID_V7(),
+  id TEXT PRIMARY KEY DEFAULT UUID_V7,
   name TEXT NOT NULL,
   price FLOAT CHECK (price > 0),
   category_id INT REFERENCES categories(id),
@@ -247,7 +250,7 @@ COMMIT;
 | `FLOAT` | `REAL`, `DOUBLE` | 64-bit floating point |
 | `BOOLEAN` | `BOOL` | true/false |
 | `TIMESTAMP` | - | Date-time with microsecond precision |
-| `UUID` | - | UUID with `UUID_V7()` default generation |
+| `UUID` | - | UUID with `UUID_V7` default generation |
 
 ### Indexes
 
@@ -281,8 +284,11 @@ CREATE TABLE accounts (
   email TEXT UNIQUE,
   balance FLOAT CHECK (balance >= 0),
   owner_id INT REFERENCES users(id),
-  recipe_id TEXT REFERENCES VERSIONED master.ingredients(id) AS OF recipe_version,
-  recipe_version INT
+  recipe_id TEXT,
+  recipe_version INT,
+  VERSIONED FOREIGN KEY (recipe_id)
+    REFERENCES master.ingredients(id)
+    AS OF recipe_version
 );
 ```
 

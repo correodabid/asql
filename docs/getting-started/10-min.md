@@ -4,11 +4,13 @@ This is the shortest path into ASQL.
 
 For the full adoption path, use [docs/getting-started/README.md](getting-started/README.md).
 
-## 1) Validate project health
+## 1) Optional: validate project health
 
 ```bash
 go test ./...
 ```
+
+If you only want the fastest local walkthrough, skip straight to starting `asqld`.
 
 ## 2) Start ASQL locally
 
