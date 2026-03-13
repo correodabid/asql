@@ -336,7 +336,7 @@ func parseOnlineSafeAddColumnSuffix(suffix []string, column *ast.ColumnDefinitio
 			}
 			defaultToken := strings.ToUpper(suffix[index+1])
 			switch defaultToken {
-			case "AUTOINCREMENT", "UUID_V7":
+			case "AUTOINCREMENT", "UUID_V7", "TX_TIMESTAMP":
 				return fmt.Errorf("%w: online-safe ADD COLUMN supports only literal DEFAULT values", errInvalidSQL)
 			default:
 				lit, err := parseLiteral(suffix[index+1])
@@ -563,6 +563,8 @@ func parseCreateTable(sql string, ifNotExists bool) (ast.Statement, error) {
 					column.DefaultValue = &ast.DefaultExpr{Kind: ast.DefaultAutoIncrement}
 				case "UUID_V7":
 					column.DefaultValue = &ast.DefaultExpr{Kind: ast.DefaultUUIDv7}
+				case "TX_TIMESTAMP":
+					column.DefaultValue = &ast.DefaultExpr{Kind: ast.DefaultTxTimestamp}
 				default:
 					lit, litErr := parseLiteral(suffix[index+1])
 					if litErr != nil {

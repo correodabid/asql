@@ -51,7 +51,7 @@
         "CREATE TABLE execution.batch_phase_records (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES batch_orders(id), unit_procedure_code TEXT NOT NULL, operation_code TEXT NOT NULL, phase_code TEXT NOT NULL, phase_state TEXT NOT NULL, equipment_id TEXT NOT NULL, equipment_lsn INT, recorded_by TEXT NOT NULL, note TEXT NOT NULL, VERSIONED FOREIGN KEY (equipment_id) REFERENCES operations.equipment_assets(id) AS OF equipment_lsn)",
         "CREATE TABLE execution.batch_material_links (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES batch_orders(id), lot_id TEXT NOT NULL, lot_version INT, material_role TEXT NOT NULL, consumed_grams INT NOT NULL DEFAULT 0, VERSIONED FOREIGN KEY (lot_id) REFERENCES inventory.material_lots(id) AS OF lot_version)",
         "CREATE TABLE execution.block_records (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL REFERENCES batch_orders(id), phase_record_id TEXT NOT NULL REFERENCES batch_phase_records(id), block_code TEXT NOT NULL, status TEXT NOT NULL, recorded_by TEXT NOT NULL, note TEXT NOT NULL DEFAULT '')",
-        "CREATE TABLE execution.component_records (id TEXT PRIMARY KEY, block_record_id TEXT NOT NULL REFERENCES block_records(id), component_code TEXT NOT NULL, value TEXT NOT NULL DEFAULT '', recorded_by TEXT NOT NULL, recorded_at TEXT NOT NULL DEFAULT '')",
+        "CREATE TABLE execution.component_records (id TEXT PRIMARY KEY, block_record_id TEXT NOT NULL REFERENCES block_records(id), component_code TEXT NOT NULL, value TEXT NOT NULL DEFAULT '', recorded_by TEXT NOT NULL, recorded_at TIMESTAMP NOT NULL DEFAULT TX_TIMESTAMP)",
         "CREATE ENTITY batch_record_entity (ROOT batch_orders, INCLUDES batch_steps, batch_phase_records, batch_material_links, block_records, component_records)"
       ]
     },
@@ -190,13 +190,13 @@
 
         "UPDATE execution.block_records SET status = 'COMPLETE', recorded_by = 'op-001' WHERE id = 'blkrec-001'",
         "UPDATE execution.block_records SET status = 'COMPLETE', recorded_by = 'op-001' WHERE id = 'blkrec-002'",
-        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-001', 'blkrec-001', 'line_clear_check', 'true', 'op-001', '2026-01-15T08:00:00Z')",
-        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-002', 'blkrec-001', 'operator_signature', '{\"signerId\":\"op-001\",\"signerRole\":\"operator\",\"timestamp\":\"2026-01-15T08:01:00Z\"}', 'op-001', '2026-01-15T08:01:00Z')",
-        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-003', 'blkrec-002', 'api_lot_code', 'SUP-API-7781', 'op-001', '2026-01-15T08:05:00Z')",
-        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-004', 'blkrec-002', 'api_weight_grams', '8000', 'op-001', '2026-01-15T08:05:30Z')",
-        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-005', 'blkrec-002', 'vehicle_lot_code', 'SUP-VEH-1120', 'op-001', '2026-01-15T08:06:00Z')",
-        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-006', 'blkrec-002', 'vehicle_weight_grams', '5000', 'op-001', '2026-01-15T08:06:30Z')",
-        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by, recorded_at) VALUES ('comprec-007', 'blkrec-002', 'weighing_verification', '{\"signerId\":\"op-001\",\"signerRole\":\"operator\",\"timestamp\":\"2026-01-15T08:07:00Z\"}', 'op-001', '2026-01-15T08:07:00Z')"
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by) VALUES ('comprec-001', 'blkrec-001', 'line_clear_check', 'true', 'op-001')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by) VALUES ('comprec-002', 'blkrec-001', 'operator_signature', '{\"signerId\":\"op-001\",\"signerRole\":\"operator\",\"timestamp\":\"2026-01-15T08:01:00Z\"}', 'op-001')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by) VALUES ('comprec-003', 'blkrec-002', 'api_lot_code', 'SUP-API-7781', 'op-001')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by) VALUES ('comprec-004', 'blkrec-002', 'api_weight_grams', '8000', 'op-001')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by) VALUES ('comprec-005', 'blkrec-002', 'vehicle_lot_code', 'SUP-VEH-1120', 'op-001')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by) VALUES ('comprec-006', 'blkrec-002', 'vehicle_weight_grams', '5000', 'op-001')",
+        "INSERT INTO execution.component_records (id, block_record_id, component_code, value, recorded_by) VALUES ('comprec-007', 'blkrec-002', 'weighing_verification', '{\"signerId\":\"op-001\",\"signerRole\":\"operator\",\"timestamp\":\"2026-01-15T08:07:00Z\"}', 'op-001')"
       ]
     },
     {

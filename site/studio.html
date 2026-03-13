@@ -1,0 +1,759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASQL Studio — Visual Database Workspace</title>
+  <meta name="description" content="ASQL Studio: Schema designer, time-travel explorer, cluster monitoring, and SQL workspace. A native desktop app for the ASQL deterministic engine.">
+  <meta name="theme-color" content="#0a0e17">
+  <meta property="og:title" content="ASQL Studio — Visual Database Workspace">
+  <meta property="og:description" content="Design schemas visually. Travel through time. Monitor your cluster. All in one native app.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ═══════════════════════════════ NAV ═══════════════════════════════ -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="index.html" class="nav-logo">
+        <span class="logo-icon">⚡</span> ASQL
+      </a>
+      <div class="nav-links">
+        <a href="index.html">Engine</a>
+        <a href="studio.html" class="nav-active">Studio</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/davidrjonas/asql" class="nav-gh" target="_blank" rel="noopener">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════════════ HERO ═══════════════════════════════ -->
+  <section class="hero studio-hero">
+    <div class="hero-glow hero-glow-purple"></div>
+    <div class="container">
+      <div class="hero-badge">Native Desktop App · Wails + React · pgwire Connected</div>
+      <h1 class="hero-title">
+        See your data<br>
+        <span class="hero-gradient-purple">like never before.</span>
+      </h1>
+      <p class="hero-sub">
+        Schema designer. Time-travel explorer. Cluster dashboard.<br>
+        SQL workspace. All in one native app.
+      </p>
+      <div class="hero-actions">
+        <a href="#get-studio" class="btn btn-primary btn-purple">Launch Studio</a>
+        <a href="index.html" class="btn btn-ghost">Learn about ASQL Engine →</a>
+      </div>
+
+      <!-- Mock App Window -->
+      <div class="studio-window">
+        <div class="studio-titlebar">
+          <div class="studio-titlebar-dots">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+          </div>
+          <span class="studio-titlebar-text">ASQL Studio — 127.0.0.1:5433</span>
+        </div>
+        <div class="studio-chrome">
+          <div class="studio-sidebar">
+            <div class="studio-sidebar-section">
+              <div class="studio-sidebar-label">QUERY</div>
+              <div class="studio-sidebar-item active">
+                <span class="sb-icon">⌨️</span> Workspace
+              </div>
+              <div class="studio-sidebar-item">
+                <span class="sb-icon">⏳</span> Time Explorer
+              </div>
+              <div class="studio-sidebar-item">
+                <span class="sb-icon">🔗</span> Entities
+              </div>
+            </div>
+            <div class="studio-sidebar-section">
+              <div class="studio-sidebar-label">SCHEMA</div>
+              <div class="studio-sidebar-item">
+                <span class="sb-icon">📐</span> Builder
+              </div>
+              <div class="studio-sidebar-item">
+                <span class="sb-icon">📄</span> DDL
+              </div>
+            </div>
+            <div class="studio-sidebar-section">
+              <div class="studio-sidebar-label">OPS</div>
+              <div class="studio-sidebar-item">
+                <span class="sb-icon">📊</span> Dashboard
+              </div>
+              <div class="studio-sidebar-item">
+                <span class="sb-icon">🌐</span> Cluster
+              </div>
+            </div>
+          </div>
+          <div class="studio-main">
+            <div class="studio-mock-editor">
+              <div class="studio-mock-tabs">
+                <span class="studio-tab active">Query 1</span>
+                <span class="studio-tab">Query 2</span>
+                <span class="studio-tab-add">+</span>
+              </div>
+              <div class="studio-mock-sql">
+                <pre><code><span class="k">SELECT</span> u.name, <span class="f">COUNT</span>(o.id) <span class="k">AS</span> orders
+<span class="k">FROM</span> users u
+<span class="k">JOIN</span> orders o <span class="k">ON</span> u.id = o.user_id
+<span class="k">GROUP BY</span> u.name
+<span class="k">ORDER BY</span> orders <span class="k">DESC</span>;</code></pre>
+              </div>
+              <div class="studio-mock-results">
+                <table>
+                  <thead><tr><th>name</th><th>orders</th></tr></thead>
+                  <tbody>
+                    <tr><td>Alice Chen</td><td class="n">142</td></tr>
+                    <tr><td>Bob Martinez</td><td class="n">98</td></tr>
+                    <tr><td>Carol Smith</td><td class="n">67</td></tr>
+                  </tbody>
+                </table>
+                <div class="studio-mock-status">3 rows · 2.1ms · LSN 1,847</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ FEATURE TABS ═══════════════════════════ -->
+  <section class="section section-dark" id="features">
+    <div class="container">
+      <div class="section-header">
+        <h2>Four workspaces. One app.</h2>
+        <p class="section-sub">Every capability of the ASQL engine, surfaced visually.</p>
+      </div>
+
+      <div class="studio-tabs">
+        <button class="studio-tab-btn active" data-tab="query">Query</button>
+        <button class="studio-tab-btn" data-tab="schema">Schema</button>
+        <button class="studio-tab-btn" data-tab="time">Time Travel</button>
+        <button class="studio-tab-btn" data-tab="ops">Operations</button>
+      </div>
+
+      <!-- Tab: Query -->
+      <div class="studio-tab-content active" id="tab-query">
+        <div class="feature-block">
+          <div class="feature-text">
+            <div class="feature-label">SQL Workspace</div>
+            <h3>Write, run, explore.<br>Like a real IDE.</h3>
+            <p>
+              Multi-tab SQL editor with schema-aware autocomplete, syntax highlighting,
+              inline formatting, and virtual-scrolling results grid.
+              Click any row to inspect details, follow FK references, view mutation history.
+            </p>
+            <ul class="feature-list">
+              <li>Schema-aware SQL autocomplete</li>
+              <li>Multi-tab query editor (Cmd+N / Cmd+W)</li>
+              <li>Inline row editing with PK/FK badges</li>
+              <li>FK navigation — click to follow references</li>
+              <li>Visual EXPLAIN plan with index suggestions</li>
+              <li>Query builder for visual query construction</li>
+              <li>Saved queries and query history</li>
+              <li>Data export (CSV, JSON)</li>
+            </ul>
+          </div>
+          <div class="feature-code">
+            <div class="studio-mockup mockup-workspace">
+              <div class="mockup-header">
+                <span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+                <span class="mockup-title">Workspace — Query 1</span>
+              </div>
+              <div class="mockup-body">
+                <div class="mockup-line"><span class="k">SELECT</span> p.name, p.price,</div>
+                <div class="mockup-line">&nbsp;&nbsp;c.category_name,</div>
+                <div class="mockup-line">&nbsp;&nbsp;<span class="f">entity_version</span>(<span class="s">'products'</span>,</div>
+                <div class="mockup-line">&nbsp;&nbsp;&nbsp;&nbsp;<span class="s">'product_entity'</span>, p.id)</div>
+                <div class="mockup-line"><span class="k">FROM</span> products p</div>
+                <div class="mockup-line"><span class="k">JOIN</span> categories c <span class="k">ON</span> p.cat_id = c.id</div>
+                <div class="mockup-autocomplete">
+                  <div class="ac-item ac-active">category_name <span class="ac-type">TEXT</span></div>
+                  <div class="ac-item">category_id <span class="ac-type">INT</span></div>
+                  <div class="ac-item">created_at <span class="ac-type">TEXT</span></div>
+                </div>
+                <div class="mockup-divider"></div>
+                <div class="mockup-result-row mockup-result-header">
+                  <span>name</span><span>price</span><span>category</span><span>version</span>
+                </div>
+                <div class="mockup-result-row">
+                  <span>Widget Pro</span><span class="n">29.99</span><span>Hardware</span><span class="n">3</span>
+                </div>
+                <div class="mockup-result-row mockup-result-selected">
+                  <span>Sensor X</span><span class="n">14.50</span><span>Electronics</span><span class="n">7</span>
+                </div>
+                <div class="mockup-result-row">
+                  <span>Cable Kit</span><span class="n">8.99</span><span>Accessories</span><span class="n">1</span>
+                </div>
+                <div class="mockup-status">3 rows · 1.8ms · LSN 2,491</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Schema -->
+      <div class="studio-tab-content" id="tab-schema">
+        <div class="feature-block">
+          <div class="feature-text">
+            <div class="feature-label">Schema Designer</div>
+            <h3>Design visually.<br>Apply with confidence.</h3>
+            <p>
+              Interactive ER diagram canvas with drag-to-create FK relationships,
+              entity-aware table grouping, WAL heat overlays, and multi-domain layout.
+              Every change generates DDL automatically and diffs against the live engine.
+            </p>
+            <ul class="feature-list">
+              <li>Interactive ER canvas — pan, zoom, auto-layout</li>
+              <li>Drag-to-create FK relationships</li>
+              <li>Entity grouping with color-coded domains</li>
+              <li>WAL mutation heat overlay per table</li>
+              <li>Live diff engine — safe vs unsafe vs breaking</li>
+              <li>Selective apply — choose what to execute</li>
+              <li>Export diagrams to SVG / PNG</li>
+              <li>Undo / redo history</li>
+            </ul>
+          </div>
+          <div class="feature-code">
+            <div class="studio-mockup mockup-schema">
+              <div class="mockup-header">
+                <span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+                <span class="mockup-title">Schema Builder — billing</span>
+              </div>
+              <div class="mockup-body mockup-canvas">
+                <!-- ER table cards -->
+                <div class="er-table" style="top:12px;left:16px">
+                  <div class="er-table-header er-domain-blue">invoices <span class="er-badge">247</span></div>
+                  <div class="er-col"><span class="er-pk">PK</span> id <span class="er-type">INT</span></div>
+                  <div class="er-col">amount <span class="er-type">FLOAT</span></div>
+                  <div class="er-col">status <span class="er-type">TEXT</span></div>
+                  <div class="er-col"><span class="er-fk">FK</span> user_id <span class="er-type">INT</span></div>
+                </div>
+                <div class="er-table" style="top:10px;right:16px">
+                  <div class="er-table-header er-domain-green">users <span class="er-badge">89</span></div>
+                  <div class="er-col"><span class="er-pk">PK</span> id <span class="er-type">INT</span></div>
+                  <div class="er-col">name <span class="er-type">TEXT</span></div>
+                  <div class="er-col">email <span class="er-type">TEXT</span></div>
+                </div>
+                <div class="er-table" style="bottom:12px;left:50%;transform:translateX(-50%)">
+                  <div class="er-table-header er-domain-blue">line_items <span class="er-badge">1.2k</span></div>
+                  <div class="er-col"><span class="er-pk">PK</span> id <span class="er-type">INT</span></div>
+                  <div class="er-col"><span class="er-fk">FK</span> invoice_id <span class="er-type">INT</span></div>
+                  <div class="er-col">product <span class="er-type">TEXT</span></div>
+                  <div class="er-col">qty <span class="er-type">INT</span></div>
+                </div>
+                <!-- Relationship lines (SVG) -->
+                <svg class="er-lines" viewBox="0 0 400 260" preserveAspectRatio="none">
+                  <path d="M 150 60 C 200 60, 220 40, 260 40" stroke="#3b82f6" stroke-width="2" fill="none" stroke-dasharray="4 3" opacity="0.6"/>
+                  <path d="M 120 120 C 120 180, 200 180, 200 180" stroke="#3b82f6" stroke-width="2" fill="none" stroke-dasharray="4 3" opacity="0.6"/>
+                </svg>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Time Travel -->
+      <div class="studio-tab-content" id="tab-time">
+        <div class="feature-block">
+          <div class="feature-text">
+            <div class="feature-label">Time Explorer</div>
+            <h3>Rewind your data<br>like a video.</h3>
+            <p>
+              A visual WAL timeline with commit density histogram, playback controls
+              (play, pause, skip, speed control), and snapshot markers.
+              Scrub to any point in time and see your data exactly as it was.
+            </p>
+            <ul class="feature-list">
+              <li>Timeline scrubber with commit density histogram</li>
+              <li>Playback controls: play, pause, skip, 0.5x–4x speed</li>
+              <li>Point-in-time snapshot: browse any table at any LSN</li>
+              <li>Side-by-side diff between two LSN points</li>
+              <li>Row-level change highlighting (add/remove/modify)</li>
+              <li>Full audit trail per table with operations</li>
+              <li>Entity version explorer with version-to-version diff</li>
+              <li>Snapshot and DDL commit markers on timeline</li>
+            </ul>
+          </div>
+          <div class="feature-code">
+            <div class="studio-mockup mockup-time">
+              <div class="mockup-header">
+                <span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+                <span class="mockup-title">Time Explorer — Diff View</span>
+              </div>
+              <div class="mockup-body">
+                <!-- Timeline scrubber -->
+                <div class="time-scrubber">
+                  <div class="time-controls">
+                    <span class="time-btn">⏮</span>
+                    <span class="time-btn time-btn-play">▶</span>
+                    <span class="time-btn">⏭</span>
+                    <span class="time-speed">1x</span>
+                  </div>
+                  <div class="time-bar">
+                    <div class="time-histogram">
+                      <div class="time-hist-bar" style="height:20%"></div>
+                      <div class="time-hist-bar" style="height:45%"></div>
+                      <div class="time-hist-bar" style="height:30%"></div>
+                      <div class="time-hist-bar" style="height:80%"></div>
+                      <div class="time-hist-bar" style="height:60%"></div>
+                      <div class="time-hist-bar" style="height:100%"></div>
+                      <div class="time-hist-bar" style="height:40%"></div>
+                      <div class="time-hist-bar" style="height:75%"></div>
+                      <div class="time-hist-bar" style="height:55%"></div>
+                      <div class="time-hist-bar" style="height:25%"></div>
+                      <div class="time-hist-bar" style="height:90%"></div>
+                      <div class="time-hist-bar" style="height:35%"></div>
+                    </div>
+                    <div class="time-track">
+                      <div class="time-progress" style="width:68%"></div>
+                      <div class="time-cursor" style="left:68%">
+                        <span class="time-lsn">LSN 1,284</span>
+                      </div>
+                      <div class="time-snap-marker" style="left:25%">📸</div>
+                      <div class="time-snap-marker" style="left:82%">📸</div>
+                    </div>
+                  </div>
+                  <div class="time-range">
+                    <span>LSN 1</span>
+                    <span>LSN 1,891</span>
+                  </div>
+                </div>
+                <!-- Diff results -->
+                <div class="time-diff">
+                  <div class="time-diff-header">users · LSN 1,200 → 1,284</div>
+                  <div class="mockup-result-row mockup-result-header">
+                    <span>id</span><span>name</span><span>status</span>
+                  </div>
+                  <div class="mockup-result-row time-row-unchanged">
+                    <span>1</span><span>Alice</span><span>active</span>
+                  </div>
+                  <div class="mockup-result-row time-row-changed">
+                    <span>2</span><span>Bob</span><span class="time-cell-changed">active → suspended</span>
+                  </div>
+                  <div class="mockup-result-row time-row-added">
+                    <span>3</span><span>Carol</span><span>active</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Operations -->
+      <div class="studio-tab-content" id="tab-ops">
+        <div class="feature-block">
+          <div class="feature-text">
+            <div class="feature-label">Operations</div>
+            <h3>Monitor everything.<br>Recover anything.</h3>
+            <p>
+              Real-time dashboard with health indicators, KPI sparklines, and latency heatmaps.
+              Cluster topology with per-node replication lag, failover history, and read routing stats.
+              Point-in-time backup and recovery by LSN or timestamp.
+            </p>
+            <ul class="feature-list">
+              <li>Health ring and KPI cards with sparklines</li>
+              <li>Latency heatmap and operation breakdowns</li>
+              <li>Cluster topology with real-time lag monitoring</li>
+              <li>Failover history and leadership transitions</li>
+              <li>Read routing visualization (leader vs follower)</li>
+              <li>Backup/restore by LSN or timestamp</li>
+              <li>Snapshot catalog and WAL segment browser</li>
+              <li>Fixture import/export/validation</li>
+            </ul>
+          </div>
+          <div class="feature-code">
+            <div class="studio-mockup mockup-ops">
+              <div class="mockup-header">
+                <span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+                <span class="mockup-title">Cluster — 3 Nodes</span>
+              </div>
+              <div class="mockup-body">
+                <div class="ops-nodes">
+                  <div class="ops-node ops-leader">
+                    <div class="ops-node-ring">
+                      <svg viewBox="0 0 36 36" class="ops-ring-svg">
+                        <circle cx="18" cy="18" r="15.9" fill="none" stroke="#1e2740" stroke-width="2.5"/>
+                        <circle cx="18" cy="18" r="15.9" fill="none" stroke="#10b981" stroke-width="2.5" stroke-dasharray="100 0" transform="rotate(-90 18 18)"/>
+                      </svg>
+                      <span class="ops-node-label">A</span>
+                    </div>
+                    <div class="ops-node-info">
+                      <span class="ops-role ops-role-leader">LEADER</span>
+                      <span class="ops-lsn">LSN 1,891</span>
+                      <span class="ops-lag ops-lag-sync">sync</span>
+                    </div>
+                  </div>
+                  <div class="ops-node">
+                    <div class="ops-node-ring">
+                      <svg viewBox="0 0 36 36" class="ops-ring-svg">
+                        <circle cx="18" cy="18" r="15.9" fill="none" stroke="#1e2740" stroke-width="2.5"/>
+                        <circle cx="18" cy="18" r="15.9" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-dasharray="97 3" transform="rotate(-90 18 18)"/>
+                      </svg>
+                      <span class="ops-node-label">B</span>
+                    </div>
+                    <div class="ops-node-info">
+                      <span class="ops-role">FOLLOWER</span>
+                      <span class="ops-lsn">LSN 1,889</span>
+                      <span class="ops-lag ops-lag-good">lag: 2</span>
+                    </div>
+                  </div>
+                  <div class="ops-node">
+                    <div class="ops-node-ring">
+                      <svg viewBox="0 0 36 36" class="ops-ring-svg">
+                        <circle cx="18" cy="18" r="15.9" fill="none" stroke="#1e2740" stroke-width="2.5"/>
+                        <circle cx="18" cy="18" r="15.9" fill="none" stroke="#3b82f6" stroke-width="2.5" stroke-dasharray="95 5" transform="rotate(-90 18 18)"/>
+                      </svg>
+                      <span class="ops-node-label">C</span>
+                    </div>
+                    <div class="ops-node-info">
+                      <span class="ops-role">FOLLOWER</span>
+                      <span class="ops-lsn">LSN 1,885</span>
+                      <span class="ops-lag ops-lag-good">lag: 6</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="ops-kpis">
+                  <div class="ops-kpi">
+                    <span class="ops-kpi-value">587</span>
+                    <span class="ops-kpi-label">tx/sec</span>
+                  </div>
+                  <div class="ops-kpi">
+                    <span class="ops-kpi-value">6ms</span>
+                    <span class="ops-kpi-label">P50 lat</span>
+                  </div>
+                  <div class="ops-kpi">
+                    <span class="ops-kpi-value">0.2%</span>
+                    <span class="ops-kpi-label">rollback</span>
+                  </div>
+                  <div class="ops-kpi">
+                    <span class="ops-kpi-value">4h 12m</span>
+                    <span class="ops-kpi-label">uptime</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ SCHEMA DIFF SHOWCASE ═══════════════════════ -->
+  <section class="section" id="diff">
+    <div class="container">
+      <div class="feature-block feature-reverse">
+        <div class="feature-text">
+          <div class="feature-label">Schema Diff Engine</div>
+          <h3>Design → Diff → Apply.<br>A deployment pipeline<br>for your schema.</h3>
+          <p>
+            Every change you make in the visual designer generates DDL automatically.
+            The diff engine compares your model against the live database and classifies
+            every operation as <strong style="color:var(--green)">safe</strong>,
+            <strong style="color:var(--yellow)">unsafe</strong>, or
+            <strong style="color:var(--red)">breaking</strong>.
+          </p>
+          <p>
+            Apply changes selectively — or batch-apply all safe operations with one click.
+            Versioned FKs and entity definitions are fully supported.
+          </p>
+        </div>
+        <div class="feature-code">
+          <div class="studio-mockup">
+            <div class="mockup-header">
+              <span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+              <span class="mockup-title">Schema Diff — 4 operations</span>
+            </div>
+            <div class="mockup-body">
+              <div class="diff-ops">
+                <div class="diff-op diff-safe">
+                  <span class="diff-badge safe">SAFE</span>
+                  <span class="diff-sql"><span class="k">CREATE TABLE</span> audit_log (...)</span>
+                  <span class="diff-check">✓</span>
+                </div>
+                <div class="diff-op diff-safe">
+                  <span class="diff-badge safe">SAFE</span>
+                  <span class="diff-sql"><span class="k">ALTER TABLE</span> users <span class="k">ADD COLUMN</span> role <span class="t">TEXT</span></span>
+                  <span class="diff-check">✓</span>
+                </div>
+                <div class="diff-op diff-unsafe">
+                  <span class="diff-badge unsafe">UNSAFE</span>
+                  <span class="diff-sql"><span class="k">ALTER TABLE</span> orders <span class="k">MODIFY</span> amount <span class="t">INT</span></span>
+                  <span class="diff-check dim">—</span>
+                </div>
+                <div class="diff-op diff-breaking">
+                  <span class="diff-badge breaking">BREAK</span>
+                  <span class="diff-sql"><span class="k">DROP TABLE</span> temp_cache</span>
+                  <span class="diff-check dim">—</span>
+                </div>
+              </div>
+              <div class="diff-actions">
+                <span class="diff-btn-apply">Apply 2 safe</span>
+                <span class="diff-btn-all">Apply all</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ ENTITY EXPLORER ═══════════════════════ -->
+  <section class="section section-dark" id="entities">
+    <div class="container">
+      <div class="feature-block">
+        <div class="feature-text">
+          <div class="feature-label">Entity Explorer</div>
+          <h3>Aggregate versions<br>across tables.</h3>
+          <p>
+            Browse entity definitions, view all instances,
+            and trace version-by-version evolution across related tables.
+            Compare any two versions with cell-level change highlighting.
+          </p>
+          <ul class="feature-list">
+            <li>Entity definitions with root + related tables</li>
+            <li>Instance browser with search</li>
+            <li>Version timeline with affected tables</li>
+            <li>Version snapshot: full state at any version</li>
+            <li>Cell-level diff between consecutive versions</li>
+          </ul>
+        </div>
+        <div class="feature-code">
+          <div class="studio-mockup">
+            <div class="mockup-header">
+              <span class="mockup-dot"></span><span class="mockup-dot"></span><span class="mockup-dot"></span>
+              <span class="mockup-title">Entity Explorer — recipe_entity</span>
+            </div>
+            <div class="mockup-body">
+              <div class="entity-header">
+                <span class="entity-name">recipe_entity</span>
+                <span class="entity-tables">root: ingredients · includes: steps, quality_checks</span>
+              </div>
+              <div class="entity-timeline">
+                <div class="entity-version entity-version-active">
+                  <span class="ev-num">v7</span>
+                  <span class="ev-lsn">LSN 1,847</span>
+                  <span class="ev-tables">steps, quality_checks</span>
+                </div>
+                <div class="entity-version">
+                  <span class="ev-num">v6</span>
+                  <span class="ev-lsn">LSN 1,520</span>
+                  <span class="ev-tables">ingredients</span>
+                </div>
+                <div class="entity-version">
+                  <span class="ev-num">v5</span>
+                  <span class="ev-lsn">LSN 1,203</span>
+                  <span class="ev-tables">steps</span>
+                </div>
+                <div class="entity-version">
+                  <span class="ev-num">v4</span>
+                  <span class="ev-lsn">LSN 998</span>
+                  <span class="ev-tables">ingredients, steps</span>
+                </div>
+              </div>
+              <div class="entity-diff-hint">
+                <span>v6 → v7</span>: 1 step added, 2 quality checks updated
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ DETAIL PANEL ═══════════════════════ -->
+  <section class="section" id="detail">
+    <div class="container">
+      <div class="section-header">
+        <h2>Click any row. See everything.</h2>
+        <p class="section-sub">
+          The Detail Panel shows FK relationships, mutation history, entity versions,
+          referenced-by lookups, and temporal metadata — all in context.
+        </p>
+      </div>
+      <div class="detail-showcase">
+        <div class="detail-card">
+          <div class="detail-icon">🔑</div>
+          <h4>PK / FK Badges</h4>
+          <p>Instantly see which columns are primary keys, foreign keys, or unique constraints.</p>
+        </div>
+        <div class="detail-card">
+          <div class="detail-icon">🔗</div>
+          <h4>FK Navigation</h4>
+          <p>Click any FK value to jump to the referenced row. Follow relationships across tables and domains.</p>
+        </div>
+        <div class="detail-card">
+          <div class="detail-icon">📜</div>
+          <h4>Mutation History</h4>
+          <p>Full change log for every row: INSERT, UPDATE, DELETE with commit LSN and timestamp.</p>
+        </div>
+        <div class="detail-card">
+          <div class="detail-icon">🏷️</div>
+          <h4>Entity Versions</h4>
+          <p>See the entity version for the current row and browse its full version history.</p>
+        </div>
+        <div class="detail-card">
+          <div class="detail-icon">↩️</div>
+          <h4>Referenced By</h4>
+          <p>Reverse FK lookup: see all rows in other tables that reference this row.</p>
+        </div>
+        <div class="detail-card">
+          <div class="detail-icon">🕐</div>
+          <h4>Temporal Metadata</h4>
+          <p>Commit LSN, entity version, resolved versioned FK references — all visible per row.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ KEYBOARD SHORTCUTS ════════════════════════ -->
+  <section class="section section-dark" id="shortcuts">
+    <div class="container">
+      <div class="section-header">
+        <h2>Keyboard-first.</h2>
+        <p class="section-sub">Everything is reachable without touching the mouse.</p>
+      </div>
+      <div class="shortcuts-grid">
+        <div class="shortcut">
+          <kbd>⌘</kbd> <kbd>K</kbd>
+          <span>Command palette</span>
+        </div>
+        <div class="shortcut">
+          <kbd>⌘</kbd> <kbd>N</kbd>
+          <span>New query tab</span>
+        </div>
+        <div class="shortcut">
+          <kbd>⌘</kbd> <kbd>W</kbd>
+          <span>Close tab</span>
+        </div>
+        <div class="shortcut">
+          <kbd>⌘</kbd> <kbd>Enter</kbd>
+          <span>Run query</span>
+        </div>
+        <div class="shortcut">
+          <kbd>⌘</kbd> <kbd>1</kbd>–<kbd>8</kbd>
+          <span>Switch tabs</span>
+        </div>
+        <div class="shortcut">
+          <kbd>?</kbd>
+          <span>All shortcuts</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ GET STUDIO ═══════════════════════ -->
+  <section class="section" id="get-studio">
+    <div class="container">
+      <div class="section-header">
+        <h2>Get started with Studio</h2>
+      </div>
+      <div class="quickstart-steps">
+        <div class="qs-step">
+          <div class="qs-number" style="background:linear-gradient(135deg,#8b5cf6,#a855f7)">1</div>
+          <div class="qs-content">
+            <h4>Start the ASQL engine</h4>
+            <pre><code><span class="t-prompt">$</span> go run ./cmd/asqld -addr :5433 -data-dir .asql</code></pre>
+          </div>
+        </div>
+        <div class="qs-step">
+          <div class="qs-number" style="background:linear-gradient(135deg,#8b5cf6,#a855f7)">2</div>
+          <div class="qs-content">
+            <h4>Launch Studio</h4>
+            <pre><code><span class="t-prompt">$</span> go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql</code></pre>
+          </div>
+        </div>
+        <div class="qs-step">
+          <div class="qs-number" style="background:linear-gradient(135deg,#8b5cf6,#a855f7)">3</div>
+          <div class="qs-content">
+            <h4>Follow the Start Here checklist</h4>
+            <p class="qs-note">
+              Studio opens with a guided onboarding: connect to engine, pick a domain, build a schema, run your first query.
+              Every feature is reachable from there.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ CTA ═══════════════════════ -->
+  <section class="section section-cta section-cta-purple">
+    <div class="container">
+      <h2>Your data has a story.<br>Studio lets you see it.</h2>
+      <p>Open source. Native desktop. Connects via pgwire.</p>
+      <div class="hero-actions">
+        <a href="https://github.com/davidrjonas/asql" class="btn btn-primary btn-purple" target="_blank" rel="noopener">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          Get ASQL on GitHub
+        </a>
+        <a href="index.html" class="btn btn-ghost">Learn about the Engine →</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ FOOTER ═══════════════════════ -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <span class="logo-icon">⚡</span> ASQL
+        <span class="footer-tagline">Deterministic SQL Engine</span>
+      </div>
+      <div class="footer-links">
+        <a href="index.html">Engine</a>
+        <a href="studio.html">Studio</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/davidrjonas/asql">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Nav scroll effect
+    const nav = document.getElementById('nav');
+    window.addEventListener('scroll', () => {
+      nav.classList.toggle('scrolled', window.scrollY > 40);
+    });
+
+    // Smooth scroll
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+      a.addEventListener('click', e => {
+        const target = document.querySelector(a.getAttribute('href'));
+        if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      });
+    });
+
+    // Tab switching
+    document.querySelectorAll('.studio-tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.studio-tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.studio-tab-content').forEach(c => c.classList.remove('active'));
+        btn.classList.add('active');
+        document.getElementById('tab-' + btn.dataset.tab).classList.add('active');
+      });
+    });
+
+    // Fade-in animations
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) entry.target.classList.add('visible');
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -60px 0px' });
+
+    document.querySelectorAll('.feature-block, .detail-card, .shortcut, .qs-step, .diff-op').forEach(el => {
+      el.classList.add('fade-in');
+      observer.observe(el);
+    });
+  </script>
+</body>
+</html>

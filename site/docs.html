@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASQL — Documentation</title>
+  <meta name="description" content="ASQL documentation: getting started, core concepts, SQL reference, operations, migration guides, and architecture.">
+  <meta name="theme-color" content="#0a0e17">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ═══════════════════════════════ NAV ═══════════════════════════════ -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="index.html" class="nav-logo">
+        <span class="logo-icon">⚡</span> ASQL
+      </a>
+      <div class="nav-links">
+        <a href="index.html">Engine</a>
+        <a href="studio.html">Studio</a>
+        <a href="docs.html" class="nav-active">Docs</a>
+        <a href="https://github.com/davidrjonas/asql" class="nav-gh" target="_blank" rel="noopener">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════════════ HERO ═══════════════════════════════ -->
+  <section class="docs-hero">
+    <div class="container">
+      <h1 class="docs-hero-title">Documentation</h1>
+      <p class="docs-hero-sub">Everything you need to get started, go deep, and run in production.</p>
+      <div class="docs-quicklinks">
+        <a href="doc.html?path=getting-started/10-min.md" class="docs-quicklink">
+          <span class="docs-ql-icon">⚡</span>
+          <span class="docs-ql-text">
+            <strong>10-Minute Quickstart</strong>
+            <small>Fastest path to your first transaction</small>
+          </span>
+          <span class="docs-ql-arrow">→</span>
+        </a>
+        <a href="doc.html?path=getting-started/README.md" class="docs-quicklink">
+          <span class="docs-ql-icon">📖</span>
+          <span class="docs-ql-text">
+            <strong>Full Getting Started Guide</strong>
+            <small>Step-by-step from install to production</small>
+          </span>
+          <span class="docs-ql-arrow">→</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ GETTING STARTED ══════════════════════ -->
+  <section class="section section-dark" id="getting-started">
+    <div class="container">
+      <div class="docs-section-title">
+        <span class="docs-section-icon">🚀</span>
+        <h2>Getting Started</h2>
+      </div>
+      <p class="docs-section-desc">The recommended learning path — from zero to building real applications.</p>
+
+      <div class="docs-grid">
+        <a href="doc.html?path=getting-started/00-engine-owned-vs-app-owned.md" class="docs-card">
+          <div class="docs-card-num">00</div>
+          <div class="docs-card-body">
+            <h4>Engine vs App Responsibilities</h4>
+            <p>What ASQL owns vs what your application owns. Read this first.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/01-overview.md" class="docs-card">
+          <div class="docs-card-num">01</div>
+          <div class="docs-card-body">
+            <h4>Overview</h4>
+            <p>What ASQL is, when it fits, how it differs from typical SQL databases.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/02-install-and-run.md" class="docs-card">
+          <div class="docs-card-num">02</div>
+          <div class="docs-card-body">
+            <h4>Install and Run</h4>
+            <p>Local setup: <code>asqld</code>, pgwire shell, and Studio startup.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/03-first-database.md" class="docs-card">
+          <div class="docs-card-num">03</div>
+          <div class="docs-card-body">
+            <h4>First Database</h4>
+            <p>Create your first schema, write and read data via pgwire.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/04-domains-and-transactions.md" class="docs-card">
+          <div class="docs-card-num">04</div>
+          <div class="docs-card-body">
+            <h4>Domains & Transactions</h4>
+            <p>Core mental model: domain boundaries, single and cross-domain transactions.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/05-time-travel-and-history.md" class="docs-card">
+          <div class="docs-card-num">05</div>
+          <div class="docs-card-body">
+            <h4>Time Travel & History</h4>
+            <p><code>AS OF LSN</code>, <code>FOR HISTORY</code>, temporal helpers and debugging.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/06-entities-and-versioned-references.md" class="docs-card">
+          <div class="docs-card-num">06</div>
+          <div class="docs-card-body">
+            <h4>Entities & Versioned References</h4>
+            <p>Aggregate boundaries, <code>CREATE ENTITY</code>, versioned foreign keys.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/07-fixtures-and-seeding.md" class="docs-card">
+          <div class="docs-card-num">07</div>
+          <div class="docs-card-body">
+            <h4>Fixtures & Seeding</h4>
+            <p>Deterministic data for demos, tests, and benchmarks.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/08-studio-cli-and-daily-workflow.md" class="docs-card">
+          <div class="docs-card-num">08</div>
+          <div class="docs-card-body">
+            <h4>Studio, CLI & Workflow</h4>
+            <p>Studio for visual exploration, <code>asqlctl</code> for scripting.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/09-go-sdk-and-integration.md" class="docs-card">
+          <div class="docs-card-num">09</div>
+          <div class="docs-card-body">
+            <h4>Go SDK & Integration</h4>
+            <p>pgwire integration via <code>pgx</code> and <code>pgxpool</code>.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/10-adoption-playbook.md" class="docs-card">
+          <div class="docs-card-num">10</div>
+          <div class="docs-card-body">
+            <h4>Adoption Playbook</h4>
+            <p>Phased rollout strategy for existing applications.</p>
+          </div>
+        </a>
+        <a href="doc.html?path=getting-started/11-troubleshooting.md" class="docs-card">
+          <div class="docs-card-num">11</div>
+          <div class="docs-card-body">
+            <h4>Troubleshooting</h4>
+            <p>Common onboarding issues and fixes.</p>
+          </div>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ REFERENCE ══════════════════════════ -->
+  <section class="section" id="reference">
+    <div class="container">
+      <div class="docs-section-title">
+        <span class="docs-section-icon">📋</span>
+        <h2>Reference</h2>
+      </div>
+      <p class="docs-section-desc">Deep technical reference for engine features, compatibility, and integration patterns.</p>
+
+      <div class="docs-grid docs-grid-compact">
+        <a href="doc.html?path=reference/postgres-compatibility-surface-v1.md" class="docs-ref-card">
+          <h4>PostgreSQL Compatibility Matrix</h4>
+          <p>Supported and unsupported pgwire and SQL surface.</p>
+        </a>
+        <a href="doc.html?path=reference/sql-pgwire-compatibility-policy-v1.md" class="docs-ref-card">
+          <h4>Compatibility Policy</h4>
+          <p>The pragmatic "PostgreSQL-compatible subset" stance.</p>
+        </a>
+        <a href="doc.html?path=reference/pgwire-driver-guidance-v1.md" class="docs-ref-card">
+          <h4>pgwire Driver Guidance</h4>
+          <p>Practical client and driver recommendations.</p>
+        </a>
+        <a href="doc.html?path=reference/cookbook-go-sdk.md" class="docs-ref-card">
+          <h4>Go Cookbook</h4>
+          <p>Code recipes for common ASQL operations in Go.</p>
+        </a>
+        <a href="doc.html?path=reference/temporal-introspection-surface-v1.md" class="docs-ref-card">
+          <h4>Temporal Introspection</h4>
+          <p>Supported temporal helper functions over pgwire.</p>
+        </a>
+        <a href="doc.html?path=reference/versioned-reference-capture-semantics-v1.md" class="docs-ref-card">
+          <h4>Versioned FK Semantics</h4>
+          <p>Versioned reference capture rules and behavior.</p>
+        </a>
+        <a href="doc.html?path=reference/fixture-format-and-lifecycle-v1.md" class="docs-ref-card">
+          <h4>Fixture Format</h4>
+          <p>Fixture file contract and schema specification.</p>
+        </a>
+        <a href="doc.html?path=reference/schema-evolution-temporal-checklist-v1.md" class="docs-ref-card">
+          <h4>Schema Evolution Checklist</h4>
+          <p>Checklist for schema changes touching temporal features.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ ARCHITECTURE ══════════════════════════ -->
+  <section class="section section-dark" id="architecture">
+    <div class="container">
+      <div class="docs-two-cols">
+        <div class="docs-col">
+          <div class="docs-section-title docs-section-title-left">
+            <span class="docs-section-icon">🏗️</span>
+            <h2>Architecture</h2>
+          </div>
+          <div class="docs-grid docs-grid-compact">
+            <a href="doc.html?path=architecture/architecture-one-pager-v1.md" class="docs-ref-card">
+              <h4>Architecture One-Pager</h4>
+              <p>High-level system layout for architects and decision-makers.</p>
+            </a>
+            <a href="doc.html?path=architecture/cluster-control-plane-note-v1.md" class="docs-ref-card">
+              <h4>Cluster Control Plane</h4>
+              <p>Raft, pgwire, gRPC — the cluster runtime path.</p>
+            </a>
+            <a href="doc.html?path=adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md" class="docs-ref-card">
+              <h4>ADR-001: Temporal DX</h4>
+              <p>Developer surface improvements for versioned references.</p>
+            </a>
+            <a href="doc.html?path=adr/0002-generalist-engine-boundary-and-adoption-surface.md" class="docs-ref-card">
+              <h4>ADR-002: General-Purpose Scope</h4>
+              <p>Why ASQL stays a general-purpose engine.</p>
+            </a>
+            <a href="doc.html?path=adr/0003-studio-as-external-product-surface.md" class="docs-ref-card">
+              <h4>ADR-003: Studio Boundary</h4>
+              <p>Studio as a product sibling, not a thin wrapper.</p>
+            </a>
+          </div>
+        </div>
+        <div class="docs-col">
+          <div class="docs-section-title docs-section-title-left">
+            <span class="docs-section-icon">🔄</span>
+            <h2>Migration</h2>
+          </div>
+          <div class="docs-grid docs-grid-compact">
+            <a href="doc.html?path=migration/sqlite-quick-path.md" class="docs-ref-card">
+              <h4>SQLite Quick Migration</h4>
+              <p>Lightweight migration path from SQLite.</p>
+            </a>
+            <a href="doc.html?path=migration/sqlite-postgres-lite-guide-v1.md" class="docs-ref-card">
+              <h4>Full Migration Guide</h4>
+              <p>Phased migration from SQLite or Postgres-lite workloads.</p>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ OPERATIONS ══════════════════════════ -->
+  <section class="section" id="operations">
+    <div class="container">
+      <div class="docs-section-title">
+        <span class="docs-section-icon">⚙️</span>
+        <h2>Operations</h2>
+      </div>
+      <p class="docs-section-desc">For operators, SREs, and anyone running ASQL in production.</p>
+
+      <div class="docs-grid docs-grid-compact">
+        <a href="doc.html?path=operations/runbook.md" class="docs-ref-card">
+          <h4>Technical Runbook</h4>
+          <p>Deep operator and developer reference for all runtime paths.</p>
+        </a>
+        <a href="doc.html?path=operations/incident-runbook-v1.md" class="docs-ref-card">
+          <h4>Incident Runbook</h4>
+          <p>P0/P1/P2 incident response scenarios and procedures.</p>
+        </a>
+        <a href="doc.html?path=operations/slo-v1.md" class="docs-ref-card">
+          <h4>SLO Definitions</h4>
+          <p>Determinism, crash recovery, and replication SLOs.</p>
+        </a>
+        <a href="doc.html?path=operations/telemetry-dashboard-v1.md" class="docs-ref-card">
+          <h4>Telemetry Dashboard</h4>
+          <p>Minimum operational dashboard panels and metrics.</p>
+        </a>
+        <a href="doc.html?path=operations/security-disclosure-policy-v1.md" class="docs-ref-card">
+          <h4>Security Disclosure</h4>
+          <p>Responsible vulnerability disclosure policy.</p>
+        </a>
+        <a href="doc.html?path=operations/release-upgrade-compat-checklist-v1.md" class="docs-ref-card">
+          <h4>Release & Upgrade Checklist</h4>
+          <p>Pre-release validation gates and compatibility checks.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ CTA ═══════════════════════ -->
+  <section class="section section-cta">
+    <div class="container">
+      <h2>Can't find what you need?</h2>
+      <p>All docs live alongside the code. Open an issue or check the source.</p>
+      <div class="hero-actions">
+        <a href="https://github.com/davidrjonas/asql/tree/main/docs" class="btn btn-primary" target="_blank" rel="noopener">
+          Browse all docs on GitHub
+        </a>
+        <a href="https://github.com/davidrjonas/asql/issues" class="btn btn-ghost" target="_blank" rel="noopener">
+          Open an issue
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════ FOOTER ═══════════════════════ -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <span class="logo-icon">⚡</span> ASQL
+        <span class="footer-tagline">Deterministic SQL Engine</span>
+      </div>
+      <div class="footer-links">
+        <a href="index.html">Engine</a>
+        <a href="studio.html">Studio</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/davidrjonas/asql">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Nav scroll effect
+    const nav = document.getElementById('nav');
+    window.addEventListener('scroll', () => {
+      nav.classList.toggle('scrolled', window.scrollY > 40);
+    });
+
+    // Smooth scroll
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+      a.addEventListener('click', e => {
+        const target = document.querySelector(a.getAttribute('href'));
+        if (target) { e.preventDefault(); target.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+      });
+    });
+
+    // Fade-in animations
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) entry.target.classList.add('visible');
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -60px 0px' });
+
+    document.querySelectorAll('.docs-card, .docs-ref-card, .docs-quicklink').forEach(el => {
+      el.classList.add('fade-in');
+      observer.observe(el);
+    });
+  </script>
+</body>
+</html>

@@ -189,6 +189,46 @@ Acceptance gates (must pass before closing Epic U)
 - [x] Post-failover replay hash equals baseline hash for equivalent WAL inputs.
 - [x] Observability covers election/failover events and fencing rejections.
 
+## Epic AF — PostgreSQL compatibility audit and selective expansion (Phase 8)
+
+Reference inputs:
+- `docs/reference/sql-pgwire-compatibility-policy-v1.md`
+- `docs/reference/postgres-compatibility-surface-v1.md`
+- `docs/ai/11-technical-gap-matrix-vs-postgres.md`
+
+Execution rule:
+- Audit before build. If a capability already exists in code/tests, document and regression-cover it before planning net-new implementation work.
+- Prefer compatibility work that improves mainstream client/tool interoperability without weakening determinism or ASQL-native transaction semantics.
+
+P0 — reconcile real behavior vs documented surface:
+- [ ] Audit existing pgwire/session/catalog compatibility against code and tests, then produce a claim-by-claim inventory of what is already implemented.
+- [ ] Refresh the PostgreSQL compatibility matrix so it includes currently implemented startup/session/catalog shims that are missing or under-specified in docs.
+- [ ] Refresh the SQL compatibility matrix so it distinguishes `implemented + documented`, `implemented but undocumented`, and `not yet supported` for common app-facing query patterns.
+- [ ] Add a compatibility evidence map linking each public compatibility claim to one or more regression tests.
+
+P1 — close documentation and regression gaps first:
+- [ ] Add regression tests for already-implemented compatibility behaviors that are presently relied on implicitly but not claimed explicitly.
+- [ ] Publish a concise “mainstream Postgres client/tool flows that work today” guide for `psql`, `pgx`, and GUI tools, including required caveats.
+- [ ] Document current error/SQLSTATE behavior and identify where ASQL already matches PostgreSQL closely enough to claim compatibility.
+- [ ] Document the currently supported SQL subset already present in parser/planner/executor but not clearly surfaced in compatibility docs.
+
+P2 — targeted high-return compatibility expansion:
+- [ ] Expand synthetic catalog/introspection coverage only for additional queries proven necessary by mainstream tool startup/metadata flows.
+- [ ] Improve `ParameterDescription` / `RowDescription` / bind-format fidelity for common scalar types where mainstream drivers still degrade or fail.
+- [ ] Tighten SQLSTATE mapping for common compatibility-critical failures (syntax, missing objects, constraint violations, cancellation, transaction state).
+- [ ] Expand app-facing PostgreSQL-compatible SQL only where it materially reduces migration friction and preserves deterministic replay semantics.
+
+P3 — compatibility operating model:
+- [ ] Add a repeatable compatibility test pack grouped by client/tool (`psql`, `pgx`, JDBC/GUI baseline) and make it part of release validation.
+- [ ] Add a triage rubric for deciding whether a reported PostgreSQL-compatibility gap should be solved in docs, protocol/catalog shim, SQL surface, or explicitly rejected as out of scope.
+- [ ] Establish a rule that new PostgreSQL-compatibility claims are not public until docs, regression tests, and compatibility matrix entries land together.
+
+Acceptance gates (must pass before closing Epic AF)
+- [ ] Public compatibility docs match real behavior closely enough that “implemented but undocumented” is no longer a recurring source of surprise.
+- [ ] Each public PostgreSQL compatibility claim is backed by at least one regression test.
+- [ ] Net-new compatibility work is prioritized by observed client/tool adoption friction, not by parity for parity’s sake.
+- [ ] ASQL remains explicitly a deterministic engine with a pragmatic PostgreSQL-compatible subset, not a drop-in PostgreSQL replacement.
+
 ## Epic AD — Adoption-friction closure from PharmaApp (Phase 8)
 
 Reference inputs:

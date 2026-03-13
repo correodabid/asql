@@ -211,7 +211,12 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 		entityCollector := make(map[string]map[string][]string)
 
 		applyFailed := false
-		for _, mutation := range job.ordered {
+		for mi := range job.ordered {
+			mutation := &job.ordered[mi]
+			if materializeVolatileInsertDefaultsInPlan(newState, &mutation.plan) {
+				job.preEncoded[mi] = encodeMutationPayloadV2(mutation.domain, mutation.plan, mutation.sql)
+			}
+
 			// Invalidate FK validation cache on non-INSERT mutations
 			// (DELETEs/UPDATEs may remove parent rows).
 			if mutation.plan.Operation != planner.OperationInsert && len(batchFKValCache) > 0 {

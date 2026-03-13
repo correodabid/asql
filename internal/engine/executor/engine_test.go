@@ -4317,6 +4317,76 @@ func TestDefaultUUIDv7GeneratesUniqueStrings(t *testing.T) {
 	}
 }
 
+func TestVolatileDefaultsPersistAcrossTimeTravelReplay(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "volatile_defaults_replay.wal")
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	if _, err := engine.Execute(ctx, session, "BEGIN DOMAIN test"); err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE items (id INT PRIMARY KEY, uid TEXT DEFAULT UUID_V7, created_at TEXT DEFAULT TX_TIMESTAMP)"); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "INSERT INTO items (id) VALUES (1)"); err != nil {
+		t.Fatalf("insert 1: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "INSERT INTO items (id) VALUES (2)"); err != nil {
+		t.Fatalf("insert 2: %v", err)
+	}
+	commitResult, err := engine.Execute(ctx, session, "COMMIT")
+	if err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	state := engine.readState.Load()
+	domainState := state.domains["test"]
+	if domainState == nil {
+		t.Fatal("expected test domain in current state")
+	}
+	table := domainState.tables["items"]
+	if table == nil {
+		t.Fatal("expected items table in current state")
+	}
+	if len(table.rows) != 2 {
+		t.Fatalf("expected 2 current rows, got %d", len(table.rows))
+	}
+	currentRows := []map[string]ast.Literal{
+		rowToMap(table, table.rows[0]),
+		rowToMap(table, table.rows[1]),
+	}
+
+	replayed, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, uid, created_at FROM items ORDER BY id ASC", []string{"test"}, commitResult.CommitLSN)
+	if err != nil {
+		t.Fatalf("time travel: %v", err)
+	}
+	if len(replayed.Rows) != len(currentRows) {
+		t.Fatalf("expected %d replayed rows, got %d", len(currentRows), len(replayed.Rows))
+	}
+
+	for i := range currentRows {
+		if currentRows[i]["id"].NumberValue != replayed.Rows[i]["id"].NumberValue {
+			t.Fatalf("row %d: expected id %d, got %d", i, currentRows[i]["id"].NumberValue, replayed.Rows[i]["id"].NumberValue)
+		}
+		if currentRows[i]["uid"].StringValue != replayed.Rows[i]["uid"].StringValue {
+			t.Fatalf("row %d: replay changed uid from %q to %q", i, currentRows[i]["uid"].StringValue, replayed.Rows[i]["uid"].StringValue)
+		}
+		if currentRows[i]["created_at"].StringValue != replayed.Rows[i]["created_at"].StringValue {
+			t.Fatalf("row %d: replay changed created_at from %q to %q", i, currentRows[i]["created_at"].StringValue, replayed.Rows[i]["created_at"].StringValue)
+		}
+	}
+}
+
 // ---------- Versioned Foreign Key tests ----------
 
 func TestVersionedForeignKeyCrossDomainAutoCapture(t *testing.T) {

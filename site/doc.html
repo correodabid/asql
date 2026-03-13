@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASQL — Docs</title>
+  <meta name="theme-color" content="#0a0e17">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <!-- Syntax highlighting theme (matches dark site) -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
+</head>
+<body>
+  <!-- ═══════════════════════════════ NAV ═══════════════════════════════ -->
+  <nav class="nav scrolled" id="nav">
+    <div class="nav-inner">
+      <a href="index.html" class="nav-logo">
+        <span class="logo-icon">⚡</span> ASQL
+      </a>
+      <div class="nav-links">
+        <a href="index.html">Engine</a>
+        <a href="studio.html">Studio</a>
+        <a href="docs.html" class="nav-active">Docs</a>
+        <a href="https://github.com/davidrjonas/asql" class="nav-gh" target="_blank" rel="noopener">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════════ CONTENT ═══════════════════════════ -->
+  <div class="doc-layout">
+    <!-- Sidebar (populated by JS) -->
+    <aside class="doc-sidebar" id="docSidebar">
+      <div class="doc-sidebar-header">
+        <a href="docs.html" class="doc-sidebar-back">← All Docs</a>
+      </div>
+      <div class="doc-sidebar-nav" id="docSidebarNav">
+        <!-- Filled by JS based on section -->
+      </div>
+    </aside>
+
+    <!-- Main content -->
+    <main class="doc-main">
+      <!-- Breadcrumb -->
+      <div class="doc-breadcrumb" id="docBreadcrumb"></div>
+
+      <!-- Loading state -->
+      <div class="doc-loading" id="docLoading">
+        <div class="doc-loading-spinner"></div>
+        <p>Loading document…</p>
+      </div>
+
+      <!-- Error state -->
+      <div class="doc-error" id="docError" style="display:none">
+        <h2>Document not found</h2>
+        <p id="docErrorMsg">The requested document could not be loaded.</p>
+        <a href="docs.html" class="btn btn-primary" style="margin-top:20px">← Back to Docs</a>
+      </div>
+
+      <!-- Rendered markdown -->
+      <article class="doc-content" id="docContent" style="display:none"></article>
+
+      <!-- Doc footer -->
+      <div class="doc-footer" id="docFooter" style="display:none">
+        <a id="docGithubLink" href="#" target="_blank" rel="noopener" class="doc-edit-link">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          Edit this page on GitHub
+        </a>
+        <div class="doc-nav-links" id="docNavLinks"></div>
+      </div>
+    </main>
+
+    <!-- Table of contents -->
+    <aside class="doc-toc" id="docToc">
+      <div class="doc-toc-header">On this page</div>
+      <nav class="doc-toc-nav" id="docTocNav"></nav>
+    </aside>
+  </div>
+
+  <!-- ═══════════════════════════ FOOTER ═══════════════════════════ -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <span class="logo-icon">⚡</span> ASQL
+        <span class="footer-tagline">Deterministic SQL Engine</span>
+      </div>
+      <div class="footer-links">
+        <a href="index.html">Engine</a>
+        <a href="studio.html">Studio</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/davidrjonas/asql">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <!-- ═══════════════════════════ LIBRARIES ═══════════════════════════ -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/sql.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/go.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/bash.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/yaml.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/languages/dockerfile.min.js"></script>
+
+  <script>
+    // ─── Configuration ───────────────────────────────────────────────
+    const REPO_OWNER = 'davidrjonas';
+    const REPO_NAME = 'asql';
+    const BRANCH = 'main';
+    // For local dev: serve from project root with `python3 -m http.server` and use ../docs
+    // For production (GitHub Pages): use raw.githubusercontent.com
+    const IS_LOCAL = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    const RAW_BASE = IS_LOCAL ? '../docs' : `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/${BRANCH}/docs`;
+    const GITHUB_BASE = `https://github.com/${REPO_OWNER}/${REPO_NAME}/blob/${BRANCH}`;
+
+    // ─── Document sections for sidebar navigation ────────────────────
+    const DOC_SECTIONS = {
+      'getting-started': {
+        title: 'Getting Started',
+        docs: [
+          { path: 'getting-started/00-engine-owned-vs-app-owned.md', title: 'Engine vs App Concerns', num: '00' },
+          { path: 'getting-started/01-overview.md', title: 'Overview', num: '01' },
+          { path: 'getting-started/02-install-and-run.md', title: 'Install and Run', num: '02' },
+          { path: 'getting-started/03-first-database.md', title: 'First Database', num: '03' },
+          { path: 'getting-started/04-domains-and-transactions.md', title: 'Domains & Transactions', num: '04' },
+          { path: 'getting-started/04a-domain-modeling-guide.md', title: 'Domain Modeling Guide', num: '04a' },
+          { path: 'getting-started/05-time-travel-and-history.md', title: 'Time Travel & History', num: '05' },
+          { path: 'getting-started/06-entities-and-versioned-references.md', title: 'Entities & Versioned Refs', num: '06' },
+          { path: 'getting-started/07-fixtures-and-seeding.md', title: 'Fixtures & Seeding', num: '07' },
+          { path: 'getting-started/08-studio-cli-and-daily-workflow.md', title: 'Studio, CLI & Workflow', num: '08' },
+          { path: 'getting-started/09-go-sdk-and-integration.md', title: 'Go SDK & Integration', num: '09' },
+          { path: 'getting-started/09a-general-purpose-starter-pack.md', title: 'General-Purpose Starter', num: '09a' },
+          { path: 'getting-started/10-adoption-playbook.md', title: 'Adoption Playbook', num: '10' },
+          { path: 'getting-started/11-troubleshooting.md', title: 'Troubleshooting', num: '11' },
+        ]
+      },
+      'reference': {
+        title: 'Reference',
+        docs: [
+          { path: 'reference/postgres-compatibility-surface-v1.md', title: 'PostgreSQL Compatibility' },
+          { path: 'reference/sql-pgwire-compatibility-policy-v1.md', title: 'Compatibility Policy' },
+          { path: 'reference/pgwire-driver-guidance-v1.md', title: 'pgwire Driver Guidance' },
+          { path: 'reference/cookbook-go-sdk.md', title: 'Go Cookbook' },
+          { path: 'reference/temporal-introspection-surface-v1.md', title: 'Temporal Introspection' },
+          { path: 'reference/versioned-reference-capture-semantics-v1.md', title: 'Versioned FK Semantics' },
+          { path: 'reference/fixture-format-and-lifecycle-v1.md', title: 'Fixture Format' },
+          { path: 'reference/schema-evolution-temporal-checklist-v1.md', title: 'Schema Evolution Checklist' },
+        ]
+      },
+      'architecture': {
+        title: 'Architecture',
+        docs: [
+          { path: 'architecture/architecture-one-pager-v1.md', title: 'Architecture One-Pager' },
+          { path: 'architecture/cluster-control-plane-note-v1.md', title: 'Cluster Control Plane' },
+        ]
+      },
+      'adr': {
+        title: 'ADRs',
+        docs: [
+          { path: 'adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md', title: 'ADR-001: Temporal DX' },
+          { path: 'adr/0002-generalist-engine-boundary-and-adoption-surface.md', title: 'ADR-002: General-Purpose Scope' },
+          { path: 'adr/0003-studio-as-external-product-surface.md', title: 'ADR-003: Studio Boundary' },
+        ]
+      },
+      'operations': {
+        title: 'Operations',
+        docs: [
+          { path: 'operations/runbook.md', title: 'Technical Runbook' },
+          { path: 'operations/incident-runbook-v1.md', title: 'Incident Runbook' },
+          { path: 'operations/slo-v1.md', title: 'SLO Definitions' },
+          { path: 'operations/telemetry-dashboard-v1.md', title: 'Telemetry Dashboard' },
+          { path: 'operations/security-disclosure-policy-v1.md', title: 'Security Disclosure' },
+          { path: 'operations/release-upgrade-compat-checklist-v1.md', title: 'Release & Upgrade' },
+        ]
+      },
+      'migration': {
+        title: 'Migration',
+        docs: [
+          { path: 'migration/sqlite-quick-path.md', title: 'SQLite Quick Migration' },
+          { path: 'migration/sqlite-postgres-lite-guide-v1.md', title: 'Full Migration Guide' },
+        ]
+      },
+    };
+
+    // ─── Markdown renderer configuration ─────────────────────────────
+    const renderer = new marked.Renderer();
+
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function getRendererToken(value) {
+      return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+    }
+
+    function parseInline(rendererInstance, tokens, fallback) {
+      if (Array.isArray(tokens) && rendererInstance?.parser?.parseInline) {
+        return rendererInstance.parser.parseInline(tokens);
+      }
+      return fallback || '';
+    }
+
+    // Custom heading renderer — add IDs for TOC linking
+    renderer.heading = function(tokenOrText, depthArg, rawArg) {
+      const token = getRendererToken(tokenOrText);
+      const depth = token?.depth ?? depthArg ?? 1;
+      const fallbackText = typeof tokenOrText === 'string' ? tokenOrText : (token?.text || '');
+      const text = parseInline(this, token?.tokens, fallbackText);
+      const raw = token?.raw
+        || (Array.isArray(token?.tokens) ? token.tokens.map(t => t.raw || t.text || '').join('') : '')
+        || rawArg
+        || fallbackText;
+      const id = raw.toLowerCase().replace(/[^\w\s-]/g, '').replace(/\s+/g, '-').replace(/-+/g, '-').trim();
+      return `<h${depth} id="${id}">${text}</h${depth}>`;
+    };
+
+    // Custom link renderer — fix relative links to other docs
+    renderer.link = function(tokenOrHref, titleArg, textArg) {
+      const token = getRendererToken(tokenOrHref);
+      const href = token?.href ?? tokenOrHref ?? '';
+      const title = token?.title ?? titleArg;
+      const fallbackText = typeof textArg === 'string' ? textArg : (token?.text || href);
+      const text = parseInline(this, token?.tokens, fallbackText);
+      const titleAttr = title ? ` title="${title}"` : '';
+
+      // Relative .md links → viewer
+      if (href && !href.startsWith('http') && !href.startsWith('#') && href.endsWith('.md')) {
+        const currentPath = getDocPath();
+        const currentDir = currentPath.substring(0, currentPath.lastIndexOf('/'));
+        let resolved = href;
+        if (href.startsWith('../')) {
+          // Resolve parent-relative paths
+          const parts = currentDir.split('/');
+          let rel = href;
+          while (rel.startsWith('../')) {
+            parts.pop();
+            rel = rel.substring(3);
+          }
+          resolved = parts.length > 0 ? parts.join('/') + '/' + rel : rel;
+        } else if (!href.includes('/')) {
+          resolved = currentDir + '/' + href;
+        }
+        return `<a href="doc.html?path=${encodeURIComponent(resolved)}"${titleAttr}>${text}</a>`;
+      }
+
+      // Absolute external link
+      const external = href && href.startsWith('http') ? ' target="_blank" rel="noopener"' : '';
+      return `<a href="${href}"${titleAttr}${external}>${text}</a>`;
+    };
+
+    // Custom code block renderer — use highlight.js
+    renderer.code = function(tokenOrText, langArg) {
+      const token = getRendererToken(tokenOrText);
+      const text = token?.text ?? tokenOrText ?? '';
+      const lang = token?.lang ?? langArg;
+      const language = lang && hljs.getLanguage(lang) ? lang : 'plaintext';
+      let highlighted;
+      try {
+        highlighted = hljs.highlight(text, { language }).value;
+      } catch (err) {
+        console.warn('Failed to highlight code block, falling back to escaped text.', err);
+        highlighted = escapeHtml(text);
+      }
+      return `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${lang || ''}</span><button class="md-code-copy" onclick="copyCode(this)" title="Copy">📋</button></div><pre><code class="hljs language-${language}">${highlighted}</code></pre></div>`;
+    };
+
+    marked.setOptions({
+      renderer,
+      gfm: true,
+      breaks: false,
+    });
+
+    // ─── Helper: get path from URL ───────────────────────────────────
+    function getDocPath() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('path') || '';
+    }
+
+    // ─── Helper: identify section from path ──────────────────────────
+    function getSection(path) {
+      for (const [key, section] of Object.entries(DOC_SECTIONS)) {
+        if (path.startsWith(key + '/') || section.docs.some(d => d.path === path)) {
+          return { key, ...section };
+        }
+      }
+      return null;
+    }
+
+    // ─── Helper: copy code ───────────────────────────────────────────
+    function copyCode(btn) {
+      const code = btn.closest('.md-code-block').querySelector('code').textContent;
+      navigator.clipboard.writeText(code).then(() => {
+        btn.textContent = '✓';
+        setTimeout(() => { btn.textContent = '📋'; }, 1500);
+      });
+    }
+
+    // ─── Build breadcrumb ────────────────────────────────────────────
+    function buildBreadcrumb(path) {
+      const parts = path.replace('.md', '').split('/');
+      const bc = document.getElementById('docBreadcrumb');
+      let html = '<a href="docs.html">Docs</a>';
+      const section = getSection(path);
+      if (section) {
+        html += ` <span class="bc-sep">›</span> <a href="docs.html#${section.key}">${section.title}</a>`;
+      }
+      // Current doc title — extract from the first heading later
+      html += ` <span class="bc-sep">›</span> <span class="bc-current" id="bcCurrent">${parts[parts.length - 1]}</span>`;
+      bc.innerHTML = html;
+    }
+
+    // ─── Build sidebar ───────────────────────────────────────────────
+    function buildSidebar(path) {
+      const section = getSection(path);
+      const nav = document.getElementById('docSidebarNav');
+      if (!section) {
+        nav.innerHTML = '';
+        return;
+      }
+
+      let html = `<div class="doc-sidebar-title">${section.title}</div>`;
+      section.docs.forEach(doc => {
+        const isActive = doc.path === path;
+        const num = doc.num ? `<span class="doc-nav-num">${doc.num}</span>` : '';
+        html += `<a href="doc.html?path=${encodeURIComponent(doc.path)}" class="doc-nav-item${isActive ? ' active' : ''}">${num}${doc.title}</a>`;
+      });
+      nav.innerHTML = html;
+    }
+
+    // ─── Build table of contents ─────────────────────────────────────
+    function buildToc() {
+      const content = document.getElementById('docContent');
+      const tocNav = document.getElementById('docTocNav');
+      const headings = content.querySelectorAll('h2, h3');
+      if (headings.length === 0) {
+        document.getElementById('docToc').style.display = 'none';
+        return;
+      }
+
+      let html = '';
+      headings.forEach(h => {
+        const level = h.tagName === 'H3' ? 'toc-l3' : 'toc-l2';
+        html += `<a href="#${h.id}" class="toc-item ${level}">${h.textContent}</a>`;
+      });
+      tocNav.innerHTML = html;
+
+      // Highlight active TOC item on scroll
+      const observer = new IntersectionObserver((entries) => {
+        entries.forEach(entry => {
+          if (entry.isIntersecting) {
+            document.querySelectorAll('.toc-item').forEach(a => a.classList.remove('toc-active'));
+            const link = tocNav.querySelector(`a[href="#${entry.target.id}"]`);
+            if (link) link.classList.add('toc-active');
+          }
+        });
+      }, { rootMargin: '-80px 0px -70% 0px', threshold: 0 });
+
+      headings.forEach(h => observer.observe(h));
+    }
+
+    // ─── Build prev/next navigation ──────────────────────────────────
+    function buildNavLinks(path) {
+      const section = getSection(path);
+      if (!section) return;
+
+      const idx = section.docs.findIndex(d => d.path === path);
+      if (idx === -1) return;
+
+      const container = document.getElementById('docNavLinks');
+      let html = '';
+
+      if (idx > 0) {
+        const prev = section.docs[idx - 1];
+        html += `<a href="doc.html?path=${encodeURIComponent(prev.path)}" class="doc-nav-prev">
+          <span class="doc-nav-dir">← Previous</span>
+          <span class="doc-nav-title">${prev.title}</span>
+        </a>`;
+      } else {
+        html += '<div></div>';
+      }
+
+      if (idx < section.docs.length - 1) {
+        const next = section.docs[idx + 1];
+        html += `<a href="doc.html?path=${encodeURIComponent(next.path)}" class="doc-nav-next">
+          <span class="doc-nav-dir">Next →</span>
+          <span class="doc-nav-title">${next.title}</span>
+        </a>`;
+      }
+
+      container.innerHTML = html;
+    }
+
+    // ─── Update page title from first heading ────────────────────────
+    function updateTitle() {
+      const h1 = document.querySelector('.doc-content h1');
+      if (h1) {
+        document.title = `${h1.textContent} — ASQL Docs`;
+        const bc = document.getElementById('bcCurrent');
+        if (bc) bc.textContent = h1.textContent;
+      }
+    }
+
+    // ─── Enhance tables ──────────────────────────────────────────────
+    function enhanceTables() {
+      document.querySelectorAll('.doc-content table').forEach(table => {
+        if (!table.parentElement.classList.contains('md-table-wrap')) {
+          const wrapper = document.createElement('div');
+          wrapper.className = 'md-table-wrap';
+          table.parentNode.insertBefore(wrapper, table);
+          wrapper.appendChild(table);
+        }
+      });
+    }
+
+    // ─── Main: fetch and render ──────────────────────────────────────
+    function showFetchError(path, err) {
+      document.getElementById('docLoading').style.display = 'none';
+      document.getElementById('docError').style.display = 'block';
+      document.getElementById('docErrorMsg').textContent =
+        `Could not load: docs/${path}. Make sure the file exists in the repository.`;
+      console.error('Failed to load doc:', err);
+    }
+
+    function showRenderError(path, markdown, err) {
+      const content = document.getElementById('docContent');
+      content.innerHTML = `
+        <div class="doc-error" style="display:block; margin-bottom: 24px;">
+          <h2>Document rendering error</h2>
+          <p>The markdown file loaded, but the page failed while rendering it. Showing raw markdown below.</p>
+        </div>
+        <div class="md-code-block">
+          <div class="md-code-header"><span class="md-code-lang">markdown</span></div>
+          <pre><code class="hljs language-markdown">${escapeHtml(markdown)}</code></pre>
+        </div>`;
+
+      document.getElementById('docLoading').style.display = 'none';
+      document.getElementById('docError').style.display = 'none';
+      content.style.display = 'block';
+      document.getElementById('docFooter').style.display = 'block';
+      document.getElementById('docToc').style.display = 'none';
+      console.error(`Failed to render doc: docs/${path}`, err);
+    }
+
+    async function loadDocument() {
+      const path = getDocPath();
+      if (!path) {
+        window.location.href = 'docs.html';
+        return;
+      }
+
+      const fullDocsPath = `docs/${path}`;
+      const rawUrl = `${RAW_BASE}/${path}`;
+      const githubUrl = `${GITHUB_BASE}/${fullDocsPath}`;
+
+      // Set GitHub edit link
+      document.getElementById('docGithubLink').href = githubUrl;
+
+      // Build UI
+      buildBreadcrumb(path);
+      buildSidebar(path);
+
+      let markdown;
+      try {
+        const response = await fetch(rawUrl);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        markdown = await response.text();
+      } catch (err) {
+        showFetchError(path, err);
+        return;
+      }
+
+      try {
+        // Render
+        const html = marked.parse(markdown);
+        const content = document.getElementById('docContent');
+        content.innerHTML = html;
+
+        // Show content, hide loading
+        document.getElementById('docLoading').style.display = 'none';
+        content.style.display = 'block';
+        document.getElementById('docFooter').style.display = 'block';
+
+        // Post-render enhancements
+        updateTitle();
+        buildToc();
+        buildNavLinks(path);
+        enhanceTables();
+
+        // Scroll to hash if present
+        if (window.location.hash) {
+          const target = document.querySelector(window.location.hash);
+          if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      } catch (err) {
+        showRenderError(path, markdown, err);
+      }
+    }
+
+    // ─── Init ────────────────────────────────────────────────────────
+    loadDocument();
+
+    // Smooth scroll for TOC links
+    document.addEventListener('click', (e) => {
+      const link = e.target.closest('a[href^="#"]');
+      if (link) {
+        const target = document.querySelector(link.getAttribute('href'));
+        if (target) {
+          e.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          history.replaceState(null, '', link.getAttribute('href'));
+        }
+      }
+    });
+
+    // Mobile sidebar toggle
+    document.getElementById('docSidebar').addEventListener('click', (e) => {
+      if (e.target.closest('.doc-sidebar-header')) {
+        document.getElementById('docSidebar').classList.toggle('open');
+      }
+    });
+  </script>
+</body>
+</html>

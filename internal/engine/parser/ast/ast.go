@@ -57,6 +57,7 @@ const (
 	DefaultLiteral       DefaultKind = "literal"
 	DefaultAutoIncrement DefaultKind = "autoincrement"
 	DefaultUUIDv7        DefaultKind = "uuid_v7"
+	DefaultTxTimestamp   DefaultKind = "tx_timestamp"
 )
 
 type DefaultExpr struct {

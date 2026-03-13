@@ -137,6 +137,7 @@ const (
 	defaultKindLiteral       byte = 0x01
 	defaultKindAutoIncrement byte = 0x02
 	defaultKindUUIDv7        byte = 0x03
+	defaultKindTxTimestamp   byte = 0x04
 )
 
 // literal kind bytes
@@ -778,6 +779,8 @@ func encodeDefaultExpr(w *v2Buf, d *ast.DefaultExpr) {
 		w.writeByte(defaultKindAutoIncrement)
 	case ast.DefaultUUIDv7:
 		w.writeByte(defaultKindUUIDv7)
+	case ast.DefaultTxTimestamp:
+		w.writeByte(defaultKindTxTimestamp)
 	default:
 		w.writeByte(defaultKindLiteral)
 		encodeLit(w, ast.Literal{Kind: ast.LiteralNull})
@@ -1411,6 +1414,8 @@ func decodeDefaultExpr(r *v2Reader) (*ast.DefaultExpr, error) {
 		return &ast.DefaultExpr{Kind: ast.DefaultAutoIncrement}, nil
 	case defaultKindUUIDv7:
 		return &ast.DefaultExpr{Kind: ast.DefaultUUIDv7}, nil
+	case defaultKindTxTimestamp:
+		return &ast.DefaultExpr{Kind: ast.DefaultTxTimestamp}, nil
 	default:
 		return nil, fmt.Errorf("payloadv2: unknown default kind 0x%02x", kind)
 	}

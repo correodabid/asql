@@ -1,0 +1,780 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ASQL — Deterministic SQL Engine</title>
+  <meta name="description" content="A deterministic SQL engine with replay, time-travel queries, domain isolation, and optional clustering. Built in Go.">
+  <meta name="theme-color" content="#0a0e17">
+  <meta property="og:title" content="ASQL — Deterministic SQL Engine">
+  <meta property="og:description" content="Replay any state. Query any point in time. From single node to cluster.">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- ═══════════════════════════════ NAV ═══════════════════════════════ -->
+  <nav class="nav" id="nav">
+    <div class="nav-inner">
+      <a href="index.html" class="nav-logo">
+        <span class="logo-icon">⚡</span> ASQL
+      </a>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="studio.html">Studio</a>
+        <a href="docs.html">Docs</a>
+        <a href="#performance">Performance</a>
+        <a href="https://github.com/davidrjonas/asql" class="nav-gh" target="_blank" rel="noopener">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ═══════════════════════════════ HERO ═══════════════════════════════ -->
+  <section class="hero">
+    <div class="hero-glow"></div>
+    <div class="container">
+      <div class="hero-badge">Open Source · Written in Go · pgwire Compatible</div>
+      <h1 class="hero-title">
+        The SQL engine that<br>
+        <span class="hero-gradient">remembers everything.</span>
+      </h1>
+      <p class="hero-sub">
+        Deterministic replay. Time-travel queries. Domain isolation.<br>
+        From a single binary to a replicated cluster — no tradeoffs.
+      </p>
+      <div class="hero-actions">
+        <a href="#quickstart" class="btn btn-primary">Get Started</a>
+        <a href="https://github.com/davidrjonas/asql" class="btn btn-ghost" target="_blank" rel="noopener">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          View on GitHub
+        </a>
+      </div>
+      <div class="hero-terminal">
+        <div class="terminal-bar">
+          <span class="terminal-dot red"></span>
+          <span class="terminal-dot yellow"></span>
+          <span class="terminal-dot green"></span>
+          <span class="terminal-title">terminal</span>
+        </div>
+        <pre class="terminal-body"><code><span class="t-comment"># Start ASQL — one binary, zero dependencies</span>
+<span class="t-prompt">$</span> go run ./cmd/asqld -addr :5433 -data-dir .asql
+
+<span class="t-comment"># Connect with any pgwire client</span>
+<span class="t-prompt">$</span> psql -h localhost -p 5433 -d asql</code></pre>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ VALUE PROPS ═══════════════════════════ -->
+  <section class="section section-dark" id="why">
+    <div class="container">
+      <div class="section-header">
+        <h2>Why another database?</h2>
+        <p class="section-sub">Because "good enough" state management costs you every incident, every audit, every debug session.</p>
+      </div>
+      <div class="value-grid">
+        <div class="value-card">
+          <div class="value-icon">🔄</div>
+          <h3>Reproduce any bug exactly</h3>
+          <p>Same WAL input, same state output. Always. Replay production issues deterministically instead of guessing.</p>
+        </div>
+        <div class="value-card">
+          <div class="value-icon">⏳</div>
+          <h3>Query any point in time</h3>
+          <p>Read data as it existed at any commit. No CDC pipelines, no event sourcing boilerplate. Just <code>SELECT * FROM users AS OF LSN 42</code>.</p>
+        </div>
+        <div class="value-card">
+          <div class="value-icon">🔒</div>
+          <h3>Isolate data boundaries</h3>
+          <p>Domains give you schema-level multi-tenancy with explicit cross-domain transactions. No accidental data leaks.</p>
+        </div>
+        <div class="value-card">
+          <div class="value-icon">📦</div>
+          <h3>Single binary, zero config</h3>
+          <p>Go binary. Append-only WAL. Automatic snapshots. Run embedded or as a server. No JVM, no sidecar, no runtime dependencies.</p>
+        </div>
+        <div class="value-card">
+          <div class="value-icon">🔌</div>
+          <h3>Use your existing tools</h3>
+          <p>pgwire protocol means pgx, psql, JDBC, DBeaver, DataGrip — they just work. No proprietary driver lock-in.</p>
+        </div>
+        <div class="value-card">
+          <div class="value-icon">📈</div>
+          <h3>Scale when you need it</h3>
+          <p>Start local. Add replication. Form a Raft cluster. Same API, same semantics, no migration.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ FEATURES ═══════════════════════════ -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="section-header">
+        <h2>Core Features</h2>
+        <p class="section-sub">Everything you need from a modern database, plus the things others can't give you.</p>
+      </div>
+
+      <!-- Feature: Time Travel -->
+      <div class="feature-block">
+        <div class="feature-text">
+          <div class="feature-label">Time-Travel Queries</div>
+          <h3>Read any historical state.<br>No extra infrastructure.</h3>
+          <p>
+            Every commit gets a monotonic LSN. Query past state with <code>AS OF LSN</code>,
+            inspect row-level change history with <code>FOR HISTORY</code>,
+            and trace entity evolution through versioned references.
+          </p>
+          <ul class="feature-list">
+            <li>Point-in-time reads by LSN or timestamp</li>
+            <li>Row-level change audit trail</li>
+            <li>Entity version history across related tables</li>
+            <li>No CDC, no event store, no external system</li>
+          </ul>
+        </div>
+        <div class="feature-code">
+          <div class="code-window">
+            <div class="code-bar">
+              <span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>
+              <span class="code-lang">SQL</span>
+            </div>
+            <pre><code><span class="k">SELECT</span> * <span class="k">FROM</span> users <span class="k">AS OF LSN</span> <span class="n">42</span>;
+
+<span class="c">-- What changed and when?</span>
+<span class="k">SELECT</span> * <span class="k">FROM</span> invoices <span class="k">FOR HISTORY</span>;
+<span class="c">-- → __operation | __commit_lsn | row data</span>
+
+<span class="c">-- Current system position</span>
+<span class="k">SELECT</span> <span class="f">current_lsn</span>();
+
+<span class="c">-- Entity version at a specific point</span>
+<span class="k">SELECT</span> <span class="f">entity_version</span>(
+  <span class="s">'recipes'</span>, <span class="s">'recipe_aggregate'</span>, <span class="s">'recipe-1'</span>
+);</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature: Domain Isolation -->
+      <div class="feature-block feature-reverse">
+        <div class="feature-text">
+          <div class="feature-label">Domain Isolation</div>
+          <h3>Explicit boundaries.<br>No accidental coupling.</h3>
+          <p>
+            Every transaction declares its scope. Domains are isolated data boundaries
+            with independent schemas, constraints, and indexes. Cross-domain work
+            is explicit and atomic.
+          </p>
+          <ul class="feature-list">
+            <li>Schema-level isolation per domain</li>
+            <li>Implicit domain creation on first use</li>
+            <li>Cross-domain atomic transactions</li>
+            <li>Cross-domain reads via IMPORT</li>
+          </ul>
+        </div>
+        <div class="feature-code">
+          <div class="code-window">
+            <div class="code-bar">
+              <span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>
+              <span class="code-lang">SQL</span>
+            </div>
+            <pre><code><span class="c">-- Each domain: own schema, own rules</span>
+<span class="k">BEGIN DOMAIN</span> billing;
+<span class="k">CREATE TABLE</span> invoices (
+  id <span class="t">INT</span> <span class="k">PRIMARY KEY</span>,
+  amount <span class="t">FLOAT</span>,
+  status <span class="t">TEXT</span>
+);
+<span class="k">COMMIT</span>;
+
+<span class="c">-- Atomic cross-domain work</span>
+<span class="k">BEGIN CROSS DOMAIN</span> billing, inventory;
+<span class="k">INSERT INTO</span> invoices <span class="k">VALUES</span> (<span class="n">2</span>, <span class="n">100.0</span>, <span class="s">'paid'</span>);
+<span class="k">UPDATE</span> stock <span class="k">SET</span> qty = qty - <span class="n">1</span> <span class="k">WHERE</span> pid = <span class="n">42</span>;
+<span class="k">COMMIT</span>;</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature: Deterministic Replay -->
+      <div class="feature-block">
+        <div class="feature-text">
+          <div class="feature-label">Deterministic Replay</div>
+          <h3>Same input.<br>Same output. Always.</h3>
+          <p>
+            The WAL is the source of truth. Materialized state is derived.
+            Replay the same log and you get bit-for-bit identical results —
+            no wall-clock dependencies, no hidden nondeterminism.
+          </p>
+          <ul class="feature-list">
+            <li>Append-only WAL as canonical truth</li>
+            <li>Automatic snapshots every 500 mutations</li>
+            <li>Crash recovery: snapshot + WAL tail replay</li>
+            <li>Injectable time and entropy for full determinism</li>
+          </ul>
+        </div>
+        <div class="feature-code">
+          <div class="code-window">
+            <div class="code-bar">
+              <span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>
+              <span class="code-lang">Architecture</span>
+            </div>
+            <pre><code><span class="c">  [Mutation]</span>
+      │
+      ▼
+<span class="k">  [WAL Append]</span> ─────── source of truth
+      │
+      ▼
+<span class="c">  [Apply to State]</span> ── derived, rebuildable
+      │
+      ├── periodic ──▶ <span class="k">[Snapshot]</span>
+      │
+      ▼
+<span class="c">  [Recovery]</span>
+      │
+      └── <span class="k">Snapshot</span> + <span class="k">WAL tail</span> ──▶ identical state</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature: Entity Versioning -->
+      <div class="feature-block feature-reverse">
+        <div class="feature-text">
+          <div class="feature-label">Entity Versioning</div>
+          <h3>Track aggregate versions<br>across tables.</h3>
+          <p>
+            Define entities that span multiple tables. When any table in
+            an entity changes, its version increments automatically. Foreign keys
+            can capture the exact version at insert time.
+          </p>
+          <ul class="feature-list">
+            <li>Automatic entity version tracking</li>
+            <li>Versioned foreign keys with auto-capture</li>
+            <li>JOINs resolve to captured version automatically</li>
+            <li>Full version history per entity</li>
+          </ul>
+        </div>
+        <div class="feature-code">
+          <div class="code-window">
+            <div class="code-bar">
+              <span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>
+              <span class="code-lang">SQL</span>
+            </div>
+            <pre><code><span class="c">-- Entity spans multiple tables</span>
+<span class="k">CREATE ENTITY</span> recipe (
+  <span class="k">ROOT</span> ingredients,
+  <span class="k">INCLUDES</span> steps, quality_checks
+);
+
+<span class="c">-- Versioned FK captures exact version</span>
+<span class="k">CREATE TABLE</span> process_orders (
+  id <span class="t">TEXT</span> <span class="k">PRIMARY KEY</span> <span class="k">DEFAULT</span> <span class="f">UUID_V7</span>(),
+  recipe_id <span class="t">TEXT</span> <span class="k">REFERENCES VERSIONED</span>
+    master.ingredients(id)
+    <span class="k">AS OF</span> recipe_version,
+  recipe_version <span class="t">INT</span>
+);</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ HOW IT WORKS ═════════════════════════ -->
+  <section class="section section-dark" id="how-it-works">
+    <div class="container">
+      <div class="section-header">
+        <h2>How It Works</h2>
+        <p class="section-sub">Hexagonal architecture. Clean boundaries. No magic.</p>
+      </div>
+      <div class="arch-diagram">
+        <div class="arch-layer arch-client">
+          <div class="arch-label">Clients</div>
+          <div class="arch-items">
+            <span>pgx</span><span>psql</span><span>JDBC</span><span>DBeaver</span><span>Studio</span>
+          </div>
+        </div>
+        <div class="arch-arrow">▼</div>
+        <div class="arch-layer arch-transport">
+          <div class="arch-label">Transport</div>
+          <div class="arch-items">
+            <span class="arch-primary">pgwire <small>(primary)</small></span>
+            <span>gRPC <small>(admin)</small></span>
+          </div>
+        </div>
+        <div class="arch-arrow">▼</div>
+        <div class="arch-layer arch-engine">
+          <div class="arch-label">Engine</div>
+          <div class="arch-items">
+            <span>Parser</span>
+            <span>→</span>
+            <span>Planner</span>
+            <span>→</span>
+            <span>Executor</span>
+            <span>→</span>
+            <span>TX Manager</span>
+          </div>
+        </div>
+        <div class="arch-arrow">▼</div>
+        <div class="arch-layer arch-storage">
+          <div class="arch-label">Storage</div>
+          <div class="arch-items">
+            <span>Append-only WAL</span>
+            <span>BTree / Hash Indexes</span>
+            <span>Binary Snapshots</span>
+          </div>
+        </div>
+        <div class="arch-arrow-opt">
+          <span>▼ optional</span>
+        </div>
+        <div class="arch-layer arch-cluster">
+          <div class="arch-label">Cluster</div>
+          <div class="arch-items">
+            <span>Raft Consensus</span>
+            <span>WAL Streaming</span>
+            <span>Read Routing</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ PERFORMANCE ══════════════════════════ -->
+  <section class="section" id="performance">
+    <div class="container">
+      <div class="section-header">
+        <h2>Performance</h2>
+        <p class="section-sub">Real numbers. Reproducible benchmarks. No asterisks.</p>
+      </div>
+
+      <div class="bench-grid">
+        <div class="bench-card bench-hero-card">
+          <div class="bench-number">587</div>
+          <div class="bench-unit">tx/sec</div>
+          <div class="bench-desc">Sustained cluster writes<br><small>3-node quorum · wide transactions · 4 workers</small></div>
+        </div>
+        <div class="bench-card bench-hero-card">
+          <div class="bench-number">18,201</div>
+          <div class="bench-unit">rows/sec</div>
+          <div class="bench-desc">Cluster row throughput<br><small>wide-tx scenario · replicated + fsync'd</small></div>
+        </div>
+        <div class="bench-card bench-hero-card">
+          <div class="bench-number">6ms</div>
+          <div class="bench-unit">P50 latency</div>
+          <div class="bench-desc">Cluster write latency<br><small>quorum commit · wide-tx scenario</small></div>
+        </div>
+      </div>
+
+      <div class="bench-table-wrap">
+        <h3>Cluster Scenario Matrix</h3>
+        <table class="bench-table">
+          <thead>
+            <tr>
+              <th>Scenario</th>
+              <th>tx/sec</th>
+              <th>rows/sec</th>
+              <th>P50</th>
+              <th>P95</th>
+              <th>P99</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>baseline</code></td>
+              <td>722</td>
+              <td>6,496</td>
+              <td>5ms</td>
+              <td>10ms</td>
+              <td>13ms</td>
+            </tr>
+            <tr>
+              <td><code>wide-tx</code></td>
+              <td>587</td>
+              <td>18,201</td>
+              <td>6ms</td>
+              <td>10ms</td>
+              <td>15ms</td>
+            </tr>
+            <tr>
+              <td><code>no-indexes</code></td>
+              <td>941</td>
+              <td>8,469</td>
+              <td>4ms</td>
+              <td>8ms</td>
+              <td>10ms</td>
+            </tr>
+            <tr>
+              <td><code>high-workers</code></td>
+              <td>917</td>
+              <td>8,252</td>
+              <td>8ms</td>
+              <td>16ms</td>
+              <td>22ms</td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="bench-note">
+          Apple M1 · 3-node local cluster · WAL fsync enabled · deterministic workload.
+          Run <code>make bench-seed-cluster</code> to reproduce.
+        </p>
+      </div>
+
+      <div class="bench-table-wrap">
+        <h3>Engine Microbenchmarks</h3>
+        <table class="bench-table">
+          <thead>
+            <tr>
+              <th>Operation</th>
+              <th>Latency</th>
+              <th>Throughput</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Write + Commit</td>
+              <td>69 μs</td>
+              <td>~14,400 ops/sec</td>
+            </tr>
+            <tr>
+              <td>WAL Append</td>
+              <td>24 μs</td>
+              <td>~40,700 appends/sec</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ DEPLOY ══════════════════════════ -->
+  <section class="section section-dark" id="deploy">
+    <div class="container">
+      <div class="section-header">
+        <h2>Start simple. Scale when ready.</h2>
+        <p class="section-sub">Same engine, same API. Choose your deployment model.</p>
+      </div>
+      <div class="deploy-grid">
+        <div class="deploy-card">
+          <div class="deploy-step">1</div>
+          <h3>Local / Embedded</h3>
+          <p>Single binary. Zero config. Perfect for development, testing, edge, and small workloads.</p>
+          <div class="deploy-code">
+            <pre><code>go run ./cmd/asqld \
+  -addr :5433 \
+  -data-dir .asql</code></pre>
+          </div>
+        </div>
+        <div class="deploy-card">
+          <div class="deploy-step">2</div>
+          <h3>Server (pgwire)</h3>
+          <p>Run as a standalone server. Connect with any PostgreSQL-compatible client or driver.</p>
+          <div class="deploy-code">
+            <pre><code>conn, _ := pgx.Connect(ctx,
+  "postgres://localhost:5433/asql")
+
+conn.Exec(ctx, "BEGIN DOMAIN app")
+conn.Exec(ctx, "SELECT * FROM users")
+conn.Exec(ctx, "COMMIT")</code></pre>
+          </div>
+        </div>
+        <div class="deploy-card deploy-card-cluster">
+          <div class="deploy-step">3</div>
+          <h3>Cluster (Raft)</h3>
+          <p>Add nodes for replication and high availability. WAL streaming, read routing, automatic catch-up.</p>
+          <div class="deploy-code">
+            <pre><code>go run ./cmd/asqld \
+  -addr :5433 -data-dir .node-a \
+  -node-id node-a -grpc-addr :6433 \
+  -peers node-b@:6434,node-c@:6435 \
+  -groups default</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ QUICKSTART ══════════════════════════ -->
+  <section class="section" id="quickstart">
+    <div class="container">
+      <div class="section-header">
+        <h2>Up and running in 2 minutes</h2>
+      </div>
+      <div class="quickstart-steps">
+        <div class="qs-step">
+          <div class="qs-number">1</div>
+          <div class="qs-content">
+            <h4>Start the engine</h4>
+            <pre><code><span class="t-prompt">$</span> go run ./cmd/asqld -addr :5433 -data-dir .asql</code></pre>
+          </div>
+        </div>
+        <div class="qs-step">
+          <div class="qs-number">2</div>
+          <div class="qs-content">
+            <h4>Open the interactive shell</h4>
+            <pre><code><span class="t-prompt">$</span> go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433</code></pre>
+          </div>
+        </div>
+        <div class="qs-step">
+          <div class="qs-number">3</div>
+          <div class="qs-content">
+            <h4>Create data and travel through time</h4>
+            <pre><code><span class="k">BEGIN DOMAIN</span> app;
+<span class="k">CREATE TABLE</span> users (id <span class="t">INT</span> <span class="k">PRIMARY KEY</span>, name <span class="t">TEXT</span>, status <span class="t">TEXT</span>);
+<span class="k">INSERT INTO</span> users <span class="k">VALUES</span> (<span class="n">1</span>, <span class="s">'Alice'</span>, <span class="s">'active'</span>);
+<span class="k">COMMIT</span>;
+
+<span class="c">-- Check current position</span>
+<span class="k">SELECT</span> <span class="f">current_lsn</span>();  <span class="c">-- → 3</span>
+
+<span class="c">-- Make a change</span>
+<span class="k">BEGIN DOMAIN</span> app;
+<span class="k">UPDATE</span> users <span class="k">SET</span> status = <span class="s">'suspended'</span> <span class="k">WHERE</span> id = <span class="n">1</span>;
+<span class="k">COMMIT</span>;
+
+<span class="c">-- Travel back in time</span>
+<span class="k">SELECT</span> * <span class="k">FROM</span> users <span class="k">AS OF LSN</span> <span class="n">3</span>;
+<span class="c">-- → Alice is still 'active'</span>
+
+<span class="c">-- Full audit trail</span>
+<span class="k">SELECT</span> * <span class="k">FROM</span> users <span class="k">FOR HISTORY</span>;
+<span class="c">-- → INSERT at LSN 3, UPDATE at LSN 4</span></code></pre>
+          </div>
+        </div>
+        <div class="qs-step">
+          <div class="qs-number">4</div>
+          <div class="qs-content">
+            <h4>Launch Studio</h4>
+            <pre><code><span class="t-prompt">$</span> go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql</code></pre>
+            <p class="qs-note">SQL editor, schema browser, ER diagrams, time-travel panel, replication monitoring.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ SQL COMPAT ══════════════════════════ -->
+  <section class="section section-dark" id="sql">
+    <div class="container">
+      <div class="section-header">
+        <h2>Familiar SQL. Unique capabilities.</h2>
+        <p class="section-sub">Standard SQL where it matters. Unique primitives where they count.</p>
+      </div>
+      <div class="sql-grid">
+        <div class="sql-card">
+          <h4>DDL</h4>
+          <pre><code><span class="k">CREATE TABLE</span> products (
+  id <span class="t">TEXT</span> <span class="k">PRIMARY KEY</span> <span class="k">DEFAULT</span> <span class="f">UUID_V7</span>(),
+  name <span class="t">TEXT</span> <span class="k">NOT NULL</span>,
+  price <span class="t">FLOAT</span> <span class="k">CHECK</span> (price > <span class="n">0</span>),
+  category_id <span class="t">INT</span> <span class="k">REFERENCES</span> categories(id)
+);
+
+<span class="k">CREATE INDEX</span> idx_name
+  <span class="k">ON</span> products <span class="k">USING</span> btree (name);</code></pre>
+        </div>
+        <div class="sql-card">
+          <h4>Queries</h4>
+          <pre><code><span class="k">SELECT</span> c.name, <span class="f">COUNT</span>(*), <span class="f">AVG</span>(p.price)
+<span class="k">FROM</span> products p
+<span class="k">JOIN</span> categories c <span class="k">ON</span> p.cat_id = c.id
+<span class="k">GROUP BY</span> c.name
+<span class="k">HAVING</span> <span class="f">COUNT</span>(*) > <span class="n">5</span>;
+
+<span class="k">WITH</span> top <span class="k">AS</span> (
+  <span class="k">SELECT</span> *, <span class="f">RANK</span>() <span class="k">OVER</span> (
+    <span class="k">ORDER BY</span> price <span class="k">DESC</span>)
+  <span class="k">FROM</span> products
+)
+<span class="k">SELECT</span> * <span class="k">FROM</span> top <span class="k">WHERE</span> rank <= <span class="n">10</span>;</code></pre>
+        </div>
+        <div class="sql-card">
+          <h4>Transactions</h4>
+          <pre><code><span class="k">BEGIN DOMAIN</span> billing;
+
+<span class="k">SAVEPOINT</span> before_charge;
+<span class="k">UPDATE</span> accounts
+  <span class="k">SET</span> balance = balance - <span class="n">100</span>
+  <span class="k">WHERE</span> id = <span class="n">1</span>;
+
+<span class="c">-- Changed your mind?</span>
+<span class="k">ROLLBACK TO SAVEPOINT</span> before_charge;
+
+<span class="k">COMMIT</span>;</code></pre>
+        </div>
+        <div class="sql-card">
+          <h4>Cross-domain reads</h4>
+          <pre><code><span class="k">BEGIN DOMAIN</span> analytics;
+
+<span class="c">-- Read from another domain</span>
+<span class="k">IMPORT</span> billing.invoices <span class="k">AS</span> inv;
+
+<span class="k">SELECT</span> u.name, <span class="f">SUM</span>(inv.amount)
+<span class="k">FROM</span> users u
+<span class="k">JOIN</span> inv <span class="k">ON</span> u.id = inv.user_id
+<span class="k">GROUP BY</span> u.name;
+
+<span class="k">COMMIT</span>;</code></pre>
+        </div>
+      </div>
+      <div class="compat-note">
+        <p>
+          <strong>Compatibility stance:</strong> ASQL implements a pragmatic PostgreSQL-compatible subset over pgwire.
+          It works with <code>pgx</code>, <code>psql</code>, <code>JDBC</code>, <code>DBeaver</code>, <code>DataGrip</code>, and <code>pgAdmin</code>.
+          <a href="https://github.com/davidrjonas/asql/blob/main/docs/reference/postgres-compatibility-surface-v1.md">Full compatibility matrix →</a>
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ USE CASES ══════════════════════════ -->
+  <section class="section" id="usecases">
+    <div class="container">
+      <div class="section-header">
+        <h2>Built for systems that can't afford ambiguity</h2>
+      </div>
+      <div class="usecase-grid">
+        <div class="usecase-card">
+          <div class="usecase-icon">🏥</div>
+          <h4>Regulated Industries</h4>
+          <p>Full audit trail, deterministic replay, versioned references. Prove data integrity without external tooling.</p>
+        </div>
+        <div class="usecase-card">
+          <div class="usecase-icon">🏦</div>
+          <h4>Financial Systems</h4>
+          <p>Time-travel queries for reconciliation. Domain isolation for multi-tenant accounting. Exact state reproduction for audits.</p>
+        </div>
+        <div class="usecase-card">
+          <div class="usecase-icon">🔍</div>
+          <h4>Debugging & Forensics</h4>
+          <p>Reproduce any production bug by replaying the exact WAL sequence. No more "works on my machine".</p>
+        </div>
+        <div class="usecase-card">
+          <div class="usecase-icon">📡</div>
+          <h4>Edge & Offline-First</h4>
+          <p>Single binary, no external dependencies. Run at the edge. Sync via WAL replication when connectivity returns.</p>
+        </div>
+        <div class="usecase-card">
+          <div class="usecase-icon">🏭</div>
+          <h4>Manufacturing (eBR)</h4>
+          <p>Entity versioning tracks recipe versions. Process orders reference the exact recipe used. Full traceability.</p>
+        </div>
+        <div class="usecase-card">
+          <div class="usecase-icon">🧪</div>
+          <h4>Testing & Simulation</h4>
+          <p>Deterministic fixtures for reproducible test scenarios. Load, validate, replay. Same result every time.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ TOOLING ══════════════════════════ -->
+  <section class="section section-dark" id="tooling">
+    <div class="container">
+      <div class="section-header">
+        <h2>Developer Experience</h2>
+        <p class="section-sub">Studio, CLI, fixtures, and a Go SDK.</p>
+      </div>
+      <div class="tools-grid">
+        <div class="tool-card">
+          <h4>🖥️ ASQL Studio</h4>
+          <p>Desktop app with SQL editor, schema browser, ER diagrams, time-travel panel, scan stats, and replication monitoring.</p>
+          <pre><code>go run ./asqlstudio \
+  -pgwire-endpoint 127.0.0.1:5433</code></pre>
+        </div>
+        <div class="tool-card">
+          <h4>⌨️ CLI (asqlctl)</h4>
+          <p>Interactive SQL shell, fixture validation and loading, audit commands.</p>
+          <pre><code>go run ./cmd/asqlctl \
+  -command shell \
+  -pgwire 127.0.0.1:5433</code></pre>
+        </div>
+        <div class="tool-card">
+          <h4>📋 Deterministic Fixtures</h4>
+          <p>JSON fixture files with validation. Seed complex scenarios reproducibly.</p>
+          <pre><code>go run ./cmd/asqlctl \
+  -command fixture-load \
+  -pgwire 127.0.0.1:5433 \
+  -fixture-file fixtures/demo.json</code></pre>
+        </div>
+        <div class="tool-card">
+          <h4>🐳 Docker</h4>
+          <p>Distroless container image. Minimal attack surface.</p>
+          <pre><code>docker build -t asql:local .
+docker run -p 5433:5433 \
+  -v $(pwd)/.data:/data asql:local</code></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ CTA ══════════════════════════ -->
+  <section class="section section-cta">
+    <div class="container">
+      <h2>Ready to try a database that<br>actually remembers?</h2>
+      <p>ASQL is open source. Start in 2 minutes.</p>
+      <div class="hero-actions">
+        <a href="https://github.com/davidrjonas/asql" class="btn btn-primary" target="_blank" rel="noopener">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+          Star on GitHub
+        </a>
+        <a href="#quickstart" class="btn btn-ghost">Quickstart Guide</a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ FOOTER ══════════════════════════ -->
+  <footer class="footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <span class="logo-icon">⚡</span> ASQL
+        <span class="footer-tagline">Deterministic SQL Engine</span>
+      </div>
+      <div class="footer-links">
+        <a href="index.html">Engine</a>
+        <a href="studio.html">Studio</a>
+        <a href="docs.html">Docs</a>
+        <a href="https://github.com/davidrjonas/asql">GitHub</a>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    // Sticky nav background on scroll
+    const nav = document.getElementById('nav');
+    window.addEventListener('scroll', () => {
+      nav.classList.toggle('scrolled', window.scrollY > 40);
+    });
+
+    // Smooth scroll for anchor links
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+      a.addEventListener('click', e => {
+        const target = document.querySelector(a.getAttribute('href'));
+        if (target) {
+          e.preventDefault();
+          target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+      });
+    });
+
+    // Intersection observer for fade-in animations
+    const observer = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+        }
+      });
+    }, { threshold: 0.1, rootMargin: '0px 0px -60px 0px' });
+
+    document.querySelectorAll('.feature-block, .value-card, .deploy-card, .bench-card, .usecase-card, .tool-card, .sql-card, .qs-step').forEach(el => {
+      el.classList.add('fade-in');
+      observer.observe(el);
+    });
+  </script>
+</body>
+</html>

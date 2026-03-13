@@ -14,6 +14,7 @@ import (
 
 	"asql/internal/engine/domains"
 	"asql/internal/engine/parser/ast"
+	"asql/internal/engine/planner"
 )
 
 // validateInsertRow performs O(1) constraint validation for a single new row
@@ -387,8 +388,83 @@ func resolveDefaults(table *tableState, row map[string]ast.Literal) {
 			row[colName] = ast.Literal{Kind: ast.LiteralNumber, NumberValue: nextAutoIncrement(table, colName)}
 		case ast.DefaultUUIDv7:
 			row[colName] = ast.Literal{Kind: ast.LiteralString, StringValue: generateUUIDv7()}
+		case ast.DefaultTxTimestamp:
+			row[colName] = ast.Literal{Kind: ast.LiteralString, StringValue: generateTxTimestamp()}
 		}
 	}
+}
+
+// resolveVolatileDefaults fills only non-deterministic defaults that must be
+// materialized into the WAL exactly once so replay/time-travel reproduce the
+// original row values.
+func resolveVolatileDefaults(table *tableState, row map[string]ast.Literal) bool {
+	if table == nil {
+		return false
+	}
+	changed := false
+	for _, colName := range table.columns {
+		if colName == "_lsn" {
+			continue
+		}
+		if _, exists := row[colName]; exists {
+			continue
+		}
+		def, hasDef := table.columnDefinitions[colName]
+		if !hasDef || def.DefaultValue == nil {
+			continue
+		}
+		switch def.DefaultValue.Kind {
+		case ast.DefaultUUIDv7:
+			row[colName] = ast.Literal{Kind: ast.LiteralString, StringValue: generateUUIDv7()}
+			changed = true
+		case ast.DefaultTxTimestamp:
+			row[colName] = ast.Literal{Kind: ast.LiteralString, StringValue: generateTxTimestamp()}
+			changed = true
+		}
+	}
+	return changed
+}
+
+// materializeVolatileInsertDefaultsInPlan resolves non-deterministic INSERT
+// defaults into the plan before the mutation is encoded into the WAL. This
+// keeps restart replay, time-travel replay, and entity history/version views
+// stable without changing commit-time resolution of deterministic defaults like
+// AUTO_INCREMENT.
+func materializeVolatileInsertDefaultsInPlan(state *readableState, plan *planner.Plan) bool {
+	if state == nil || plan == nil || plan.Operation != planner.OperationInsert {
+		return false
+	}
+	domainState := state.domains[plan.DomainName]
+	if domainState == nil {
+		return false
+	}
+	table := domainState.tables[plan.TableName]
+	if table == nil {
+		return false
+	}
+
+	originalColumns := append([]string(nil), plan.Columns...)
+	buildRow := func(values []ast.Literal) map[string]ast.Literal {
+		row := make(map[string]ast.Literal, len(table.columns)+1)
+		for i, col := range originalColumns {
+			if i < len(values) {
+				row[col] = values[i]
+			}
+		}
+		return row
+	}
+
+	row := buildRow(plan.Values)
+	if !resolveVolatileDefaults(table, row) {
+		return false
+	}
+	plan.Columns, plan.Values = flattenRow(row, table.columns)
+	for i, values := range plan.MultiValues {
+		multiRow := buildRow(values)
+		resolveVolatileDefaults(table, multiRow)
+		_, plan.MultiValues[i] = flattenRow(multiRow, table.columns)
+	}
+	return true
 }
 
 // resolveVFKVersions pre-fills VFK lsn_column values at Execute time (before
@@ -467,6 +543,13 @@ func generateUUIDv7() string {
 	buf[23] = '-'
 	hex.Encode(buf[24:36], uuid[10:16])
 	return string(buf[:])
+}
+
+// generateTxTimestamp returns the current wall-clock UTC time as an RFC3339Nano
+// string. The value must be materialized into the WAL payload exactly once so
+// replay reproduces the same value deterministically.
+func generateTxTimestamp() string {
+	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
 // flattenRow converts a row map back into ordered Columns and Values slices,

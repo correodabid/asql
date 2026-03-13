@@ -23,6 +23,7 @@ function inferDefaultMode(value: string): string {
   if (upper === 'NULL') return 'null'
   if (upper === 'AUTOINCREMENT') return 'autoincrement'
   if (upper === 'UUID_V7') return 'uuid_v7'
+  if (upper === 'TX_TIMESTAMP') return 'tx_timestamp'
   return 'value'
 }
 
@@ -221,7 +222,8 @@ export function ColumnEditor({
                   else if (mode === 'null') updateColumn((c) => ({ ...c, default_value: 'NULL' }))
                   else if (mode === 'autoincrement') updateColumn((c) => ({ ...c, default_value: 'AUTOINCREMENT' }))
                   else if (mode === 'uuid_v7') updateColumn((c) => ({ ...c, default_value: 'UUID_V7' }))
-                  else if (mode === 'value') updateColumn((c) => ({ ...c, default_value: c.default_value && !['NULL', 'AUTOINCREMENT', 'UUID_V7'].includes(c.default_value.toUpperCase()) ? c.default_value : '0' }))
+                  else if (mode === 'tx_timestamp') updateColumn((c) => ({ ...c, default_value: 'TX_TIMESTAMP' }))
+                  else if (mode === 'value') updateColumn((c) => ({ ...c, default_value: c.default_value && !['NULL', 'AUTOINCREMENT', 'UUID_V7', 'TX_TIMESTAMP'].includes(c.default_value.toUpperCase()) ? c.default_value : '0' }))
                 }}
               >
                 <option value="none">None</option>
@@ -229,6 +231,7 @@ export function ColumnEditor({
                 <option value="null">NULL</option>
                 <option value="autoincrement">AUTOINCREMENT</option>
                 <option value="uuid_v7">UUID_V7</option>
+                <option value="tx_timestamp">TX_TIMESTAMP</option>
               </select>
               {inferDefaultMode(activeColumn.default_value || '') === 'value' && (
                 <input

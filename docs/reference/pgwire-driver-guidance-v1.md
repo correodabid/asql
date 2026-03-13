@@ -32,6 +32,22 @@ The recommendation below is about adoption risk, not only protocol capability.
 | ORMs or query builders that emit broad PostgreSQL syntax | Known-risk path | They often assume broader PostgreSQL semantics than ASQL promises. |
 | Drivers or tools that require TLS-only startup (`sslmode=require`) | Unsupported today | ASQL currently responds to `SSLRequest` with `N`. |
 
+## What already works well today
+
+The current compatibility wedge is good enough for several mainstream startup
+and metadata flows already exercised in regression tests:
+
+- `psql` startup/introspection basics (`current_setting`, `SHOW`, `current_database`, `current_user`, `pg_namespace`, `pg_database`),
+- DBeaver/DataGrip-style startup queries (`SET`, `set_config`, `version`, `current_schema`, `pg_settings`, `information_schema.schemata`, privilege probes),
+- `pgx` connection setup plus end-to-end CRUD/query flows.
+
+For interactive tooling, this usually means:
+
+- connect succeeds with `sslmode=prefer` or `sslmode=disable`,
+- basic schema browsing works against the supported synthetic catalog subset,
+- common session-management statements are accepted as no-ops,
+- normal app queries can proceed as long as they stay inside the documented SQL subset.
+
 ## Recommended connection shapes
 
 ### Go / `pgx`
@@ -77,6 +93,24 @@ Extended protocol is reasonable when:
 
 That is the normal path after the team has already established one stable simple-protocol baseline.
 
+## Current SQL shapes that are good candidates for pgwire adoption
+
+Within the documented ASQL subset, the following PostgreSQL-shaped query
+patterns already have a relatively strong adoption story:
+
+- scalar predicates with bind parameters,
+- `ORDER BY`, `LIMIT`, and `OFFSET`,
+- `IN (SELECT ...)`, `EXISTS`, and `NOT EXISTS` for current supported shapes,
+- `LEFT JOIN`, `RIGHT JOIN`, and `CROSS JOIN` for current supported shapes,
+- `LIKE` / `ILIKE`,
+- `INSERT ... RETURNING ...`,
+- `INSERT ... ON CONFLICT ...` for current supported upsert shapes,
+- narrow `COPY FROM STDIN` / `COPY TO STDOUT` flows.
+
+Treat broader ORM-generated SQL, PostgreSQL-specific types, and full catalog
+assumptions as separate validation work, not as implicitly safe extensions of
+the list above.
+
 ## Known-risk patterns
 
 Treat these as review points during adoption:
@@ -84,6 +118,7 @@ Treat these as review points during adoption:
 - assuming bare PostgreSQL transaction syntax like `BEGIN` is acceptable,
 - relying on ORM-generated SQL that you do not inspect,
 - assuming catalog or metadata parity beyond the documented surface,
+- assuming `UPDATE ... RETURNING` / `DELETE ... RETURNING` behave like PostgreSQL just because `INSERT ... RETURNING` works,
 - requiring TLS-only pgwire startup,
 - assuming every PostgreSQL driver feature implies matching ASQL engine semantics.
 

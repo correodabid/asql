@@ -395,6 +395,7 @@ const (
 	defaultTagLiteral       byte = 0x01
 	defaultTagAutoIncrement byte = 0x02
 	defaultTagUUIDv7        byte = 0x03
+	defaultTagTxTimestamp   byte = 0x04
 )
 
 func (w *binWriter) columnDef(cd ast.ColumnDefinition) {
@@ -427,6 +428,8 @@ func (w *binWriter) columnDef(cd ast.ColumnDefinition) {
 			w.u8(defaultTagAutoIncrement)
 		case ast.DefaultUUIDv7:
 			w.u8(defaultTagUUIDv7)
+		case ast.DefaultTxTimestamp:
+			w.u8(defaultTagTxTimestamp)
 		default:
 			w.u8(defaultTagNil)
 		}
@@ -453,6 +456,8 @@ func (r *binReader) columnDef() ast.ColumnDefinition {
 		cd.DefaultValue = &ast.DefaultExpr{Kind: ast.DefaultAutoIncrement}
 	case defaultTagUUIDv7:
 		cd.DefaultValue = &ast.DefaultExpr{Kind: ast.DefaultUUIDv7}
+	case defaultTagTxTimestamp:
+		cd.DefaultValue = &ast.DefaultExpr{Kind: ast.DefaultTxTimestamp}
 	}
 	return cd
 }
