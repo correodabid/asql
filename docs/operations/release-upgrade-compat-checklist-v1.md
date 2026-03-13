@@ -1,11 +1,32 @@
-# ASQL Release Upgrade & Backward-Compatibility Checklist (v1)
+# ASQL Release Candidate, Upgrade & Backward-Compatibility Checklist (v1)
 
 Date: 2026-02-28
 Applies to: every release candidate and GA release.
 
 ## Goal
 
-Ensure upgrades are safe and WAL/protocol compatibility remains stable.
+Ensure release candidates and GA upgrades are safe, observable, and stable enough to ship.
+
+## Release-candidate gate (`v1.0.0-rc*` and later)
+
+Every release candidate should include a short evidence bundle covering:
+
+1. Runtime sanity:
+   - `cmd/asqld` boots locally.
+   - the pgwire getting-started flow still works.
+   - Studio launch path still works when included in release scope.
+2. Operator sanity:
+   - `/livez`, `/readyz`, and `/metrics` respond on the admin HTTP surface.
+   - leadership, failover history, and WAL retention admin endpoints respond with expected shapes.
+3. Compatibility sanity:
+   - compatibility docs were reviewed in the same release window.
+   - documented mainstream client/tool flows (`psql` / `pgx` baseline) still pass their current regression pack.
+4. Recovery sanity:
+   - replay/restart parity suite passes.
+   - backup/restore parity suite passes.
+   - failover continuity suite passes for the supported replicated runtime path.
+5. Documentation sanity:
+   - `README.md`, `docs/getting-started/`, `docs/reference/`, and `site/` were updated when user-visible behavior changed.
 
 ## Pre-release validation
 
@@ -19,6 +40,10 @@ Ensure upgrades are safe and WAL/protocol compatibility remains stable.
    - legacy fixture read
    - version mismatch rejection
    - append sequence continuity
+4. Production-facing smoke lanes green:
+   - pgwire onboarding flow
+   - admin HTTP health/metrics flow
+   - release-candidate evidence summary generated
 
 ## Upgrade simulation
 
@@ -56,8 +81,9 @@ Run on representative datasets:
 ## Operational checks
 
 1. Audit log fields present and structured.
-2. SLO dashboard baseline metrics available.
-3. Incident runbook references updated for new behavior.
+2. `/metrics` exports the expected Prometheus baseline for health, WAL durability, replay, snapshot, lag, and failover.
+3. SLO/dashboard consumers still map cleanly to emitted metrics.
+4. Incident runbook references updated for new behavior.
 
 ## Release decision gate
 
@@ -71,6 +97,7 @@ Release can proceed only if all below are true:
 ## Required release artifacts
 
 - Test evidence summary
+- Release-candidate gate summary (`runtime`, `compatibility`, `recovery`, `operations`)
 - Compatibility matrix result
 - Upgrade guide notes
 - Rollback plan notes

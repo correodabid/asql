@@ -119,7 +119,7 @@ Legend:
 - [x] Produce migration guide from SQLite/Postgres-lite usage.
 
 ## Epic P — Launch readiness
-- [ ] Create release candidate gate checklist (`v1.0.0-rc1`).
+- [x] Create release candidate gate checklist (`v1.0.0-rc1`).
 - [ ] Freeze protocol/WAL compatibility for GA.
 - [ ] Finalize docs portal and examples repo.
 - [ ] Prepare launch narrative and channels.

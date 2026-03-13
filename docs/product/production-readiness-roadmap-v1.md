@@ -151,14 +151,16 @@ Conclusion:
 
 ### 10) "Métricas Prometheus nativas"
 
-**Assessment:** true gap.
+**Assessment:** outdated.
 
 Evidence:
-- I found telemetry/stats endpoints and internal perf counters.
-- I did not find a native Prometheus exporter or `/metrics` endpoint.
+- Admin HTTP already exposes a native `/metrics` endpoint in the main pgwire runtime.
+- The exported metrics already cover health/readiness, WAL durability, commit/fsync latency, replay/snapshot timing, replication lag, and failover signals.
+- Admin HTTP tests validate Prometheus output fragments.
 
 Conclusion:
-- This remains a real blocker for production operations.
+- Native Prometheus export already exists.
+- The remaining work is operational hardening: keep dashboard/SLO mappings current, make `/metrics` part of the release-candidate gate, and ensure operator docs remain aligned with emitted metrics.
 
 ### 11) "Query explain plan legible"
 
