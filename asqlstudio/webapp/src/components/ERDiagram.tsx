@@ -573,16 +573,11 @@ function RelationshipPath({ rel, isHovered, onHover, index, dimmed, highlightedC
   /** "tableKey:colName" — when set, brightens any rel whose endpoint column matches */
   highlightedColKey?: string | null
 }) {
+  const isSelfRef = (rel.from.tableKey || rel.from.table.name) === (rel.to.tableKey || rel.to.table.name)
   const fromRight = rel.from.x + rel.from.w
   const toLeft = rel.to.x
   const fy = colY(rel.from, rel.fromCol)
   const ty = colY(rel.to, rel.toCol)
-
-  const fromX = fromRight < toLeft ? fromRight : rel.from.x
-  const toX = fromRight < toLeft ? toLeft : rel.to.x + rel.to.w
-
-  const midX = (fromX + toX) / 2
-  const pathD = `M ${fromX} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${toX} ${ty}`
 
   const isCross = rel.crossDomain
   const hasEntityColor = !!rel.entityColor
@@ -595,6 +590,76 @@ function RelationshipPath({ rel, isHovered, onHover, index, dimmed, highlightedC
 
   const eh = isHovered || isColHL
   const hlColor = isColHL ? '#22d3ee' : strokeColor
+
+  // ── Self-referential loop: both endpoints exit the right side, loop outward
+  if (isSelfRef) {
+    const rx = fromRight        // right edge of the table
+    const loopW = 52            // how far right the loop extends
+    const r = 10                // corner radius
+    // rounded rectangular loop: exit right → bend down/up → re-enter right
+    // sorted so top is always the smaller Y
+    const topY = Math.min(fy, ty)
+    const botY = Math.max(fy, ty)
+    const isFromTop = fy <= ty
+    const exitY  = isFromTop ? topY : botY   // FK source side
+    const enterY = isFromTop ? botY : topY   // PK target side
+    // path: M right,exitY → H right+loopW-r arc → V enterY+r arc → H right
+    const lx = rx + loopW
+    const loopPath = [
+      `M ${rx} ${exitY}`,
+      `H ${lx - r}`,
+      `Q ${lx} ${exitY} ${lx} ${exitY + r}`,
+      `V ${enterY - r}`,
+      `Q ${lx} ${enterY} ${lx - r} ${enterY}`,
+      `H ${rx}`,
+    ].join(' ')
+
+    const swLine = eh ? (isColHL ? 3 : 2.5) : (hasEntityColor ? 2 : 1.5)
+
+    return (
+      <g
+        onMouseEnter={() => onHover(index)}
+        onMouseLeave={() => onHover(null)}
+        opacity={dimmed ? 0.1 : 1}
+        style={{ transition: 'opacity 200ms' }}
+      >
+        {/* Hit area */}
+        <path d={loopPath} fill="none" stroke="transparent" strokeWidth={14} style={{ cursor: 'pointer' }} />
+        {/* Visible loop */}
+        <path
+          d={loopPath}
+          fill="none"
+          stroke={hlColor}
+          strokeWidth={swLine}
+          strokeDasharray={isCross ? (eh ? '8 4' : '4 4') : (hasEntityColor ? 'none' : (eh ? 'none' : '6 3'))}
+          opacity={eh ? 1 : (hasEntityColor ? 0.7 : 0.5)}
+          markerEnd={eh ? 'url(#arrowhead-hover)' : 'url(#arrowhead)'}
+          style={{ transition: 'opacity 150ms, stroke-width 150ms' }}
+        />
+        {/* Dots */}
+        <circle cx={rx} cy={exitY}  r={isColHL ? 4 : 3} fill={hlColor} opacity={eh ? 0.9 : 0.4} />
+        <circle cx={rx} cy={enterY} r={isColHL ? 4 : 3} fill={hlColor} opacity={eh ? 0.9 : 0.4} />
+        {/* Cardinality labels */}
+        {eh && (
+          <>
+            <text x={rx + 8} y={exitY  - 7} fontSize="10" fontWeight="600"
+              fill={isCross ? '#f59e0b' : (isColHL ? '#22d3ee' : (hasEntityColor ? strokeColor : 'var(--text-accent)'))}
+              textAnchor="start" fontFamily="Inter, sans-serif">N</text>
+            <text x={rx + 8} y={enterY + 16} fontSize="10" fontWeight="600"
+              fill={isCross ? '#f59e0b' : (isColHL ? '#22d3ee' : (hasEntityColor ? strokeColor : 'var(--text-accent)'))}
+              textAnchor="start" fontFamily="Inter, sans-serif">1</text>
+          </>
+        )}
+      </g>
+    )
+  }
+
+  // ── Normal (cross-table) relationship
+  const fromX = fromRight < toLeft ? fromRight : rel.from.x
+  const toX = fromRight < toLeft ? toLeft : rel.to.x + rel.to.w
+
+  const midX = (fromX + toX) / 2
+  const pathD = `M ${fromX} ${fy} C ${midX} ${fy}, ${midX} ${ty}, ${toX} ${ty}`
 
   return (
     <g
@@ -984,7 +1049,7 @@ function TableCard({
           const isHL = highlightedColumns?.has(col.name) ?? false
           const isFKHL = fkHighlightedColumns?.has(col.name) ?? false
           const isDropTarget = fkDropTargetCol === col.name
-          const canDragFK = !!onFKDragStart && !col.primary_key
+          const canDragFK = !!onFKDragStart
           return (
             <g
               key={`col-${ci}`}
