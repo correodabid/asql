@@ -1,5 +1,7 @@
 # Transaction and Protocol Spec (MVP)
 
+Status note (2026-03-13): this file is retained only as historical context. The active internal sources of truth are [docs/ai/05-backlog.md](../ai/05-backlog.md), [docs/ai/02-architecture-blueprint.md](../ai/02-architecture-blueprint.md), and [.github/copilot-instructions.md](../../.github/copilot-instructions.md).
+
 ## SQL transaction primitives
 ### Single-domain
 ```sql
@@ -68,7 +70,7 @@ not a drop-in PostgreSQL replacement. See
 [docs/reference/sql-pgwire-compatibility-policy-v1.md](../reference/sql-pgwire-compatibility-policy-v1.md)
 and [docs/reference/postgres-compatibility-surface-v1.md](../reference/postgres-compatibility-surface-v1.md).
 
-For current implementation priorities, use [docs/ai/05-backlog.md](05-backlog.md) as the source of truth rather than this MVP-era protocol note.
+For current implementation priorities, use [docs/ai/05-backlog.md](../ai/05-backlog.md) as the source of truth rather than this MVP-era protocol note.
 
 ## Time-travel semantics
 - `AS OF LSN <n>`: read from materialized state as of log position.

@@ -102,7 +102,8 @@ Start with a thin helper around `BEGIN DOMAIN ...` or `BEGIN CROSS DOMAIN ...`, 
 ## where to look next
 
 - [README.md](../../README.md)
-- [10-min.md](10-min.md)
+- [02-install-and-run.md](02-install-and-run.md)
+- [03-first-database.md](03-first-database.md)
 - [10-adoption-playbook.md](10-adoption-playbook.md)
 - [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
 - [../reference/fixture-format-and-lifecycle-v1.md](../reference/fixture-format-and-lifecycle-v1.md)

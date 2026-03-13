@@ -116,7 +116,7 @@ Use this as the lowest-surprise baseline:
 ASQL supports the extended query pipeline for the documented subset.
 Still, simple protocol is the recommended first adoption path because it makes compatibility issues easier to reproduce and reason about.
 
-For a reusable app-side baseline, continue with [09a-general-purpose-starter-pack.md](09a-general-purpose-starter-pack.md).
+For a reusable app-side baseline, use the compact starter conventions in [10-adoption-playbook.md](10-adoption-playbook.md).
 
 ## Common expectation mismatch
 

@@ -68,7 +68,7 @@ Likely overlap between:
 
 - root README
 - [docs/getting-started/README.md](../getting-started/README.md)
-- [docs/getting-started/10-min.md](../getting-started/10-min.md)
+- the former `docs/getting-started/10-min.md` quick path (now merged/removed)
 
 Resolution in this pass:
 
@@ -215,7 +215,7 @@ Check all docs for:
 1. Audit and update [.github/copilot-instructions.md](../../.github/copilot-instructions.md)
 2. Unify README + getting-started + 10-min guide
 3. Define canonical local startup and port examples
-4. Decide whether `docs/getting-started/10-min.md` stays, shrinks, or merges into getting-started
+4. Decide whether the former `docs/getting-started/10-min.md` stays, shrinks, or merges into getting-started
 5. Add a classification table for the full docs corpus
 
 ## Acceptance criteria

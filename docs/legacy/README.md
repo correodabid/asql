@@ -12,5 +12,6 @@ Current state:
 
 - [documentation-audit-plan-v1.md](documentation-audit-plan-v1.md) — archived record of the completed documentation audit.
 - [documentation-cleanup-backlog-v1.md](documentation-cleanup-backlog-v1.md) — archived record of the completed documentation cleanup execution.
+- [ai-03-transaction-and-protocol-spec.md](ai-03-transaction-and-protocol-spec.md) — archived MVP-era AI protocol note.
 
 These files are retained only as historical context and should not be treated as active maintainer guidance.

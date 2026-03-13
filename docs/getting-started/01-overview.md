@@ -4,8 +4,6 @@
 
 ASQL is a deterministic SQL engine written in Go.
 
-Before going deeper, read [00-engine-owned-vs-app-owned.md](00-engine-owned-vs-app-owned.md) if your team needs a short note on which concerns belong in the engine versus the application.
-
 It combines:
 
 - embedded-first operation,
@@ -41,6 +39,14 @@ Use this rule early:
 - **Engine-owned**: explicit domains, replay-safe history, temporal queries, entity/version primitives, deterministic fixtures.
 - **App-owned**: workflow states, approvals, actor semantics, compliance meaning, projections specific to one product.
 - **Recommended integration pattern**: keep workflow meaning in the application and use ASQL to make state changes, history, and debugging explicit.
+
+When a proposed capability feels attractive because one example app needs it, ask:
+
+1. would this help many different applications, not just one workflow?
+2. is it fundamentally about deterministic data, history, transactions, replay, or database observability?
+3. can it be expressed as a reusable primitive rather than a domain-specific workflow object?
+
+If the answer is mostly no, it probably belongs in the application layer rather than in ASQL itself.
 
 ### 1. Transactions are domain-scoped
 

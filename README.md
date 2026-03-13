@@ -523,12 +523,11 @@ make seed-domains-10x  # 10x scale: 1K recipes, 3K orders
 | Document | Description |
 |----------|-------------|
 | [Getting started guide](docs/getting-started/README.md) | Primary onboarding path from first run to integration |
-| [Getting started (10 min)](docs/getting-started/10-min.md) | Optional ultra-short quick path |
 | [Go SDK cookbook](docs/reference/cookbook-go-sdk.md) | Code recipes for common operations |
 | [Architecture one-pager](docs/architecture/architecture-one-pager-v1.md) | System design overview |
 | [Benchmark one-pager](docs/product/benchmark-one-pager-v1.md) | Performance characteristics |
 | [Fixture format and lifecycle](docs/reference/fixture-format-and-lifecycle-v1.md) | Deterministic scenario file contract and loader workflow |
-| [SQLite migration path](docs/migration/sqlite-quick-path.md) | Migrate from SQLite to ASQL |
+| [SQLite/Postgres-lite migration guide](docs/migration/sqlite-postgres-lite-guide-v1.md) | Migrate lightweight SQL workloads to ASQL |
 | [PostgreSQL compatibility](docs/reference/postgres-compatibility-surface-v1.md) | pgwire protocol support matrix |
 | [SLO definitions](docs/operations/slo-v1.md) | Service level objectives |
 | [Runbook](docs/operations/runbook.md) | Executable demo commands |

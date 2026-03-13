@@ -5,13 +5,14 @@ Use [docs/ai/05-backlog.md](05-backlog.md) as the active task source and [.githu
 
 ## Daily execution loop for AI agents
 1. Read `docs/ai/01-product-vision.md`.
-2. Select one unchecked item from `docs/ai/05-backlog.md`.
-3. Confirm assumptions in task notes.
-4. Implement minimal code to satisfy the task.
-5. Add/update unit/integration tests.
-6. Run local checks.
-7. Update backlog status and docs.
-8. Verify that public claims/examples still match code and tests.
+2. Read `docs/ai/02-architecture-blueprint.md` when the task changes runtime or core-engine structure.
+3. Select one unchecked item from `docs/ai/05-backlog.md`.
+4. Confirm assumptions in task notes.
+5. Implement minimal code to satisfy the task.
+6. Add/update unit/integration tests.
+7. Run local checks.
+8. Update backlog status and docs.
+9. Verify that public claims/examples still match code and tests.
 
 ## Documentation sync checklist
 When a change affects externally visible behavior, agents should update the

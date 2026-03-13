@@ -38,7 +38,7 @@ Orden recomendado:
 2. recorrer [docs/getting-started/05-time-travel-and-history.md](../docs/getting-started/05-time-travel-and-history.md),
 3. recorrer [docs/getting-started/06-entities-and-versioned-references.md](../docs/getting-started/06-entities-and-versioned-references.md),
 4. recorrer [docs/getting-started/07-fixtures-and-seeding.md](../docs/getting-started/07-fixtures-and-seeding.md),
-5. revisar [docs/getting-started/09a-general-purpose-starter-pack.md](../docs/getting-started/09a-general-purpose-starter-pack.md),
+5. revisar las convenciones compactas de adopción en [docs/getting-started/10-adoption-playbook.md](../docs/getting-started/10-adoption-playbook.md),
 6. usar esta app como ejemplo profundo que combina todo lo anterior.
 
 ## Dominios usados

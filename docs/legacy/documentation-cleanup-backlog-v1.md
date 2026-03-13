@@ -41,15 +41,16 @@ Minimization rule:
 
 These are the main candidates for future consolidation if duplication starts growing again:
 
-1. [docs/getting-started/10-min.md](../getting-started/10-min.md)
-	- keep only as an optional ultra-short quick path,
-	- merge into [docs/getting-started/README.md](../getting-started/README.md) if it starts accumulating explanation instead of staying compact.
-2. [docs/getting-started/09a-general-purpose-starter-pack.md](../getting-started/09a-general-purpose-starter-pack.md)
-	- keep only if it remains a compact app-side checklist,
-	- otherwise fold it into [docs/getting-started/09-go-sdk-and-integration.md](../getting-started/09-go-sdk-and-integration.md) or [docs/getting-started/10-adoption-playbook.md](../getting-started/10-adoption-playbook.md).
-3. [docs/migration/sqlite-quick-path.md](../migration/sqlite-quick-path.md)
-	- keep only as a very short migration companion,
-	- otherwise collapse it into [docs/migration/sqlite-postgres-lite-guide-v1.md](../migration/sqlite-postgres-lite-guide-v1.md).
+1. the former `docs/getting-started/10-min.md`
+	- was merged away once README plus getting-started covered the same quick path.
+2. the former `docs/getting-started/09a-general-purpose-starter-pack.md`
+	- was folded into [docs/getting-started/10-adoption-playbook.md](../getting-started/10-adoption-playbook.md).
+3. the former `docs/migration/sqlite-quick-path.md`
+	- was folded into [docs/migration/sqlite-postgres-lite-guide-v1.md](../migration/sqlite-postgres-lite-guide-v1.md).
+4. the former `docs/getting-started/04a-domain-modeling-guide.md`
+	- was folded into [docs/getting-started/04-domains-and-transactions.md](../getting-started/04-domains-and-transactions.md).
+5. the former `docs/getting-started/00-engine-owned-vs-app-owned.md`
+	- was folded into [docs/getting-started/README.md](../getting-started/README.md) and [docs/getting-started/01-overview.md](../getting-started/01-overview.md).
 
 ## P0 — Fix misleading or stale sources of truth
 
@@ -99,9 +100,9 @@ Deliverables:
 - update README, getting-started, runbook, cookbook, and example references
 - verify Studio startup syntax
 
-### 4. Decide the fate of [docs/getting-started/10-min.md](../getting-started/10-min.md)
+### 4. Decide the fate of the former `docs/getting-started/10-min.md`
 
-Completed for this pass: retained as a minimal subordinate quick path that points back to the main getting-started narrative.
+Completed in a later pass: removed after its quick-path content was fully covered by README and [docs/getting-started/README.md](../getting-started/README.md).
 
 Problem:
 
@@ -210,7 +211,7 @@ Completed.
 Additional close-out completed after the main pass:
 
 - refreshed [docs/reference/versioned-reference-capture-semantics-v1.md](../reference/versioned-reference-capture-semantics-v1.md),
-- positioned [docs/migration/sqlite-quick-path.md](../migration/sqlite-quick-path.md) explicitly as the short migration companion,
+- later folded the short SQLite migration companion into [docs/migration/sqlite-postgres-lite-guide-v1.md](../migration/sqlite-postgres-lite-guide-v1.md),
 - refreshed [docs/ai/06-agent-playbook.md](../ai/06-agent-playbook.md), [docs/ai/07-definition-of-done.md](../ai/07-definition-of-done.md), and [docs/ai/09-benchmark-baseline.md](../ai/09-benchmark-baseline.md),
 - added an implementation-status note to [docs/adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md](../adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md),
 - positioned [hospitalapp/README.md](../../hospitalapp/README.md) explicitly as a supporting example doc.

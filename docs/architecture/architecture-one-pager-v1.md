@@ -83,5 +83,4 @@ This keeps execution core free from transport/storage framework coupling.
 ## 8) Reference specs
 
 - `docs/ai/02-architecture-blueprint.md`
-- `docs/ai/03-transaction-and-protocol-spec.md`
 - `docs/ai/01-product-vision.md`

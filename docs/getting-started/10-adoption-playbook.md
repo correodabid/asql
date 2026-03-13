@@ -33,7 +33,7 @@ Start with boundaries the team already understands.
 
 If the team cannot explain why two concepts must commit together, they probably should not be separate domains yet.
 
-If the team needs a shorter modeling aid, use [04a-domain-modeling-guide.md](04a-domain-modeling-guide.md) before splitting further.
+If the team needs a shorter modeling aid, re-read the domain modeling checklist in [04-domains-and-transactions.md](04-domains-and-transactions.md) before splitting further.
 
 ### Phase 3: adopt temporal workflows
 
@@ -72,7 +72,6 @@ The main mindset change is that ASQL makes boundaries visible instead of letting
 
 Related docs:
 
-- [../migration/sqlite-quick-path.md](../migration/sqlite-quick-path.md)
 - [../migration/sqlite-postgres-lite-guide-v1.md](../migration/sqlite-postgres-lite-guide-v1.md)
 
 ## Common adoption mistakes
@@ -190,7 +189,49 @@ If the team is unsure whether a friction should become engine work, docs, SDK he
 - [ ] Studio is part of onboarding
 - [ ] One application integration example exists
 
-For a compact baseline of IDs, timestamps, audit metadata shape, transaction helpers, and temporal read helpers, use [09a-general-purpose-starter-pack.md](09a-general-purpose-starter-pack.md).
+## Compact starter conventions
+
+Use this as the default app-side baseline unless the product has a strong reason to do something else.
+
+### IDs
+
+- use explicit stable IDs in fixtures and tests,
+- prefer application-generated IDs over hidden database generation,
+- keep one consistent ID format per aggregate family.
+
+### Timestamps
+
+- keep business timestamps explicit and app-owned,
+- use literal timestamps in fixtures,
+- use ASQL temporal helpers for replay-safe explanation, not as a substitute for business time semantics.
+
+### Audit metadata
+
+Recommended generic fields:
+
+- `actor_id`
+- `reason`
+- `artifact_type`
+- `artifact_id`
+- `occurred_at`
+- `payload_json`
+
+### Transaction helpers
+
+- keep `DOMAIN` vs `CROSS DOMAIN` decisions explicit,
+- wrap boilerplate in small helpers,
+- do not hide boundary decisions inside generic repositories.
+
+### Temporal helpers
+
+- use `current_lsn()`, `row_lsn(...)`, `entity_version(...)`, `entity_version_lsn(...)`, and `FOR HISTORY` in explicit helper functions,
+- keep “current view + historical explanation” as one named application pattern.
+
+### Fixture-first workflow
+
+1. create one small fixture per important workflow,
+2. validate it before wiring handlers,
+3. reuse it in integration tests and demo/debug flows when practical.
 
 ## Reference example app: BankApp
 

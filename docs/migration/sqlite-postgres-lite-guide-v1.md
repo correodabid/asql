@@ -3,6 +3,8 @@
 Date: 2026-03-01
 Audience: teams migrating lightweight SQL workloads to deterministic ASQL operations.
 
+If you only need the minimum migration path, focus on sections 2, 5, 6, and 8 of this guide.
+
 ## 1) When this guide applies
 
 Best-fit migrations:
@@ -227,7 +229,6 @@ If the team is still carrying SQLite/Postgres/ORM assumptions into the migration
 
 ## 10) Companion references
 
-- `docs/migration/sqlite-quick-path.md`
 - `docs/reference/cookbook-go-sdk.md`
 - `docs/operations/release-upgrade-compat-checklist-v1.md`
 - `docs/operations/runbook.md`

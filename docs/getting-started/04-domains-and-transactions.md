@@ -70,7 +70,7 @@ It reduces ambiguity around:
 - what replay should reconstruct,
 - what auditing must explain.
 
-If your team is still unsure where the first boundaries should go, continue with [04a-domain-modeling-guide.md](04a-domain-modeling-guide.md).
+If the first boundaries are still fuzzy, use the checklist and examples below before adding more domains.
 
 ## Engine-owned vs app-owned concerns
 
@@ -109,6 +109,53 @@ For explicit SQL examples, you can still use qualified names when that is cleare
 
 If domain design is still debated, start with the smallest boundary split that the team can explain clearly.
 Refining from one clear boundary to two is easier than unwinding an over-modeled schema map.
+
+## Domain modeling checklist
+
+Before splitting domains, ask:
+
+1. which data must usually commit together to preserve one invariant?
+2. which tables are owned by the same part of the application?
+3. which state transitions do developers need to explain together during incidents?
+4. where would cross-domain work be rare and meaningful rather than constant?
+
+If those answers are still unclear, use fewer domains first.
+
+### Signals that a split is probably good
+
+- one team or service area clearly owns the tables,
+- the boundary has its own lifecycle and debugging questions,
+- the data is often read together but does not always need atomic writes together,
+- historical inspection is easier if the boundary is explicit.
+
+### Signals that a split is probably too early
+
+- every important write immediately becomes `BEGIN CROSS DOMAIN ...`,
+- the team cannot explain why the boundary exists beyond naming preference,
+- the split mirrors screens or APIs rather than invariants,
+- developers start treating domains as mandatory prefixes for every table rather than meaningful boundaries.
+
+### Example starting shapes
+
+Banking-style first boundaries:
+
+- `identity`
+- `ledger`
+- `payments`
+
+Healthcare-style first boundaries:
+
+- `patients`
+- `clinical`
+- `billing`
+
+Commerce-style first boundaries:
+
+- `catalog`
+- `orders`
+- `inventory`
+
+These are useful only when they reflect ownership, invariants, and debugging boundaries. They should not be copied mechanically.
 
 ## Supported visibility for cross-domain overuse
 
