@@ -17,6 +17,10 @@ Reference material:
 Treat `examples/go-client` as a lower-level reference for the internal/admin
 gRPC surface, not as the default onboarding path.
 
+Important: the default local runtime started by `go run ./cmd/asqld ...` in
+getting-started exposes pgwire on `:5433`. It does not make the lower-level
+gRPC example the primary application-facing path for new teams.
+
 For new application code, a pgwire-first service shape is the right default.
 That is also the runtime started in [02-install-and-run.md](02-install-and-run.md).
 

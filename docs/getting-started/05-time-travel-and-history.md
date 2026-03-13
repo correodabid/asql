@@ -23,7 +23,9 @@ SELECT current_lsn();
 SELECT id, email FROM app.users AS OF LSN 4;
 ```
 
-The lower-level `time-travel` command still exists, but the normal developer path should be pgwire queries and Studio.
+There are lower-level admin and recovery commands elsewhere in the product, but
+the normal developer path in getting-started should be pgwire queries and
+Studio.
 
 ## Supported temporal helper surface
 
