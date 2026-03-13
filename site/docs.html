@@ -147,16 +147,24 @@
     </div>
   </section>
 
-  <!-- ═══════════════════════════ REFERENCE ══════════════════════════ -->
-  <section class="section" id="reference">
+  <!-- ═══════════════════════════ INTEGRATION ══════════════════════════ -->
+  <section class="section" id="integration">
     <div class="container">
       <div class="docs-section-title">
         <span class="docs-section-icon">📋</span>
-        <h2>Reference</h2>
+        <h2>Integration</h2>
       </div>
-      <p class="docs-section-desc">Deep technical reference for engine features, compatibility, and integration patterns.</p>
+      <p class="docs-section-desc">The key technical docs for connecting ASQL to real applications without drowning users in low-level detail.</p>
 
       <div class="docs-grid docs-grid-compact">
+        <a href="doc.html?path=reference/cookbook-go-sdk.md" class="docs-ref-card">
+          <h4>Go Cookbook</h4>
+          <p>Code recipes for common ASQL operations in Go.</p>
+        </a>
+        <a href="doc.html?path=reference/pgwire-driver-guidance-v1.md" class="docs-ref-card">
+          <h4>pgwire Driver Guidance</h4>
+          <p>Practical client and driver recommendations.</p>
+        </a>
         <a href="doc.html?path=reference/postgres-compatibility-surface-v1.md" class="docs-ref-card">
           <h4>PostgreSQL Compatibility Matrix</h4>
           <p>Supported and unsupported pgwire and SQL surface.</p>
@@ -164,14 +172,6 @@
         <a href="doc.html?path=reference/sql-pgwire-compatibility-policy-v1.md" class="docs-ref-card">
           <h4>Compatibility Policy</h4>
           <p>The pragmatic "PostgreSQL-compatible subset" stance.</p>
-        </a>
-        <a href="doc.html?path=reference/pgwire-driver-guidance-v1.md" class="docs-ref-card">
-          <h4>pgwire Driver Guidance</h4>
-          <p>Practical client and driver recommendations.</p>
-        </a>
-        <a href="doc.html?path=reference/cookbook-go-sdk.md" class="docs-ref-card">
-          <h4>Go Cookbook</h4>
-          <p>Code recipes for common ASQL operations in Go.</p>
         </a>
         <a href="doc.html?path=reference/temporal-introspection-surface-v1.md" class="docs-ref-card">
           <h4>Temporal Introspection</h4>
@@ -181,50 +181,40 @@
           <h4>Fixture Format</h4>
           <p>Fixture file contract and schema specification.</p>
         </a>
+        <a href="doc.html?path=architecture/architecture-one-pager-v1.md" class="docs-ref-card">
+          <h4>Architecture One-Pager</h4>
+          <p>High-level system layout for teams evaluating how ASQL fits their stack.</p>
+        </a>
       </div>
     </div>
   </section>
 
-  <!-- ═══════════════════════════ ARCHITECTURE ══════════════════════════ -->
-  <section class="section section-dark" id="architecture">
+  <!-- ═══════════════════════════ MIGRATION ══════════════════════════ -->
+  <section class="section section-dark" id="migration">
     <div class="container">
-      <div class="docs-two-cols">
-        <div class="docs-col">
-          <div class="docs-section-title docs-section-title-left">
-            <span class="docs-section-icon">🏗️</span>
-            <h2>Architecture</h2>
-          </div>
-          <div class="docs-grid docs-grid-compact">
-            <a href="doc.html?path=architecture/architecture-one-pager-v1.md" class="docs-ref-card">
-              <h4>Architecture One-Pager</h4>
-              <p>High-level system layout for architects and decision-makers.</p>
-            </a>
-          </div>
-        </div>
-        <div class="docs-col">
-          <div class="docs-section-title docs-section-title-left">
-            <span class="docs-section-icon">🔄</span>
-            <h2>Migration</h2>
-          </div>
-          <div class="docs-grid docs-grid-compact">
-            <a href="doc.html?path=migration/sqlite-postgres-lite-guide-v1.md" class="docs-ref-card">
-                <h4>Migration Guide</h4>
-                <p>Phased migration from SQLite or Postgres-lite workloads.</p>
-            </a>
-          </div>
-        </div>
+      <div class="docs-section-title">
+        <span class="docs-section-icon">🔄</span>
+        <h2>Migration</h2>
+      </div>
+      <p class="docs-section-desc">For teams moving from lightweight SQL workloads into ASQL with a staged, low-risk path.</p>
+
+      <div class="docs-grid docs-grid-compact">
+        <a href="doc.html?path=migration/sqlite-postgres-lite-guide-v1.md" class="docs-ref-card">
+          <h4>Migration Guide</h4>
+          <p>Phased migration from SQLite or Postgres-lite workloads.</p>
+        </a>
       </div>
     </div>
   </section>
 
-  <!-- ═══════════════════════════ OPERATIONS ══════════════════════════ -->
-  <section class="section" id="operations">
+  <!-- ═══════════════════════════ PRODUCTION ══════════════════════════ -->
+  <section class="section" id="production">
     <div class="container">
       <div class="docs-section-title">
         <span class="docs-section-icon">⚙️</span>
-        <h2>Operations</h2>
+        <h2>Production</h2>
       </div>
-      <p class="docs-section-desc">For operators, SREs, and anyone running ASQL in production.</p>
+      <p class="docs-section-desc">The minimum production-facing set for running, upgrading, and responding to incidents without surfacing every internal operator note.</p>
 
       <div class="docs-grid docs-grid-compact">
         <a href="doc.html?path=operations/runbook.md" class="docs-ref-card">
