@@ -3,7 +3,7 @@ import type { Dispatch, SetStateAction } from 'react'
 import type { StatementState } from './DDLPanel'
 import { ColumnEditor } from './ColumnEditor'
 import { ERDiagram } from './ERDiagram'
-import { IconAlertTriangle, IconArrowRight, IconCheckCircle, IconChevronDown, IconChevronUp, IconCode, IconPlay, IconRefresh, IconRedo, IconSchema, IconShield, IconUndo, IconX } from './Icons'
+import { IconAlertTriangle, IconArrowRight, IconCheckCircle, IconChevronDown, IconChevronUp, IconCode, IconPlay, IconRefresh, IconSchema, IconShield, IconX } from './Icons'
 import { IndexEditor } from './IndexEditor'
 import { ResizeHandle } from './ResizeHandle'
 import { useResizable } from '../hooks/useResizable'
@@ -260,6 +260,10 @@ export function DesignerWorkbench({
             }}
             onAddTable={handleAddTable}
             onDeleteTable={handleDeleteTable}
+            onUndo={undo}
+            onRedo={redo}
+            canUndo={canUndo}
+            canRedo={canRedo}
             onCreateFK={(fromTable, fromCol, toTable, toCol) => {
               const tableIdx = model.tables.findIndex((t) => t.name === fromTable)
               if (tableIdx < 0) return
@@ -302,13 +306,6 @@ export function DesignerWorkbench({
       </div>
 
       <div className="designer-footer-bar">
-        <div className="designer-footer-section">
-          <button className="designer-history-btn" onClick={undo} disabled={!canUndo} title="Undo (⌘Z)"><IconUndo /></button>
-          <button className="designer-history-btn" onClick={redo} disabled={!canRedo} title="Redo (⌘⇧Z)"><IconRedo /></button>
-        </div>
-
-        <div className="designer-footer-sep" />
-
         <div className="designer-footer-section">
           <span className={`designer-footer-indicator${diffSafe === true ? ' safe' : diffSafe === false ? ' unsafe' : ''}`}>
             {isDiffing

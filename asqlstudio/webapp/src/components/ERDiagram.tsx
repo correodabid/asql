@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, useCallback, useEffect } from 'react'
 import type { EntityDefinition, MultiDomainModel, SchemaColumn, SchemaModel, SchemaTable } from '../schema'
 import { useERDiagram } from '../hooks/useERDiagram'
 import { ERMinimap } from './ERMinimap'
-import { IconDownload, IconGrid, IconImage, IconMaximize, IconMinus, IconPlus, IconSearch } from './Icons'
+import { IconDownload, IconGrid, IconImage, IconMaximize, IconMinus, IconPlus, IconRedo, IconSearch, IconUndo } from './Icons'
 import { exportSVG, exportPNG } from '../lib/schemaExport'
 import { downloadFile } from '../lib/export'
 
@@ -27,6 +27,12 @@ type Props = {
   onAddTable?: () => void
   /** Called when the user wants to delete a table via context menu (name = table to remove) */
   onDeleteTable?: (tableName: string) => void
+  /** Undo the last model change */
+  onUndo?: () => void
+  /** Redo the last undone model change */
+  onRedo?: () => void
+  canUndo?: boolean
+  canRedo?: boolean
 }
 
 const TABLE_W = 220
@@ -1186,7 +1192,7 @@ function EntityLegend({ groups, hoveredEntity, onHover, onFocus, isolatedEntity,
 
 // ─── Main component ───────────────────────────────────────
 
-export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onDomainClick, tableCounts, walMutationCounts, onAddColumn, onCreateFK, onSelectColumn, onSelectIndex, onAddTable, onDeleteTable }: Props) {
+export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onDomainClick, tableCounts, walMutationCounts, onAddColumn, onCreateFK, onSelectColumn, onSelectIndex, onAddTable, onDeleteTable, onUndo, onRedo, canUndo, canRedo }: Props) {
   const isMulti = !!multiModel && multiModel.domains.length > 0
 
   // ── Search
@@ -1795,12 +1801,24 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
 
       {/* ── Canvas toolbar ────────────────────────── */}
       <div className="er-toolbar">
-        {/* Add table */}
-        {onAddTable && (
+        {/* Add table + undo/redo */}
+        {(onAddTable || onUndo) && (
           <>
-            <button className="er-toolbar-btn" onClick={onAddTable} title="Add table">
-              <IconPlus />
-            </button>
+            {onAddTable && (
+              <button className="er-toolbar-btn" onClick={onAddTable} title="Add table">
+                <IconPlus />
+              </button>
+            )}
+            {onUndo && (
+              <button className="er-toolbar-btn" onClick={onUndo} disabled={!canUndo} title="Undo (⌘Z)" style={{ opacity: canUndo ? 1 : 0.3 }}>
+                <IconUndo />
+              </button>
+            )}
+            {onRedo && (
+              <button className="er-toolbar-btn" onClick={onRedo} disabled={!canRedo} title="Redo (⌘⇧Z)" style={{ opacity: canRedo ? 1 : 0.3 }}>
+                <IconRedo />
+              </button>
+            )}
             <span className="er-toolbar-sep" />
           </>
         )}
