@@ -2,12 +2,12 @@
 
 This runbook documents the current operational/runtime path in the repository.
 
-For first adoption and developer onboarding, prefer [docs/getting-started/README.md](getting-started/README.md). This runbook is the deeper operator/developer reference.
+For first adoption and developer onboarding, prefer [../getting-started/README.md](../getting-started/README.md). This runbook is the deeper operator/developer reference.
 
 Related quick docs:
-- `docs/getting-started/10-min.md`
-- `docs/reference/cookbook-go-sdk.md`
-- `docs/migration/sqlite-quick-path.md`
+- [../getting-started/10-min.md](../getting-started/10-min.md)
+- [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
+- [../migration/sqlite-quick-path.md](../migration/sqlite-quick-path.md)
 
 Backup and point-in-time recovery validation are covered by integration tests:
 - `test/integration/backup_restore_test.go`
