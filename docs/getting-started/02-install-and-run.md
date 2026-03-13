@@ -53,20 +53,15 @@ Use Studio when you want:
 - time explorer workflows,
 - fixture validate/load/export workflows.
 
-## Optional smoke path
-
-If you want a single validation command:
-
-```bash
-make smoke-onboarding
-```
-
 ## Optional Docker path
 
 ```bash
 docker build -t asql:local .
 docker run -p 5433:5433 -v $(pwd)/.data:/data asql:local
 ```
+
+This container starts `asqld` with its default entrypoint and persists engine
+state under `/data/.asql` inside the mounted volume.
 
 ## What to do next
 

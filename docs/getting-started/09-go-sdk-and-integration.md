@@ -9,13 +9,16 @@ For driver/query-mode guidance, see [../reference/pgwire-driver-guidance-v1.md](
 
 ## Start from the example
 
-Reference implementation:
+Reference material:
 
 - [../../examples/go-client/main.go](../../examples/go-client/main.go)
 - [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
 
-Treat the example client as a low-level reference for engine operations.
-For new application code, a pgwire-first service shape is usually the right default.
+Treat `examples/go-client` as a lower-level reference for the internal/admin
+gRPC surface, not as the default onboarding path.
+
+For new application code, a pgwire-first service shape is the right default.
+That is also the runtime started in [02-install-and-run.md](02-install-and-run.md).
 
 ## Typical integration shape
 

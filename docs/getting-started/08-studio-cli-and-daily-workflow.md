@@ -30,21 +30,33 @@ go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 - CI or smoke tests,
 - scripted transactions,
 - fixture workflows,
-- migration preflight and rollback review,
 - audit evidence export and retention review,
 - reproducible team instructions.
 
-Before applying schema changes, run migration preflight from the CLI:
+The default day-to-day path in this guide is still pgwire-first:
+
+- use `asqlctl shell` for interactive SQL over pgwire,
+- use fixture commands for deterministic setup,
+- use Studio for inspection.
+
+Some `asqlctl` commands target lower-level admin or recovery surfaces instead of
+the pgwire shell path. Treat those as advanced/operator flows rather than part
+of the first-run local loop.
+
+Example: validate and load a fixture from the CLI.
 
 ```bash
-go run ./cmd/asqlctl \
-	-endpoint 127.0.0.1:9042 \
-	-command migration-preflight \
-	-domains accounts \
-	-sql "ALTER TABLE users ADD COLUMN status TEXT; CREATE INDEX idx_users_status ON users (status) USING HASH;"
+go run ./cmd/asqlctl -command fixture-validate \
+	-fixture-file fixtures/healthcare-billing-demo-v1.json
+
+go run ./cmd/asqlctl -command fixture-load \
+	-pgwire 127.0.0.1:5433 \
+	-fixture-file fixtures/healthcare-billing-demo-v1.json
 ```
 
-When rollback SQL is omitted, ASQL generates a best-effort rollback plan for reversible schema operations and reports whether replay-visible rollback is actually safe. For destructive or data-changing statements, provide explicit `-rollback-sql`.
+Schema-evolution review commands such as `migration-preflight` still exist in
+`asqlctl`, but they belong to a lower-level admin path rather than the default
+pgwire-first onboarding flow used in this chapter.
 
 ## Guided CLI workflow: explain one state transition
 
