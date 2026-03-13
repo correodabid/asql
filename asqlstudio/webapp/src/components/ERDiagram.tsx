@@ -1484,15 +1484,17 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
   }
 
   // ── FK drag-to-create helpers
-  function findColumnAtSVGPoint(x: number, y: number, excludeKey?: string) {
+  function findColumnAtSVGPoint(x: number, y: number, excludeCol?: { tableKey: string; colName: string }) {
     for (const pos of visibleTablePositions) {
       const key = pos.tableKey || pos.table.name
-      if (key === excludeKey) continue
       if (x < pos.x || x > pos.x + pos.w) continue
       for (let ci = 0; ci < pos.table.columns.length; ci++) {
         const top = pos.y + TABLE_HEADER_H + ci * COL_ROW_H
         if (y >= top && y <= top + COL_ROW_H) {
-          return { tableKey: key, tableName: pos.table.name, colName: pos.table.columns[ci].name }
+          const colName = pos.table.columns[ci].name
+          // skip the exact source column (allow other columns in same table)
+          if (excludeCol && key === excludeCol.tableKey && colName === excludeCol.colName) continue
+          return { tableKey: key, tableName: pos.table.name, colName }
         }
       }
     }
@@ -1510,7 +1512,7 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
     if (fkDrag) {
       const pt = clientToSVG(e.clientX, e.clientY)
       setFkDrag(prev => prev ? { ...prev, curSVGX: pt.x, curSVGY: pt.y } : null)
-      const target = findColumnAtSVGPoint(pt.x, pt.y, fkDrag.fromTableKey)
+      const target = findColumnAtSVGPoint(pt.x, pt.y, { tableKey: fkDrag.fromTableKey, colName: fkDrag.fromCol })
       setFkDragTarget(target ? { tableKey: target.tableKey, colName: target.colName } : null)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1520,7 +1522,7 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
     handleMouseUp()
     if (fkDrag) {
       const pt = clientToSVG(e.clientX, e.clientY)
-      const target = findColumnAtSVGPoint(pt.x, pt.y, fkDrag.fromTableKey)
+      const target = findColumnAtSVGPoint(pt.x, pt.y, { tableKey: fkDrag.fromTableKey, colName: fkDrag.fromCol })
       if (target && onCreateFK) {
         const fromPos = visibleTablePositions.find(p => (p.tableKey || p.table.name) === fkDrag.fromTableKey)
         onCreateFK(fromPos?.table.name ?? fkDrag.fromTableKey, fkDrag.fromCol, target.tableName, target.colName)
