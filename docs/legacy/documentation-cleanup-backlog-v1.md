@@ -10,11 +10,26 @@ Status update (2026-03-12):
 - the residual review items from this audit have also been completed,
 - this file now serves mainly as a record of what was done and what acceptance gates were used.
 
+Status update (2026-03-13):
+
+- the next documentation goal is minimization rather than expansion,
+- user-facing onboarding should keep one primary path per intent,
+- any companion doc should exist only when it is materially shorter or materially deeper than the primary doc.
+- this file is now best treated as historical cleanup record rather than an active maintainer control surface,
+- [documentation-classification-matrix-v1.md](../maintenance/documentation-classification-matrix-v1.md) should be the primary active minimization inventory going forward,
+- this file moved to [docs/legacy/README.md](README.md) after the cleanup history stopped being part of the active maintenance surface.
+
 Structural rule:
 
-- no loose Markdown files directly inside [docs/](../),
+- no loose Markdown files directly inside [docs/](..),
 - every active doc must live in a classified subfolder,
-- anything pending deletion review belongs in [docs/legacy/](../legacy).
+- anything pending deletion review belongs in [docs/legacy/](.).
+
+Minimization rule:
+
+- one primary document per audience + task,
+- companion docs must defer quickly to the primary path,
+- if two docs serve the same audience and the same job, merge one into the other or move one toward archival review.
 
 ## Priority model
 
@@ -22,9 +37,23 @@ Structural rule:
 - `P1`: high-value cleanup that reduces duplication and structural confusion
 - `P2`: deeper editorial and archival cleanup
 
+## Next reduction pass
+
+These are the main candidates for future consolidation if duplication starts growing again:
+
+1. [docs/getting-started/10-min.md](../getting-started/10-min.md)
+	- keep only as an optional ultra-short quick path,
+	- merge into [docs/getting-started/README.md](../getting-started/README.md) if it starts accumulating explanation instead of staying compact.
+2. [docs/getting-started/09a-general-purpose-starter-pack.md](../getting-started/09a-general-purpose-starter-pack.md)
+	- keep only if it remains a compact app-side checklist,
+	- otherwise fold it into [docs/getting-started/09-go-sdk-and-integration.md](../getting-started/09-go-sdk-and-integration.md) or [docs/getting-started/10-adoption-playbook.md](../getting-started/10-adoption-playbook.md).
+3. [docs/migration/sqlite-quick-path.md](../migration/sqlite-quick-path.md)
+	- keep only as a very short migration companion,
+	- otherwise collapse it into [docs/migration/sqlite-postgres-lite-guide-v1.md](../migration/sqlite-postgres-lite-guide-v1.md).
+
 ## P0 — Fix misleading or stale sources of truth
 
-### 1. Rewrite [.github/copilot-instructions.md](../.github/copilot-instructions.md)
+### 1. Rewrite [.github/copilot-instructions.md](../../.github/copilot-instructions.md)
 
 Completed.
 
@@ -39,7 +68,7 @@ Deliverables:
 - retain durable principles
 - remove stale repo-shape and outdated scope language
 
-### 2. Rewrite [README.md](../README.md) as a short front door
+### 2. Rewrite [README.md](../../README.md) as a short front door
 
 Completed.
 
@@ -137,9 +166,9 @@ Completed.
 
 Targets:
 
-- [docs/adr/0002-generalist-engine-boundary-and-adoption-surface.md](adr/0002-generalist-engine-boundary-and-adoption-surface.md)
+- [docs/adr/0002-generalist-engine-boundary-and-adoption-surface.md](../adr/0002-generalist-engine-boundary-and-adoption-surface.md)
 - [docs/product/asql-adoption-friction-prioritized-backlog-v1.md](../product/asql-adoption-friction-prioritized-backlog-v1.md)
-- [hospitalapp/FRICTION_LOG.md](../hospitalapp/FRICTION_LOG.md)
+- [hospitalapp/FRICTION_LOG.md](../../hospitalapp/FRICTION_LOG.md)
 
 Deliverables:
 
@@ -154,7 +183,7 @@ Completed:
 
 - deleted the superseded engineering DX backlog and improvement-plan notes,
 - deleted the early AI roadmap,
-- kept [docs/legacy/README.md](../legacy/README.md) as the retention-policy marker for future review cycles.
+- kept [docs/legacy/README.md](README.md) as the retention-policy marker for future review cycles.
 
 Follow-through:
 
@@ -183,8 +212,8 @@ Additional close-out completed after the main pass:
 - refreshed [docs/reference/versioned-reference-capture-semantics-v1.md](../reference/versioned-reference-capture-semantics-v1.md),
 - positioned [docs/migration/sqlite-quick-path.md](../migration/sqlite-quick-path.md) explicitly as the short migration companion,
 - refreshed [docs/ai/06-agent-playbook.md](../ai/06-agent-playbook.md), [docs/ai/07-definition-of-done.md](../ai/07-definition-of-done.md), and [docs/ai/09-benchmark-baseline.md](../ai/09-benchmark-baseline.md),
-- added an implementation-status note to [docs/adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md](adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md),
-- positioned [hospitalapp/README.md](../hospitalapp/README.md) explicitly as a supporting example doc.
+- added an implementation-status note to [docs/adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md](../adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md),
+- positioned [hospitalapp/README.md](../../hospitalapp/README.md) explicitly as a supporting example doc.
 
 Deliverables:
 

@@ -10,4 +10,7 @@ Rules:
 
 Current state:
 
-- no retained legacy docs at the moment.
+- [documentation-audit-plan-v1.md](documentation-audit-plan-v1.md) — archived record of the completed documentation audit.
+- [documentation-cleanup-backlog-v1.md](documentation-cleanup-backlog-v1.md) — archived record of the completed documentation cleanup execution.
+
+These files are retained only as historical context and should not be treated as active maintainer guidance.

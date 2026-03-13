@@ -46,16 +46,19 @@ Audit close-out:
 | [.github/copilot-instructions.md](../.github/copilot-instructions.md) | AI/maintainers | Internal instructions | keep-primary | Rewritten to current product/runtime posture; active source of truth for AI-facing repo guidance. |
 | [README.md](../README.md) | All users | Front door + minimal quickstart | keep-primary | Now acts as the short front door and routes adoption into getting-started. |
 | [docs/getting-started/README.md](../getting-started/README.md) | New adopters | Onboarding index | keep-primary | Should remain the main narrative spine. |
-| [docs/getting-started/10-min.md](../getting-started/10-min.md) | New adopters | Short subordinate quick path | keep-reference | Retained as a minimal fast path that explicitly defers to the main getting-started spine. |
+| [docs/getting-started/00-engine-owned-vs-app-owned.md](../getting-started/00-engine-owned-vs-app-owned.md) | New adopters | Scope-boundary primer | keep-reference | Keep as a short framing note only; if it expands, fold boundary guidance back into [docs/getting-started/README.md](../getting-started/README.md) and [docs/getting-started/01-overview.md](../getting-started/01-overview.md). |
+| [docs/getting-started/10-min.md](../getting-started/10-min.md) | New adopters | Optional quick path | keep-reference | Keep only while it stays materially shorter than the main onboarding spine; otherwise merge into [docs/getting-started/README.md](../getting-started/README.md). |
 | [docs/getting-started/01-overview.md](../getting-started/01-overview.md) | New adopters | Product intro | keep-primary | Good placement; needs boundary callouts and alignment with current stance. |
 | [docs/getting-started/02-install-and-run.md](../getting-started/02-install-and-run.md) | New adopters | Local startup | keep-primary | Canonical runtime/port/Studio invocation was refreshed in this cleanup pass. |
 | [docs/getting-started/03-first-database.md](../getting-started/03-first-database.md) | New adopters | First schema/read/write | keep-primary | Current pgwire-shell walkthrough remains aligned with the canonical local path. |
 | [docs/getting-started/04-domains-and-transactions.md](../getting-started/04-domains-and-transactions.md) | New adopters | Core mental model | keep-primary | Should absorb more adoption-boundary guidance. |
+| [docs/getting-started/04a-domain-modeling-guide.md](../getting-started/04a-domain-modeling-guide.md) | Teams modeling boundaries | Domain-splitting aid | keep-reference | Keep only as a short companion to chapter 04; merge into [docs/getting-started/04-domains-and-transactions.md](../getting-started/04-domains-and-transactions.md) if it starts repeating full adoption guidance. |
 | [docs/getting-started/05-time-travel-and-history.md](../getting-started/05-time-travel-and-history.md) | New adopters | Temporal intro | keep-primary | Good candidate to absorb more from temporal reference docs. |
 | [docs/getting-started/06-entities-and-versioned-references.md](../getting-started/06-entities-and-versioned-references.md) | New adopters | Aggregate/version intro | keep-primary | Keep; verify wording matches current automatic capture semantics. |
 | [docs/getting-started/07-fixtures-and-seeding.md](../getting-started/07-fixtures-and-seeding.md) | New adopters | Deterministic setup | keep-primary | Important onboarding asset; should become stronger. |
 | [docs/getting-started/08-studio-cli-and-daily-workflow.md](../getting-started/08-studio-cli-and-daily-workflow.md) | New adopters | Tooling workflow | keep-primary | Studio and `asqlctl` workflow stays aligned with the current pgwire-first posture. |
 | [docs/getting-started/09-go-sdk-and-integration.md](../getting-started/09-go-sdk-and-integration.md) | Go developers | Integration path | keep-primary | Good place for helper-pattern improvements. |
+| [docs/getting-started/09a-general-purpose-starter-pack.md](../getting-started/09a-general-purpose-starter-pack.md) | App teams adopting ASQL | App-side baseline checklist | keep-reference | Keep only as a compact checklist; merge into 09 or 10 if it grows into a second adoption guide. |
 | [docs/getting-started/10-adoption-playbook.md](../getting-started/10-adoption-playbook.md) | Teams adopting ASQL | Rollout guidance | keep-primary | Should absorb some new adoption-friction guidance. |
 | [docs/getting-started/11-troubleshooting.md](../getting-started/11-troubleshooting.md) | New adopters | Troubleshooting | keep-primary | Should receive expectation-mismatch material. |
 | [docs/reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md) | Go developers | Deep examples | keep-reference | Support getting-started; avoid duplicating onboarding narrative. |
@@ -65,7 +68,7 @@ Audit close-out:
 | [docs/reference/versioned-reference-capture-semantics-v1.md](../reference/versioned-reference-capture-semantics-v1.md) | Developers/architects | Semantics note | keep-reference | Retained as a deeper standalone note with explicit links back to the primary onboarding/reference path. |
 | [docs/reference/sql-pgwire-compatibility-policy-v1.md](../reference/sql-pgwire-compatibility-policy-v1.md) | All users | Compatibility policy | keep-primary | Clear policy doc; README/getting-started should link to it. |
 | [docs/reference/postgres-compatibility-surface-v1.md](../reference/postgres-compatibility-surface-v1.md) | Developers | Detailed compatibility matrix | keep-reference | Good detailed companion to policy doc. |
-| [docs/migration/sqlite-quick-path.md](../migration/sqlite-quick-path.md) | Migration users | Fast migration note | keep-reference | Retained as the short migration companion, with links to the fuller migration and adoption guides. |
+| [docs/migration/sqlite-quick-path.md](../migration/sqlite-quick-path.md) | Migration users | Fast migration note | keep-reference | Keep only as a materially shorter migration companion; otherwise collapse into the fuller migration guide. |
 | [docs/migration/sqlite-postgres-lite-guide-v1.md](../migration/sqlite-postgres-lite-guide-v1.md) | Migration users | Full migration guide | keep-reference | Should remain deeper migration document. |
 | [docs/operations/runbook.md](../operations/runbook.md) | Operators/developers | Technical runbook | keep-primary | Current-runtime wording was aligned around the pgwire-first path. |
 | [docs/operations/incident-runbook-v1.md](../operations/incident-runbook-v1.md) | Operators | Incident handling | keep-reference | Refreshed for pgwire-first auth/runtime posture; retain as an operational companion doc. |
@@ -83,7 +86,8 @@ Audit close-out:
 | [docs/product/design-partner-triage-v1.md](../product/design-partner-triage-v1.md) | Product | Feedback operations | keep-reference | Refreshed to force ownership classification and avoid vertical workflow asks leaking into core scope. |
 | [docs/commercial/comercial-caso-uso-fabricacion-farmaceutica.md](../commercial/comercial-caso-uso-fabricacion-farmaceutica.md) | Commercial | Specific vertical narrative | keep-reference | Retained as a sales/partner narrative with explicit note that ASQL remains a general-purpose database. |
 | [docs/product/asql-adoption-friction-prioritized-backlog-v1.md](../product/asql-adoption-friction-prioritized-backlog-v1.md) | Product/engineering | Adoption prioritization snapshot | keep-reference | Snapshot context for adoption work; use [docs/ai/05-backlog.md](../ai/05-backlog.md) for active engineering execution order. |
-| [docs/maintenance/documentation-audit-plan-v1.md](documentation-audit-plan-v1.md) | Maintainers | Audit plan | keep-primary | New umbrella plan for this cleanup effort. |
+| [docs/legacy/documentation-audit-plan-v1.md](../legacy/documentation-audit-plan-v1.md) | Maintainers | Archived audit record | archive/delete | Historical plan retained only as legacy context; not part of the active maintenance surface. |
+| [docs/legacy/documentation-cleanup-backlog-v1.md](../legacy/documentation-cleanup-backlog-v1.md) | Maintainers | Archived cleanup record | archive/delete | Historical execution record retained only for reference during deletion review. |
 | [docs/adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md](../adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md) | Maintainers | Decision record | keep-reference | Now includes an implementation-status note; keep as rationale/history rather than live execution guidance. |
 | [docs/adr/0002-generalist-engine-boundary-and-adoption-surface.md](../adr/0002-generalist-engine-boundary-and-adoption-surface.md) | Maintainers | Decision record | keep-primary | Current boundary decision; keep. |
 | [docs/ai/README.md](../ai/README.md) | AI/maintainers | Internal index | keep-primary | Updated to distinguish current core docs from historical docs. |
@@ -103,5 +107,22 @@ Audit close-out:
 ## Recommended next cleanup sequence
 
 1. Treat future changes as periodic documentation maintenance instead of broad cleanup.
-2. Re-run a lightweight consistency pass whenever runtime posture, onboarding flow, or benchmark/commercial posture changes materially.
-3. Continue routing any document pending deletion review through [docs/legacy/README.md](../legacy/README.md).
+2. Keep one active maintainer inventory doc and move completed audit-history docs toward [docs/legacy/README.md](../legacy/README.md).
+3. Re-run a lightweight consistency pass whenever runtime posture, onboarding flow, or benchmark/commercial posture changes materially.
+
+## Minimum active-set recommendation
+
+If the goal is to minimize active documentation while preserving adoption quality, the next concrete cuts should be:
+
+1. keep as primary adoption path:
+	- [README.md](../README.md)
+	- [docs/getting-started/README.md](../getting-started/README.md)
+	- the chapter flow under [docs/getting-started/](../getting-started)
+2. keep only as compact companions:
+	- [docs/getting-started/10-min.md](../getting-started/10-min.md)
+	- [docs/getting-started/04a-domain-modeling-guide.md](../getting-started/04a-domain-modeling-guide.md)
+	- [docs/getting-started/09a-general-purpose-starter-pack.md](../getting-started/09a-general-purpose-starter-pack.md)
+	- [docs/migration/sqlite-quick-path.md](../migration/sqlite-quick-path.md)
+3. treat as archive candidates after the audit is fully digested:
+	- [docs/legacy/documentation-audit-plan-v1.md](../legacy/documentation-audit-plan-v1.md)
+	- [docs/legacy/documentation-cleanup-backlog-v1.md](../legacy/documentation-cleanup-backlog-v1.md)

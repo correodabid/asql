@@ -522,7 +522,8 @@ make seed-domains-10x  # 10x scale: 1K recipes, 3K orders
 
 | Document | Description |
 |----------|-------------|
-| [Getting started (10 min)](docs/getting-started/10-min.md) | Hands-on guide from zero to time-travel |
+| [Getting started guide](docs/getting-started/README.md) | Primary onboarding path from first run to integration |
+| [Getting started (10 min)](docs/getting-started/10-min.md) | Optional ultra-short quick path |
 | [Go SDK cookbook](docs/reference/cookbook-go-sdk.md) | Code recipes for common operations |
 | [Architecture one-pager](docs/architecture/architecture-one-pager-v1.md) | System design overview |
 | [Benchmark one-pager](docs/product/benchmark-one-pager-v1.md) | Performance characteristics |

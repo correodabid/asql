@@ -15,6 +15,12 @@ Status update (2026-03-12):
 - the main audit and restructuring goals in this plan were completed in the current cleanup pass,
 - the remaining work is incremental review on a small residual set of docs rather than broad structural remediation.
 
+Status update (2026-03-13):
+
+- this file is now primarily historical context for maintainers,
+- [documentation-classification-matrix-v1.md](../maintenance/documentation-classification-matrix-v1.md) should be treated as the main active inventory for future minimization decisions,
+- this plan moved to [docs/legacy/README.md](README.md) because maintainers no longer need the original audit narrative in the active maintenance set.
+
 ## Review scope
 
 This audit includes:
@@ -26,8 +32,8 @@ This audit includes:
 - architecture / operations / pricing / support docs
 - ADRs
 - AI planning docs under [docs/ai/](../ai)
-- [.github/copilot-instructions.md](../.github/copilot-instructions.md)
-- example app docs such as [hospitalapp/README.md](../hospitalapp/README.md)
+- [.github/copilot-instructions.md](../../.github/copilot-instructions.md)
+- example app docs such as [hospitalapp/README.md](../../hospitalapp/README.md)
 
 ## Operating principles
 
@@ -84,8 +90,8 @@ Resolution in this pass:
 
 Now that we have:
 
-- [hospitalapp/FRICTION_LOG.md](../hospitalapp/FRICTION_LOG.md)
-- [docs/adr/0002-generalist-engine-boundary-and-adoption-surface.md](adr/0002-generalist-engine-boundary-and-adoption-surface.md)
+- [hospitalapp/FRICTION_LOG.md](../../hospitalapp/FRICTION_LOG.md)
+- [docs/adr/0002-generalist-engine-boundary-and-adoption-surface.md](../adr/0002-generalist-engine-boundary-and-adoption-surface.md)
 - [docs/product/asql-adoption-friction-prioritized-backlog-v1.md](../product/asql-adoption-friction-prioritized-backlog-v1.md)
 
 we should ensure they complement rather than repeat each other.
@@ -99,12 +105,13 @@ Resolution in this pass:
 
 ## Proposed target structure
 
-All Markdown files under [docs/](../) should live inside a classified folder.
-There should be no loose `.md` files directly at the root of [docs/](../).
+All Markdown files under [docs/](..)
+should live inside a classified folder.
+There should be no loose `.md` files directly at the root of [docs/](..).
 
 ### 1. Front door
 
-- [README.md](../README.md)
+- [README.md](../../README.md)
   - short product pitch
   - one minimal quickstart
   - clear link to getting-started
@@ -142,14 +149,14 @@ These should support getting-started, not replace it.
 ### 6. AI / maintenance instructions
 
 - [docs/ai/](../ai)
-- [docs/maintenance/](.)
-- [.github/copilot-instructions.md](../.github/copilot-instructions.md)
+- [docs/maintenance/](../maintenance)
+- [.github/copilot-instructions.md](../../.github/copilot-instructions.md)
 
 These should align with the actual current repository and current product stance.
 
 ### 7. Legacy review area
 
-- [docs/legacy/](../legacy)
+- [docs/legacy/](.)
 
 This folder is for historical docs or material under review for deletion.
 Anything moved there should be treated as non-primary documentation.
@@ -205,7 +212,7 @@ Check all docs for:
 
 ## Residual execution candidates
 
-1. Audit and update [.github/copilot-instructions.md](../.github/copilot-instructions.md)
+1. Audit and update [.github/copilot-instructions.md](../../.github/copilot-instructions.md)
 2. Unify README + getting-started + 10-min guide
 3. Define canonical local startup and port examples
 4. Decide whether `docs/getting-started/10-min.md` stays, shrinks, or merges into getting-started
