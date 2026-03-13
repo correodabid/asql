@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-export type TabId = 'workspace' | 'designer' | 'dashboard' | 'cluster' | 'time-explorer' | 'fixtures' | 'recovery'
+export type TabId = 'home' | 'workspace' | 'designer' | 'dashboard' | 'cluster' | 'time-explorer' | 'fixtures' | 'recovery'
 
 type TabDef = {
   id: TabId

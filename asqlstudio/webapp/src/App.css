@@ -351,6 +351,339 @@
   overflow: auto;
 }
 
+/* ── Start Here ─────────────────────────────────────────── */
+
+.start-here {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+}
+
+.start-here-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.9fr);
+  gap: 16px;
+}
+
+.start-here-hero-copy,
+.start-here-panel,
+.start-here-stat {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent), var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.start-here-hero-copy {
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 220px;
+  justify-content: center;
+  background:
+    radial-gradient(circle at top left, rgba(99, 91, 255, 0.18), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+    var(--bg-card);
+}
+
+.start-here-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: var(--accent-subtle);
+  color: var(--text-accent);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.start-here-kicker svg,
+.start-here-action-icon svg,
+.start-here-stat-icon svg,
+.start-here-step-index svg {
+  width: 16px;
+  height: 16px;
+}
+
+.start-here-hero-copy h1 {
+  font-size: 30px;
+  line-height: 1.08;
+  letter-spacing: -0.04em;
+}
+
+.start-here-hero-copy p {
+  max-width: 60ch;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
+.start-here-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.start-here-hero-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.start-here-stat {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+}
+
+.start-here-stat.tone-good {
+  border-color: rgba(52, 211, 153, 0.25);
+}
+
+.start-here-stat.tone-warn {
+  border-color: rgba(248, 113, 113, 0.2);
+}
+
+.start-here-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  color: var(--text-accent);
+  flex-shrink: 0;
+}
+
+.start-here-stat-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.start-here-stat-label,
+.start-here-step-description,
+.start-here-action-description,
+.start-here-panel-header p,
+.start-here-stat-meta {
+  color: var(--text-secondary);
+}
+
+.start-here-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.start-here-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+}
+
+.start-here-stat-meta {
+  font-size: 12px;
+}
+
+.start-here-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  gap: 16px;
+}
+
+.start-here-panel {
+  padding: 18px;
+}
+
+.start-here-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.start-here-panel-header.compact {
+  margin-bottom: 12px;
+}
+
+.start-here-panel-header h2 {
+  font-size: 18px;
+  letter-spacing: -0.03em;
+  margin-bottom: 4px;
+}
+
+.start-here-panel-header p,
+.start-here-step-description,
+.start-here-action-description {
+  font-size: 13px;
+}
+
+.start-here-progress {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-secondary);
+  background: var(--bg-elevated);
+  white-space: nowrap;
+}
+
+.start-here-steps,
+.start-here-action-list,
+.start-here-side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.start-here-step,
+.start-here-action {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: all var(--transition);
+}
+
+.start-here-step:hover,
+.start-here-action:hover {
+  border-color: var(--border-strong);
+  transform: translateY(-1px);
+  background: var(--bg-hover);
+}
+
+.start-here-step.done {
+  border-color: rgba(52, 211, 153, 0.22);
+}
+
+.start-here-step-index {
+  width: 34px;
+  height: 34px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-accent);
+  background: rgba(99, 91, 255, 0.08);
+  font-weight: 700;
+}
+
+.start-here-step.done .start-here-step-index {
+  color: var(--text-safe);
+  background: rgba(52, 211, 153, 0.08);
+  border-color: rgba(52, 211, 153, 0.18);
+}
+
+.start-here-step-copy,
+.start-here-action-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.start-here-step-title,
+.start-here-action-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.start-here-step-action,
+.start-here-action-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-accent);
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.start-here-action {
+  align-items: flex-start;
+}
+
+.start-here-action.compact {
+  padding: 14px;
+}
+
+.start-here-action.accent {
+  border-color: rgba(99, 91, 255, 0.25);
+}
+
+.start-here-action-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(99, 91, 255, 0.08);
+  color: var(--text-accent);
+  flex-shrink: 0;
+}
+
+.start-here-operator-panel {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+    rgba(17, 19, 30, 0.48);
+}
+
+@media (max-width: 1180px) {
+  .start-here-hero,
+  .start-here-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .start-here {
+    padding: 14px;
+  }
+
+  .start-here-hero-copy h1 {
+    font-size: 24px;
+  }
+
+  .start-here-hero-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .start-here-panel-header,
+  .start-here-step,
+  .start-here-action {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .start-here-step-action,
+  .start-here-action-cta {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+
 /* ── Designer Layout ─────────────────────────────────────── */
 
 .designer-layout {

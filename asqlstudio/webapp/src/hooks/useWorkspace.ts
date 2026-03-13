@@ -13,6 +13,10 @@ const HISTORY_KEY = 'asql_query_history'
 const FAVORITES_KEY = 'asql_query_favorites'
 const MAX_HISTORY = 50
 
+function notifyHistoryCount(count: number) {
+  window.dispatchEvent(new CustomEvent('asql:query-history-updated', { detail: { count } }))
+}
+
 function loadFromStorage<T>(key: string, fallback: T): T {
   try {
     const raw = localStorage.getItem(key)
@@ -115,6 +119,7 @@ export function useWorkspace(domain: string) {
     setHistory((prev) => {
       const next = [entry, ...prev].slice(0, MAX_HISTORY)
       saveToStorage(HISTORY_KEY, next)
+      notifyHistoryCount(next.length)
       return next
     })
   }, [])
@@ -131,6 +136,7 @@ export function useWorkspace(domain: string) {
   const clearHistory = useCallback(() => {
     setHistory([])
     saveToStorage(HISTORY_KEY, [])
+    notifyHistoryCount(0)
   }, [])
 
   // ─── Max LSN ───────────────────────────────────────────

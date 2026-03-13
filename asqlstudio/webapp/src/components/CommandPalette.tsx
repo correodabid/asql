@@ -107,6 +107,13 @@ export function CommandPalette({
 
     // Navigation
     cmds.push({
+      id: 'nav-home',
+      category: 'Navigation',
+      label: 'Go to Start Here',
+      description: 'Switch to the guided first-run overview',
+      action: () => onNavigate('home'),
+    })
+    cmds.push({
       id: 'nav-workspace',
       category: 'Navigation',
       label: 'Go to Workspace',
@@ -133,6 +140,27 @@ export function CommandPalette({
       label: 'Go to Cluster',
       description: 'Switch to the Cluster tab',
       action: () => onNavigate('cluster'),
+    })
+    cmds.push({
+      id: 'nav-time-explorer',
+      category: 'Navigation',
+      label: 'Go to Time Explorer',
+      description: 'Switch to the temporal exploration tab',
+      action: () => onNavigate('time-explorer'),
+    })
+    cmds.push({
+      id: 'nav-fixtures',
+      category: 'Navigation',
+      label: 'Go to Fixtures',
+      description: 'Switch to the deterministic fixture workflows',
+      action: () => onNavigate('fixtures'),
+    })
+    cmds.push({
+      id: 'nav-recovery',
+      category: 'Navigation',
+      label: 'Go to Recovery',
+      description: 'Switch to backup, restore, and recovery tools',
+      action: () => onNavigate('recovery'),
     })
 
     return cmds

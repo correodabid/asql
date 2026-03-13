@@ -7,11 +7,12 @@ import { DDLPanel } from './components/DDLPanel'
 import { DiffPanel } from './components/DiffPanel'
 import { ERDiagram } from './components/ERDiagram'
 import { FixturePanel } from './components/FixturePanel'
-import { IconDatabase, IconDownload, IconGrid, IconMoon, IconSchema, IconShield, IconSun, IconTerminal, IconTimeline } from './components/Icons'
+import { IconDatabase, IconDownload, IconGrid, IconMoon, IconSchema, IconShield, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
 import { IndexEditor } from './components/IndexEditor'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { RecoveryPanel } from './components/RecoveryPanel'
 import { Sidebar } from './components/Sidebar'
+import { StartHerePanel } from './components/StartHerePanel'
 import { StatusBar } from './components/StatusBar'
 import { TabBar, type TabId } from './components/Tabs'
 import { TimeExplorer } from './components/TimeExplorer'
@@ -29,6 +30,7 @@ import { api } from './lib/api'
 import './App.css'
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
+  { id: 'home',          label: 'Start Here',    icon: <IconZap /> },
   { id: 'workspace',     label: 'Workspace',     icon: <IconTerminal /> },
   { id: 'designer',     label: 'Designer',      icon: <IconSchema /> },
   { id: 'dashboard',    label: 'Dashboard',     icon: <IconGrid /> },
@@ -37,6 +39,19 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: 'fixtures',      label: 'Fixtures',      icon: <IconDownload /> },
   { id: 'recovery',      label: 'Recovery',      icon: <IconDownload /> },
 ]
+
+const QUERY_HISTORY_KEY = 'asql_query_history'
+
+function readQueryHistoryCount() {
+  try {
+    const raw = localStorage.getItem(QUERY_HISTORY_KEY)
+    if (!raw) return 0
+    const parsed = JSON.parse(raw)
+    return Array.isArray(parsed) ? parsed.length : 0
+  } catch {
+    return 0
+  }
+}
 
 type DashboardBoundaryProps = {
   children: React.ReactNode
@@ -82,9 +97,10 @@ class DashboardBoundary extends Component<DashboardBoundaryProps, DashboardBound
 }
 
 function App() {
-  const [activeTab, setActiveTab] = useState<TabId>('workspace')
+  const [activeTab, setActiveTab] = useState<TabId>('home')
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [designerTableCounts, setDesignerTableCounts] = useState<Record<string, number>>({})
+  const [queryHistoryCount, setQueryHistoryCount] = useState(() => readQueryHistoryCount())
   const { toasts, addToast: _addToast, dismiss: dismissToast } = useToast()
   void _addToast
   const { theme, toggleTheme } = useTheme()
@@ -145,7 +161,7 @@ function App() {
 
       // Cmd+1/2/3/4 — main tab switching (works even in inputs)
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
-    const tabMap: Record<string, TabId> = { '1': 'workspace', '2': 'designer', '3': 'dashboard', '4': 'cluster', '5': 'time-explorer', '6': 'fixtures', '7': 'recovery' }
+        const tabMap: Record<string, TabId> = { '1': 'home', '2': 'workspace', '3': 'designer', '4': 'dashboard', '5': 'cluster', '6': 'time-explorer', '7': 'fixtures', '8': 'recovery' }
         const tab = tabMap[e.key]
         if (tab) {
           e.preventDefault()
@@ -182,6 +198,26 @@ function App() {
     return () => window.removeEventListener('keydown', handler)
   }, [cmdPalette])
 
+  useEffect(() => {
+    const syncHistoryCount = () => setQueryHistoryCount(readQueryHistoryCount())
+    const handleHistoryUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ count?: number }>).detail
+      if (typeof detail?.count === 'number') {
+        setQueryHistoryCount(detail.count)
+        return
+      }
+      syncHistoryCount()
+    }
+
+    window.addEventListener('focus', syncHistoryCount)
+    window.addEventListener('asql:query-history-updated', handleHistoryUpdate as EventListener)
+
+    return () => {
+      window.removeEventListener('focus', syncHistoryCount)
+      window.removeEventListener('asql:query-history-updated', handleHistoryUpdate as EventListener)
+    }
+  }, [])
+
   // Fetch row counts per table when the canvas designer is active
   useEffect(() => {
     if (activeTab !== 'designer' || designerView !== 'canvas' || isAllDomains) return
@@ -214,6 +250,20 @@ function App() {
         ? diffOperations.length
         : undefined,
   }))
+
+  const tableCountInScope = isAllDomains
+    ? (allDomainsModel?.domains.reduce((n, d) => n + d.tables.length, 0) ?? 0)
+    : model.tables.length
+
+  const openDesignerCanvas = () => {
+    setDesignerView('canvas')
+    setActiveTab('designer')
+  }
+
+  const openDesignerDDL = () => {
+    setDesignerView('ddl')
+    setActiveTab('designer')
+  }
 
   return (
     <div className="app-shell">
@@ -271,6 +321,22 @@ function App() {
           <TabBar tabs={tabsWithBadges} active={activeTab} onChange={setActiveTab} />
 
           <div className="main-content">
+            {activeTab === 'home' && (
+              <StartHerePanel
+                heartbeatStatus={heartbeat.status}
+                heartbeatLatency={heartbeat.latency}
+                currentDomain={isAllDomains ? 'All Domains' : (model.domain || 'default')}
+                isAllDomains={isAllDomains}
+                domainCount={domains.length}
+                tableCount={tableCountInScope}
+                diffCount={diffOperations.length}
+                queryHistoryCount={queryHistoryCount}
+                onNavigate={setActiveTab}
+                onOpenDesignerCanvas={openDesignerCanvas}
+                onOpenDesignerDDL={openDesignerDDL}
+              />
+            )}
+
             {activeTab === 'workspace' && (
               <Workspace domain={model.domain || 'default'} />
             )}
@@ -430,7 +496,7 @@ function App() {
       <StatusBar
         health={health}
         designerStatus={designerStatus}
-        tableCount={isAllDomains ? (allDomainsModel?.domains.reduce((n, d) => n + d.tables.length, 0) ?? 0) : model.tables.length}
+        tableCount={tableCountInScope}
         domain={isAllDomains ? 'All Domains' : model.domain}
         heartbeat={heartbeat.status}
         heartbeatLatency={heartbeat.latency}
