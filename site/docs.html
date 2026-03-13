@@ -36,11 +36,11 @@
       <h1 class="docs-hero-title">Documentation</h1>
       <p class="docs-hero-sub">Everything you need to get started, go deep, and run in production.</p>
       <div class="docs-quicklinks">
-        <a href="doc.html?path=getting-started/10-min.md" class="docs-quicklink">
+        <a href="doc.html?path=getting-started/02-install-and-run.md" class="docs-quicklink">
           <span class="docs-ql-icon">⚡</span>
           <span class="docs-ql-text">
-            <strong>10-Minute Quickstart</strong>
-            <small>Fastest path to your first transaction</small>
+            <strong>Quick Start</strong>
+            <small>Fastest path to running ASQL locally</small>
           </span>
           <span class="docs-ql-arrow">→</span>
         </a>
@@ -66,13 +66,6 @@
       <p class="docs-section-desc">The recommended learning path — from zero to building real applications.</p>
 
       <div class="docs-grid">
-        <a href="doc.html?path=getting-started/00-engine-owned-vs-app-owned.md" class="docs-card">
-          <div class="docs-card-num">00</div>
-          <div class="docs-card-body">
-            <h4>Engine vs App Responsibilities</h4>
-            <p>What ASQL owns vs what your application owns. Read this first.</p>
-          </div>
-        </a>
         <a href="doc.html?path=getting-started/01-overview.md" class="docs-card">
           <div class="docs-card-num">01</div>
           <div class="docs-card-body">
@@ -184,17 +177,9 @@
           <h4>Temporal Introspection</h4>
           <p>Supported temporal helper functions over pgwire.</p>
         </a>
-        <a href="doc.html?path=reference/versioned-reference-capture-semantics-v1.md" class="docs-ref-card">
-          <h4>Versioned FK Semantics</h4>
-          <p>Versioned reference capture rules and behavior.</p>
-        </a>
         <a href="doc.html?path=reference/fixture-format-and-lifecycle-v1.md" class="docs-ref-card">
           <h4>Fixture Format</h4>
           <p>Fixture file contract and schema specification.</p>
-        </a>
-        <a href="doc.html?path=reference/schema-evolution-temporal-checklist-v1.md" class="docs-ref-card">
-          <h4>Schema Evolution Checklist</h4>
-          <p>Checklist for schema changes touching temporal features.</p>
         </a>
       </div>
     </div>
@@ -214,22 +199,6 @@
               <h4>Architecture One-Pager</h4>
               <p>High-level system layout for architects and decision-makers.</p>
             </a>
-            <a href="doc.html?path=architecture/cluster-control-plane-note-v1.md" class="docs-ref-card">
-              <h4>Cluster Control Plane</h4>
-              <p>Raft, pgwire, gRPC — the cluster runtime path.</p>
-            </a>
-            <a href="doc.html?path=adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md" class="docs-ref-card">
-              <h4>ADR-001: Temporal DX</h4>
-              <p>Developer surface improvements for versioned references.</p>
-            </a>
-            <a href="doc.html?path=adr/0002-generalist-engine-boundary-and-adoption-surface.md" class="docs-ref-card">
-              <h4>ADR-002: General-Purpose Scope</h4>
-              <p>Why ASQL stays a general-purpose engine.</p>
-            </a>
-            <a href="doc.html?path=adr/0003-studio-as-external-product-surface.md" class="docs-ref-card">
-              <h4>ADR-003: Studio Boundary</h4>
-              <p>Studio as a product sibling, not a thin wrapper.</p>
-            </a>
           </div>
         </div>
         <div class="docs-col">
@@ -238,13 +207,9 @@
             <h2>Migration</h2>
           </div>
           <div class="docs-grid docs-grid-compact">
-            <a href="doc.html?path=migration/sqlite-quick-path.md" class="docs-ref-card">
-              <h4>SQLite Quick Migration</h4>
-              <p>Lightweight migration path from SQLite.</p>
-            </a>
             <a href="doc.html?path=migration/sqlite-postgres-lite-guide-v1.md" class="docs-ref-card">
-              <h4>Full Migration Guide</h4>
-              <p>Phased migration from SQLite or Postgres-lite workloads.</p>
+                <h4>Migration Guide</h4>
+                <p>Phased migration from SQLite or Postgres-lite workloads.</p>
             </a>
           </div>
         </div>
@@ -269,18 +234,6 @@
         <a href="doc.html?path=operations/incident-runbook-v1.md" class="docs-ref-card">
           <h4>Incident Runbook</h4>
           <p>P0/P1/P2 incident response scenarios and procedures.</p>
-        </a>
-        <a href="doc.html?path=operations/slo-v1.md" class="docs-ref-card">
-          <h4>SLO Definitions</h4>
-          <p>Determinism, crash recovery, and replication SLOs.</p>
-        </a>
-        <a href="doc.html?path=operations/telemetry-dashboard-v1.md" class="docs-ref-card">
-          <h4>Telemetry Dashboard</h4>
-          <p>Minimum operational dashboard panels and metrics.</p>
-        </a>
-        <a href="doc.html?path=operations/security-disclosure-policy-v1.md" class="docs-ref-card">
-          <h4>Security Disclosure</h4>
-          <p>Responsible vulnerability disclosure policy.</p>
         </a>
         <a href="doc.html?path=operations/release-upgrade-compat-checklist-v1.md" class="docs-ref-card">
           <h4>Release & Upgrade Checklist</h4>
