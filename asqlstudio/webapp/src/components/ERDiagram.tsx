@@ -19,6 +19,8 @@ type Props = {
   onAddColumn?: (tableName: string) => void
   /** Called when user drag-creates an FK from canvas */
   onCreateFK?: (fromTable: string, fromCol: string, toTable: string, toCol: string) => void
+  /** Called when user deletes an FK via keyboard (removes references from a column) */
+  onDeleteFK?: (fromTable: string, fromCol: string) => void
   /** Called when user clicks a column row — passes model table index and column index */
   onSelectColumn?: (tableIndex: number, colIndex: number) => void
   /** Called when user clicks an index row — passes model table index and index index */
@@ -564,7 +566,7 @@ function colY(pos: TablePos, colName: string) {
   return pos.y + TABLE_HEADER_H + (idx >= 0 ? idx : 0) * COL_ROW_H + COL_ROW_H / 2
 }
 
-function RelationshipPath({ rel, isHovered, onHover, index, dimmed, highlightedColKey }: {
+function RelationshipPath({ rel, isHovered, onHover, index, dimmed, highlightedColKey, isSelected, onSelect }: {
   rel: Rel
   isHovered: boolean
   onHover: (index: number | null) => void
@@ -572,6 +574,8 @@ function RelationshipPath({ rel, isHovered, onHover, index, dimmed, highlightedC
   dimmed?: boolean
   /** "tableKey:colName" — when set, brightens any rel whose endpoint column matches */
   highlightedColKey?: string | null
+  isSelected?: boolean
+  onSelect?: (index: number) => void
 }) {
   const isSelfRef = (rel.from.tableKey || rel.from.table.name) === (rel.to.tableKey || rel.to.table.name)
   const fromRight = rel.from.x + rel.from.w
@@ -615,38 +619,44 @@ function RelationshipPath({ rel, isHovered, onHover, index, dimmed, highlightedC
     ].join(' ')
 
     const swLine = eh ? (isColHL ? 3 : 2.5) : (hasEntityColor ? 2 : 1.5)
+    const visColor = isSelected ? '#f59e0b' : hlColor
 
     return (
       <g
         onMouseEnter={() => onHover(index)}
         onMouseLeave={() => onHover(null)}
+        onClick={(e) => { e.stopPropagation(); onSelect?.(index) }}
         opacity={dimmed ? 0.1 : 1}
-        style={{ transition: 'opacity 200ms' }}
+        style={{ transition: 'opacity 200ms', cursor: 'pointer' }}
       >
         {/* Hit area */}
-        <path d={loopPath} fill="none" stroke="transparent" strokeWidth={14} style={{ cursor: 'pointer' }} />
+        <path d={loopPath} fill="none" stroke="transparent" strokeWidth={14} />
+        {/* Selection ring */}
+        {isSelected && (
+          <path d={loopPath} fill="none" stroke="#f59e0b" strokeWidth={7} opacity={0.22} />
+        )}
         {/* Visible loop */}
         <path
           d={loopPath}
           fill="none"
-          stroke={hlColor}
-          strokeWidth={swLine}
-          strokeDasharray={isCross ? (eh ? '8 4' : '4 4') : (hasEntityColor ? 'none' : (eh ? 'none' : '6 3'))}
-          opacity={eh ? 1 : (hasEntityColor ? 0.7 : 0.5)}
-          markerEnd={eh ? 'url(#arrowhead-hover)' : 'url(#arrowhead)'}
+          stroke={visColor}
+          strokeWidth={isSelected ? 2.5 : swLine}
+          strokeDasharray={isCross ? (eh ? '8 4' : '4 4') : (hasEntityColor ? 'none' : (eh || isSelected ? 'none' : '6 3'))}
+          opacity={isSelected ? 1 : (eh ? 1 : (hasEntityColor ? 0.7 : 0.5))}
+          markerEnd={eh || isSelected ? 'url(#arrowhead-hover)' : 'url(#arrowhead)'}
           style={{ transition: 'opacity 150ms, stroke-width 150ms' }}
         />
         {/* Dots */}
-        <circle cx={rx} cy={exitY}  r={isColHL ? 4 : 3} fill={hlColor} opacity={eh ? 0.9 : 0.4} />
-        <circle cx={rx} cy={enterY} r={isColHL ? 4 : 3} fill={hlColor} opacity={eh ? 0.9 : 0.4} />
+        <circle cx={rx} cy={exitY}  r={isColHL || isSelected ? 4 : 3} fill={visColor} opacity={eh || isSelected ? 0.9 : 0.4} />
+        <circle cx={rx} cy={enterY} r={isColHL || isSelected ? 4 : 3} fill={visColor} opacity={eh || isSelected ? 0.9 : 0.4} />
         {/* Cardinality labels */}
-        {eh && (
+        {(eh || isSelected) && (
           <>
             <text x={rx + 8} y={exitY  - 7} fontSize="10" fontWeight="600"
-              fill={isCross ? '#f59e0b' : (isColHL ? '#22d3ee' : (hasEntityColor ? strokeColor : 'var(--text-accent)'))}
+              fill={isSelected ? '#f59e0b' : (isCross ? '#f59e0b' : (isColHL ? '#22d3ee' : (hasEntityColor ? strokeColor : 'var(--text-accent)')))}
               textAnchor="start" fontFamily="Inter, sans-serif">N</text>
             <text x={rx + 8} y={enterY + 16} fontSize="10" fontWeight="600"
-              fill={isCross ? '#f59e0b' : (isColHL ? '#22d3ee' : (hasEntityColor ? strokeColor : 'var(--text-accent)'))}
+              fill={isSelected ? '#f59e0b' : (isCross ? '#f59e0b' : (isColHL ? '#22d3ee' : (hasEntityColor ? strokeColor : 'var(--text-accent)')))}
               textAnchor="start" fontFamily="Inter, sans-serif">1</text>
           </>
         )}
@@ -665,45 +675,40 @@ function RelationshipPath({ rel, isHovered, onHover, index, dimmed, highlightedC
     <g
       onMouseEnter={() => onHover(index)}
       onMouseLeave={() => onHover(null)}
+      onClick={(e) => { e.stopPropagation(); onSelect?.(index) }}
       opacity={dimmed ? 0.1 : 1}
-      style={{ transition: 'opacity 200ms' }}
+      style={{ transition: 'opacity 200ms', cursor: 'pointer' }}
     >
       {/* Invisible hit area for easier hover targeting */}
-      <path
-        d={pathD}
-        fill="none"
-        stroke="transparent"
-        strokeWidth={14}
-        style={{ cursor: 'pointer' }}
-      />
-
+      <path d={pathD} fill="none" stroke="transparent" strokeWidth={14} />
+      {/* Selection ring */}
+      {isSelected && (
+        <path d={pathD} fill="none" stroke="#f59e0b" strokeWidth={7} opacity={0.22} />
+      )}
       {/* Visible line */}
       <path
         d={pathD}
         fill="none"
-        stroke={hlColor}
-        strokeWidth={eh ? (isColHL ? 3 : 2.5) : (hasEntityColor ? 2 : 1.5)}
-        strokeDasharray={isCross ? (eh ? '8 4' : '4 4') : (hasEntityColor ? 'none' : (eh ? 'none' : '6 3'))}
-        opacity={eh ? 1 : (hasEntityColor ? 0.7 : 0.5)}
-        markerEnd={eh ? 'url(#arrowhead-hover)' : 'url(#arrowhead)'}
+        stroke={isSelected ? '#f59e0b' : hlColor}
+        strokeWidth={isSelected ? 2.5 : (eh ? (isColHL ? 3 : 2.5) : (hasEntityColor ? 2 : 1.5))}
+        strokeDasharray={isCross ? (eh ? '8 4' : '4 4') : (hasEntityColor ? 'none' : (eh || isSelected ? 'none' : '6 3'))}
+        opacity={isSelected ? 1 : (eh ? 1 : (hasEntityColor ? 0.7 : 0.5))}
+        markerEnd={eh || isSelected ? 'url(#arrowhead-hover)' : 'url(#arrowhead)'}
         style={{ transition: 'opacity 150ms, stroke-width 150ms' }}
       />
-
       {/* Connection dot at FK source */}
-      <circle cx={fromX} cy={fy} r={isColHL ? 4 : 3} fill={hlColor} opacity={eh ? 0.9 : 0.4} />
-
+      <circle cx={fromX} cy={fy} r={isColHL || isSelected ? 4 : 3} fill={isSelected ? '#f59e0b' : hlColor} opacity={eh || isSelected ? 0.9 : 0.4} />
       {/* Connection dot at PK target */}
-      <circle cx={toX} cy={ty} r={isColHL ? 4 : 3} fill={hlColor} opacity={eh ? 0.9 : 0.4} />
-
-      {/* Cardinality labels on hover */}
-      {eh && (
+      <circle cx={toX} cy={ty} r={isColHL || isSelected ? 4 : 3} fill={isSelected ? '#f59e0b' : hlColor} opacity={eh || isSelected ? 0.9 : 0.4} />
+      {/* Cardinality labels on hover or selection */}
+      {(eh || isSelected) && (
         <>
           <text
             x={fromX + (fromRight < toLeft ? -14 : 14)}
             y={fy - 10}
             fontSize="10"
             fontWeight="600"
-            fill={isCross ? '#f59e0b' : (isColHL ? '#22d3ee' : (hasEntityColor ? strokeColor : 'var(--text-accent)'))}
+            fill={isSelected ? '#f59e0b' : (isCross ? '#f59e0b' : (isColHL ? '#22d3ee' : (hasEntityColor ? strokeColor : 'var(--text-accent)')))}
             textAnchor="middle"
             fontFamily="Inter, sans-serif"
           >
@@ -714,7 +719,7 @@ function RelationshipPath({ rel, isHovered, onHover, index, dimmed, highlightedC
             y={ty - 10}
             fontSize="10"
             fontWeight="600"
-            fill={isCross ? '#f59e0b' : (isColHL ? '#22d3ee' : (hasEntityColor ? strokeColor : 'var(--text-accent)'))}
+            fill={isSelected ? '#f59e0b' : (isCross ? '#f59e0b' : (isColHL ? '#22d3ee' : (hasEntityColor ? strokeColor : 'var(--text-accent)')))}
             textAnchor="middle"
             fontFamily="Inter, sans-serif"
           >
@@ -1009,6 +1014,7 @@ function TableCard({
       {onAddColumnClick && (
         <g
           className="er-add-col-header-btn"
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => { e.stopPropagation(); onAddColumnClick() }}
           style={{ cursor: 'pointer' }}
         >
@@ -1296,7 +1302,7 @@ function EntityLegend({ groups, hoveredEntity, onHover, onFocus, isolatedEntity,
 
 // ─── Main component ───────────────────────────────────────
 
-export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onDomainClick, tableCounts, walMutationCounts, onAddColumn, onCreateFK, onSelectColumn, onSelectIndex, onAddTable, onDeleteTable, onUndo, onRedo, canUndo, canRedo }: Props) {
+export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onDomainClick, tableCounts, walMutationCounts, onAddColumn, onCreateFK, onDeleteFK, onSelectColumn, onSelectIndex, onAddTable, onDeleteTable, onUndo, onRedo, canUndo, canRedo }: Props) {
   const isMulti = !!multiModel && multiModel.domains.length > 0
 
   // ── Search
@@ -1329,6 +1335,7 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
     svgX: number; svgY: number; curSVGX: number; curSVGY: number
   } | null>(null)
   const [fkDragTarget, setFkDragTarget] = useState<{ tableKey: string; colName: string } | null>(null)
+  const [selectedRelationship, setSelectedRelationship] = useState<number | null>(null)
 
   const svgRef = useRef<SVGSVGElement>(null)
 
@@ -1409,6 +1416,26 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
       return visibleTableKeySet.has(fk) || visibleTableKeySet.has(tk)
     })
   }, [isolatedEntity, allRels, visibleTableKeySet])
+
+  // ── Keyboard: delete selected relationship with Delete/Backspace
+  useEffect(() => {
+    if (selectedRelationship === null) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const rel = visibleRels[selectedRelationship]
+        if (rel && onDeleteFK) {
+          e.preventDefault()
+          onDeleteFK(rel.from.table.name, rel.fromCol)
+          setSelectedRelationship(null)
+        }
+      } else if (e.key === 'Escape') {
+        setSelectedRelationship(null)
+      }
+    }
+    document.addEventListener('keydown', handleKey)
+    return () => document.removeEventListener('keydown', handleKey)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedRelationship, visibleRels, onDeleteFK])
 
   // ── FK highlight map: which column in each table to accent when a rel is hovered
   const fkHighlightMap = useMemo(() => {
@@ -1654,8 +1681,8 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
           transform={`translate(${pan.x},${pan.y}) scale(${zoom})`}
           onMouseDown={handleBackgroundMouseDown}
         >
-          {/* Invisible background rect for pan interaction */}
-          <rect x={-10000} y={-10000} width={20000} height={20000} fill="transparent" />
+          {/* Invisible background rect for pan interaction and deselect */}
+          <rect x={-10000} y={-10000} width={20000} height={20000} fill="transparent" onClick={() => setSelectedRelationship(null)} />
 
           {/* Layer 1: Domain group rectangles (multi-domain only) */}
           {isMulti && multi.groups.map((group) => (
@@ -1703,6 +1730,8 @@ export function ERDiagram({ model, selectedTable, onSelectTable, multiModel, onD
               onHover={setHoveredRelationship}
               dimmed={hoveredEntity !== null && !isRelInEntity(rel)}
               highlightedColKey={hoveredColumnKey}
+              isSelected={selectedRelationship === i}
+              onSelect={setSelectedRelationship}
             />
           ))}
 

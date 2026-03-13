@@ -49,8 +49,6 @@ function renderCell(v: unknown): React.ReactNode {
 type Props = { domain: string }
 
 export function TimeExplorer({ domain }: Props) {
-  const [localDomain, setLocalDomain] = useState(domain)
-  const [domains, setDomains]         = useState<string[]>([])
   const [tables, setTables]           = useState<TableInfo[]>([])
   const [selectedTable, setSelectedTable] = useState('')
   const [view, setView]               = useState<View>('snapshot')
@@ -98,13 +96,6 @@ export function TimeExplorer({ domain }: Props) {
     } catch { /* ignore */ }
   }, [])
 
-  const loadDomains = useCallback(async () => {
-    try {
-      const r = await api<{ domains: string[] }>('/api/domains', 'GET')
-      setDomains(r.domains || [])
-    } catch { /* ignore */ }
-  }, [])
-
   const loadTables = useCallback(async (d: string) => {
     try {
       const r = await api<{ tables: TableInfo[] }>(`/api/schema/tables?domain=${encodeURIComponent(d)}`, 'GET')
@@ -123,13 +114,13 @@ export function TimeExplorer({ domain }: Props) {
   }, [])
 
   useEffect(() => {
-    loadDomains(); refreshMaxLSN(); loadStats()
-  }, [loadDomains, refreshMaxLSN, loadStats])
+    refreshMaxLSN(); loadStats()
+  }, [refreshMaxLSN, loadStats])
 
   useEffect(() => {
     setSelectedTable('')
-    loadTables(localDomain)
-  }, [localDomain, loadTables])
+    loadTables(domain)
+  }, [domain, loadTables])
 
   // ─── Snapshot query ────────────────────────────────────
 
@@ -141,10 +132,10 @@ export function TimeExplorer({ domain }: Props) {
       const sql = `SELECT * FROM ${selectedTable} LIMIT 500;`
       const [snapResp, headResp] = await Promise.all([
         api<{ rows?: Record<string, unknown>[]; columns?: string[] }>('/api/time-travel', 'POST', {
-          sql, domains: [localDomain], lsn: currentLSN,
+          sql, domains: [domain], lsn: currentLSN,
         }),
         api<{ rows?: Record<string, unknown>[]; columns?: string[] }>('/api/time-travel', 'POST', {
-          sql, domains: [localDomain], lsn: maxLSN,
+          sql, domains: [domain], lsn: maxLSN,
         }),
       ])
       if (seq !== querySeq.current) return
@@ -180,7 +171,7 @@ export function TimeExplorer({ domain }: Props) {
     } catch { /* ignore */ } finally {
       if (seq === querySeq.current) setSnapLoading(false)
     }
-  }, [selectedTable, currentLSN, maxLSN, localDomain])
+  }, [selectedTable, currentLSN, maxLSN, domain])
 
   useEffect(() => {
     if (view === 'snapshot') runSnapshot()
@@ -195,13 +186,13 @@ export function TimeExplorer({ domain }: Props) {
       const where = histFilter.trim() ? ` WHERE ${histFilter.trim()}` : ''
       const sql = `SELECT * FROM ${selectedTable} FOR HISTORY${where} LIMIT 200;`
       const r = await api<{ rows?: Record<string, unknown>[] }>('/api/row-history', 'POST', {
-        sql, domains: [localDomain],
+        sql, domains: [domain],
       })
       setHistRows((r.rows ?? []) as HistoryEntry[])
     } catch { /* ignore */ } finally {
       setHistLoading(false)
     }
-  }, [selectedTable, histFilter, localDomain])
+  }, [selectedTable, histFilter, domain])
 
   useEffect(() => {
     if (view === 'history' && selectedTable) runHistory()
@@ -250,24 +241,11 @@ export function TimeExplorer({ domain }: Props) {
 
   const sidebar = (
     <div className="te-sidebar">
-      {/* Domain */}
-      <div className="te-sidebar-section">
-        <div className="te-sidebar-label">Domain</div>
-        <select
-          className="te-domain-select"
-          value={localDomain}
-          onChange={e => setLocalDomain(e.target.value)}
-        >
-          {domains.map(d => <option key={d} value={d}>{d}</option>)}
-          {!domains.includes(localDomain) && <option value={localDomain}>{localDomain}</option>}
-        </select>
-      </div>
-
       {/* Tables */}
       <div className="te-sidebar-section te-sidebar-grow">
         <div className="te-sidebar-label">
           Tables
-          <button className="te-icon-btn" onClick={() => loadTables(localDomain)} title="Refresh">
+          <button className="te-icon-btn" onClick={() => loadTables(domain)} title="Refresh">
             <IconRefresh />
           </button>
         </div>
@@ -662,7 +640,7 @@ export function TimeExplorer({ domain }: Props) {
     </div>
   ) : (
     <TimeTravelDiff
-      domain={localDomain}
+      domain={domain}
       tableName={selectedTable}
       maxLSN={maxLSN}
       onClose={() => setView('snapshot')}
@@ -682,7 +660,7 @@ export function TimeExplorer({ domain }: Props) {
             <TimelineScrubber
               maxLSN={maxLSN}
               currentLSN={currentLSN || maxLSN}
-              domain={localDomain}
+              domain={domain}
               onScrub={lsn => setCurrentLSN(lsn)}
               onRefresh={() => { refreshMaxLSN(); loadStats() }}
             />

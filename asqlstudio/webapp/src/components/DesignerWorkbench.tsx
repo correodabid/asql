@@ -278,6 +278,19 @@ export function DesignerWorkbench({
                 return next
               })
             }}
+            onDeleteFK={(fromTable, fromCol) => {
+              const tableIdx = model.tables.findIndex((t) => t.name === fromTable)
+              if (tableIdx < 0) return
+              const colIdx = model.tables[tableIdx].columns.findIndex((c) => c.name === fromCol)
+              if (colIdx < 0) return
+              setModel((prev) => {
+                const next = clone(prev)
+                const col = { ...next.tables[tableIdx].columns[colIdx] }
+                delete col.references
+                next.tables[tableIdx].columns[colIdx] = col
+                return next
+              })
+            }}
           />
         </div>
 
