@@ -39,7 +39,9 @@ and metadata flows already exercised in regression tests:
 
 - `psql` startup/introspection basics (`current_setting`, `SHOW`, `current_database`, `current_user`, `pg_namespace`, `pg_database`),
 - DBeaver/DataGrip-style startup queries (`SET`, `set_config`, `version`, `current_schema`, `pg_settings`, `information_schema.schemata`, privilege probes),
-- `pgx` connection setup plus end-to-end CRUD/query flows.
+- `pgx` connection setup plus end-to-end CRUD/query flows,
+- PostgreSQL `CancelRequest` handling for supported pgwire execution boundaries,
+- narrow `COPY FROM STDIN` / `COPY TO STDOUT` flows covered by conformance-style tests.
 
 For interactive tooling, this usually means:
 

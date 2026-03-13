@@ -155,6 +155,8 @@ regression-covered` behaviors from items that are only partially evidenced.
 |---|---|---|---|
 | Session/setup shim (`current_database`, `version`, `current_schema`, `current_user`, `SHOW`, `SET`/`RESET`/`DEALLOCATE`) | Implemented | Regression-covered | Exercised by mainstream tool startup tests. |
 | Synthetic catalog subset (`pg_tables`, `pg_namespace`, `pg_class`, `pg_attribute`, `pg_type`, `pg_settings`, `pg_database`, `information_schema.*`) | Implemented | Regression-covered | Supported only as a targeted compatibility shim, not as catalog parity. |
+| `CancelRequest` / SQLSTATE `57014` cancel path | Implemented | Regression-covered | Conformance tests cover query cancellation plus post-cancel connection usability. |
+| Narrow `COPY FROM STDIN` / `COPY TO STDOUT` flows | Implemented | Regression-covered | Conformance tests cover chunked copy-in, copy-out streaming, and `CopyFail` rollback behavior. |
 | `EXISTS` / `NOT EXISTS` | Implemented | Regression-covered | Covered in parser and executor tests for current shapes. |
 | `LEFT JOIN` / `RIGHT JOIN` / `CROSS JOIN` | Implemented | Regression-covered | Covered in executor tests for current supported join shapes. |
 | Non-recursive `WITH` / CTE shapes | Implemented | Regression-covered | Current documented support should remain limited to tested shapes. |
@@ -162,7 +164,7 @@ regression-covered` behaviors from items that are only partially evidenced.
 | `INSERT ... RETURNING` | Implemented | Regression-covered | This is the only `RETURNING` path currently documented as supported. |
 | `INSERT ... ON CONFLICT ...` | Implemented | Regression-covered | Current `DO NOTHING` and supported `DO UPDATE` shapes are tested. |
 | `TRUNCATE TABLE` | Implemented | Regression-covered | Covered in parser and executor tests. |
-| `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` | Implemented | Partial evidence | Present in parser/planner/executor/WAL paths, but not yet called out as a public compatibility claim with dedicated end-to-end regression coverage. |
+| `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` | Implemented | Regression-covered | Covered by parser tests plus dedicated pgwire end-to-end regression coverage for duplicate-safe create flows. |
 | `UPDATE ... RETURNING` / `DELETE ... RETURNING` | Unsupported | Clear negative status | Do not assume PostgreSQL parity here because `INSERT ... RETURNING` works. |
 
 Documentation rule going forward:

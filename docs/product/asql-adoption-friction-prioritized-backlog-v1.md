@@ -1,5 +1,8 @@
 # ASQL adoption friction prioritized backlog v1
 
+Status note (2026-03-13): this document is a product backlog snapshot, not the active engineering execution source.
+Use [../ai/05-backlog.md](../ai/05-backlog.md) for current execution order and treat this file as prioritization context for adoption work.
+
 ## Purpose
 
 Turn the general adoption-friction findings into a prioritized backlog that improves ASQL as a general-purpose database product without pulling app-specific workflow semantics into the engine.
@@ -17,7 +20,7 @@ Documentation and example work for this backlog should preferentially improve th
 
 That means:
 
-- new user-facing guidance should land in [docs/getting-started/](getting-started),
+- new user-facing guidance should land in [../getting-started/](../getting-started/),
 - example flows should be wired into the getting-started progression,
 - cookbook and example-app material should support the onboarding path rather than compete with it,
 - standalone docs should be used only when the topic is too large, too reference-heavy, or too architectural for getting-started.
@@ -281,4 +284,4 @@ When implementing documentation/example tasks in this backlog:
 
 - [docs/adr/0002-generalist-engine-boundary-and-adoption-surface.md](adr/0002-generalist-engine-boundary-and-adoption-surface.md)
 - [bankapp/FRICTION_LOG.md](../../bankapp/FRICTION_LOG.md)
-- [docs/ai/05-backlog.md](ai/05-backlog.md)
+- [docs/ai/05-backlog.md](../ai/05-backlog.md)

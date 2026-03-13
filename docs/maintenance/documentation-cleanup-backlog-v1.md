@@ -52,7 +52,7 @@ Deliverables:
 
 - short product pitch
 - one canonical quickstart path
-- direct handoff to [docs/getting-started/README.md](getting-started/README.md)
+- direct handoff to [docs/getting-started/README.md](../getting-started/README.md)
 - direct links to compatibility, migration, and operations docs
 
 ### 3. Canonicalize startup/runtime examples
@@ -85,7 +85,7 @@ Deliverables:
 
 ## P1 — Consolidate onboarding and adoption docs
 
-### 5. Strengthen [docs/getting-started/README.md](getting-started/README.md) as the narrative spine
+### 5. Strengthen [docs/getting-started/README.md](../getting-started/README.md) as the narrative spine
 
 Completed.
 
@@ -101,12 +101,12 @@ Completed for the current adoption spine.
 
 Targets:
 
-- [docs/getting-started/04-domains-and-transactions.md](getting-started/04-domains-and-transactions.md)
-- [docs/getting-started/05-time-travel-and-history.md](getting-started/05-time-travel-and-history.md)
-- [docs/getting-started/07-fixtures-and-seeding.md](getting-started/07-fixtures-and-seeding.md)
-- [docs/getting-started/09-go-sdk-and-integration.md](getting-started/09-go-sdk-and-integration.md)
-- [docs/getting-started/10-adoption-playbook.md](getting-started/10-adoption-playbook.md)
-- [docs/getting-started/11-troubleshooting.md](getting-started/11-troubleshooting.md)
+- [docs/getting-started/04-domains-and-transactions.md](../getting-started/04-domains-and-transactions.md)
+- [docs/getting-started/05-time-travel-and-history.md](../getting-started/05-time-travel-and-history.md)
+- [docs/getting-started/07-fixtures-and-seeding.md](../getting-started/07-fixtures-and-seeding.md)
+- [docs/getting-started/09-go-sdk-and-integration.md](../getting-started/09-go-sdk-and-integration.md)
+- [docs/getting-started/10-adoption-playbook.md](../getting-started/10-adoption-playbook.md)
+- [docs/getting-started/11-troubleshooting.md](../getting-started/11-troubleshooting.md)
 
 Deliverables:
 
@@ -174,7 +174,7 @@ Deliverables:
 - stale claims removed
 - broken assumptions corrected
 
-### 11. Audit [docs/ai/](ai) as an internal documentation set
+### 11. Audit [docs/ai/](../ai) as an internal documentation set
 
 Completed.
 
@@ -182,7 +182,7 @@ Additional close-out completed after the main pass:
 
 - refreshed [docs/reference/versioned-reference-capture-semantics-v1.md](../reference/versioned-reference-capture-semantics-v1.md),
 - positioned [docs/migration/sqlite-quick-path.md](../migration/sqlite-quick-path.md) explicitly as the short migration companion,
-- refreshed [docs/ai/06-agent-playbook.md](ai/06-agent-playbook.md), [docs/ai/07-definition-of-done.md](ai/07-definition-of-done.md), and [docs/ai/09-benchmark-baseline.md](ai/09-benchmark-baseline.md),
+- refreshed [docs/ai/06-agent-playbook.md](../ai/06-agent-playbook.md), [docs/ai/07-definition-of-done.md](../ai/07-definition-of-done.md), and [docs/ai/09-benchmark-baseline.md](../ai/09-benchmark-baseline.md),
 - added an implementation-status note to [docs/adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md](adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md),
 - positioned [hospitalapp/README.md](../hospitalapp/README.md) explicitly as a supporting example doc.
 

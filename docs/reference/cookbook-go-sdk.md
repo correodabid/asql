@@ -2,7 +2,7 @@
 
 This cookbook provides practical Go-centric workflows for integrating ASQL into services.
 
-For the broader adoption path, see [docs/getting-started/README.md](getting-started/README.md).
+For the broader adoption path, see [docs/getting-started/README.md](../getting-started/README.md).
 
 ## Prerequisites
 
@@ -300,7 +300,7 @@ For aggregate-oriented services, swap the snapshot token source to:
 
 See also:
 
-- [docs/getting-started/09-go-sdk-and-integration.md](getting-started/09-go-sdk-and-integration.md)
+- [docs/getting-started/09-go-sdk-and-integration.md](../getting-started/09-go-sdk-and-integration.md)
 - [bankapp/main.go](../../bankapp/main.go)
 - [bankapp/tx_helpers.go](../../bankapp/tx_helpers.go)
 

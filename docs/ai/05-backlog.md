@@ -1,5 +1,8 @@
 # ASQL Backlog (Agent-executable)
 
+Status note (2026-03-13): this is the active engineering execution backlog.
+Use strategy/product snapshot docs for context, but treat this file as the default source for current implementation priority unless a newer doc explicitly supersedes it.
+
 ## How to use this backlog
 - Pick top-most unchecked task.
 - Implement smallest vertical slice.

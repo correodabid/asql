@@ -20,12 +20,12 @@ Status update (2026-03-12):
 This audit includes:
 
 - root README
-- [docs/getting-started/](getting-started)
+- [docs/getting-started/](../getting-started)
 - quickstart and cookbook material
 - migration and compatibility docs
 - architecture / operations / pricing / support docs
 - ADRs
-- AI planning docs under [docs/ai/](ai)
+- AI planning docs under [docs/ai/](../ai)
 - [.github/copilot-instructions.md](../.github/copilot-instructions.md)
 - example app docs such as [hospitalapp/README.md](../hospitalapp/README.md)
 
@@ -61,7 +61,7 @@ Resolution in this pass:
 Likely overlap between:
 
 - root README
-- [docs/getting-started/README.md](getting-started/README.md)
+- [docs/getting-started/README.md](../getting-started/README.md)
 - [docs/getting-started/10-min.md](../getting-started/10-min.md)
 
 Resolution in this pass:
@@ -112,8 +112,8 @@ There should be no loose `.md` files directly at the root of [docs/](../).
 
 ### 2. Primary onboarding
 
-- [docs/getting-started/README.md](getting-started/README.md)
-- chapterized path in [docs/getting-started/](getting-started)
+- [docs/getting-started/README.md](../getting-started/README.md)
+- chapterized path in [docs/getting-started/](../getting-started)
 
 This should absorb most developer-learning material.
 
@@ -141,7 +141,7 @@ These should support getting-started, not replace it.
 
 ### 6. AI / maintenance instructions
 
-- [docs/ai/](ai)
+- [docs/ai/](../ai)
 - [docs/maintenance/](.)
 - [.github/copilot-instructions.md](../.github/copilot-instructions.md)
 

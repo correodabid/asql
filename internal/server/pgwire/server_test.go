@@ -273,6 +273,105 @@ func TestPGWireCompatibilityUnsupportedPatternGuidance(t *testing.T) {
 	}
 }
 
+func TestPGWireCreateIfNotExistsRegression(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "if-not-exists-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	connect := func(t *testing.T) *pgx.Conn {
+		t.Helper()
+		conn, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable")
+		if err != nil {
+			t.Fatalf("connect pgx: %v", err)
+		}
+		return conn
+	}
+
+	conn1 := connect(t)
+	defer conn1.Close(ctx)
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT PRIMARY KEY, email TEXT)",
+		"CREATE INDEX idx_users_email ON users (email)",
+		"COMMIT",
+	} {
+		if _, err := conn1.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	conn2 := connect(t)
+	defer conn2.Close(ctx)
+	if _, err := conn2.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+		t.Fatalf("begin duplicate tx: %v", err)
+	}
+	if _, err := conn2.Exec(ctx, "CREATE TABLE users (id INT PRIMARY KEY, email TEXT)"); err != nil {
+		t.Fatalf("queue duplicate create table: %v", err)
+	}
+	if _, err := conn2.Exec(ctx, "COMMIT"); err == nil {
+		t.Fatal("expected duplicate CREATE TABLE to fail without IF NOT EXISTS")
+	}
+
+	conn3 := connect(t)
+	defer conn3.Close(ctx)
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE IF NOT EXISTS users (id INT PRIMARY KEY, email TEXT)",
+		"CREATE INDEX IF NOT EXISTS idx_users_email ON users (email)",
+		"COMMIT",
+	} {
+		if _, err := conn3.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	rows, err := conn3.Query(ctx, "SELECT id, email FROM accounts.users ORDER BY id ASC")
+	if err != nil {
+		t.Fatalf("query users after IF NOT EXISTS roundtrip: %v", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		t.Fatal("expected table to remain empty after duplicate IF NOT EXISTS roundtrip")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate rows: %v", err)
+	}
+}
+
 func TestPGWireForHistoryContract(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

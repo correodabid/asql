@@ -2,7 +2,7 @@
 
 This is the shortest path into ASQL.
 
-For the full adoption path, use [docs/getting-started/README.md](getting-started/README.md).
+For the full adoption path, use [docs/getting-started/README.md](README.md).
 
 ## 1) Optional: validate project health
 
@@ -53,7 +53,7 @@ go run ./cmd/asqlctl -command fixture-validate \
 
 ## Next reading
 
-- [getting-started/03-first-database.md](getting-started/03-first-database.md)
-- [getting-started/04-domains-and-transactions.md](getting-started/04-domains-and-transactions.md)
-- [getting-started/05-time-travel-and-history.md](getting-started/05-time-travel-and-history.md)
-- [getting-started/07-fixtures-and-seeding.md](getting-started/07-fixtures-and-seeding.md)
+- [docs/getting-started/03-first-database.md](03-first-database.md)
+- [docs/getting-started/04-domains-and-transactions.md](04-domains-and-transactions.md)
+- [docs/getting-started/05-time-travel-and-history.md](05-time-travel-and-history.md)
+- [docs/getting-started/07-fixtures-and-seeding.md](07-fixtures-and-seeding.md)
