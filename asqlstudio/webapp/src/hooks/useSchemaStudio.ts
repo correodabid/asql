@@ -184,6 +184,20 @@ export function useSchemaStudio() {
     setDesignerStatus('Baseline set from current model')
   }
 
+  // Silent variant: updates diff state without switching views (used by auto-diff in the canvas footer)
+  const onSilentDiff = async () => {
+    try {
+      const response = await api<DiffResponse>('/api/schema/diff', 'POST', {
+        base: baseline,
+        target: designerPayload(),
+      })
+      renderDiff(response)
+      setDesignerStatus(`Diff auto-updated (${response.operations.length} operation(s))`)
+    } catch {
+      // silent — don't overwrite status on background diff failures
+    }
+  }
+
   const onPreviewDiff = async () => {
     setLoading(true)
     try {
@@ -429,6 +443,7 @@ export function useSchemaStudio() {
     onLoadBaseline,
     onSetBaseline,
     changeDomain,
+    onSilentDiff,
     onPreviewDiff,
     onApplySafeDiff,
     onRefreshAutoDiff,

@@ -144,6 +144,7 @@ function App() {
     updateColumn,
     normalizeSelection,
     onGenerateDDL,
+    onSilentDiff,
     onLoadBaseline,
     onSetBaseline,
     changeDomain,
@@ -429,11 +430,10 @@ function App() {
                     designerTableCounts={designerTableCounts}
                     ddlStatements={ddlStatements}
                     statementStates={statementStates}
-                    diffSummary={diffSummary}
                     diffSafe={diffSafe}
                     diffOperations={diffOperations}
-                    diffWarnings={diffWarnings}
                     onGenerateDDL={onGenerateDDL}
+                    onSilentDiff={onSilentDiff}
                     onPreviewDiff={onPreviewDiff}
                     onApplySafeDiff={onApplySafeDiff}
                     onExecuteAll={onExecuteAll}

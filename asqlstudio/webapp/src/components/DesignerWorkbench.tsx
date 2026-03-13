@@ -1,10 +1,12 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Dispatch, SetStateAction } from 'react'
 import type { StatementState } from './DDLPanel'
 import { ColumnEditor } from './ColumnEditor'
 import { ERDiagram } from './ERDiagram'
 import { IconAlertTriangle, IconArrowRight, IconCheckCircle, IconChevronDown, IconChevronUp, IconCode, IconPlay, IconRefresh, IconSchema, IconShield, IconX } from './Icons'
 import { IndexEditor } from './IndexEditor'
+import { ResizeHandle } from './ResizeHandle'
+import { useResizable } from '../hooks/useResizable'
 import { clone, type DiffOperation, type SchemaColumn, type SchemaModel, type SchemaTable } from '../schema'
 
 const DESIGNER_GUIDANCE_KEY = 'asql-designer-guidance-dismissed'
@@ -41,11 +43,10 @@ type Props = {
   designerTableCounts: Record<string, number>
   ddlStatements: string[]
   statementStates: StatementState[]
-  diffSummary: string
   diffSafe: boolean | null
   diffOperations: DiffOperation[]
-  diffWarnings: string[]
   onGenerateDDL: () => void
+  onSilentDiff: () => Promise<void>
   onPreviewDiff: () => void
   onApplySafeDiff: () => void
   onExecuteAll: () => void
@@ -59,10 +60,6 @@ function summarizeOps(diffOperations: DiffOperation[]) {
   const adds = diffOperations.filter((op) => op.type.startsWith('add_')).length
   const drops = diffOperations.filter((op) => op.type.startsWith('drop_')).length
   return { safe, unsafe, adds, drops }
-}
-
-function sqlSnippet(sql: string) {
-  return sql.replace(/\s+/g, ' ').trim()
 }
 
 export function DesignerWorkbench({
@@ -81,11 +78,10 @@ export function DesignerWorkbench({
   designerTableCounts,
   ddlStatements,
   statementStates,
-  diffSummary,
   diffSafe,
   diffOperations,
-  diffWarnings,
   onGenerateDDL,
+  onSilentDiff,
   onPreviewDiff,
   onApplySafeDiff,
   onExecuteAll,
@@ -95,10 +91,27 @@ export function DesignerWorkbench({
   const stats = summarizeOps(diffOperations)
   const executedStatements = statementStates.filter((state) => state.status === 'success').length
   const pendingStatements = statementStates.filter((state) => state.status === 'pending').length
-  const previewOps = diffOperations.slice(0, 4)
-  const previewDDL = ddlStatements.slice(0, 3)
+  const editorResize = useResizable({ key: 'designer-editor', initial: 320, min: 240, max: 640, direction: 'horizontal' })
   const [showGuidance, setShowGuidance] = useState(false)
   const [guidanceDismissed, setGuidanceDismissed] = useState(() => readGuidanceDismissed())
+  const [isDiffing, setIsDiffing] = useState(false)
+  const isFirstRender = useRef(true)
+  const silentDiffRef = useRef(onSilentDiff)
+  useEffect(() => { silentDiffRef.current = onSilentDiff }, [onSilentDiff])
+
+  // Auto-diff: debounce 700ms after any model change
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
+    const timer = setTimeout(async () => {
+      setIsDiffing(true)
+      try { await silentDiffRef.current() } finally { setIsDiffing(false) }
+    }, 700)
+    return () => clearTimeout(timer)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model])
 
   const dismissGuidance = () => {
     setGuidanceDismissed(true)
@@ -203,7 +216,9 @@ export function DesignerWorkbench({
           />
         </div>
 
-        <div className="designer-editor">
+        <ResizeHandle direction="horizontal" onMouseDown={editorResize.startDragInverse} />
+
+        <div className="designer-editor" style={{ width: editorResize.size }}>
           <ColumnEditor
             model={model}
             setModel={setModel}
@@ -225,88 +240,35 @@ export function DesignerWorkbench({
         </div>
       </div>
 
-      <div className="designer-review-grid">
-        <section className="designer-review-card">
-          <div className="designer-review-header">
-            <div>
-              <div className="designer-review-kicker">Change Review</div>
-              <h3>One place to understand impact</h3>
-            </div>
-            <button className="ddl-action-btn" onClick={onOpenDiff}>Open full review</button>
-          </div>
+      <div className="designer-footer-bar">
+        <div className="designer-footer-section">
+          <span className={`designer-footer-indicator${diffSafe === true ? ' safe' : diffSafe === false ? ' unsafe' : ''}`}>
+            {isDiffing
+              ? <span className="designer-footer-diffing" />
+              : diffSafe === true ? <IconCheckCircle /> : diffSafe === false ? <IconAlertTriangle /> : <IconShield />}
+            {isDiffing
+              ? 'Checking…'
+              : diffOperations.length > 0
+                ? `${diffOperations.length} change${diffOperations.length !== 1 ? 's' : ''} · ${stats.safe} safe · ${stats.unsafe} unsafe`
+                : 'No diff'}
+          </span>
+          <button className="ddl-action-btn" onClick={onApplySafeDiff} disabled={stats.safe === 0 || isDiffing}><IconShield /> Apply safe</button>
+          <button className="designer-footer-link" onClick={onOpenDiff}>Full review →</button>
+        </div>
 
-          <div className={`designer-review-summary ${diffSafe === true ? 'safe' : diffSafe === false ? 'unsafe' : ''}`}>
-            {diffSafe === true ? <IconCheckCircle /> : diffSafe === false ? <IconAlertTriangle /> : <IconShield />}
-            <span>{diffSummary || 'No diff preview yet. Refresh to compute the change plan.'}</span>
-          </div>
+        <div className="designer-footer-sep" />
 
-          <div className="designer-review-stats">
-            <div><strong>{diffOperations.length}</strong><span>changes</span></div>
-            <div><strong>{stats.safe}</strong><span>safe</span></div>
-            <div><strong>{stats.unsafe}</strong><span>unsafe</span></div>
-            <div><strong>{stats.drops}</strong><span>removals</span></div>
-          </div>
-
-          <div className="designer-review-list">
-            {previewOps.length === 0 && (
-              <div className="designer-review-empty">No preview yet. Use Refresh to compute the change plan from the current model.</div>
-            )}
-            {previewOps.map((op, index) => (
-              <div key={`${op.type}-${op.table}-${op.column ?? index}`} className={`designer-review-item ${op.safe ? 'safe' : 'unsafe'}`}>
-                <div className="designer-review-item-main">
-                  <span className="designer-review-item-type">{op.type.replace(/_/g, ' ')}</span>
-                  <span className="designer-review-item-target">{op.table}{op.column ? `.${op.column}` : ''}</span>
-                </div>
-                <span className={`designer-review-badge ${op.safe ? 'safe' : 'unsafe'}`}>{op.safe ? 'safe' : 'review'}</span>
-              </div>
-            ))}
-          </div>
-
-          {diffWarnings.length > 0 && (
-            <div className="designer-review-warning">{diffWarnings[0]}</div>
-          )}
-
-          <div className="designer-review-actions">
-            <button className="ddl-action-btn" onClick={onPreviewDiff}><IconRefresh /> Refresh</button>
-            <button className="ddl-action-btn safe" onClick={onApplySafeDiff} disabled={stats.safe === 0}><IconShield /> Apply Safe</button>
-          </div>
-        </section>
-
-        <section className="designer-review-card">
-          <div className="designer-review-header">
-            <div>
-              <div className="designer-review-kicker">SQL Plan</div>
-              <h3>Generate only when needed</h3>
-            </div>
-            <button className="ddl-action-btn" onClick={onOpenDDL}>Open SQL details</button>
-          </div>
-
-          <div className="designer-review-summary neutral">
+        <div className="designer-footer-section">
+          <span className="designer-footer-indicator">
             <IconCode />
-            <span>
-              {ddlStatements.length > 0
-                ? `${ddlStatements.length} statement(s) ready · ${executedStatements} executed · ${pendingStatements} pending`
-                : 'No generated SQL yet. Create it from the current visual model when you want to inspect or execute it.'}
-            </span>
-          </div>
-
-          <div className="designer-review-list sql">
-            {previewDDL.length === 0 && (
-              <div className="designer-review-empty">Generate SQL to inspect the actual execution plan behind the visual model.</div>
-            )}
-            {previewDDL.map((sql, index) => (
-              <div key={`${index}-${sql}`} className="designer-review-item sql">
-                <span className="designer-review-item-type">#{index + 1}</span>
-                <code className="designer-review-sql">{sqlSnippet(sql)}</code>
-              </div>
-            ))}
-          </div>
-
-          <div className="designer-review-actions">
-            <button className="ddl-action-btn primary" onClick={onGenerateDDL}><IconPlay /> Generate SQL</button>
-            <button className="ddl-action-btn accent" onClick={onExecuteAll} disabled={pendingStatements === 0}><IconPlay /> Execute Pending</button>
-          </div>
-        </section>
+            {ddlStatements.length > 0
+              ? `${ddlStatements.length} stmt${ddlStatements.length !== 1 ? 's' : ''} · ${executedStatements} executed · ${pendingStatements} pending`
+              : 'No SQL'}
+          </span>
+          <button className="ddl-action-btn" onClick={onGenerateDDL}><IconPlay /> Generate SQL</button>
+          <button className="ddl-action-btn" onClick={onExecuteAll} disabled={pendingStatements === 0}><IconPlay /> Execute pending</button>
+          <button className="designer-footer-link" onClick={onOpenDDL}>SQL details →</button>
+        </div>
       </div>
     </div>
   )
