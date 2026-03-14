@@ -8,6 +8,7 @@ import (
 	"hash/crc32"
 	"math"
 	"sort"
+	"unsafe"
 
 	"asql/internal/engine/parser/ast"
 )
@@ -102,6 +103,13 @@ type stringDict struct {
 
 func newStringDict() *stringDict {
 	return &stringDict{index: make(map[string]uint32)}
+}
+
+func bytesToImmutableString(b []byte) string {
+	if len(b) == 0 {
+		return ""
+	}
+	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
 // intern adds a string to the dictionary (if absent) and returns its index.
@@ -1069,7 +1077,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 		if !r.need(n) {
 			return nil, fmt.Errorf("snapshot binary: dictionary string %d truncated", i)
 		}
-		r.dictTable[i] = string(r.data[r.off : r.off+n])
+		r.dictTable[i] = bytesToImmutableString(r.data[r.off : r.off+n])
 		r.off += n
 	}
 
@@ -1162,6 +1170,9 @@ func encodeSnapshotsBinary(store *snapshotStore) ([]byte, error) {
 func (r *binReader) readCatalog() persistedCatalog {
 	pc := persistedCatalog{Domains: make(map[string][]string)}
 	numDomains := int(r.u16())
+	if numDomains > 0 {
+		pc.Domains = make(map[string][]string, numDomains)
+	}
 	for i := 0; i < numDomains; i++ {
 		domain := r.str()
 		numTables := int(r.u16())
@@ -1229,7 +1240,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 		if !r.need(n) {
 			return nil, fmt.Errorf("snapshot binary: dictionary string %d truncated", i)
 		}
-		r.dictTable[i] = string(r.data[r.off : r.off+n])
+		r.dictTable[i] = bytesToImmutableString(r.data[r.off : r.off+n])
 		r.off += n
 	}
 	if r.err != nil {
@@ -1266,7 +1277,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 			LSN:       lsn,
 			LogicalTS: logicalTS,
 			Catalog:   catalog,
-			Domains:   deepCopyPersistedDomains(accumulated),
+			Domains:   accumulated,
 		}
 
 		result[i] = marshalableToSnapshot(full)
