@@ -308,6 +308,52 @@ func BenchmarkEngineReadIndexOnlyOrderBTree(b *testing.B) {
 	_ = store.Close()
 }
 
+func BenchmarkEngineReadIndexOnlySelectiveCoveredBTree(b *testing.B) {
+	ctx := context.Background()
+	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)
+
+	query := "SELECT email FROM entries WHERE email >= 'user-09900@asql.dev' ORDER BY email ASC LIMIT 100"
+	baselineCounts := engine.ScanStrategyCounts()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+		if err != nil {
+			b.Fatalf("covered selective index-only query: %v", err)
+		}
+		if len(result.Rows) != 100 {
+			b.Fatalf("unexpected covered selective row count: got %d want 100", len(result.Rows))
+		}
+	}
+	b.StopTimer()
+	reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyBTreeIOScan))
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+}
+
+func BenchmarkEngineReadSelectiveNonCoveredBTree(b *testing.B) {
+	ctx := context.Background()
+	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)
+
+	query := "SELECT email, payload FROM entries WHERE email >= 'user-09900@asql.dev' ORDER BY email ASC LIMIT 100"
+	baselineCounts := engine.ScanStrategyCounts()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+		if err != nil {
+			b.Fatalf("non-covered selective query: %v", err)
+		}
+		if len(result.Rows) != 100 {
+			b.Fatalf("unexpected non-covered selective row count: got %d want 100", len(result.Rows))
+		}
+	}
+	b.StopTimer()
+	reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyBTreeOrder))
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+}
+
 func benchmarkEngineRestartLoad(b *testing.B, withPersistedSnapshot bool) {
 	ctx := context.Background()
 	walPath, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, withPersistedSnapshot)

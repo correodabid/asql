@@ -488,7 +488,9 @@ Open gaps before closure:
 Latest directional read evidence:
 - `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and measured `432,792 ns/op`.
 - `BenchmarkEngineReadIndexOnlyOrderBTree` exercised `btree-index-only` and measured `132,958 ns/op`.
-- This suggests the current index-only path is materially cheaper on the covered benchmark shape, but the epic still lacks a closure-level optimization decision and broader scenario coverage.
+- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree` exercised `btree-index-only` and measured `912,083 ns/op`.
+- `BenchmarkEngineReadSelectiveNonCoveredBTree` exercised `btree-order` and measured `549,875 ns/op`.
+- Current interpretation: index-only is clearly better on the simple covered ordered read shape, but the selective covered-vs-non-covered shape is still noisy/counterintuitive and needs repeated runs plus profiling before using it to justify broader index-only expansion.
 
 - [ ] Benchmark and improve commit batching on realistic workloads.
 - [ ] Benchmark and improve replay throughput.

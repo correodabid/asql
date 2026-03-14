@@ -44,6 +44,11 @@ Initial dry-run on 2026-03-14 using `go test ./internal/engine/executor -run '^$
 - `BenchmarkEngineReadIndexedRangeBTree-8`: `432,792 ns/op` (`btree-order-count=1`)
 - `BenchmarkEngineReadIndexOnlyOrderBTree-8`: `132,958 ns/op` (`btree-index-only-count=1`)
 
+Selective covered-vs-non-covered dry-run on 2026-03-14:
+
+- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree-8`: `912,083 ns/op` (`btree-index-only-count=1`)
+- `BenchmarkEngineReadSelectiveNonCoveredBTree-8`: `549,875 ns/op` (`btree-order-count=1`)
+
 ### Failover / recovery validation (`test/integration`)
 
 Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench 'BenchmarkFailover(CoordinatorPromotion|RecoveryReplay)$' -benchtime=1x -count=1`:
@@ -56,3 +61,4 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 - This baseline is deterministic in workload shape and command path.
 - Values are hardware/OS dependent and serve as a regression reference, not cross-machine SLA numbers.
 - The restart-path numbers above are a single-iteration validation sample, useful for directional comparison only; they are not yet closure-grade AB evidence.
+- The selective covered/non-covered read numbers are also single-iteration validation samples; because they are close and partially counterintuitive, they should not be used for product decisions without repeated runs and deeper profiling.
