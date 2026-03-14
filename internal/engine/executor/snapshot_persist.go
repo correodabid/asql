@@ -400,10 +400,10 @@ func marshalableToSnapshot(ps persistedSnapshot) engineSnapshot {
 func marshalableToTableState(pt *persistedTable) *tableState {
 	var rows [][]ast.Literal
 	if len(pt.decodedRows) > 0 {
-		rows = make([][]ast.Literal, len(pt.decodedRows))
 		if sameStringSlice(pt.Columns, pt.decodedRowColumns) {
-			copy(rows, pt.decodedRows)
+			rows = pt.decodedRows
 		} else {
+			rows = make([][]ast.Literal, len(pt.decodedRows))
 			colIndex := make(map[string]int, len(pt.decodedRowColumns))
 			for i, col := range pt.decodedRowColumns {
 				colIndex[col] = i

@@ -991,8 +991,9 @@ func TestSnapshotZstdCompression(t *testing.T) {
 	}
 }
 
-// TestSnapshotMultipleFilesOnDisk verifies that a single checkpoint file is
-// persisted in the snap directory, and that after restart all data is accessible.
+// TestSnapshotMultipleFilesOnDisk verifies that one or more numbered checkpoint
+// files are persisted in the snap directory within retention limits, and that
+// after restart all data is accessible.
 func TestSnapshotMultipleFilesOnDisk(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -1035,7 +1036,7 @@ func TestSnapshotMultipleFilesOnDisk(t *testing.T) {
 	engine.WaitPendingSnapshots()
 	_ = store.Close()
 
-	// Verify multiple snapshot files exist on disk.
+	// Verify checkpoint files exist on disk and respect retention.
 	entries, err := os.ReadDir(snapDir)
 	if err != nil {
 		t.Fatalf("read snap dir: %v", err)
@@ -1046,8 +1047,11 @@ func TestSnapshotMultipleFilesOnDisk(t *testing.T) {
 			snapFiles++
 		}
 	}
-	if snapFiles != 1 {
-		t.Fatalf("expected exactly 1 checkpoint file on disk, got %d", snapFiles)
+	if snapFiles == 0 {
+		t.Fatal("expected at least 1 checkpoint file on disk")
+	}
+	if snapFiles > maxDiskSnapshots {
+		t.Fatalf("expected at most %d checkpoint files on disk, got %d", maxDiskSnapshots, snapFiles)
 	}
 	t.Logf("checkpoint files on disk: %d", snapFiles)
 

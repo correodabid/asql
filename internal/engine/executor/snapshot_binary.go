@@ -132,6 +132,25 @@ func countBitmapSetBits(bitmap []byte, limit int) int {
 	return count
 }
 
+func allBitmapBitsSet(bitmap []byte, limit int) bool {
+	remaining := limit
+	for _, b := range bitmap {
+		if remaining <= 0 {
+			return true
+		}
+		if remaining >= 8 {
+			if b != 0xFF {
+				return false
+			}
+			remaining -= 8
+			continue
+		}
+		mask := byte((1 << uint(remaining)) - 1)
+		return b&mask == mask
+	}
+	return remaining <= 0
+}
+
 // intern adds a string to the dictionary (if absent) and returns its index.
 func (d *stringDict) intern(s string) uint32 {
 	if idx, ok := d.index[s]; ok {
@@ -691,11 +710,17 @@ func (r *binReader) readTable() (string, *persistedTable) {
 			bitmap := r.data[r.off : r.off+bitmapLen]
 			r.off += bitmapLen
 			row := make([]ast.Literal, numRowCols)
-			for ci := range rowCols {
-				if bitmap[ci/8]&(1<<(uint(ci)%8)) != 0 {
+			if allBitmapBitsSet(bitmap, numRowCols) {
+				for ci := range rowCols {
 					row[ci] = r.literal()
-				} else {
-					row[ci] = ast.Literal{Kind: ast.LiteralNull}
+				}
+			} else {
+				for ci := range rowCols {
+					if bitmap[ci/8]&(1<<(uint(ci)%8)) != 0 {
+						row[ci] = r.literal()
+					} else {
+						row[ci] = ast.Literal{Kind: ast.LiteralNull}
+					}
 				}
 			}
 			pt.decodedRows[i] = row
