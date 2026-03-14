@@ -97,10 +97,10 @@ type persistedChangeLogEntry struct {
 }
 
 type persistedIndex struct {
-	Name    string
-	Column  string
-	Columns []string
-	Kind    string
+	Name           string
+	Column         string
+	Columns        []string
+	Kind           string
 	decodedEntries []indexEntry
 	// v11+: set to true when bucket/entry data is present so the reader
 	// can skip the O(N×indexes) rebuild on startup.
@@ -430,29 +430,68 @@ func marshalableToTableState(pt *persistedTable) *tableState {
 		}
 	}
 
+	columnDefinitions := pt.ColumnDefinitions
+	if columnDefinitions == nil {
+		columnDefinitions = make(map[string]ast.ColumnDefinition)
+	}
+
+	columnIndex := make(map[string]int, len(pt.Columns))
+	for i, col := range pt.Columns {
+		columnIndex[col] = i
+	}
+
+	uniqueColumns := make(map[string]struct{}, len(pt.UniqueColumns))
+	uniqueColumnList := make([]string, 0, len(pt.UniqueColumns))
+	for _, col := range pt.UniqueColumns {
+		uniqueColumns[col] = struct{}{}
+		if col != pt.PrimaryKey {
+			uniqueColumnList = append(uniqueColumnList, col)
+		}
+	}
+
+	notNullColumns := make([]string, 0, len(columnDefinitions))
+	pkAutoUUID := false
+	if pt.PrimaryKey != "" {
+		if def, ok := columnDefinitions[pt.PrimaryKey]; ok && def.DefaultValue != nil {
+			pkAutoUUID = def.DefaultValue.Kind == ast.DefaultUUIDv7
+		}
+	}
+	for colName, colDef := range columnDefinitions {
+		if colDef.NotNull && colName != pt.PrimaryKey {
+			notNullColumns = append(notNullColumns, colName)
+		}
+	}
+
+	indexes := make(map[string]*indexState, len(pt.Indexes))
+	indexedColumns := pt.IndexedColumns
+	if indexedColumns == nil {
+		indexedColumns = make(map[string]string)
+	}
+	indexedColumnSets := pt.IndexedColumnSets
+	if indexedColumnSets == nil {
+		indexedColumnSets = make(map[string]string)
+	}
+
 	ts := &tableState{
 		columns:           pt.Columns,
-		columnDefinitions: pt.ColumnDefinitions,
+		columnDefinitions: columnDefinitions,
+		columnIndex:       columnIndex,
 		rows:              rows,
 		primaryKey:        pt.PrimaryKey,
 		lastMutationTS:    pt.LastMutationTS,
-		indexes:           make(map[string]*indexState),
-		indexedColumns:    make(map[string]string),
-		indexedColumnSets: make(map[string]string),
-		uniqueColumns:     make(map[string]struct{}),
+		indexes:           indexes,
+		indexedColumns:    indexedColumns,
+		indexedColumnSets: indexedColumnSets,
+		uniqueColumns:     uniqueColumns,
+		uniqueColumnList:  uniqueColumnList,
+		notNullColumns:    notNullColumns,
+		pkAutoUUID:        pkAutoUUID,
 	}
 
 	// Ensure non-nil slices/maps
 	if ts.columns == nil {
 		ts.columns = []string{}
 	}
-	if ts.columnDefinitions == nil {
-		ts.columnDefinitions = make(map[string]ast.ColumnDefinition)
-	}
-	rebuildColumnIndex(ts)
-	rebuildNotNullColumns(ts)
-	rebuildUniqueColumnList(ts)
-	rebuildPKAutoUUID(ts)
 	if ts.rows == nil {
 		ts.rows = [][]ast.Literal{}
 	}
@@ -496,18 +535,6 @@ func marshalableToTableState(pt *persistedTable) *tableState {
 			idx.buckets = make(map[string][]int)
 		}
 		ts.indexes[name] = idx
-	}
-
-	for col, name := range pt.IndexedColumns {
-		ts.indexedColumns[col] = name
-	}
-	for cols, name := range pt.IndexedColumnSets {
-		ts.indexedColumnSets[cols] = name
-	}
-
-	// Unique columns
-	for _, col := range pt.UniqueColumns {
-		ts.uniqueColumns[col] = struct{}{}
 	}
 
 	// Foreign keys
