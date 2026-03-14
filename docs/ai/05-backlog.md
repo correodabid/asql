@@ -223,7 +223,7 @@ P2 — targeted high-return compatibility expansion:
 - [ ] Expand app-facing PostgreSQL-compatible SQL only where it materially reduces migration friction and preserves deterministic replay semantics.
 
 P3 — compatibility operating model:
-- [ ] Add a repeatable compatibility test pack grouped by client/tool (`psql`, `pgx`, JDBC/GUI baseline) and make it part of release validation.
+- [x] Add a repeatable compatibility test pack grouped by client/tool (`psql`, `pgx`, JDBC/GUI baseline) and make it part of release validation.
 - [ ] Add a triage rubric for deciding whether a reported PostgreSQL-compatibility gap should be solved in docs, protocol/catalog shim, SQL surface, or explicitly rejected as out of scope.
 - [ ] Establish a rule that new PostgreSQL-compatibility claims are not public until docs, regression tests, and compatibility matrix entries land together.
 

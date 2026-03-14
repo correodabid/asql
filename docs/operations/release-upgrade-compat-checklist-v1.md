@@ -20,7 +20,7 @@ Every release candidate should include a short evidence bundle covering:
    - leadership, failover history, and WAL retention admin endpoints respond with expected shapes.
 3. Compatibility sanity:
    - compatibility docs were reviewed in the same release window.
-   - documented mainstream client/tool flows (`psql` / `pgx` baseline) still pass their current regression pack.
+   - documented mainstream client/tool flows still pass the current pack in [pgwire-compatibility-test-pack-v1.md](pgwire-compatibility-test-pack-v1.md).
 4. Recovery sanity:
    - replay/restart parity suite passes.
    - backup/restore parity suite passes.
@@ -43,6 +43,7 @@ Every release candidate should include a short evidence bundle covering:
 4. Production-facing smoke lanes green:
    - pgwire onboarding flow
    - admin HTTP health/metrics flow
+   - pgwire compatibility pack baseline lanes
    - release-candidate evidence summary generated
 
 ## Upgrade simulation

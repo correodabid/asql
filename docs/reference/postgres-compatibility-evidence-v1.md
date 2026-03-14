@@ -10,6 +10,7 @@ Use it together with:
 - [sql-pgwire-compatibility-policy-v1.md](sql-pgwire-compatibility-policy-v1.md)
 - [postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md)
 - [pgwire-driver-guidance-v1.md](pgwire-driver-guidance-v1.md)
+- [../operations/pgwire-compatibility-test-pack-v1.md](../operations/pgwire-compatibility-test-pack-v1.md)
 
 Status meanings:
 
