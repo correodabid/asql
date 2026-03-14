@@ -533,6 +533,39 @@ func TestExtendedQueryDescribeStatementInfersUpdateParameterOIDs(t *testing.T) {
 	}
 }
 
+func TestExtendedQueryDescribeStatementInfersArithmeticUpdateParameterOIDs(t *testing.T) {
+	addr, cleanup := startConformanceServer(t)
+	defer cleanup()
+
+	client := newRawProtoClient(t, addr)
+	defer client.close()
+
+	client.simpleQuery("BEGIN DOMAIN accounts")
+	client.simpleQuery("CREATE TABLE inventory (id INT PRIMARY KEY, stock INT, active BOOL)")
+	client.simpleQuery("COMMIT")
+
+	client.send(
+		&pgproto3.Parse{Name: "arith_update_stmt", Query: "UPDATE accounts.inventory SET stock = stock - $1 WHERE id = $2"},
+		&pgproto3.Describe{ObjectType: 'S', Name: "arith_update_stmt"},
+		&pgproto3.Sync{},
+	)
+	messages := client.receiveUntilReady()
+
+	found := false
+	for _, raw := range messages {
+		if msg, ok := raw.(*pgproto3.ParameterDescription); ok {
+			found = true
+			want := []uint32{20, 20}
+			if !reflect.DeepEqual(msg.ParameterOIDs, want) {
+				t.Fatalf("unexpected arithmetic update parameter OIDs: got %v want %v", msg.ParameterOIDs, want)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected parameter description in describe-statement response")
+	}
+}
+
 func TestExtendedQueryInsertReturningUsesSchemaAwareRowDescription(t *testing.T) {
 	addr, cleanup := startConformanceServer(t)
 	defer cleanup()

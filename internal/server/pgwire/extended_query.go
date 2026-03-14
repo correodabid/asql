@@ -251,17 +251,8 @@ func (server *Server) inferUpdateParamOIDs(sql string) []uint32 {
 	cols := make([]string, 0, len(assignments))
 	paramIndexes := make([]int, 0, len(assignments))
 	for _, assignment := range assignments {
-		parts := strings.SplitN(assignment, "=", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		col := canonicalParamIdentifier(parts[0])
-		rhs := strings.TrimSpace(parts[1])
-		if col == "" || !strings.HasPrefix(rhs, "$") {
-			continue
-		}
-		paramIndex, err := strconv.Atoi(strings.TrimPrefix(rhs, "$"))
-		if err != nil || paramIndex <= 0 {
+		col, paramIndex, ok := parseUpdateAssignmentParam(assignment)
+		if !ok {
 			continue
 		}
 		cols = append(cols, col)
@@ -286,6 +277,38 @@ func (server *Server) inferUpdateParamOIDs(sql string) []uint32 {
 		}
 	}
 	return result
+}
+
+func parseUpdateAssignmentParam(assignment string) (string, int, bool) {
+	parts := strings.SplitN(assignment, "=", 2)
+	if len(parts) != 2 {
+		return "", 0, false
+	}
+	col := canonicalParamIdentifier(parts[0])
+	rhs := strings.TrimSpace(parts[1])
+	if col == "" {
+		return "", 0, false
+	}
+	if strings.HasPrefix(rhs, "$") {
+		paramIndex, err := strconv.Atoi(strings.TrimPrefix(rhs, "$"))
+		if err != nil || paramIndex <= 0 {
+			return "", 0, false
+		}
+		return col, paramIndex, true
+	}
+	if match := updateArithmeticParamPattern.FindStringSubmatch(rhs); len(match) == 4 {
+		leftCol := canonicalParamIdentifier(match[1])
+		paramIndex, err := strconv.Atoi(match[3])
+		if err != nil || paramIndex <= 0 {
+			return "", 0, false
+		}
+		// Only infer when the arithmetic source column matches the target column.
+		// That keeps the OID hint conservative and schema-aligned.
+		if leftCol == col {
+			return col, paramIndex, true
+		}
+	}
+	return "", 0, false
 }
 
 func (server *Server) inferPredicateParamOIDs(sql string) []uint32 {
@@ -505,7 +528,10 @@ func splitTopLevelCSV(clause string) []string {
 	return parts
 }
 
-var whereParamPattern = regexp.MustCompile(`(?i)([a-zA-Z_][a-zA-Z0-9_\."\>]*)\s*(=|<>|!=|>=|<=|>|<|like|ilike|not\s+like|not\s+ilike)\s*\$(\d+)`)
+var (
+	whereParamPattern           = regexp.MustCompile(`(?i)([a-zA-Z_][a-zA-Z0-9_\."\>]*)\s*(=|<>|!=|>=|<=|>|<|like|ilike|not\s+like|not\s+ilike)\s*\$(\d+)`)
+	updateArithmeticParamPattern = regexp.MustCompile(`(?i)^([a-zA-Z_][a-zA-Z0-9_\."\>]*)\s*([+\-*/])\s*\$(\d+)$`)
+)
 
 func extractWhereClause(sql string) string {
 	upper := strings.ToUpper(sql)
