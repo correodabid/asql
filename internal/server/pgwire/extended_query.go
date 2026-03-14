@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,6 +124,9 @@ func (server *Server) inferParamOIDs(sql string) []uint32 {
 	if inferred := server.inferInsertParamOIDs(sql); len(inferred) > 0 {
 		return inferred
 	}
+	if inferred := server.inferPredicateParamOIDs(sql); len(inferred) > 0 {
+		return inferred
+	}
 	return inferParamOIDCount(sql)
 }
 
@@ -194,6 +198,78 @@ func (server *Server) inferInsertParamOIDs(sql string) []uint32 {
 		}
 		if oid := oids[cols[i]]; oid != 0 {
 			result[paramIndex-1] = oid
+		}
+	}
+	return result
+}
+
+func (server *Server) inferPredicateParamOIDs(sql string) []uint32 {
+	trimmed := stripAsOfComment(strings.TrimSpace(sql))
+	normalized := normalizePlaceholders(trimmed)
+	stmt, err := parser.Parse(normalized)
+	if err != nil {
+		return nil
+	}
+
+	var tableName string
+	switch typed := stmt.(type) {
+	case ast.SelectStatement:
+		tableName = typed.TableName
+	case ast.UpdateStatement:
+		tableName = typed.TableName
+	case ast.DeleteStatement:
+		tableName = typed.TableName
+	default:
+		return nil
+	}
+	if tableName == "" {
+		return nil
+	}
+
+	whereClause := extractWhereClause(trimmed)
+	if whereClause == "" {
+		return nil
+	}
+
+	matches := whereParamPattern.FindAllStringSubmatch(whereClause, -1)
+	if len(matches) == 0 {
+		return nil
+	}
+
+	max := 0
+	cols := make([]string, 0, len(matches))
+	paramIndexes := make([]int, 0, len(matches))
+	for _, match := range matches {
+		if len(match) < 4 {
+			continue
+		}
+		col := canonicalParamIdentifier(match[1])
+		if col == "" {
+			continue
+		}
+		n, err := strconv.Atoi(match[3])
+		if err != nil || n <= 0 {
+			continue
+		}
+		cols = append(cols, col)
+		paramIndexes = append(paramIndexes, n)
+		if n > max {
+			max = n
+		}
+	}
+	if max == 0 || len(cols) == 0 {
+		return nil
+	}
+
+	oids := server.resolveColumnOIDs(tableName, cols)
+	result := make([]uint32, max)
+	for i, col := range cols {
+		idx := paramIndexes[i] - 1
+		if idx < 0 || idx >= len(result) {
+			continue
+		}
+		if oid := oids[col]; oid != 0 {
+			result[idx] = oid
 		}
 	}
 	return result
@@ -286,6 +362,34 @@ func insertParameterOrder(sql string) []int {
 		}
 	}
 	return order
+}
+
+var whereParamPattern = regexp.MustCompile(`(?i)([a-zA-Z_][a-zA-Z0-9_\."\>]*)\s*(=|<>|!=|>=|<=|>|<|like|ilike|not\s+like|not\s+ilike)\s*\$(\d+)`)
+
+func extractWhereClause(sql string) string {
+	upper := strings.ToUpper(sql)
+	whereIdx := strings.Index(upper, " WHERE ")
+	if whereIdx == -1 {
+		return ""
+	}
+	clause := sql[whereIdx+len(" WHERE "):]
+	upperClause := strings.ToUpper(clause)
+	end := len(clause)
+	for _, kw := range []string{" GROUP BY ", " HAVING ", " ORDER BY ", " LIMIT ", " OFFSET ", " RETURNING "} {
+		if idx := strings.Index(upperClause, kw); idx != -1 && idx < end {
+			end = idx
+		}
+	}
+	return strings.TrimSpace(clause[:end])
+}
+
+func canonicalParamIdentifier(raw string) string {
+	name := strings.TrimSpace(raw)
+	if dot := strings.LastIndex(name, "."); dot != -1 {
+		name = name[dot+1:]
+	}
+	name = strings.Trim(name, `"`)
+	return strings.ToLower(name)
 }
 
 // handleBind substitutes parameters into the prepared statement, stores the

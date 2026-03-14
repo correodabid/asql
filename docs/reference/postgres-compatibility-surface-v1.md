@@ -44,7 +44,7 @@ matches PostgreSQL closely enough to claim compatibility today, see
   - extended query protocol for the current ASQL SQL subset
 - Extended-query behavior:
   - named prepared statements and portals are supported per connection
-  - `Describe Statement` returns `ParameterDescription`; common schema-aligned `INSERT ... VALUES ($n, ...)` shapes can advertise concrete scalar OIDs instead of only unspecified (`0`) entries
+  - `Describe Statement` returns `ParameterDescription`; common schema-aligned `INSERT ... VALUES ($n, ...)` and simple `WHERE column OP $n` predicate shapes can advertise concrete scalar OIDs instead of only unspecified (`0`) entries
   - portals can suspend and resume across repeated `Execute` calls
   - post-error message discard semantics are aligned with `Sync` recovery behavior
   - parameters are inlined at bind time before ASQL execution
