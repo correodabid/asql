@@ -305,6 +305,27 @@ func BenchmarkEngineRestartWorkloadSweep(b *testing.B) {
 	}
 }
 
+func BenchmarkEngineRestartWorkloadCadenceSweep(b *testing.B) {
+	const replayTail = 500
+	for _, workload := range []restartWorkloadKind{
+		restartWorkloadInsertHeavy,
+		restartWorkloadUpdateHeavy,
+		restartWorkloadDeleteHeavy,
+	} {
+		b.Run(string(workload), func(b *testing.B) {
+			for _, baseMutations := range []int{defaultSnapshotInterval, snapshotIntervalMedium} {
+				totalMutations := restartWorkloadTotalMutations(workload, baseMutations, replayTail)
+				b.Run(fmt.Sprintf("replay_only_total_%d", totalMutations), func(b *testing.B) {
+					benchmarkEngineRestartWorkloadCustomLoad(b, workload, baseMutations, replayTail, false)
+				})
+				b.Run(fmt.Sprintf("persisted_snapshot_total_%d_tail_%d", totalMutations, replayTail), func(b *testing.B) {
+					benchmarkEngineRestartWorkloadCustomLoad(b, workload, baseMutations, replayTail, true)
+				})
+			}
+		})
+	}
+}
+
 func BenchmarkEngineReadPersistedSnapshotsFromDir(b *testing.B) {
 	_, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, true)
 
@@ -749,6 +770,12 @@ func benchmarkEngineRestartWorkloadLoad(b *testing.B, workload restartWorkloadKi
 	benchmarkEngineRestartFixtureLoad(b, ctx, walPath, snapDir, expectedHeadLSN)
 }
 
+func benchmarkEngineRestartWorkloadCustomLoad(b *testing.B, workload restartWorkloadKind, baseMutations int, tailMutations int, withPersistedSnapshot bool) {
+	ctx := context.Background()
+	walPath, snapDir, expectedHeadLSN := prepareRestartWorkloadFixtureWithBase(b, workload, baseMutations, tailMutations, withPersistedSnapshot)
+	benchmarkEngineRestartFixtureLoad(b, ctx, walPath, snapDir, expectedHeadLSN)
+}
+
 func benchmarkEngineRestartFixtureLoad(b *testing.B, ctx context.Context, walPath string, snapDir string, expectedHeadLSN uint64) {
 	runRoot := filepath.Join(b.TempDir(), "restart-runs")
 	if err := os.MkdirAll(runRoot, 0o755); err != nil {
@@ -1157,7 +1184,17 @@ const (
 )
 
 func prepareRestartWorkloadFixture(b *testing.B, workload restartWorkloadKind, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
+	return prepareRestartWorkloadFixtureWithBase(b, workload, defaultSnapshotInterval, defaultSnapshotInterval, withPersistedSnapshot)
+}
+
+func prepareRestartWorkloadFixtureWithBase(b *testing.B, workload restartWorkloadKind, baseMutations int, tailMutations int, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
 	b.Helper()
+	if baseMutations <= 0 {
+		b.Fatalf("base mutations must be positive: %d", baseMutations)
+	}
+	if tailMutations < 0 {
+		b.Fatalf("tail mutations must be non-negative: %d", tailMutations)
+	}
 
 	ctx := context.Background()
 	dir := b.TempDir()
@@ -1183,7 +1220,7 @@ func prepareRestartWorkloadFixture(b *testing.B, workload restartWorkloadKind, w
 	session := engine.NewSession()
 	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
 	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
-	applyRestartWorkloadSeed(b, ctx, engine, session, workload)
+	applyRestartWorkloadSeed(b, ctx, engine, session, workload, baseMutations, tailMutations)
 	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
 
 	if withPersistedSnapshot {
@@ -1208,6 +1245,10 @@ func prepareRestartWorkloadFixture(b *testing.B, workload restartWorkloadKind, w
 			b.Fatal("expected persisted snapshot fixture files")
 		}
 
+		if tailMutations == 0 {
+			return walPath, snapDir, expectedHeadLSN
+		}
+
 		store, err = wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
 		if err != nil {
 			b.Fatalf("reopen workload wal store for tail: %v", err)
@@ -1218,10 +1259,17 @@ func prepareRestartWorkloadFixture(b *testing.B, workload restartWorkloadKind, w
 			b.Fatalf("reopen workload engine for tail: %v", err)
 		}
 		session = engine.NewSession()
+	} else if tailMutations == 0 {
+		engine.WaitPendingSnapshots()
+		expectedHeadLSN = store.LastLSN()
+		if err := store.Close(); err != nil {
+			b.Fatalf("close workload replay-only wal store: %v", err)
+		}
+		return walPath, "", expectedHeadLSN
 	}
 
 	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
-	applyRestartWorkloadTail(b, ctx, engine, session, workload)
+	applyRestartWorkloadTail(b, ctx, engine, session, workload, baseMutations, tailMutations)
 	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
 
 	engine.WaitPendingSnapshots()
@@ -1236,16 +1284,16 @@ func prepareRestartWorkloadFixture(b *testing.B, workload restartWorkloadKind, w
 	return walPath, snapDir, expectedHeadLSN
 }
 
-func applyRestartWorkloadSeed(b *testing.B, ctx context.Context, engine *Engine, session *Session, workload restartWorkloadKind) {
+func applyRestartWorkloadSeed(b *testing.B, ctx context.Context, engine *Engine, session *Session, workload restartWorkloadKind, baseMutations int, tailMutations int) {
 	b.Helper()
 
 	switch workload {
 	case restartWorkloadInsertHeavy, restartWorkloadUpdateHeavy:
-		for i := 1; i <= defaultSnapshotInterval; i++ {
+		for i := 1; i <= baseMutations; i++ {
 			mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
 		}
 	case restartWorkloadDeleteHeavy:
-		for i := 1; i <= defaultSnapshotInterval*2; i++ {
+		for i := 1; i <= baseMutations+tailMutations; i++ {
 			mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
 		}
 	default:
@@ -1253,26 +1301,37 @@ func applyRestartWorkloadSeed(b *testing.B, ctx context.Context, engine *Engine,
 	}
 }
 
-func applyRestartWorkloadTail(b *testing.B, ctx context.Context, engine *Engine, session *Session, workload restartWorkloadKind) {
+func applyRestartWorkloadTail(b *testing.B, ctx context.Context, engine *Engine, session *Session, workload restartWorkloadKind, baseMutations int, tailMutations int) {
 	b.Helper()
 
 	switch workload {
 	case restartWorkloadInsertHeavy:
-		for i := defaultSnapshotInterval + 1; i <= defaultSnapshotInterval*2; i++ {
+		for i := baseMutations + 1; i <= baseMutations+tailMutations; i++ {
 			mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
 		}
 	case restartWorkloadUpdateHeavy:
 		const workingSet = 100
-		for i := 1; i <= defaultSnapshotInterval; i++ {
+		for i := 1; i <= tailMutations; i++ {
 			targetID := ((i - 1) % workingSet) + 1
 			mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("UPDATE entries SET payload = 'payload-updated-%d' WHERE id = %d", i, targetID))
 		}
 	case restartWorkloadDeleteHeavy:
-		for i := defaultSnapshotInterval * 2; i > defaultSnapshotInterval; i-- {
+		for i := baseMutations + tailMutations; i > baseMutations; i-- {
 			mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("DELETE FROM entries WHERE id = %d", i))
 		}
 	default:
 		b.Fatalf("unsupported restart workload: %s", workload)
+	}
+}
+
+func restartWorkloadTotalMutations(workload restartWorkloadKind, baseMutations int, tailMutations int) int {
+	switch workload {
+	case restartWorkloadInsertHeavy, restartWorkloadUpdateHeavy:
+		return baseMutations + tailMutations
+	case restartWorkloadDeleteHeavy:
+		return baseMutations + (2 * tailMutations)
+	default:
+		return baseMutations + tailMutations
 	}
 }
 
