@@ -27,8 +27,8 @@ Current behavior falls into three buckets:
    but still based on coarse message classification rather than rich typed engine
    errors.
 3. **Implementation-present / partially evidenced** — behavior exists in code and
-   may be exercised indirectly, but the exact SQLSTATE is not yet covered by a
-   dedicated end-to-end regression.
+  may be exercised indirectly, but the exact SQLSTATE is not yet covered by a
+  dedicated regression.
 
 ## End-to-end regression-covered behavior
 
@@ -37,6 +37,9 @@ Current behavior falls into three buckets:
 | Query cancellation after PostgreSQL `CancelRequest` | `57014` (`query_canceled`) | `internal/server/pgwire/extended_query_conformance_test.go`: `TestCancelRequestCancelsSimpleQueryAndKeepsConnectionUsable` | The connection remains usable after the canceled query. |
 | Client-aborted `COPY FROM STDIN` via `CopyFail` | `57014` (`query_canceled`) | `internal/server/pgwire/extended_query_conformance_test.go`: `TestCopyFailRollsBackInsertedRows` | Abort rolls back inserted rows and returns a cancellation-style error. |
 | Invalid binary bind payload for the currently supported narrow binary subset | `22P02` (`invalid_text_representation`) | `internal/server/pgwire/extended_query_conformance_test.go`: `TestExtendedQueryDiscardsMessagesUntilSyncAfterError` | Applies to malformed binary bind input in the current `int4` / `int8` / `bool` compatibility wedge. |
+| Password auth failure when `AuthToken` is configured | `28P01` (`invalid_password`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWirePasswordAuthenticationWrongPasswordReturns28P01` | This is now covered at the raw pgwire startup/auth handshake level. |
+| Wrong frontend message during password startup | `08P01` (`protocol_violation`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWirePasswordAuthenticationWrongMessageReturns08P01` | Covers the password-challenge path where the client sends a non-password frontend message. |
+| Follower redirect error shape with leader hint | `25006` (`read_only_sql_transaction`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestSendFollowerRedirectErrorWrites25006AndHint` | Covers the wire-level redirect message and `asql_leader=...` hint shape used by SDK clients. |
 
 ## Unit-covered current mapper behavior
 
@@ -72,9 +75,6 @@ error hierarchy.
 
 | Situation | Current SQLSTATE | Evidence status | Notes |
 |---|---|---|---|
-| Follower rejects a write and provides leader redirect hint | `25006` (`read_only_sql_transaction`) | Partial | Implemented in `sendFollowerRedirectError()` and `extendedFollowerRedirect()`. SDK-side redirect-hint parsing is covered in `sdk/cluster_test.go`, but the exact wire-level error is not yet asserted in a dedicated pgwire regression. |
-| Password auth failure when `AuthToken` is configured | `28P01` (`invalid_password`) | Partial | Startup path implementation sends `28P01`; `TestPGWirePasswordAuthenticationWithAuthToken` proves the connection fails for missing/wrong password, but does not currently assert the exact SQLSTATE on the wire. |
-| Protocol violation during password startup | `08P01` (`protocol_violation`) | Implementation-present | Startup path sends `08P01` when a password challenge is answered with the wrong frontend message type. No dedicated regression covers this exact path yet. |
 | Bare PostgreSQL transaction syntax guardrail (`BEGIN`) | currently coarse, message-oriented | Partial | `TestPGWireCompatibilityUnsupportedPatternGuidance` asserts actionable guidance text, not a specific SQLSTATE. Treat the guidance message as the stable contract today, not an exact PostgreSQL parity claim. |
 | `ANY(...)` / `ARRAY[...]` guardrail | currently coarse, message-oriented | Partial | `TestPGWireCompatibilityUnsupportedPatternGuidance` asserts actionable guidance text, not a specific SQLSTATE. |
 
