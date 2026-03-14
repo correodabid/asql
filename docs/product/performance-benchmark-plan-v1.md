@@ -115,6 +115,11 @@ Recommended scenarios:
 - repeated writes under induced leader change
 - write workload with periodic node restarts
 
+Current code-backed hooks:
+
+- `BenchmarkFailoverCoordinatorPromotion`
+- `BenchmarkFailoverRecoveryReplay`
+
 Primary metrics:
 
 - rows/sec

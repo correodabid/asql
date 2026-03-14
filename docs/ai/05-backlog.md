@@ -480,8 +480,9 @@ Current evidence already in repo, but not sufficient to close this epic:
 
 Open gaps before closure:
 - Snapshot restart microbenchmarks now exist, but there is no closure-level baseline/improvement decision yet for snapshot load time.
-- No benchmark-backed closure yet for indexed read latency or failover recovery time.
-- No published failover/recovery benchmark suite that satisfies the acceptance gates below.
+- Initial failover promotion/recovery benchmarks now exist, but there is no closure-level baseline/improvement decision yet for failover recovery time.
+- No benchmark-backed closure yet for indexed read latency.
+- No published multi-scenario failover/recovery benchmark suite yet that satisfies the acceptance gates below.
 - No measured decision record yet for persisted index/cache architecture or parallel scan evaluation.
 
 - [ ] Benchmark and improve commit batching on realistic workloads.

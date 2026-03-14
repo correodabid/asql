@@ -37,6 +37,13 @@ Initial dry-run on 2026-03-14 using `go test ./internal/engine/executor -run '^$
 - `BenchmarkEngineRestartReplayOnly-8`: `10,152,376 ns/op`
 - `BenchmarkEngineRestartFromPersistedSnapshot-8`: `5,134,292 ns/op`
 
+### Failover / recovery validation (`test/integration`)
+
+Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench 'BenchmarkFailover(CoordinatorPromotion|RecoveryReplay)$' -benchtime=1x -count=1`:
+
+- `BenchmarkFailoverCoordinatorPromotion-8`: `125,667 ns/op`
+- `BenchmarkFailoverRecoveryReplay-8`: `227,584 ns/op`
+
 ## Notes
 
 - This baseline is deterministic in workload shape and command path.
