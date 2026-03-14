@@ -2930,8 +2930,8 @@ func TestCompositeBTreeIndexOrdersMultiColumnQuery(t *testing.T) {
 	}
 
 	counts := engine.ScanStrategyCounts()
-	if counts[string(scanStrategyBTreeOrder)] == 0 {
-		t.Fatalf("expected btree-order strategy count > 0, got %+v", counts)
+	if counts[string(scanStrategyBTreeIOScan)] == 0 {
+		t.Fatalf("expected btree-index-only strategy count > 0, got %+v", counts)
 	}
 }
 

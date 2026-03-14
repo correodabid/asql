@@ -910,10 +910,21 @@ func tryIndexOnlyScan(
 		return nil, false
 	}
 
-	// Find a btree index that covers the first ORDER BY column.
-	orderCol := strings.TrimSpace(strings.ToLower(plan.OrderBy[0].Column))
-	index, ok := indexForColumn(table, orderCol)
-	if !ok || index.kind != "btree" {
+	// Find a btree index that covers the ORDER BY shape.
+	var (
+		index *indexState
+		ok    bool
+	)
+	if len(plan.OrderBy) > 1 {
+		index, _, ok = compositeBTreeIndexForOrder(table, plan.OrderBy)
+	} else {
+		orderCol := strings.TrimSpace(strings.ToLower(plan.OrderBy[0].Column))
+		index, ok = indexForColumn(table, orderCol)
+		if ok && index.kind != "btree" {
+			ok = false
+		}
+	}
+	if !ok || index == nil || index.kind != "btree" {
 		return nil, false
 	}
 

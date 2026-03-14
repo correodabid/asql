@@ -377,7 +377,7 @@ func BenchmarkEngineReadSelectiveNonCoveredBTree(b *testing.B) {
 	_ = store.Close()
 }
 
-func BenchmarkEngineReadCompositeCoveredFallbackBTree(b *testing.B) {
+func BenchmarkEngineReadCompositeCoveredIndexOnlyBTree(b *testing.B) {
 	ctx := context.Background()
 	store, engine, targetLSN := prepareCompositeIndexedReadBenchmarkFixture(b)
 
@@ -387,14 +387,14 @@ func BenchmarkEngineReadCompositeCoveredFallbackBTree(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
 		if err != nil {
-			b.Fatalf("composite covered fallback query: %v", err)
+			b.Fatalf("composite covered index-only query: %v", err)
 		}
 		if len(result.Rows) != 100 {
 			b.Fatalf("unexpected composite covered row count: got %d want 100", len(result.Rows))
 		}
 	}
 	b.StopTimer()
-	reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyBTreeOrder))
+	reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyBTreeIOScan))
 
 	engine.WaitPendingSnapshots()
 	_ = store.Close()

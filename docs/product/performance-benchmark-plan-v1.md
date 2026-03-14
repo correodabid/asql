@@ -45,7 +45,7 @@ Coverage:
 - `BenchmarkEngineReadIndexOnlyOrderOffsetBTree`
 - `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree`
 - `BenchmarkEngineReadSelectiveNonCoveredBTree`
-- `BenchmarkEngineReadCompositeCoveredFallbackBTree`
+- `BenchmarkEngineReadCompositeCoveredIndexOnlyBTree`
 - `BenchmarkEngineReadCompositeNonCoveredBTree`
 - WAL append/read/recover benchmarks
 
