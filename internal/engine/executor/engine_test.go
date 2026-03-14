@@ -2775,7 +2775,14 @@ func TestBaseJoinPredicateUsesQualifiedRootAlias(t *testing.T) {
 		},
 	}
 	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
-	baseTable := &tableState{columns: []string{"id", "status"}}
+	baseTable := &tableState{
+		columns: []string{"id", "status"},
+		indexes: map[string]*indexState{
+			"idx_orders_id_hash": {name: "idx_orders_id_hash", column: "id", kind: "hash", buckets: map[string][]int{"n:42": {0}}},
+		},
+		indexedColumns: map[string]string{"id": "idx_orders_id_hash"},
+		rows:           make([][]ast.Literal, 10),
+	}
 
 	predicate := baseJoinPredicate(plan, aliasMap, baseTable)
 	if predicate == nil {
@@ -2802,6 +2809,71 @@ func TestBaseJoinPredicateRejectsJoinedTableFilter(t *testing.T) {
 
 	if predicate := baseJoinPredicate(plan, aliasMap, baseTable); predicate != nil {
 		t.Fatalf("expected nil base join predicate, got %+v", predicate)
+	}
+}
+
+func TestBaseJoinPredicateUsesIndexedConjunctFromRootFilter(t *testing.T) {
+	plan := planner.Plan{
+		TableName:  "orders",
+		TableAlias: "o",
+		Joins:      []ast.JoinClause{{TableName: "order_lines", Alias: "l"}},
+		Filter: &ast.Predicate{
+			Operator: "AND",
+			Left: &ast.Predicate{
+				Column:   "o.status",
+				Operator: "=",
+				Value:    ast.Literal{Kind: ast.LiteralString, StringValue: "open"},
+			},
+			Right: &ast.Predicate{
+				Column:   "o.id",
+				Operator: "=",
+				Value:    ast.Literal{Kind: ast.LiteralNumber, NumberValue: 42},
+			},
+		},
+	}
+	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	baseTable := &tableState{
+		columns: []string{"id", "status"},
+		indexes: map[string]*indexState{
+			"idx_orders_id_hash": {name: "idx_orders_id_hash", column: "id", kind: "hash", buckets: map[string][]int{"n:42": {0}}},
+		},
+		indexedColumns: map[string]string{"id": "idx_orders_id_hash"},
+		rows:           make([][]ast.Literal, 10),
+	}
+
+	predicate := baseJoinPredicate(plan, aliasMap, baseTable)
+	if predicate == nil {
+		t.Fatal("expected base join predicate")
+	}
+	if predicate.Column != "id" {
+		t.Fatalf("unexpected predicate column: got %q want %q", predicate.Column, "id")
+	}
+}
+
+func TestBaseJoinPredicateRejectsOrFilter(t *testing.T) {
+	plan := planner.Plan{
+		TableName:  "orders",
+		TableAlias: "o",
+		Joins:      []ast.JoinClause{{TableName: "order_lines", Alias: "l"}},
+		Filter: &ast.Predicate{
+			Operator: "OR",
+			Left: &ast.Predicate{
+				Column:   "o.id",
+				Operator: "=",
+				Value:    ast.Literal{Kind: ast.LiteralNumber, NumberValue: 42},
+			},
+			Right: &ast.Predicate{
+				Column:   "o.status",
+				Operator: "=",
+				Value:    ast.Literal{Kind: ast.LiteralString, StringValue: "open"},
+			},
+		},
+	}
+	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	baseTable := &tableState{columns: []string{"id", "status"}}
+
+	if predicate := baseJoinPredicate(plan, aliasMap, baseTable); predicate != nil {
+		t.Fatalf("expected nil base join predicate for OR filter, got %+v", predicate)
 	}
 }
 
@@ -3127,6 +3199,59 @@ func TestJoinQueryWithQualifiedRootFilterReturnsExpectedRows(t *testing.T) {
 	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT o.id, o.status, l.id, l.sku FROM orders o JOIN order_lines l ON o.id = l.order_id WHERE o.id = 1 ORDER BY l.id ASC", []string{"bench"}, store.LastLSN())
 	if err != nil {
 		t.Fatalf("join query with root filter: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("unexpected join row count: got %d want 2", len(result.Rows))
+	}
+	if result.Rows[0]["o.id"].NumberValue != 1 || result.Rows[0]["l.id"].NumberValue != 10 {
+		t.Fatalf("unexpected first join row: %+v", result.Rows[0])
+	}
+	if result.Rows[1]["o.id"].NumberValue != 1 || result.Rows[1]["l.id"].NumberValue != 11 {
+		t.Fatalf("unexpected second join row: %+v", result.Rows[1])
+	}
+}
+
+func TestJoinQueryWithQualifiedRootAndFilterReturnsExpectedRows(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "join-root-and-filter.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	if _, err := engine.Execute(ctx, session, "BEGIN DOMAIN bench"); err != nil {
+		t.Fatalf("begin domain: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE orders (id INT PRIMARY KEY, status TEXT)"); err != nil {
+		t.Fatalf("create orders table: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE order_lines (id INT PRIMARY KEY, order_id INT REFERENCES orders(id), sku TEXT, qty INT)"); err != nil {
+		t.Fatalf("create order_lines table: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "INSERT INTO orders (id, status) VALUES (1, 'open'), (2, 'closed')"); err != nil {
+		t.Fatalf("insert orders: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "INSERT INTO order_lines (id, order_id, sku, qty) VALUES (10, 1, 'a', 1), (11, 1, 'b', 2), (20, 2, 'c', 3)"); err != nil {
+		t.Fatalf("insert order lines: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE INDEX idx_order_lines_order_id_hash ON order_lines (order_id) USING HASH"); err != nil {
+		t.Fatalf("create child fk index: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "COMMIT"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT o.id, o.status, l.id, l.sku FROM orders o JOIN order_lines l ON o.id = l.order_id WHERE o.id = 1 AND o.status = 'open' ORDER BY l.id ASC", []string{"bench"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("join query with root and filter: %v", err)
 	}
 	if len(result.Rows) != 2 {
 		t.Fatalf("unexpected join row count: got %d want 2", len(result.Rows))

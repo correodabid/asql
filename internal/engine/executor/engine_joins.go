@@ -217,23 +217,72 @@ func prefixRowWithNames(qualifiedNames map[string]string, prefix string, row map
 }
 
 func baseJoinPredicate(plan planner.Plan, aliasMap map[string]string, baseTable *tableState) *ast.Predicate {
-	if !isSimplePredicate(plan.Filter) {
+	basePrefix := displayPrefix(plan.TableName, plan.TableAlias)
+	return bestBaseJoinPredicate(plan.Filter, aliasMap, plan.TableName, basePrefix, baseTable)
+}
+
+func bestBaseJoinPredicate(predicate *ast.Predicate, aliasMap map[string]string, baseTableName string, basePrefix string, baseTable *tableState) *ast.Predicate {
+	if predicate == nil {
 		return nil
 	}
 
-	basePrefix := displayPrefix(plan.TableName, plan.TableAlias)
-	column, ok := normalizeBasePredicateColumn(plan.Filter.Column, aliasMap, plan.TableName, basePrefix, baseTable)
+	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
+	case "AND":
+		left := bestBaseJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
+		right := bestBaseJoinPredicate(predicate.Right, aliasMap, baseTableName, basePrefix, baseTable)
+		return preferredBaseJoinPredicate(baseTable, left, right)
+	case "OR", "NOT":
+		return nil
+	}
+
+	if !isSimplePredicate(predicate) {
+		return nil
+	}
+
+	column, ok := normalizeBasePredicateColumn(predicate.Column, aliasMap, baseTableName, basePrefix, baseTable)
 	if !ok {
 		return nil
 	}
 
-	return &ast.Predicate{
+	candidate := &ast.Predicate{
 		Column:   column,
-		Operator: plan.Filter.Operator,
-		Value:    plan.Filter.Value,
-		Value2:   plan.Filter.Value2,
-		InValues: plan.Filter.InValues,
-		Subquery: plan.Filter.Subquery,
+		Operator: predicate.Operator,
+		Value:    predicate.Value,
+		Value2:   predicate.Value2,
+		InValues: predicate.InValues,
+		Subquery: predicate.Subquery,
+	}
+
+	if chooseSingleTableScanStrategy(baseTable, candidate, nil) == scanStrategyFullScan {
+		return nil
+	}
+
+	return candidate
+}
+
+func preferredBaseJoinPredicate(baseTable *tableState, left *ast.Predicate, right *ast.Predicate) *ast.Predicate {
+	if left == nil {
+		return right
+	}
+	if right == nil {
+		return left
+	}
+
+	leftRank := rankBaseJoinPredicate(baseTable, left)
+	if rightRank := rankBaseJoinPredicate(baseTable, right); rightRank > leftRank {
+		return right
+	}
+	return left
+}
+
+func rankBaseJoinPredicate(baseTable *tableState, predicate *ast.Predicate) int {
+	switch chooseSingleTableScanStrategy(baseTable, predicate, nil) {
+	case scanStrategyHashLookup:
+		return 3
+	case scanStrategyBTreeLookup:
+		return 2
+	default:
+		return 1
 	}
 }
 
