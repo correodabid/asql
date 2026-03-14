@@ -29,6 +29,7 @@ Status meanings:
 | Session/setup compatibility shim (`current_database()`, `current_user`, `SHOW`, `version()`, `SET`) | `internal/server/pgwire/server_test.go`: `TestCatalogStartupIntrospectionQueries`, `TestShowUnknownParamFallbackWorksOnExtendedProtocol` ; tool-flow coverage around `psql_startup` and `dbeaver_datagrip_startup` | Direct | Includes explicit coverage for generic non-`asql_*` `SHOW <param>` fallback plus session no-op probes (`RESET`, `RESET ALL`, `DEALLOCATE`, `DEALLOCATE ALL`). |
 | Catalog/introspection shim (`current_setting`, `pg_is_in_recovery`, `pg_backend_pid`, `pg_database`, `pg_type`, `pg_settings`, `pg_namespace`) | `internal/server/pgwire/server_test.go`: `TestCatalogStartupIntrospectionQueries`, `TestCatalogEmptyInterceptsExposeSchemaAcrossProtocols`; tool-flow coverage around `psql_startup` and `dbeaver_datagrip_startup` | Direct | Mainstream introspection paths are covered, including schema-stable empty-result intercepts for `pg_index`, `pg_constraint`, `pg_proc`, `pg_am`, `pg_extension`, `pg_roles`, `pg_authid`, and `pg_user`. |
 | Extended query pipeline (`Parse` / `Bind` / `Describe` / `Execute` / `Sync`) | `internal/server/pgwire/extended_query_conformance_test.go`: `TestExtendedQueryPortalResumesAcrossExecuteCalls`, `TestExtendedQueryDescribeStatementInfersParameterCount`, `TestExtendedQueryDiscardsMessagesUntilSyncAfterError` | Direct | Covers prepared statements, portals, `ParameterDescription`, suspend/resume behavior, and `Sync` recovery semantics. |
+| Narrow binary bind parameter decoding (`int4`, `int8`, `bool`) | `internal/server/pgwire/extended_query_conformance_test.go`: `TestExtendedQueryBinaryBindSupportsInt4Int8AndBool` | Direct | Covers the currently documented binary bind subset, including signed `int4`, large `int8`, and boolean parameters. |
 | CancelRequest + SQLSTATE `57014` + connection remains usable | `internal/server/pgwire/extended_query_conformance_test.go`: `TestCancelRequestCancelsSimpleQueryAndKeepsConnectionUsable` | Direct | Matches the documented best-effort cancellation claim at pgwire-managed execution boundaries. |
 | `COPY FROM STDIN` / `COPY TO STDOUT`, chunked `CopyData`, `CopyFail` rollback | `internal/server/pgwire/extended_query_conformance_test.go`: `TestCopyFromStdinInsertsRowsAndAcceptsChunkedCopyData`, `TestCopyToStdoutStreamsRows`, `TestCopyFailRollsBackInsertedRows` | Partial | Text-mode copy semantics are well covered. CSV-mode support is implemented in `internal/server/pgwire/copy.go` but lacks dedicated regression tests. |
 | `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` over pgwire | `internal/server/pgwire/server_test.go`: `TestPGWireCreateIfNotExistsRegression` | Direct | Confirms duplicate create fails without the guard and succeeds with `IF NOT EXISTS`. |
@@ -65,8 +66,6 @@ The following public claims or sub-claims are still weaker than they should be
 for a release-quality compatibility pack:
 
 1. Add dedicated CSV-mode `COPY FROM STDIN` / `COPY TO STDOUT` tests.
-2. Add direct pgwire tests for the currently documented narrow binary bind
-   parameter support (`int4`, `int8`, `bool`).
 
 Until those gaps are closed, treat those sub-parts as implementation-backed but
 not yet fully evidence-hardened compatibility promises.

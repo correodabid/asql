@@ -13,6 +13,7 @@ package pgwire
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -861,14 +862,23 @@ func paramOIDFor(i int, oids []uint32) uint32 {
 // decodeBinaryParam attempts to decode a binary-format parameter for numeric types.
 func decodeBinaryParam(data []byte, oid uint32) (string, error) {
 	switch oid {
-	case 23, 20: // int4, int8
-		var n int64
-		for _, b := range data {
-			n = n<<8 | int64(b)
+	case 23: // int4
+		if len(data) != 4 {
+			return "", fmt.Errorf("invalid int4 binary length %d", len(data))
 		}
+		n := int32(binary.BigEndian.Uint32(data))
+		return strconv.FormatInt(int64(n), 10), nil
+	case 20: // int8
+		if len(data) != 8 {
+			return "", fmt.Errorf("invalid int8 binary length %d", len(data))
+		}
+		n := int64(binary.BigEndian.Uint64(data))
 		return strconv.FormatInt(n, 10), nil
 	case 16: // bool
-		if len(data) == 1 && data[0] != 0 {
+		if len(data) != 1 {
+			return "", fmt.Errorf("invalid bool binary length %d", len(data))
+		}
+		if data[0] != 0 {
 			return "true", nil
 		}
 		return "false", nil

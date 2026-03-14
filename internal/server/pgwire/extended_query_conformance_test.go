@@ -21,9 +21,9 @@ type frontendEncodable interface {
 }
 
 type rawProtoClient struct {
-	t        *testing.T
-	conn     net.Conn
-	frontend *pgproto3.Frontend
+	t         *testing.T
+	conn      net.Conn
+	frontend  *pgproto3.Frontend
 	processID uint32
 	secretKey uint32
 }
@@ -157,7 +157,7 @@ func (client *rawProtoClient) receive() any {
 		client.t.Fatalf("receive backend message: %v", err)
 	}
 	return cloneBackendMessage(msg)
-	}
+}
 
 func cloneBackendMessage(msg any) any {
 	switch typed := msg.(type) {
@@ -432,6 +432,68 @@ func TestExtendedQueryDescribeStatementInfersParameterCount(t *testing.T) {
 	if !found {
 		t.Fatal("expected parameter description in describe-statement response")
 	}
+}
+
+func TestExtendedQueryBinaryBindSupportsInt4Int8AndBool(t *testing.T) {
+	addr, cleanup := startConformanceServer(t)
+	defer cleanup()
+
+	client := newRawProtoClient(t, addr)
+	defer client.close()
+
+	client.simpleQuery("BEGIN DOMAIN accounts")
+	client.simpleQuery("CREATE TABLE users (id INT, amount INT, active BOOL)")
+	client.simpleQuery("INSERT INTO users (id, amount, active) VALUES (1, 5, true)")
+	client.simpleQuery("INSERT INTO users (id, amount, active) VALUES (2, 5000000000, false)")
+	client.simpleQuery("INSERT INTO users (id, amount, active) VALUES (3, -7, true)")
+	client.simpleQuery("COMMIT")
+
+	int4Bytes := func(v int32) []byte {
+		buf := make([]byte, 4)
+		binary.BigEndian.PutUint32(buf, uint32(v))
+		return buf
+	}
+	int8Bytes := func(v int64) []byte {
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, uint64(v))
+		return buf
+	}
+	assertIDs := func(t *testing.T, messages []any, want []string) {
+		t.Helper()
+		var got []string
+		for _, raw := range messages {
+			if msg, ok := raw.(*pgproto3.DataRow); ok {
+				got = append(got, string(msg.Values[0]))
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("unexpected ids: got %v want %v", got, want)
+		}
+	}
+
+	client.send(
+		&pgproto3.Parse{Name: "bin_int4", Query: "SELECT id FROM accounts.users WHERE amount = $1 ORDER BY id ASC", ParameterOIDs: []uint32{23}},
+		&pgproto3.Bind{DestinationPortal: "bin_int4", PreparedStatement: "bin_int4", ParameterFormatCodes: []int16{1}, Parameters: [][]byte{int4Bytes(-7)}},
+		&pgproto3.Execute{Portal: "bin_int4", MaxRows: 0},
+		&pgproto3.Sync{},
+	)
+	assertIDs(t, client.receiveUntilReady(), []string{"3"})
+
+	client.send(
+		&pgproto3.Parse{Name: "bin_int8", Query: "SELECT id FROM accounts.users WHERE amount = $1 ORDER BY id ASC", ParameterOIDs: []uint32{20}},
+		&pgproto3.Bind{DestinationPortal: "bin_int8", PreparedStatement: "bin_int8", ParameterFormatCodes: []int16{1}, Parameters: [][]byte{int8Bytes(5000000000)}},
+		&pgproto3.Execute{Portal: "bin_int8", MaxRows: 0},
+		&pgproto3.Sync{},
+	)
+	assertIDs(t, client.receiveUntilReady(), []string{"2"})
+
+	client.send(
+		&pgproto3.Parse{Name: "bin_bool", Query: "SELECT id FROM accounts.users WHERE active = $1 ORDER BY id ASC", ParameterOIDs: []uint32{16}},
+		&pgproto3.Bind{DestinationPortal: "bin_bool", PreparedStatement: "bin_bool", ParameterFormatCodes: []int16{1}, Parameters: [][]byte{{1}}},
+		&pgproto3.Execute{Portal: "bin_bool", MaxRows: 0},
+		&pgproto3.Sync{},
+	)
+	assertIDs(t, client.receiveUntilReady(), []string{"1", "3"})
 }
 
 func TestCopyFromStdinInsertsRowsAndAcceptsChunkedCopyData(t *testing.T) {
