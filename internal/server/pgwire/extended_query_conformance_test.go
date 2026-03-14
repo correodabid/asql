@@ -434,6 +434,39 @@ func TestExtendedQueryDescribeStatementInfersParameterCount(t *testing.T) {
 	}
 }
 
+func TestExtendedQueryDescribeStatementInfersInsertParameterOIDs(t *testing.T) {
+	addr, cleanup := startConformanceServer(t)
+	defer cleanup()
+
+	client := newRawProtoClient(t, addr)
+	defer client.close()
+
+	client.simpleQuery("BEGIN DOMAIN accounts")
+	client.simpleQuery("CREATE TABLE users (id INT PRIMARY KEY, active BOOL, email TEXT)")
+	client.simpleQuery("COMMIT")
+
+	client.send(
+		&pgproto3.Parse{Name: "insert_stmt", Query: "INSERT INTO accounts.users (id, active, email) VALUES ($1, $2, $3)"},
+		&pgproto3.Describe{ObjectType: 'S', Name: "insert_stmt"},
+		&pgproto3.Sync{},
+	)
+	messages := client.receiveUntilReady()
+
+	found := false
+	for _, raw := range messages {
+		if msg, ok := raw.(*pgproto3.ParameterDescription); ok {
+			found = true
+			want := []uint32{20, 16, 25}
+			if !reflect.DeepEqual(msg.ParameterOIDs, want) {
+				t.Fatalf("unexpected parameter OIDs: got %v want %v", msg.ParameterOIDs, want)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected parameter description in describe-statement response")
+	}
+}
+
 func TestExtendedQueryInsertReturningUsesSchemaAwareRowDescription(t *testing.T) {
 	addr, cleanup := startConformanceServer(t)
 	defer cleanup()

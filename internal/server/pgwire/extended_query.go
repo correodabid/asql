@@ -102,10 +102,11 @@ func (server *Server) handleParse(backend *pgproto3.Backend, state *connState, m
 		return
 	}
 	// Infer number of $n parameters from the SQL so ParameterDescription
-	// contains the right count even when the client sends no OID hints.
+	// contains the right count even when the client sends no OID hints. For
+	// common schema-aligned shapes we also infer concrete OIDs.
 	paramOIDs := msg.ParameterOIDs
 	if len(paramOIDs) == 0 {
-		paramOIDs = inferParamOIDs(msg.Query)
+		paramOIDs = server.inferParamOIDs(msg.Query)
 	}
 	state.prepared[msg.Name] = preparedStmt{
 		sql:       msg.Query,
@@ -115,9 +116,19 @@ func (server *Server) handleParse(backend *pgproto3.Backend, state *connState, m
 	_ = backend.Flush()
 }
 
-// inferParamOIDs scans sql for the highest $n placeholder and returns a
+// inferParamOIDs returns ParameterDescription OIDs for common shapes and falls
+// back to a count-only unspecified-OID slice when type inference is not yet
+// available.
+func (server *Server) inferParamOIDs(sql string) []uint32 {
+	if inferred := server.inferInsertParamOIDs(sql); len(inferred) > 0 {
+		return inferred
+	}
+	return inferParamOIDCount(sql)
+}
+
+// inferParamOIDCount scans sql for the highest $n placeholder and returns a
 // slice of that length filled with 0 (unspecified OID).
-func inferParamOIDs(sql string) []uint32 {
+func inferParamOIDCount(sql string) []uint32 {
 	max := 0
 	for i := 0; i < len(sql); i++ {
 		if sql[i] != '$' {
@@ -139,6 +150,142 @@ func inferParamOIDs(sql string) []uint32 {
 		return nil
 	}
 	return make([]uint32, max) // all zeros = unspecified type
+}
+
+func (server *Server) inferInsertParamOIDs(sql string) []uint32 {
+	trimmed := stripAsOfComment(strings.TrimSpace(sql))
+	normalized := normalizePlaceholders(trimmed)
+	stmt, err := parser.Parse(normalized)
+	if err != nil {
+		return nil
+	}
+	ins, ok := stmt.(ast.InsertStatement)
+	if !ok || len(ins.Columns) == 0 {
+		return nil
+	}
+
+	paramOrder := insertParameterOrder(sql)
+	if len(paramOrder) == 0 {
+		return nil
+	}
+
+	max := 0
+	for _, n := range paramOrder {
+		if n > max {
+			max = n
+		}
+	}
+	if max == 0 {
+		return nil
+	}
+
+	result := make([]uint32, max)
+	cols := make([]string, 0, len(ins.Columns))
+	for _, c := range ins.Columns {
+		cols = append(cols, strings.ToLower(strings.TrimSpace(c)))
+	}
+	oids := server.resolveColumnOIDs(ins.TableName, cols)
+	for i, paramIndex := range paramOrder {
+		if i >= len(cols) {
+			break
+		}
+		if paramIndex <= 0 || paramIndex > len(result) {
+			continue
+		}
+		if oid := oids[cols[i]]; oid != 0 {
+			result[paramIndex-1] = oid
+		}
+	}
+	return result
+}
+
+func insertParameterOrder(sql string) []int {
+	upper := strings.ToUpper(sql)
+	valuesIdx := strings.Index(upper, "VALUES")
+	if valuesIdx == -1 {
+		return nil
+	}
+	rest := sql[valuesIdx+len("VALUES"):]
+	var order []int
+	depth := 0
+	inString := false
+	stringQuote := byte(0)
+	groupIndex := -1
+	exprIndex := 0
+	var token strings.Builder
+	flush := func() {
+		if groupIndex != 0 {
+			token.Reset()
+			return
+		}
+		expr := strings.TrimSpace(token.String())
+		token.Reset()
+		if exprIndex >= 0 {
+			if len(expr) > 1 && expr[0] == '$' {
+				if n, err := strconv.Atoi(expr[1:]); err == nil {
+					order = append(order, n)
+				}
+			}
+			exprIndex++
+		}
+	}
+
+	for i := 0; i < len(rest); i++ {
+		ch := rest[i]
+		if inString {
+			token.WriteByte(ch)
+			if ch == stringQuote {
+				if i+1 < len(rest) && rest[i+1] == stringQuote {
+					token.WriteByte(rest[i+1])
+					i++
+					continue
+				}
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '\'', '"':
+			inString = true
+			stringQuote = ch
+			token.WriteByte(ch)
+		case '(':
+			depth++
+			if depth == 1 {
+				groupIndex++
+				exprIndex = 0
+				token.Reset()
+				continue
+			}
+			token.WriteByte(ch)
+		case ')':
+			if depth == 1 {
+				flush()
+				depth--
+				if groupIndex == 0 {
+					return order
+				}
+				continue
+			}
+			if depth > 1 {
+				depth--
+				token.WriteByte(ch)
+			}
+		case ',':
+			if depth == 1 {
+				flush()
+				continue
+			}
+			if depth > 1 {
+				token.WriteByte(ch)
+			}
+		default:
+			if depth >= 1 {
+				token.WriteByte(ch)
+			}
+		}
+	}
+	return order
 }
 
 // handleBind substitutes parameters into the prepared statement, stores the
