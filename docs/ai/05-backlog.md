@@ -480,6 +480,7 @@ Current evidence already in repo, but not sufficient to close this epic:
 
 Closed sub-slices:
 - Restart/cadence policy is now treated as closed at the subline level: the mutation-mix-aware persisted checkpoint policy has deterministic regression coverage and repeated natural-restart evidence that is strong enough for a closure decision, even though the broader snapshot-load optimization item remains open.
+- Repeated historical/time-travel reads at the same target `LSN` are now treated as closed at the subline level: caching full WAL recovery results plus rebuilt historical states materially reduced repeated `AS OF LSN` latency and allocations on the benchmark fixture, even though broader replay-throughput and cross-`LSN` reuse decisions remain open.
 
 Open gaps before closure:
 - Snapshot restart microbenchmarks now exist, but there is no closure-level baseline/improvement decision yet for snapshot load time.
@@ -517,6 +518,8 @@ Subline status:
 - A direct full-snapshot decode experiment via `decodeSnapshotsBinary()` also failed to show a compelling win over the current raw-decode + materialize pipeline on either the base or index-rich fixture, so a larger refactor toward that path is not yet justified by the evidence.
 - The persisted-index/cache item is now narrower than it first appeared: a persisted timestamp→LSN side index already exists and is restart-validated, but there is still no evidence-backed need yet for general persisted table indexes or a broader cache layer.
 - The parallel-scan item has now been evaluated to a defer decision: there is still no proven workload class that justifies intra-query parallel scan complexity over the current deterministic single-threaded indexed paths.
+- Entity-related join reads now have dedicated scaling coverage: `BenchmarkEngineReadEntityRelatedJoinScaling` and `BenchmarkEngineReadEntityRelatedJoinRightFilterScaling` show that root-table pruning, root-only `AND` conjunct extraction, and safe right-side filtering materially improved the user-reported “entity + related tables” slowdown as row counts grow, but the broader indexed-read/query-latency item remains open because other read shapes still need closure-level decisions.
+- Repeated historical reads now have dedicated scaling coverage via `BenchmarkEngineReadHistoricalAsOfLSNScaling`: exact-`LSN` repeat reads benefit materially from the new WAL-record cache and small historical-state cache, while invalidation on commit and WAL GC keeps correctness explicit.
 
 Latest directional read evidence:
 - `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and repeated at ~`353–361 µs/op`.
@@ -526,6 +529,10 @@ Latest directional read evidence:
 - `BenchmarkEngineReadSelectiveNonCoveredBTree` exercised `btree-order` and repeated at ~`406–407 µs/op`.
 - `BenchmarkEngineReadCompositeCoveredIndexOnlyBTree` now exercises `btree-index-only` at ~`36 µs/op`.
 - `BenchmarkEngineReadCompositeNonCoveredBTree` exercises `btree-order` at ~`76–78 µs/op`.
+- `BenchmarkEngineReadEntityRelatedJoinScaling` now shows the indexed related-read path staying in the ~`23–27 µs/op` range at `orders_10000`, while the optimized unindexed path lands around ~`1.8–1.9 ms/op` instead of continuing to pay the earlier broader join-materialization cost.
+- `BenchmarkEngineReadEntityRelatedJoinRightFilterScaling` now keeps the unindexed related-read + right-side filter shape around ~`1.87 ms/op` at `orders_10000`, which is directionally consistent with the new pruning/filtering improvements rather than a fresh regression cliff.
+- `BenchmarkEngineReadHistoricalAsOfLSNScaling` now shows repeated exact-`LSN` historical reads improving from roughly ~`2.10 ms/op`, ~`1.19 MB/op`, ~`8.1k allocs/op` to ~`0.59 ms/op`, ~`373 KB/op`, ~`2.7k allocs/op` on the `rows_1000` fixture.
+- The same historical benchmark improves the larger `rows_10000` fixture from roughly ~`8.57 ms/op`, ~`12.09 MB/op`, ~`80k allocs/op` to ~`3.12 ms/op`, ~`3.79 MB/op`, ~`26.8k allocs/op`, which is strong enough to treat exact-target repeat history reads as a real fixed bottleneck rather than micro-tuning.
 - Current interpretation: index-only is strongly justified for simple covered ordered reads, remains strong with `OFFSET`, is justified on the selective covered shape after bounded-scan support, and is now also justified for the covered composite ordered-read shape. Further expansion should still be guided by measured query shapes rather than blanket rollout.
 
 - [ ] Benchmark and improve commit batching on realistic workloads.
