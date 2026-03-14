@@ -267,6 +267,7 @@ func BenchmarkEngineReadIndexedRangeBTree(b *testing.B) {
 	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)
 
 	query := "SELECT id, payload FROM entries WHERE id >= 9900 ORDER BY id ASC LIMIT 100"
+	baselineCounts := engine.ScanStrategyCounts()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
@@ -277,6 +278,8 @@ func BenchmarkEngineReadIndexedRangeBTree(b *testing.B) {
 			b.Fatalf("unexpected indexed range row count: got %d want 100", len(result.Rows))
 		}
 	}
+	b.StopTimer()
+	reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyBTreeOrder))
 
 	engine.WaitPendingSnapshots()
 	_ = store.Close()
@@ -287,6 +290,7 @@ func BenchmarkEngineReadIndexOnlyOrderBTree(b *testing.B) {
 	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)
 
 	query := "SELECT email FROM entries ORDER BY email ASC LIMIT 100"
+	baselineCounts := engine.ScanStrategyCounts()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
@@ -297,6 +301,8 @@ func BenchmarkEngineReadIndexOnlyOrderBTree(b *testing.B) {
 			b.Fatalf("unexpected index-only row count: got %d want 100", len(result.Rows))
 		}
 	}
+	b.StopTimer()
+	reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyBTreeIOScan))
 
 	engine.WaitPendingSnapshots()
 	_ = store.Close()
@@ -425,6 +431,17 @@ func prepareIndexedReadBenchmarkFixture(b *testing.B) (*wal.SegmentedLogStore, *
 
 	targetLSN := store.LastLSN()
 	return store, engine, targetLSN
+}
+
+func reportScanStrategyDelta(b *testing.B, engine *Engine, baselineCounts map[string]uint64, strategy string) {
+	b.Helper()
+
+	counts := engine.ScanStrategyCounts()
+	delta := counts[strategy] - baselineCounts[strategy]
+	if delta == 0 {
+		b.Fatalf("expected scan strategy %q to be exercised, got counts=%+v", strategy, counts)
+	}
+	b.ReportMetric(float64(delta), strategy+"-count")
 }
 
 func newBenchmarkEngine(b *testing.B) (*wal.SegmentedLogStore, *Engine) {

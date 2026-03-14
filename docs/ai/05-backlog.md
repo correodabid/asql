@@ -485,6 +485,11 @@ Open gaps before closure:
 - No published multi-scenario failover/recovery benchmark suite yet that satisfies the acceptance gates below.
 - No measured decision record yet for persisted index/cache architecture or parallel scan evaluation.
 
+Latest directional read evidence:
+- `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and measured `432,792 ns/op`.
+- `BenchmarkEngineReadIndexOnlyOrderBTree` exercised `btree-index-only` and measured `132,958 ns/op`.
+- This suggests the current index-only path is materially cheaper on the covered benchmark shape, but the epic still lacks a closure-level optimization decision and broader scenario coverage.
+
 - [ ] Benchmark and improve commit batching on realistic workloads.
 - [ ] Benchmark and improve replay throughput.
 - [ ] Benchmark and improve snapshot load time.

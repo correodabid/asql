@@ -41,8 +41,8 @@ Initial dry-run on 2026-03-14 using `go test ./internal/engine/executor -run '^$
 
 Initial dry-run on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngineRead(IndexedRangeBTree|IndexOnlyOrderBTree)$' -benchtime=1x -count=1`:
 
-- `BenchmarkEngineReadIndexedRangeBTree-8`: `2,000,362,042 ns/op`
-- `BenchmarkEngineReadIndexOnlyOrderBTree-8`: `2,002,305,583 ns/op`
+- `BenchmarkEngineReadIndexedRangeBTree-8`: `432,792 ns/op` (`btree-order-count=1`)
+- `BenchmarkEngineReadIndexOnlyOrderBTree-8`: `132,958 ns/op` (`btree-index-only-count=1`)
 
 ### Failover / recovery validation (`test/integration`)
 
