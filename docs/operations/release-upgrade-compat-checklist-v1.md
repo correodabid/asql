@@ -29,6 +29,7 @@ Every release candidate should include a short evidence bundle covering:
    - backup/restore parity suite passes.
    - failover continuity suite passes for the supported replicated runtime path.
    - concrete recovery evidence should include `test/integration/restart_replay_test.go`: `TestRestartReplayRestoresState`, `test/integration/backup_restore_test.go`: `TestBackupWipeRestorePreservesQueryParity`, and `test/integration/recovery_restore_test.go`: `TestBaseBackupRestoreToLSNAndTimestamp`.
+   - concrete replicated-runtime continuity evidence should include `test/integration/failover_simulation_test.go`: `TestFailoverSimulationLeaderCrashPromotesCandidate`, `TestFailoverSimulationStaleLeaderRecoveryRejectsOldToken`, `TestFailoverSimulationRepeatedSeededTimelineProducesIdenticalSequence`, and `test/integration/failover_state_hash_continuity_test.go`: `TestFailoverPromotionPreservesReplayStateHashContinuity`.
 5. Documentation sanity:
    - `README.md`, `docs/getting-started/`, `docs/reference/`, and `site/` were updated when user-visible behavior changed.
 
@@ -50,6 +51,7 @@ Every release candidate should include a short evidence bundle covering:
    - admin HTTP health/metrics flow
    - pgwire compatibility pack baseline lanes
    - focused pgwire SQLSTATE/error-shape regressions when protocol error behavior changed
+   - focused failover continuity evidence when cluster/runtime, fencing, or promotion logic changed
    - release-candidate evidence summary generated
 
 ## Upgrade simulation
@@ -103,6 +105,7 @@ Release can proceed only if all below are true:
 - No unresolved P0/P1 compatibility issues.
 - Upgrade simulation passes across test matrix.
 - Backup/restore parity test passes.
+- Replicated-runtime failover continuity tests pass for the supported cluster path.
 - Rollback plan documented and verified.
 
 ## Required release artifacts
