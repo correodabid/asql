@@ -21,10 +21,10 @@ func TestCaptureSnapshotWithCatalogStripsChangeLogAndClonesRows(t *testing.T) {
 			"d": {
 				tables: map[string]*tableState{
 					"t": {
-						columns: []string{"id"},
+						columns:           []string{"id"},
 						columnDefinitions: map[string]ast.ColumnDefinition{},
-						columnIndex: map[string]int{"id": 0},
-						rows: [][]ast.Literal{row},
+						columnIndex:       map[string]int{"id": 0},
+						rows:              [][]ast.Literal{row},
 						changeLog: []changeLogEntry{{
 							operation: "INSERT",
 							newRow: map[string]ast.Literal{
@@ -87,6 +87,77 @@ func TestAdaptiveDiskCheckpointWALBytes(t *testing.T) {
 		if got := adaptiveDiskCheckpointWALBytes(tt.mutations); got != tt.want {
 			t.Fatalf("adaptiveDiskCheckpointWALBytes(%d) = %d, want %d", tt.mutations, got, tt.want)
 		}
+	}
+}
+
+func TestAdaptivePersistedCheckpointMutationInterval(t *testing.T) {
+	tests := []struct {
+		name           string
+		mutations      uint64
+		recentPressure int
+		recentSamples  int
+		want           int
+	}{
+		{
+			name:           "insufficient sample keeps base",
+			mutations:      0,
+			recentPressure: int(mutationPressureUpdate) * (recentMutationMinSampleSize - 1),
+			recentSamples:  recentMutationMinSampleSize - 1,
+			want:           defaultSnapshotInterval,
+		},
+		{
+			name:           "insert heavy keeps base",
+			mutations:      snapshotIntervalMediumThreshold,
+			recentPressure: int(mutationPressureInsert) * recentMutationMinSampleSize,
+			recentSamples:  recentMutationMinSampleSize,
+			want:           snapshotIntervalMedium,
+		},
+		{
+			name:           "mixed update pressure halves interval",
+			mutations:      snapshotIntervalMediumThreshold,
+			recentPressure: recentMutationMinSampleSize * 3,
+			recentSamples:  recentMutationMinSampleSize,
+			want:           snapshotIntervalMedium / 2,
+		},
+		{
+			name:           "minimum floor applies",
+			mutations:      0,
+			recentPressure: recentMutationMinSampleSize * 4,
+			recentSamples:  recentMutationMinSampleSize,
+			want:           minPersistedCheckpointMutationInterval,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := adaptivePersistedCheckpointMutationInterval(tt.mutations, tt.recentPressure, tt.recentSamples); got != tt.want {
+				t.Fatalf("adaptivePersistedCheckpointMutationInterval(%d, %d, %d) = %d, want %d", tt.mutations, tt.recentPressure, tt.recentSamples, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRecordMutationPressureRollingWindow(t *testing.T) {
+	engine := &Engine{}
+
+	for i := 0; i < recentMutationWindowSize; i++ {
+		engine.recordMutationPressure(mutationPressureInsert)
+	}
+	if engine.recentMutationCount != recentMutationWindowSize {
+		t.Fatalf("recentMutationCount = %d, want %d", engine.recentMutationCount, recentMutationWindowSize)
+	}
+	if engine.recentMutationPressure != recentMutationWindowSize*int(mutationPressureInsert) {
+		t.Fatalf("recentMutationPressure = %d, want %d", engine.recentMutationPressure, recentMutationWindowSize*int(mutationPressureInsert))
+	}
+
+	for i := 0; i < recentMutationWindowSize; i++ {
+		engine.recordMutationPressure(mutationPressureUpdate)
+	}
+	if engine.recentMutationCount != recentMutationWindowSize {
+		t.Fatalf("recentMutationCount after rollover = %d, want %d", engine.recentMutationCount, recentMutationWindowSize)
+	}
+	if engine.recentMutationPressure != recentMutationWindowSize*int(mutationPressureUpdate) {
+		t.Fatalf("recentMutationPressure after rollover = %d, want %d", engine.recentMutationPressure, recentMutationWindowSize*int(mutationPressureUpdate))
 	}
 }
 

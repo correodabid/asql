@@ -131,32 +131,37 @@ const (
 // Reads are lock-free via an atomic pointer to an immutable readableState.
 // Writes are serialized by writeMu and use COW (copy-on-write) semantics.
 type Engine struct {
-	writeMu                   sync.Mutex                    // serializes write path (commit, beginDomain, replay)
-	readState                 atomic.Pointer[readableState] // lock-free read path
-	logStore                  ports.LogStore
-	snapDir                   string      // directory for numbered snapshot files ("" = disabled)
-	snapSeq                   uint64      // monotonic sequence number for the next snapshot file
-	snapCaptureInFlight       atomic.Bool // true while an in-memory snapshot capture goroutine is running
-	snapWriteInFlight         atomic.Bool // true while a disk snapshot goroutine is running
-	lastWriteUnixNano         atomic.Int64
-	catalog                   *domains.Catalog
-	txCount                   uint64
-	logicalTS                 uint64
-	headLSN                   uint64
-	statsMu                   sync.Mutex
-	scanStats                 map[scanStrategy]uint64
-	snapshots                 *snapshotStore
-	snapshotWg                sync.WaitGroup // tracks in-flight async snapshot goroutines
-	groupSync                 *groupSyncer   // non-nil when group commit is enabled
-	commitQ                   *commitQueue   // batches concurrent commits under single writeMu
-	mutationCount             uint64         // total mutations applied, for snapshot scheduling
-	lastCheckpointWALSize     uint64         // WAL TotalSize at last disk checkpoint, for size-based trigger
-	lastDiskSnapshotLogicalTS uint64         // logicalTS of the last successfully written disk snapshot
-	perf                      *perfStats
-	retainWAL                 bool                // when true, WAL is never truncated after snapshot persistence (audit/compliance)
-	auditStore                ports.AuditStore    // non-nil when a persistent audit log is wired in
-	raftCommitter             ports.RaftCommitter // non-nil in cluster mode; routes every WAL write through Raft quorum
-	timestampIndex            *timestampLSNIndex
+	writeMu                       sync.Mutex                    // serializes write path (commit, beginDomain, replay)
+	readState                     atomic.Pointer[readableState] // lock-free read path
+	logStore                      ports.LogStore
+	snapDir                       string      // directory for numbered snapshot files ("" = disabled)
+	snapSeq                       uint64      // monotonic sequence number for the next snapshot file
+	snapCaptureInFlight           atomic.Bool // true while an in-memory snapshot capture goroutine is running
+	snapWriteInFlight             atomic.Bool // true while a disk snapshot goroutine is running
+	lastWriteUnixNano             atomic.Int64
+	catalog                       *domains.Catalog
+	txCount                       uint64
+	logicalTS                     uint64
+	headLSN                       uint64
+	statsMu                       sync.Mutex
+	scanStats                     map[scanStrategy]uint64
+	snapshots                     *snapshotStore
+	snapshotWg                    sync.WaitGroup // tracks in-flight async snapshot goroutines
+	groupSync                     *groupSyncer   // non-nil when group commit is enabled
+	commitQ                       *commitQueue   // batches concurrent commits under single writeMu
+	mutationCount                 uint64         // total mutations applied, for snapshot scheduling
+	recentMutationPressure        int            // rolling weighted mutation pressure for persisted checkpoint cadence
+	recentMutationCount           int            // number of mutations currently represented in the rolling window
+	recentMutationIndex           int            // next slot to overwrite in recentMutationWeights
+	lastDiskSnapshotMutationCount uint64         // mutationCount at the last successful disk checkpoint
+	recentMutationWeights         [recentMutationWindowSize]uint8
+	lastCheckpointWALSize         uint64 // WAL TotalSize at last disk checkpoint, for size-based trigger
+	lastDiskSnapshotLogicalTS     uint64 // logicalTS of the last successfully written disk snapshot
+	perf                          *perfStats
+	retainWAL                     bool                // when true, WAL is never truncated after snapshot persistence (audit/compliance)
+	auditStore                    ports.AuditStore    // non-nil when a persistent audit log is wired in
+	raftCommitter                 ports.RaftCommitter // non-nil in cluster mode; routes every WAL write through Raft quorum
+	timestampIndex                *timestampLSNIndex
 	// vfkSubscriptions maps "sourceDomain.sourceTable" to the list of subscriber
 	// domains that maintain a read-only projection of that table. This index is
 	// populated when a CREATE TABLE with VFK constraints is processed and is

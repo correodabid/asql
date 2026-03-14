@@ -13,6 +13,7 @@ import (
 
 	"asql/internal/engine/domains"
 	"asql/internal/engine/parser/ast"
+	"asql/internal/engine/ports"
 	"asql/internal/storage/wal"
 
 	"github.com/klauspost/compress/zstd"
@@ -617,7 +618,13 @@ func (engine *Engine) persistAllSnapshots() {
 		return
 	}
 	engine.lastDiskSnapshotLogicalTS = latest.logicalTS
+	engine.lastDiskSnapshotMutationCount = engine.mutationCount
 	slog.Info("snapshot: disk checkpoint written", "lsn", latest.lsn, "seq", engine.snapSeq, "full", isFull)
+	if sizer, ok := engine.logStore.(ports.Sizer); ok {
+		if sz, err := sizer.TotalSize(); err == nil && sz > 0 {
+			engine.lastCheckpointWALSize = uint64(sz)
+		}
+	}
 	if engine.perf != nil {
 		engine.perf.recordSnapshotPersist(time.Since(started))
 	}

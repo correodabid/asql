@@ -16,6 +16,21 @@ const defaultSnapshotInterval = 500
 const snapshotIdleDelay = 2 * time.Second
 
 const (
+	recentMutationWindowSize               = 256
+	recentMutationMinSampleSize            = 64
+	persistedCheckpointPressureThreshold   = 250 // average weighted pressure >= 2.5x insert baseline shrinks interval
+	minPersistedCheckpointMutationInterval = 250
+)
+
+type mutationPressureKind uint8
+
+const (
+	mutationPressureInsert mutationPressureKind = 1
+	mutationPressureUpdate mutationPressureKind = 4
+	mutationPressureDelete mutationPressureKind = 3
+)
+
+const (
 	snapshotIntervalMediumThreshold = 5_000
 	snapshotIntervalHighThreshold   = 20_000
 	snapshotIntervalXLThreshold     = 100_000
@@ -103,6 +118,26 @@ func adaptiveSnapshotInterval(mutationCount uint64) int {
 	return defaultSnapshotInterval
 }
 
+// adaptivePersistedCheckpointMutationInterval chooses how many mutations to
+// allow between persisted checkpoints. It keeps the same volume-based baseline
+// as adaptiveSnapshotInterval, but shrinks the interval when the recent
+// mutation mix is dominated by UPDATE/DELETE pressure.
+func adaptivePersistedCheckpointMutationInterval(mutationCount uint64, recentPressure int, recentSamples int) int {
+	base := adaptiveSnapshotInterval(mutationCount)
+	if recentSamples < recentMutationMinSampleSize {
+		return base
+	}
+	avgPressureTimes100 := (recentPressure * 100) / recentSamples
+	if avgPressureTimes100 < persistedCheckpointPressureThreshold {
+		return base
+	}
+	adjusted := base / 2
+	if adjusted < minPersistedCheckpointMutationInterval {
+		return minPersistedCheckpointMutationInterval
+	}
+	return adjusted
+}
+
 // adaptiveDiskCheckpointWALBytes increases disk-checkpoint spacing as total
 // mutation volume grows. Persisted checkpoints deep-copy and serialize large
 // states, so keeping the trigger fixed at 64 MiB makes sustained ingest spend
@@ -118,6 +153,27 @@ func adaptiveDiskCheckpointWALBytes(mutationCount uint64) uint64 {
 		return diskCheckpointWALBytesMedium
 	}
 	return diskCheckpointWALBytes
+}
+
+func (engine *Engine) recordMutationPressure(kind mutationPressureKind) {
+	weight := uint8(kind)
+	if weight == 0 {
+		weight = uint8(mutationPressureInsert)
+	}
+
+	if engine.recentMutationCount < recentMutationWindowSize {
+		engine.recentMutationWeights[engine.recentMutationIndex] = weight
+		engine.recentMutationPressure += int(weight)
+		engine.recentMutationCount++
+		engine.recentMutationIndex = (engine.recentMutationIndex + 1) % recentMutationWindowSize
+		return
+	}
+
+	old := engine.recentMutationWeights[engine.recentMutationIndex]
+	engine.recentMutationPressure -= int(old)
+	engine.recentMutationWeights[engine.recentMutationIndex] = weight
+	engine.recentMutationPressure += int(weight)
+	engine.recentMutationIndex = (engine.recentMutationIndex + 1) % recentMutationWindowSize
 }
 
 // engineSnapshot captures a deep copy of the engine's in-memory state at a

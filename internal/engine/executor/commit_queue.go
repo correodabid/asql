@@ -407,6 +407,16 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 		runningLSN = predictedCommitLSN
 
 		// Count mutations for snapshot scheduling.
+		for _, mutation := range job.ordered {
+			switch mutation.plan.Operation {
+			case planner.OperationUpdate:
+				engine.recordMutationPressure(mutationPressureUpdate)
+			case planner.OperationDelete:
+				engine.recordMutationPressure(mutationPressureDelete)
+			default:
+				engine.recordMutationPressure(mutationPressureInsert)
+			}
+		}
 		engine.mutationCount += uint64(len(job.ordered))
 	}
 
@@ -527,10 +537,23 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 			needSnapshot = true
 		}
 	}
-	// Periodic disk checkpoint: trigger when the WAL has grown by at least
-	// diskCheckpointWALBytes since the last checkpoint. Using WAL size rather
-	// than mutation count makes the trigger independent of row size and workload.
-	if needSnapshot && engine.snapDir != "" && !engine.snapWriteInFlight.Load() {
+	// Periodic disk checkpoint: trigger either when recent weighted mutation
+	// pressure has crossed the persisted-checkpoint interval, or when the WAL
+	// has grown enough since the last checkpoint. Mutation-mix pressure lets the
+	// engine checkpoint earlier for UPDATE/DELETE-heavy workloads without
+	// forcing more frequent checkpoints for append-heavy ones.
+	if engine.snapDir != "" && !engine.snapWriteInFlight.Load() && totalBatchMutations > 0 {
+		checkpointMutationInterval := uint64(adaptivePersistedCheckpointMutationInterval(
+			engine.mutationCount,
+			engine.recentMutationPressure,
+			engine.recentMutationCount,
+		))
+		if checkpointMutationInterval > 0 && engine.mutationCount-engine.lastDiskSnapshotMutationCount >= checkpointMutationInterval {
+			needSnapshot = true
+			needDiskCheckpoint = true
+		}
+	}
+	if needSnapshot && engine.snapDir != "" && !engine.snapWriteInFlight.Load() && !needDiskCheckpoint {
 		var walSize uint64
 		if sizer, ok := engine.logStore.(ports.Sizer); ok {
 			if sz, err := sizer.TotalSize(); err == nil && sz > 0 {
@@ -595,6 +618,12 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 					slog.Info("periodic disk checkpoint written", "lsn", snap.lsn, "seq", seq, "full", isFull)
 					engine.writeMu.Lock()
 					engine.lastDiskSnapshotLogicalTS = snap.logicalTS
+					engine.lastDiskSnapshotMutationCount = mutationCount
+					if sizer, ok := engine.logStore.(ports.Sizer); ok {
+						if sz, err := sizer.TotalSize(); err == nil && sz > 0 {
+							engine.lastCheckpointWALSize = uint64(sz)
+						}
+					}
 					engine.writeMu.Unlock()
 					_ = cleanupOldSnapshotFiles(dir, maxDiskSnapshots)
 					engine.maybeGCWAL(snap.lsn)
