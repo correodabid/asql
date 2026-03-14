@@ -105,7 +105,7 @@ patterns already have a relatively strong adoption story:
 - `ORDER BY`, `LIMIT`, and `OFFSET`,
 - `IN (SELECT ...)`, `EXISTS`, and `NOT EXISTS` for current supported shapes,
 - `LEFT JOIN`, `RIGHT JOIN`, and `CROSS JOIN` for current supported shapes,
-- `LIKE` / `ILIKE`,
+- `ILIKE` / `NOT ILIKE`,
 - `INSERT ... RETURNING ...`,
 - `INSERT ... ON CONFLICT ...` for current supported upsert shapes,
 - narrow `COPY FROM STDIN` / `COPY TO STDOUT` flows.

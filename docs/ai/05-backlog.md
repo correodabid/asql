@@ -204,17 +204,17 @@ Execution rule:
 - Prefer compatibility work that improves mainstream client/tool interoperability without weakening determinism or ASQL-native transaction semantics.
 
 P0 — reconcile real behavior vs documented surface:
-- [ ] Audit existing pgwire/session/catalog compatibility against code and tests, then produce a claim-by-claim inventory of what is already implemented.
-- [ ] Refresh the PostgreSQL compatibility matrix so it includes currently implemented startup/session/catalog shims that are missing or under-specified in docs.
-- [ ] Refresh the SQL compatibility matrix so it distinguishes `implemented + documented`, `implemented but undocumented`, and `not yet supported` for common app-facing query patterns.
+- [x] Audit existing pgwire/session/catalog compatibility against code and tests, then produce a claim-by-claim inventory of what is already implemented.
+- [x] Refresh the PostgreSQL compatibility matrix so it includes currently implemented startup/session/catalog shims that are missing or under-specified in docs.
+- [x] Refresh the SQL compatibility matrix so it distinguishes `implemented + documented`, `implemented but undocumented`, and `not yet supported` for common app-facing query patterns.
 - [x] Add a compatibility evidence map linking each public compatibility claim to one or more regression tests.
 
 P1 — close documentation and regression gaps first:
 - [ ] Add regression tests for already-implemented compatibility behaviors that are presently relied on implicitly but not claimed explicitly.
 - [x] Close the remaining evidence gaps called out in `docs/reference/postgres-compatibility-evidence-v1.md` (CSV `COPY`).
-- [ ] Publish a concise “mainstream Postgres client/tool flows that work today” guide for `psql`, `pgx`, and GUI tools, including required caveats.
+- [x] Publish a concise “mainstream Postgres client/tool flows that work today” guide for `psql`, `pgx`, and GUI tools, including required caveats.
 - [ ] Document current error/SQLSTATE behavior and identify where ASQL already matches PostgreSQL closely enough to claim compatibility.
-- [ ] Document the currently supported SQL subset already present in parser/planner/executor but not clearly surfaced in compatibility docs.
+- [x] Document the currently supported SQL subset already present in parser/planner/executor but not clearly surfaced in compatibility docs.
 
 P2 — targeted high-return compatibility expansion:
 - [ ] Expand synthetic catalog/introspection coverage only for additional queries proven necessary by mainstream tool startup/metadata flows.
@@ -228,10 +228,10 @@ P3 — compatibility operating model:
 - [x] Establish a rule that new PostgreSQL-compatibility claims are not public until docs, regression tests, and compatibility matrix entries land together.
 
 Acceptance gates (must pass before closing Epic AF)
-- [ ] Public compatibility docs match real behavior closely enough that “implemented but undocumented” is no longer a recurring source of surprise.
+- [x] Public compatibility docs match real behavior closely enough that “implemented but undocumented” is no longer a recurring source of surprise.
 - [x] Each public PostgreSQL compatibility claim is backed by at least one regression test.
-- [ ] Net-new compatibility work is prioritized by observed client/tool adoption friction, not by parity for parity’s sake.
-- [ ] ASQL remains explicitly a deterministic engine with a pragmatic PostgreSQL-compatible subset, not a drop-in PostgreSQL replacement.
+- [x] Net-new compatibility work is prioritized by observed client/tool adoption friction, not by parity for parity’s sake.
+- [x] ASQL remains explicitly a deterministic engine with a pragmatic PostgreSQL-compatible subset, not a drop-in PostgreSQL replacement.
 
 ## Epic AD — Adoption-friction closure from PharmaApp (Phase 8)
 

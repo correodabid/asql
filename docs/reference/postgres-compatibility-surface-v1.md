@@ -84,7 +84,7 @@ For claim-to-test traceability and current evidence gaps, see
 | `EXISTS (SELECT ...)` / `NOT EXISTS (SELECT ...)` | Supported | Covered in parser and executor tests. |
 | `LEFT JOIN`, `RIGHT JOIN`, `CROSS JOIN` | Supported | Covered in executor tests for current join shapes. |
 | Simple `WITH` / CTE shapes | Supported | Covered in executor tests for current non-recursive shapes. |
-| `LIKE` / `ILIKE` / `NOT ILIKE` | Supported | Covered in executor tests. |
+| `ILIKE` / `NOT ILIKE` | Supported | Covered in executor tests. |
 | `INSERT ... RETURNING ...` | Supported | Current `RETURNING` support is insert-focused. |
 | `INSERT ... ON CONFLICT ...` | Supported | `DO NOTHING` and current `DO UPDATE` shapes are covered in executor tests. |
 | `TRUNCATE TABLE ...` | Supported | Covered in parser and executor tests. |

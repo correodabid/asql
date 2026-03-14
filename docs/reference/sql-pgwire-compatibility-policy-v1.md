@@ -16,8 +16,9 @@ flows, not a claim of broad PostgreSQL behavioral parity.
   - `COMMIT`
   - `ROLLBACK`
 - Stable support for the documented ASQL SQL subset used by app backends:
-  simple predicates, joins within the current engine surface, ordering, `LIMIT`,
-  deterministic temporal helpers, and versioned-reference workflows.
+  simple predicates, joins within the current engine surface, ordering,
+  `LIMIT` / `OFFSET`, deterministic temporal helpers, and versioned-reference
+  workflows.
 - Explicit documentation of unsupported and planned behaviors.
 
 ## What ASQL does not promise
