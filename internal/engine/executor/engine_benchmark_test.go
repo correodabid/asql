@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -325,6 +326,65 @@ func BenchmarkEngineReplayFromPersistedSnapshots(b *testing.B) {
 	_ = store.Close()
 }
 
+func BenchmarkEngineDecompressPersistedSnapshotFiles(b *testing.B) {
+	compressedFiles, _ := loadPersistedSnapshotFixtureFiles(b)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, compressed := range compressedFiles {
+			data := compressed
+			if isZstd(data) {
+				var err error
+				data, err = decompressZstd(data)
+				if err != nil {
+					b.Fatalf("decompress persisted snapshot file: %v", err)
+				}
+			}
+			if len(data) == 0 {
+				b.Fatal("expected decompressed snapshot payload")
+			}
+		}
+	}
+	b.StopTimer()
+}
+
+func BenchmarkEngineDecodePersistedSnapshotFiles(b *testing.B) {
+	compressedFiles, _ := loadPersistedSnapshotFixtureFiles(b)
+	decompressedFiles := decompressSnapshotFixtureFiles(b, compressedFiles)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, data := range decompressedFiles {
+			entries, err := decodeSnapshotFileBinaryRaw(data)
+			if err != nil {
+				b.Fatalf("decode persisted snapshot file: %v", err)
+			}
+			if len(entries) == 0 {
+				b.Fatal("expected decoded snapshot entries")
+			}
+		}
+	}
+	b.StopTimer()
+}
+
+func BenchmarkEngineMaterializePersistedSnapshots(b *testing.B) {
+	compressedFiles, expectedHeadLSN := loadPersistedSnapshotFixtureFiles(b)
+	decompressedFiles := decompressSnapshotFixtureFiles(b, compressedFiles)
+	rawFiles := decodeSnapshotFixtureFiles(b, decompressedFiles)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		snapshots := materializeSnapshotFixtureFiles(rawFiles)
+		if len(snapshots) == 0 {
+			b.Fatal("expected materialized snapshots")
+		}
+		if snapshots[len(snapshots)-1].lsn != expectedHeadLSN {
+			b.Fatalf("unexpected materialized latest snapshot lsn: got %d want %d", snapshots[len(snapshots)-1].lsn, expectedHeadLSN)
+		}
+	}
+	b.StopTimer()
+}
+
 func BenchmarkEngineReadIndexedRangeBTree(b *testing.B) {
 	ctx := context.Background()
 	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)
@@ -564,6 +624,98 @@ func cloneRestartBenchmarkFixture(b *testing.B, runRoot string, run int, walPath
 		b.Fatalf("copy restart benchmark snapshot fixture: %v", err)
 	}
 	return runWalPath, runSnapDir
+}
+
+func loadPersistedSnapshotFixtureFiles(b *testing.B) ([][]byte, uint64) {
+	b.Helper()
+
+	_, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, true)
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		b.Fatalf("read persisted snapshot fixture dir: %v", err)
+	}
+
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), snapFilePrefix) {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	if len(names) == 0 {
+		b.Fatal("expected persisted snapshot fixture files")
+	}
+	sort.Strings(names)
+
+	files := make([][]byte, 0, len(names))
+	for _, name := range names {
+		data, err := os.ReadFile(filepath.Join(snapDir, name))
+		if err != nil {
+			b.Fatalf("read persisted snapshot fixture file %s: %v", name, err)
+		}
+		files = append(files, data)
+	}
+
+	return files, expectedHeadLSN
+}
+
+func decompressSnapshotFixtureFiles(b *testing.B, compressedFiles [][]byte) [][]byte {
+	b.Helper()
+
+	decompressedFiles := make([][]byte, len(compressedFiles))
+	for i, compressed := range compressedFiles {
+		data := compressed
+		if isZstd(data) {
+			var err error
+			data, err = decompressZstd(data)
+			if err != nil {
+				b.Fatalf("decompress persisted snapshot fixture file: %v", err)
+			}
+		}
+		decompressedFiles[i] = data
+	}
+	return decompressedFiles
+}
+
+func decodeSnapshotFixtureFiles(b *testing.B, decompressedFiles [][]byte) [][]rawSnapshotFileEntry {
+	b.Helper()
+
+	rawFiles := make([][]rawSnapshotFileEntry, len(decompressedFiles))
+	for i, data := range decompressedFiles {
+		entries, err := decodeSnapshotFileBinaryRaw(data)
+		if err != nil {
+			b.Fatalf("decode persisted snapshot fixture file: %v", err)
+		}
+		if len(entries) == 0 {
+			b.Fatal("expected raw snapshot entries")
+		}
+		rawFiles[i] = entries
+	}
+	return rawFiles
+}
+
+func materializeSnapshotFixtureFiles(rawFiles [][]rawSnapshotFileEntry) []engineSnapshot {
+	var accumulated map[string]*persistedDomain
+	result := make([]engineSnapshot, 0)
+	for _, fileEntries := range rawFiles {
+		for _, entry := range fileEntries {
+			if entry.isFull || accumulated == nil {
+				accumulated = entry.domains
+			} else {
+				accumulated = applyDeltaBinary(accumulated, entry.domains, entry.catalog)
+			}
+
+			snap := marshalableToSnapshot(persistedSnapshot{
+				LSN:       entry.lsn,
+				LogicalTS: entry.logicalTS,
+				Catalog:   entry.catalog,
+				Domains:   accumulated,
+			})
+			rebuildAllIndexes(&snap)
+			result = append(result, snap)
+		}
+	}
+	return result
 }
 
 func copyWALFixture(srcBasePath string, dstBasePath string) error {

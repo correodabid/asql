@@ -44,6 +44,12 @@ Focused persisted-snapshot load split on 2026-03-14 using `go test ./internal/en
 - `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `429,216 ns/op`, `645,288 B/op`, `3,385 allocs/op`
 - `BenchmarkEngineReplayFromPersistedSnapshots-8`: `59,530 ns/op`, `167,720 B/op`, `1,132 allocs/op`
 
+Finer-grained persisted-snapshot microbenchmarks on 2026-03-14:
+
+- `BenchmarkEngineDecompressPersistedSnapshotFiles-8`: `74,280 ns/op`, `32,784 B/op`, `1 allocs/op`
+- `BenchmarkEngineDecodePersistedSnapshotFiles-8`: `192,300 ns/op`, `470,220 B/op`, `2,786 allocs/op`
+- `BenchmarkEngineMaterializePersistedSnapshots-8`: `49,473 ns/op`, `113,050 B/op`, `573 allocs/op`
+
 Replay-throughput repeated sample on 2026-03-14:
 
 - `BenchmarkEngineReplayToLSN-8`: ~`1,998,773,750–2,000,865,708 ns/op`, `2,693,952–2,704,560 B/op`, `16,664–16,676 allocs/op`
@@ -81,7 +87,8 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 - Current restart-path interpretation:
 	- replay-to-LSN is now benchmarked with a stable repeated sample around ~`2.0 ms/op` on this fixture;
 	- after fixing the restart benchmark harness and removing one extra deep copy during snapshot materialization, the persisted-snapshot path is much closer to replay-only and now allocates materially less, but it is still not yet faster on this fixture, so snapshot-load work remains open rather than justified for closure;
-	- the new focused split shows the persisted restart cost is dominated by snapshot-directory read/decompress/decode/materialization (~`429 µs/op`), while the in-memory `replayFromSnapshots` restore step itself is comparatively small (~`60 µs/op`).
+	- the new focused split shows the persisted restart cost is dominated by snapshot-directory read/decompress/decode/materialization (~`429 µs/op`), while the in-memory `replayFromSnapshots` restore step itself is comparatively small (~`60 µs/op`);
+	- inside the snapshot-directory load, binary decode is currently the largest measured in-process component (~`192 µs/op` and ~`470 KB/op`), ahead of zstd decompression (~`74 µs/op`) and snapshot materialization (~`49 µs/op`), with the remaining gap attributable largely to file reads and surrounding glue work.
 - Current read-path interpretation:
 	- on the simple covered ordered-read shape, `btree-index-only` is about $10\times$ faster than `btree-order` and materially reduces allocations;
 	- adding `OFFSET` to the covered ordered-read shape still keeps `btree-index-only` comfortably fast (about $1.7\times$ slower than the zero-offset variant, but still far below row-fetch ordered reads);
