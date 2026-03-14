@@ -850,7 +850,10 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 				LSN:       e.lsn,
 				LogicalTS: e.logicalTS,
 				Catalog:   e.catalog,
-				Domains:   deepCopyPersistedDomains(accumulated),
+				// `marshalableToSnapshot` below materializes a fresh engine state,
+				// so duplicating the accumulated persisted-domain tree first only
+				// adds restart-time copy cost without providing extra isolation.
+				Domains: accumulated,
 			}
 			snap := marshalableToSnapshot(full)
 			rebuildAllIndexes(&snap)

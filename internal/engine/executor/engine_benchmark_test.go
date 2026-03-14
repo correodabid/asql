@@ -263,6 +263,68 @@ func BenchmarkEngineRestartFromPersistedSnapshot(b *testing.B) {
 	benchmarkEngineRestartLoad(b, true)
 }
 
+func BenchmarkEngineReadPersistedSnapshotsFromDir(b *testing.B) {
+	_, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, true)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		snapshots, maxSeq, err := readAllSnapshotsFromDir(snapDir)
+		if err != nil {
+			b.Fatalf("read persisted snapshots from dir: %v", err)
+		}
+		if maxSeq == 0 {
+			b.Fatal("expected persisted snapshot sequence")
+		}
+		if len(snapshots) == 0 {
+			b.Fatal("expected persisted snapshots")
+		}
+		if snapshots[len(snapshots)-1].lsn != expectedHeadLSN {
+			b.Fatalf("unexpected latest snapshot lsn: got %d want %d", snapshots[len(snapshots)-1].lsn, expectedHeadLSN)
+		}
+	}
+	b.StopTimer()
+}
+
+func BenchmarkEngineReplayFromPersistedSnapshots(b *testing.B) {
+	ctx := context.Background()
+	walPath, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, true)
+
+	fixtureStore, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("reopen snapshot benchmark wal store: %v", err)
+	}
+	defer fixtureStore.Close()
+
+	snapshots, _, err := readAllSnapshotsFromDir(snapDir)
+	if err != nil {
+		b.Fatalf("read persisted snapshots for replay benchmark: %v", err)
+	}
+	if len(snapshots) == 0 {
+		b.Fatal("expected persisted snapshots for replay benchmark")
+	}
+
+	latest := snapshots[len(snapshots)-1]
+	deltaRecords, err := fixtureStore.ReadFrom(ctx, latest.lsn+1, 0)
+	if err != nil {
+		b.Fatalf("read wal delta after persisted snapshots: %v", err)
+	}
+
+	store, engine := newBenchmarkEngine(b)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if err := engine.replayFromSnapshots(snapshots, deltaRecords); err != nil {
+			b.Fatalf("replay from persisted snapshots: %v", err)
+		}
+		if engine.readState.Load().headLSN != expectedHeadLSN {
+			b.Fatalf("unexpected replayed head lsn: got %d want %d", engine.readState.Load().headLSN, expectedHeadLSN)
+		}
+	}
+	b.StopTimer()
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+}
+
 func BenchmarkEngineReadIndexedRangeBTree(b *testing.B) {
 	ctx := context.Background()
 	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)

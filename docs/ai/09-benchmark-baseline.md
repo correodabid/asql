@@ -36,8 +36,13 @@ Harness note on 2026-03-14: the restart benchmark now clones the seeded WAL/snap
 
 Current clean spot-check on 2026-03-14 using isolated fixtures and `go test ./internal/engine/executor -run '^$' -bench '^BenchmarkEngineRestart...$' -benchmem -benchtime=100ms -count=1`:
 
-- `BenchmarkEngineRestartReplayOnly-8`: `4,189,922 ns/op`, `2,303,604 B/op`, `15,573 allocs/op`
-- `BenchmarkEngineRestartFromPersistedSnapshot-8`: `4,900,229 ns/op`, `1,943,557 B/op`, `10,757 allocs/op`
+- `BenchmarkEngineRestartReplayOnly-8`: `3,261,762 ns/op`, `2,303,630 B/op`, `15,573 allocs/op`
+- `BenchmarkEngineRestartFromPersistedSnapshot-8`: `4,340,938 ns/op`, `1,407,530 B/op`, `7,967 allocs/op`
+
+Focused persisted-snapshot load split on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngine(ReadPersistedSnapshotsFromDir|ReplayFromPersistedSnapshots)$' -benchmem -benchtime=100ms -count=1`:
+
+- `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `429,216 ns/op`, `645,288 B/op`, `3,385 allocs/op`
+- `BenchmarkEngineReplayFromPersistedSnapshots-8`: `59,530 ns/op`, `167,720 B/op`, `1,132 allocs/op`
 
 Replay-throughput repeated sample on 2026-03-14:
 
@@ -75,7 +80,8 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 - The restart/replay numbers above are useful internal evidence but are not closure-grade AB evidence yet.
 - Current restart-path interpretation:
 	- replay-to-LSN is now benchmarked with a stable repeated sample around ~`2.0 ms/op` on this fixture;
-	- after fixing the restart benchmark harness to isolate fixture copies per iteration, the persisted-snapshot path is much closer to replay-only and now allocates less, but it is still not yet faster on this fixture, so snapshot-load work remains open rather than justified for closure.
+	- after fixing the restart benchmark harness and removing one extra deep copy during snapshot materialization, the persisted-snapshot path is much closer to replay-only and now allocates materially less, but it is still not yet faster on this fixture, so snapshot-load work remains open rather than justified for closure;
+	- the new focused split shows the persisted restart cost is dominated by snapshot-directory read/decompress/decode/materialization (~`429 µs/op`), while the in-memory `replayFromSnapshots` restore step itself is comparatively small (~`60 µs/op`).
 - Current read-path interpretation:
 	- on the simple covered ordered-read shape, `btree-index-only` is about $10\times$ faster than `btree-order` and materially reduces allocations;
 	- adding `OFFSET` to the covered ordered-read shape still keeps `btree-index-only` comfortably fast (about $1.7\times$ slower than the zero-offset variant, but still far below row-fetch ordered reads);
