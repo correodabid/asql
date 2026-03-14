@@ -348,6 +348,37 @@ func BenchmarkEngineDecompressPersistedSnapshotFiles(b *testing.B) {
 	b.StopTimer()
 }
 
+func BenchmarkEngineReadPersistedSnapshotFilesOnly(b *testing.B) {
+	snapDir, names := persistedSnapshotFixtureDir(b)
+	expectedFiles := len(names)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		entries, err := os.ReadDir(snapDir)
+		if err != nil {
+			b.Fatalf("read persisted snapshot dir: %v", err)
+		}
+		readCount := 0
+		for _, entry := range entries {
+			if entry.IsDir() || !strings.HasPrefix(entry.Name(), snapFilePrefix) {
+				continue
+			}
+			data, err := os.ReadFile(filepath.Join(snapDir, entry.Name()))
+			if err != nil {
+				b.Fatalf("read persisted snapshot file: %v", err)
+			}
+			if len(data) == 0 {
+				b.Fatal("expected persisted snapshot file bytes")
+			}
+			readCount++
+		}
+		if readCount != expectedFiles {
+			b.Fatalf("unexpected snapshot file count: got %d want %d", readCount, expectedFiles)
+		}
+	}
+	b.StopTimer()
+}
+
 func BenchmarkEngineDecodePersistedSnapshotFiles(b *testing.B) {
 	compressedFiles, _ := loadPersistedSnapshotFixtureFiles(b)
 	decompressedFiles := decompressSnapshotFixtureFiles(b, compressedFiles)
@@ -380,6 +411,32 @@ func BenchmarkEngineMaterializePersistedSnapshots(b *testing.B) {
 		}
 		if snapshots[len(snapshots)-1].lsn != expectedHeadLSN {
 			b.Fatalf("unexpected materialized latest snapshot lsn: got %d want %d", snapshots[len(snapshots)-1].lsn, expectedHeadLSN)
+		}
+	}
+	b.StopTimer()
+}
+
+func BenchmarkEngineMergePersistedSnapshotDeltas(b *testing.B) {
+	compressedFiles, _ := loadPersistedSnapshotFixtureFiles(b)
+	decompressedFiles := decompressSnapshotFixtureFiles(b, compressedFiles)
+	rawFiles := decodeSnapshotFixtureFiles(b, decompressedFiles)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		mergedCount := 0
+		var accumulated map[string]*persistedDomain
+		for _, fileEntries := range rawFiles {
+			for _, entry := range fileEntries {
+				if entry.isFull || accumulated == nil {
+					accumulated = entry.domains
+				} else {
+					accumulated = applyDeltaBinary(accumulated, entry.domains, entry.catalog)
+				}
+				mergedCount++
+			}
+		}
+		if mergedCount == 0 || accumulated == nil {
+			b.Fatal("expected merged persisted snapshot state")
 		}
 	}
 	b.StopTimer()
@@ -629,7 +686,25 @@ func cloneRestartBenchmarkFixture(b *testing.B, runRoot string, run int, walPath
 func loadPersistedSnapshotFixtureFiles(b *testing.B) ([][]byte, uint64) {
 	b.Helper()
 
-	_, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, true)
+	snapDir, names := persistedSnapshotFixtureDir(b)
+	expectedHeadLSN := persistedSnapshotFixtureHeadLSN(b, snapDir)
+
+	files := make([][]byte, 0, len(names))
+	for _, name := range names {
+		data, err := os.ReadFile(filepath.Join(snapDir, name))
+		if err != nil {
+			b.Fatalf("read persisted snapshot fixture file %s: %v", name, err)
+		}
+		files = append(files, data)
+	}
+
+	return files, expectedHeadLSN
+}
+
+func persistedSnapshotFixtureDir(b *testing.B) (string, []string) {
+	b.Helper()
+
+	_, snapDir, _ := prepareRestartBenchmarkFixture(b, true)
 	entries, err := os.ReadDir(snapDir)
 	if err != nil {
 		b.Fatalf("read persisted snapshot fixture dir: %v", err)
@@ -646,17 +721,20 @@ func loadPersistedSnapshotFixtureFiles(b *testing.B) ([][]byte, uint64) {
 		b.Fatal("expected persisted snapshot fixture files")
 	}
 	sort.Strings(names)
+	return snapDir, names
+}
 
-	files := make([][]byte, 0, len(names))
-	for _, name := range names {
-		data, err := os.ReadFile(filepath.Join(snapDir, name))
-		if err != nil {
-			b.Fatalf("read persisted snapshot fixture file %s: %v", name, err)
-		}
-		files = append(files, data)
+func persistedSnapshotFixtureHeadLSN(b *testing.B, snapDir string) uint64 {
+	b.Helper()
+
+	walPath := filepath.Join(filepath.Dir(snapDir), "restart-bench.wal")
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("open persisted snapshot fixture wal store: %v", err)
 	}
+	defer store.Close()
 
-	return files, expectedHeadLSN
+	return store.LastLSN()
 }
 
 func decompressSnapshotFixtureFiles(b *testing.B, compressedFiles [][]byte) [][]byte {
