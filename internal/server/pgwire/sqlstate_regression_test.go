@@ -3,6 +3,7 @@ package pgwire
 import (
 	"bufio"
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -10,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
@@ -87,6 +90,32 @@ func receiveBackendMessageOfType[T any](t *testing.T, frontend *pgproto3.Fronten
 		t.Fatalf("unexpected backend message %T", msg)
 	}
 	return typed
+}
+
+func connectSQLStateRegressionPGX(t *testing.T, addr string) *pgx.Conn {
+	t.Helper()
+
+	conn, err := pgx.Connect(context.Background(), "postgres://asql@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return conn
+}
+
+func requirePGErrorCode(t *testing.T, err error, wantCode string) *pgconn.PgError {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected pg error with SQLSTATE %s", wantCode)
+	}
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		t.Fatalf("expected pgconn.PgError, got %T: %v", err, err)
+	}
+	if pgErr.Code != wantCode {
+		t.Fatalf("unexpected SQLSTATE: got %s want %s (message=%q)", pgErr.Code, wantCode, pgErr.Message)
+	}
+	return pgErr
 }
 
 func TestSendFollowerRedirectErrorWrites25006AndHint(t *testing.T) {
@@ -185,4 +214,158 @@ func TestPGWirePasswordAuthenticationWrongMessageReturns08P01(t *testing.T) {
 	if errMsg.Severity != "FATAL" {
 		t.Fatalf("unexpected severity: got %q want FATAL", errMsg.Severity)
 	}
+}
+
+func TestPGWireTransactionStateSQLStates(t *testing.T) {
+	addr, cleanup := startSQLStateRegressionServer(t, Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: filepath.Join(t.TempDir(), "data"),
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	defer cleanup()
+
+	t.Run("commit without active transaction", func(t *testing.T) {
+		conn := connectSQLStateRegressionPGX(t, addr)
+		defer conn.Close(context.Background())
+		_, err := conn.Exec(context.Background(), "COMMIT")
+		pgErr := requirePGErrorCode(t, err, "25P01")
+		if pgErr.Message != "active transaction required" {
+			t.Fatalf("unexpected message: got %q", pgErr.Message)
+		}
+	})
+
+	t.Run("begin while transaction already active", func(t *testing.T) {
+		conn := connectSQLStateRegressionPGX(t, addr)
+		ctx := context.Background()
+		defer conn.Close(ctx)
+		if _, err := conn.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+			t.Fatalf("begin domain: %v", err)
+		}
+		_, err := conn.Exec(ctx, "BEGIN DOMAIN billing")
+		pgErr := requirePGErrorCode(t, err, "25001")
+		if pgErr.Message != "transaction already active" {
+			t.Fatalf("unexpected message: got %q", pgErr.Message)
+		}
+		if _, err := conn.Exec(ctx, "ROLLBACK"); err != nil {
+			t.Fatalf("rollback cleanup: %v", err)
+		}
+	})
+}
+
+func TestPGWireObjectAndConstraintSQLStates(t *testing.T) {
+	addr, cleanup := startSQLStateRegressionServer(t, Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: filepath.Join(t.TempDir(), "data"),
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	defer cleanup()
+
+	seed := func(t *testing.T) {
+		t.Helper()
+		conn := connectSQLStateRegressionPGX(t, addr)
+		ctx := context.Background()
+		defer conn.Close(ctx)
+		for _, sql := range []string{
+			"BEGIN DOMAIN accounts",
+			"CREATE TABLE users (id INT PRIMARY KEY, email TEXT UNIQUE NOT NULL, age INT CHECK (age > 0))",
+			"INSERT INTO users (id, email, age) VALUES (1, 'one@asql.dev', 10)",
+			"COMMIT",
+		} {
+			if _, err := conn.Exec(ctx, sql); err != nil {
+				t.Fatalf("seed exec %q: %v", sql, err)
+			}
+		}
+	}
+
+	seed(t)
+
+	t.Run("undefined table", func(t *testing.T) {
+		conn := connectSQLStateRegressionPGX(t, addr)
+		defer conn.Close(context.Background())
+		_, err := conn.Exec(context.Background(), "SELECT id FROM accounts.missing_users")
+		pgErr := requirePGErrorCode(t, err, "42P01")
+		if pgErr.Message != "table not found" {
+			t.Fatalf("unexpected message: got %q", pgErr.Message)
+		}
+	})
+
+	t.Run("duplicate table on commit", func(t *testing.T) {
+		conn := connectSQLStateRegressionPGX(t, addr)
+		ctx := context.Background()
+		defer conn.Close(ctx)
+		if _, err := conn.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+			t.Fatalf("begin domain: %v", err)
+		}
+		if _, err := conn.Exec(ctx, "CREATE TABLE users (id INT PRIMARY KEY)"); err != nil {
+			t.Fatalf("duplicate create queued: %v", err)
+		}
+		_, err := conn.Exec(ctx, "COMMIT")
+		pgErr := requirePGErrorCode(t, err, "42P07")
+		if pgErr.Message != "table already exists" {
+			t.Fatalf("unexpected message: got %q", pgErr.Message)
+		}
+		if _, err := conn.Exec(ctx, "ROLLBACK"); err != nil {
+			t.Fatalf("rollback cleanup: %v", err)
+		}
+	})
+
+	t.Run("unique violation on commit", func(t *testing.T) {
+		conn := connectSQLStateRegressionPGX(t, addr)
+		ctx := context.Background()
+		defer conn.Close(ctx)
+		if _, err := conn.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+			t.Fatalf("begin domain: %v", err)
+		}
+		if _, err := conn.Exec(ctx, "INSERT INTO users (id, email, age) VALUES (1, 'other@asql.dev', 20)"); err != nil {
+			t.Fatalf("queue duplicate primary key insert: %v", err)
+		}
+		_, err := conn.Exec(ctx, "COMMIT")
+		pgErr := requirePGErrorCode(t, err, "23505")
+		if pgErr.Message == "" {
+			t.Fatal("expected non-empty error message")
+		}
+		if _, err := conn.Exec(ctx, "ROLLBACK"); err != nil {
+			t.Fatalf("rollback cleanup: %v", err)
+		}
+	})
+
+	t.Run("not null violation on commit", func(t *testing.T) {
+		conn := connectSQLStateRegressionPGX(t, addr)
+		ctx := context.Background()
+		defer conn.Close(ctx)
+		if _, err := conn.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+			t.Fatalf("begin domain: %v", err)
+		}
+		if _, err := conn.Exec(ctx, "INSERT INTO users (id, email, age) VALUES (2, NULL, 20)"); err != nil {
+			t.Fatalf("queue null insert: %v", err)
+		}
+		_, err := conn.Exec(ctx, "COMMIT")
+		pgErr := requirePGErrorCode(t, err, "23502")
+		if pgErr.Message == "" {
+			t.Fatal("expected non-empty error message")
+		}
+		if _, err := conn.Exec(ctx, "ROLLBACK"); err != nil {
+			t.Fatalf("rollback cleanup: %v", err)
+		}
+	})
+
+	t.Run("check violation on commit", func(t *testing.T) {
+		conn := connectSQLStateRegressionPGX(t, addr)
+		ctx := context.Background()
+		defer conn.Close(ctx)
+		if _, err := conn.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+			t.Fatalf("begin domain: %v", err)
+		}
+		if _, err := conn.Exec(ctx, "INSERT INTO users (id, email, age) VALUES (2, 'two@asql.dev', 0)"); err != nil {
+			t.Fatalf("queue check-violating insert: %v", err)
+		}
+		_, err := conn.Exec(ctx, "COMMIT")
+		pgErr := requirePGErrorCode(t, err, "23514")
+		if pgErr.Message == "" {
+			t.Fatal("expected non-empty error message")
+		}
+		if _, err := conn.Exec(ctx, "ROLLBACK"); err != nil {
+			t.Fatalf("rollback cleanup: %v", err)
+		}
+	})
 }

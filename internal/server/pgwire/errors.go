@@ -46,13 +46,15 @@ func sqlStateFromMessage(msg string) string {
 	}
 
 	// ── Integrity / constraint violations ── Class 23 ────────────────────
-	if containsAny(lower, "unique constraint", "duplicate key") {
+	if containsAny(lower, "unique constraint", "duplicate key") ||
+		containsAll(lower, "primary key", "duplicate") ||
+		containsAll(lower, "unique", "duplicate") {
 		return "23505" // unique_violation
 	}
 	if containsAll(lower, "foreign key", "references") || containsAny(lower, "foreign key violation") {
 		return "23503" // foreign_key_violation
 	}
-	if containsAny(lower, "not null", "null value") {
+	if containsAny(lower, "not null", "null value") || containsAll(lower, "cannot be null") {
 		return "23502" // not_null_violation
 	}
 	if containsAny(lower, "check constraint") {
@@ -60,10 +62,10 @@ func sqlStateFromMessage(msg string) string {
 	}
 
 	// ── Transaction state errors ── Class 25 ─────────────────────────────
-	if containsAny(lower, "no active transaction", "not in a transaction") {
+	if containsAny(lower, "no active transaction", "not in a transaction", "active transaction required") {
 		return "25P01" // no_active_sql_transaction
 	}
-	if containsAll(lower, "transaction", "already begun") || containsAll(lower, "transaction", "already in") {
+	if containsAll(lower, "transaction", "already begun") || containsAll(lower, "transaction", "already in") || containsAll(lower, "transaction", "already active") {
 		return "25001" // active_sql_transaction
 	}
 	if containsAny(lower, "domain is required", "domain not set") {

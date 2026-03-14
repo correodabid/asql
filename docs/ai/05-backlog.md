@@ -219,7 +219,7 @@ P1 — close documentation and regression gaps first:
 P2 — targeted high-return compatibility expansion:
 - [ ] Expand synthetic catalog/introspection coverage only for additional queries proven necessary by mainstream tool startup/metadata flows.
 - [ ] Improve `ParameterDescription` / `RowDescription` / bind-format fidelity for common scalar types where mainstream drivers still degrade or fail.
-- [ ] Tighten SQLSTATE mapping for common compatibility-critical failures (syntax, missing objects, constraint violations, cancellation, transaction state).
+- [x] Tighten SQLSTATE mapping for common compatibility-critical failures (syntax, missing objects, constraint violations, cancellation, transaction state).
 - [ ] Expand app-facing PostgreSQL-compatible SQL only where it materially reduces migration friction and preserves deterministic replay semantics.
 
 P3 — compatibility operating model:

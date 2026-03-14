@@ -1247,7 +1247,7 @@ func commandTag(result executor.Result) string {
 }
 
 func sendErrorAndReady(backend *pgproto3.Backend, message string, session *executor.Session) error {
-	return sendErrorAndReadyCode(backend, message, "XX000", session)
+	return sendErrorAndReadyCode(backend, message, sqlStateFromMessage(message), session)
 }
 
 func sendErrorAndReadyCode(backend *pgproto3.Backend, message, code string, session *executor.Session) error {

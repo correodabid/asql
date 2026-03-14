@@ -40,6 +40,13 @@ Current behavior falls into three buckets:
 | Password auth failure when `AuthToken` is configured | `28P01` (`invalid_password`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWirePasswordAuthenticationWrongPasswordReturns28P01` | This is now covered at the raw pgwire startup/auth handshake level. |
 | Wrong frontend message during password startup | `08P01` (`protocol_violation`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWirePasswordAuthenticationWrongMessageReturns08P01` | Covers the password-challenge path where the client sends a non-password frontend message. |
 | Follower redirect error shape with leader hint | `25006` (`read_only_sql_transaction`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestSendFollowerRedirectErrorWrites25006AndHint` | Covers the wire-level redirect message and `asql_leader=...` hint shape used by SDK clients. |
+| `COMMIT` without an active ASQL transaction | `25P01` (`no_active_sql_transaction`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWireTransactionStateSQLStates/commit_without_active_transaction` | Covers the current ASQL-native transaction-state guardrail through pgwire. |
+| Starting a second ASQL transaction while one is already active | `25001` (`active_sql_transaction`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWireTransactionStateSQLStates/begin_while_transaction_already_active` | Covers the current single active transaction per session behavior. |
+| Missing table in a pgwire query | `42P01` (`undefined_table`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWireObjectAndConstraintSQLStates/undefined_table` | Covers a common planner/object failure end to end. |
+| Duplicate table create on commit | `42P07` (`duplicate_table`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWireObjectAndConstraintSQLStates/duplicate_table_on_commit` | The current mapper uses PostgreSQL's duplicate-table code generically for duplicate object creation. |
+| Duplicate primary/unique key surfaced on commit | `23505` (`unique_violation`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWireObjectAndConstraintSQLStates/unique_violation_on_commit` | Covers ASQL's current commit-time uniqueness enforcement shape. |
+| `NOT NULL` violation surfaced on commit | `23502` (`not_null_violation`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWireObjectAndConstraintSQLStates/not_null_violation_on_commit` | Covers ASQL's current commit-time nullability enforcement shape. |
+| `CHECK` violation surfaced on commit | `23514` (`check_violation`) | `internal/server/pgwire/sqlstate_regression_test.go`: `TestPGWireObjectAndConstraintSQLStates/check_violation_on_commit` | Covers ASQL's current commit-time check-constraint enforcement shape. |
 
 ## Unit-covered current mapper behavior
 
@@ -76,6 +83,7 @@ error hierarchy.
 | Situation | Current SQLSTATE | Evidence status | Notes |
 |---|---|---|---|
 | Bare PostgreSQL transaction syntax guardrail (`BEGIN`) | currently coarse, message-oriented | Partial | `TestPGWireCompatibilityUnsupportedPatternGuidance` asserts actionable guidance text, not a specific SQLSTATE. Treat the guidance message as the stable contract today, not an exact PostgreSQL parity claim. |
+| Empty or malformed ASQL transaction-open statements | currently coarse / not yet claimed | Partial | Keep the guidance/message surface as the contract until a dedicated regression proves a stable exact SQLSTATE for these malformed `BEGIN DOMAIN ...` cases. |
 | `ANY(...)` / `ARRAY[...]` guardrail | currently coarse, message-oriented | Partial | `TestPGWireCompatibilityUnsupportedPatternGuidance` asserts actionable guidance text, not a specific SQLSTATE. |
 
 ## What clients should rely on today
@@ -89,10 +97,12 @@ Safe public compatibility claims today:
 
 Client code should be more cautious when depending on:
 
-- exact SQLSTATEs for auth-startup failure paths,
-- exact SQLSTATEs for ASQL-native guardrail errors,
-- exact SQLSTATEs for all planner/executor failures beyond the mapper's current
-  coarse classification.
+- exact SQLSTATEs for planner/executor failure families not yet listed in the
+  end-to-end table above,
+- exact SQLSTATEs for ASQL guardrail paths that still only have guidance-style
+  tests rather than dedicated SQLSTATE regressions,
+- exact SQLSTATEs for broader PostgreSQL parity claims beyond the documented
+  subset of end-to-end-covered paths.
 
 ## Follow-up guidance
 
