@@ -478,6 +478,9 @@ Current evidence already in repo, but not sufficient to close this epic:
 - `internal/storage/wal/store_benchmark_test.go` covers append, read, and recovery microbenchmarks.
 - `internal/engine/executor/engine_query.go` and `internal/engine/executor/engine_scan.go` already contain index-only scan support.
 
+Closed sub-slices:
+- Restart/cadence policy is now treated as closed at the subline level: the mutation-mix-aware persisted checkpoint policy has deterministic regression coverage and repeated natural-restart evidence that is strong enough for a closure decision, even though the broader snapshot-load optimization item remains open.
+
 Open gaps before closure:
 - Snapshot restart microbenchmarks now exist, but there is no closure-level baseline/improvement decision yet for snapshot load time.
 - Initial failover promotion/recovery benchmarks now exist, but there is no closure-level baseline/improvement decision yet for failover recovery time.
@@ -503,6 +506,8 @@ Subline status:
 - Repeated natural-cadence runs (`-benchmem -benchtime=1x -count=2`) now make the post-implementation signal much stronger: without forcing a final head-snapshot flush, the policy-driven persisted path reduced small-anchor restart from ~`16–18 ms` to ~`11.5–13.0 ms` for `insert_heavy`, from ~`286–290 ms` to ~`11.6–12.2 ms` for `update_heavy`, and from ~`295–311 ms` to ~`13.1–16.1 ms` for `delete_heavy`.
 - At the medium anchor the policy still preserves meaningful wins with stable ranges: `insert_heavy` drops from ~`94–96 ms` to ~`51 ms`, `update_heavy` from ~`5.13–5.26 s` to ~`4.79 s`, and `delete_heavy` from ~`3.52–3.55 s` to ~`3.35–3.38 s`.
 - Heap pressure collapses in the natural small-anchor restart cases because the replay tail is largely eliminated when the policy lands a checkpoint near the workload end: `update_heavy` drops from ~`616 MB` / ~`2.54M` allocs to ~`1.62 MB` / ~`8.8k` allocs, and `delete_heavy` from ~`618 MB` / ~`2.67M` allocs to ~`2.14 MB` / ~`11.8k` allocs on the current M1 samples.
+- A further three-run confirmation on the heaviest shapes keeps the post-implementation ranges tight enough to treat the effect as stable rather than anecdotal: `update_heavy` small-anchor replay-only remains ~`286–311 ms` versus ~`11.4–12.4 ms` with policy-driven checkpoints, and `delete_heavy` small-anchor replay-only remains ~`288–310 ms` versus ~`15.4–16.5 ms` with policy-driven checkpoints.
+- Given the deterministic regression test plus the repeated natural-restart benchmark evidence, the mutation-mix-aware persisted checkpoint policy is now treated as closed for the restart/cadence slice of Epic AB, even if snapshot-load micro-optimizations remain open separately.
 - Within that snapshot-directory load, binary decode remains the largest measured in-process component, but the direct positional-row decode path pushed it down materially to roughly ~`79–166 µs/op`, ~`186–458 KB/op`, and ~`1.1k–1.7k allocs/op`, ahead of raw file I/O (~`87 µs/op`), zstd decompression (~`74 µs/op`), and snapshot materialization (~`49–57 µs/op`).
 - The positional-row decode change clearly improved isolated decode and snapshot-directory load benchmarks, but end-to-end persisted-restart timing is still noisy on the current short benchtime harness and needs repeated confirmation before any stronger claim.
 - Delta-chain merge is negligible on the current fixture because it is effectively loading a single persisted snapshot file, so the remaining work in this AB slice is about file read + decode efficiency rather than cross-file snapshot chaining.

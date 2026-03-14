@@ -101,6 +101,17 @@ Restart-tail/cadence spot checks on 2026-03-14 using `-benchtime=1x`:
 		- `policy_persisted_total_1500_tail_500`: `13,082,083–16,060,834 ns/op`, `2,140,400–2,140,416 B/op`, `11,809 allocs/op`
 		- `replay_only_total_11000`: `3,518,639,292–3,553,196,959 ns/op`, `8,438,595,312–8,438,688,208 B/op`, `36,303,215–36,303,220 allocs/op`
 		- `policy_persisted_total_11000_tail_500`: `3,354,867,793–3,375,866,541 ns/op`, `8,408,820,000–8,408,822,032 B/op`, `36,132,044–36,132,066 allocs/op`
+	- Longer repeated confirmation on 2026-03-14 for the heaviest shapes (`-benchmem -benchtime=1x -count=3`):
+		- `update_heavy`
+			- `replay_only_total_1000`: `285,637,377–311,128,750 ns/op`, `616,016,184–616,016,896 B/op`, `2,541,969–2,541,978 allocs/op`
+			- `policy_persisted_total_1000_tail_500`: `11,371,792–12,445,791 ns/op`, `1,622,624 B/op`, `8,806 allocs/op`
+			- `replay_only_total_10500`: `4,972,909,501–5,183,491,917 ns/op`, `12,084,551,856–12,084,648,688 B/op`, `50,458,480–50,458,510 allocs/op`
+			- `policy_persisted_total_10500_tail_500`: `4,797,593,583–4,856,035,793 ns/op`, `12,055,915,184–12,055,924,480 B/op`, `50,291,846–50,291,886 allocs/op`
+		- `delete_heavy`
+			- `replay_only_total_1500`: `288,345,501–310,098,999 ns/op`, `617,716,664–617,718,856 B/op`, `2,672,301–2,672,316 allocs/op`
+			- `policy_persisted_total_1500_tail_500`: `15,398,500–16,506,167 ns/op`, `2,140,400–2,140,416 B/op`, `11,809 allocs/op`
+			- `replay_only_total_11000`: `3,545,556,417–3,714,091,708 ns/op`, `8,438,490,032–8,438,491,488 B/op`, `36,303,195–36,303,207 allocs/op`
+			- `policy_persisted_total_11000_tail_500`: `3,345,657,959–3,441,926,292 ns/op`, `8,408,820,176–8,408,821,872 B/op`, `36,132,050–36,132,064 allocs/op`
 
 Focused persisted-snapshot load split on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngine(ReadPersistedSnapshotsFromDir|ReplayFromPersistedSnapshots)$' -benchmem -benchtime=100ms -count=1`:
 
@@ -169,6 +180,8 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 	- repeated natural-cadence runs now make that result much more credible: without forcing a final flush, the policy-driven persisted path consistently cuts small-anchor restart from ~`16–18 ms` to ~`11.5–13.0 ms` for `insert_heavy`, from ~`286–290 ms` to ~`11.6–12.2 ms` for `update_heavy`, and from ~`295–311 ms` to ~`13.1–16.1 ms` for `delete_heavy` when a runtime checkpoint lands near the tail;
 	- at the medium anchor, the policy still preserves meaningful wins with less dramatic variance: `insert_heavy` drops from ~`94–96 ms` to ~`51 ms`, `update_heavy` from ~`5.13–5.26 s` to ~`4.79 s`, and `delete_heavy` from ~`3.52–3.55 s` to ~`3.35–3.38 s`;
 	- allocation pressure also drops sharply in the natural small-anchor cases because restart no longer has to replay the long tail: for example `update_heavy` falls from ~`616 MB` / ~`2.54M` allocs to ~`1.62 MB` / ~`8.8k` allocs, and `delete_heavy` from ~`618 MB` / ~`2.67M` allocs to ~`2.14 MB` / ~`11.8k` allocs;
+	- the extra three-run confirmation on `update_heavy` and `delete_heavy` keeps those ranges tight enough to treat the effect as stable rather than anecdotal, especially for the small-anchor “checkpoint lands near the tail” case where the policy changes restart behavior by more than an order of magnitude;
+	- taken together, the deterministic test coverage plus the repeated natural-restart runs are now strong enough to treat restart/cadence policy as a closed evidence slice, so the remaining snapshot work should focus on snapshot-directory load efficiency rather than on further cadence tuning;
 	- the focused split shows the persisted restart cost is still dominated by snapshot-directory read/decompress/decode/materialization (~`302–377 µs/op`), while the in-memory `replayFromSnapshots` restore step itself is comparatively small (~`60 µs/op`);
 	- inside the snapshot-directory load, binary decode remains the largest measured in-process component, but the direct positional-row decode path pushed it down materially to roughly `79–166 µs/op`, `186–458 KB/op`, and `1.1k–1.7k allocs/op`, ahead of raw file I/O (~`87 µs/op`), zstd decompression (~`74 µs/op`), and snapshot materialization (~`49–57 µs/op`);
 	- delta-chain merge is negligible on the current fixture because the harness is effectively loading a single persisted snapshot file, so this AB slice is presently about file read + decode efficiency rather than cross-file snapshot chaining.
