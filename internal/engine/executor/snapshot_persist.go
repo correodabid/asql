@@ -813,11 +813,11 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 		return nil, 0, fmt.Errorf("read snapshot dir: %w", err)
 	}
 
-	type seqFileEntries struct {
-		seq     uint64
-		entries []rawSnapshotFileEntry
+	type seqFile struct {
+		seq  uint64
+		name string
 	}
-	var rawFiles []seqFileEntries
+	var files []seqFile
 	var maxSeq uint64
 
 	for _, entry := range entries {
@@ -833,45 +833,44 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 		if seq > maxSeq {
 			maxSeq = seq
 		}
+		files = append(files, seqFile{seq: seq, name: name})
+	}
 
-		filePath := filepath.Join(snapDir, name)
+	if len(files) == 0 {
+		return nil, 0, nil
+	}
+
+	// Process files in seq order to maintain delta chain integrity.
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].seq < files[j].seq
+	})
+
+	var accumulated map[string]*persistedDomain
+	result := make([]engineSnapshot, 0, len(files))
+
+	for _, file := range files {
+		filePath := filepath.Join(snapDir, file.name)
 		data, err := os.ReadFile(filePath)
 		if err != nil {
-			return nil, 0, fmt.Errorf("read snapshot file %s: %w", name, err)
+			return nil, 0, fmt.Errorf("read snapshot file %s: %w", file.name, err)
 		}
 
 		if isZstd(data) {
 			data, err = decompressZstd(data)
 			if err != nil {
-				return nil, 0, fmt.Errorf("decompress snapshot file %s: %w", name, err)
+				return nil, 0, fmt.Errorf("decompress snapshot file %s: %w", file.name, err)
 			}
 		}
 
 		fileEntries, err := decodeSnapshotFileBinaryRaw(data)
 		if err != nil || len(fileEntries) == 0 {
 			if err != nil {
-				return nil, 0, fmt.Errorf("decode snapshot file %s: %w", name, err)
+				return nil, 0, fmt.Errorf("decode snapshot file %s: %w", file.name, err)
 			}
-			return nil, 0, fmt.Errorf("decode snapshot file %s: empty snapshot file", name)
+			return nil, 0, fmt.Errorf("decode snapshot file %s: empty snapshot file", file.name)
 		}
 
-		rawFiles = append(rawFiles, seqFileEntries{seq: seq, entries: fileEntries})
-	}
-
-	if len(rawFiles) == 0 {
-		return nil, 0, nil
-	}
-
-	// Process files in seq order to maintain delta chain integrity.
-	sort.Slice(rawFiles, func(i, j int) bool {
-		return rawFiles[i].seq < rawFiles[j].seq
-	})
-
-	var accumulated map[string]*persistedDomain
-	var result []engineSnapshot
-
-	for _, rf := range rawFiles {
-		for _, e := range rf.entries {
+		for _, e := range fileEntries {
 			if e.isFull || accumulated == nil {
 				// Full snapshot (or first file seen — treat orphan delta as full).
 				if !e.isFull {
@@ -902,11 +901,6 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 	if len(result) == 0 {
 		return nil, 0, nil
 	}
-
-	// Sort final result by LSN ascending.
-	sort.Slice(result, func(i, j int) bool {
-		return result[i].lsn < result[j].lsn
-	})
 
 	return result, maxSeq, nil
 
