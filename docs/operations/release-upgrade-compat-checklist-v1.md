@@ -21,6 +21,7 @@ Every release candidate should include a short evidence bundle covering:
 3. Compatibility sanity:
    - compatibility docs were reviewed in the same release window.
    - documented mainstream client/tool flows still pass the current pack in [pgwire-compatibility-test-pack-v1.md](pgwire-compatibility-test-pack-v1.md).
+   - if pgwire error handling or startup/auth code changed, the SQLSTATE/error-shape lane is green in the same release window.
 4. Recovery sanity:
    - replay/restart parity suite passes.
    - backup/restore parity suite passes.
@@ -44,6 +45,7 @@ Every release candidate should include a short evidence bundle covering:
    - pgwire onboarding flow
    - admin HTTP health/metrics flow
    - pgwire compatibility pack baseline lanes
+   - focused pgwire SQLSTATE/error-shape regressions when protocol error behavior changed
    - release-candidate evidence summary generated
 
 ## Upgrade simulation

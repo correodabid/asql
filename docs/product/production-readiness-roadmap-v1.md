@@ -132,11 +132,12 @@ Conclusion:
 Evidence:
 - Extended query protocol support exists (`Parse` / `Bind` / `Describe` / `Execute` pipeline).
 - There is already a supported compatibility wedge and pgx-based interoperability work.
-- I found no evidence of protocol cancellation support or `COPY` support.
+- Protocol cancellation support exists and is regression-covered.
+- Narrow text/CSV `COPY` support exists and is regression-covered.
 
 Conclusion:
 - The right statement today is: **pgwire compatibility is beyond a simple spike, but still far from a drop-in Postgres replacement.**
-- Main gaps: cancellation, `COPY`, auth/TLS breadth, catalog compatibility, and conformance docs.
+- Main gaps are now auth/TLS breadth, catalog compatibility breadth, and continued conformance hardening around the documented subset.
 
 ### 9) "CLI tipo psql funcional"
 
@@ -255,13 +256,11 @@ If not, it should usually rank below durability, failover, recovery, observabili
 
 ### Still materially missing
 
-- Native Prometheus metrics
 - PITR / incremental backup workflow
 - Interactive admin shell / psql-like CLI
-- Protocol cancellation
-- `COPY`
 - Formal release/chaos gates for GA
 - Large-scale soak and adversarial fault testing
+- broader auth/TLS and catalog compatibility for mainstream PostgreSQL tooling
 
 ---
 
@@ -362,8 +361,7 @@ Goal: remove friction for real applications evaluating ASQL.
 ### Deliverables
 - Refresh PostgreSQL compatibility matrix so docs match reality.
 - Harden extended query protocol behavior and add conformance tests.
-- Add protocol cancellation.
-- Add narrow `COPY` support for the highest-value ingest/export path.
+- Keep protocol cancellation and narrow `COPY` support regression-covered as the compatibility wedge evolves.
 - Expand auth/TLS and catalog compatibility where it most improves tool interoperability.
 - Extend the interactive `asqlctl shell` with stronger explain, replay, and cluster-admin workflows.
 

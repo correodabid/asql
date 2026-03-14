@@ -58,6 +58,11 @@ Primary evidence:
 - `internal/server/pgwire/extended_query_conformance_test.go`
   - `TestExtendedQueryPortalResumesAcrossExecuteCalls`
   - `TestExtendedQueryDescribeStatementInfersParameterCount`
+  - `TestExtendedQueryDescribeStatementInfersInsertParameterOIDs`
+  - `TestExtendedQueryDescribeStatementInfersPredicateParameterOIDs`
+  - `TestExtendedQueryDescribeStatementInfersUpdateParameterOIDs`
+  - `TestExtendedQueryDescribeStatementInfersArithmeticUpdateParameterOIDs`
+  - `TestExtendedQueryInsertReturningUsesSchemaAwareRowDescription`
   - `TestExtendedQueryDiscardsMessagesUntilSyncAfterError`
   - `TestExtendedQueryBinaryBindSupportsInt4Int8AndBool`
   - `TestCancelRequestCancelsSimpleQueryAndKeepsConnectionUsable`
@@ -65,11 +70,37 @@ Primary evidence:
 What this lane covers:
 
 - `Parse` / `Bind` / `Describe` / `Execute` / `Sync`,
-- `ParameterDescription`,
+- schema-aware `ParameterDescription` for the current documented common scalar shapes,
+- schema-aware `RowDescription` for extended-query `INSERT ... RETURNING`,
 - portal suspend/resume,
 - error discard until `Sync`,
 - narrow binary bind support (`int4`, `int8`, `bool`),
 - cancel behavior on pgwire-managed execution boundaries.
+
+### Lane F — SQLSTATE and error-shape baseline
+
+Goal: prove the public pgwire error contract remains aligned with the
+documented compatibility subset.
+
+Primary evidence:
+
+- `internal/server/pgwire/sqlstate_regression_test.go`
+  - `TestPGWirePasswordAuthenticationWrongPasswordReturns28P01`
+  - `TestPGWirePasswordAuthenticationWrongMessageReturns08P01`
+  - `TestSendFollowerRedirectErrorWrites25006AndHint`
+  - `TestPGWireTransactionStateSQLStates`
+  - `TestPGWireObjectAndConstraintSQLStates`
+- `internal/server/pgwire/errors_test.go`
+  - `TestSQLStateFromMessageMappings`
+  - `TestMapErrorToSQLState`
+
+What this lane covers:
+
+- startup/auth SQLSTATEs,
+- follower redirect error shape and hinting,
+- current transaction-state SQLSTATEs,
+- common object/constraint SQLSTATEs,
+- mapper coverage for the remaining documented coarse classifications.
 
 ### Lane C — `psql` baseline
 
@@ -138,6 +169,7 @@ At RC time, treat these as the minimum compatibility evidence summary:
 
 - Lane A green
 - Lane B green
+- Lane F green whenever pgwire error handling, SQLSTATE mapping, or startup/auth flows changed
 - one representative startup/catalog lane green (`psql` or JDBC/GUI), with the
   other lane checked whenever pgwire shim/catalog code changed
 - Lane E green when `COPY` behavior or parser/shim code changed
