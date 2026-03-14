@@ -121,13 +121,36 @@ func (server *Server) handleParse(backend *pgproto3.Backend, state *connState, m
 // back to a count-only unspecified-OID slice when type inference is not yet
 // available.
 func (server *Server) inferParamOIDs(sql string) []uint32 {
-	if inferred := server.inferInsertParamOIDs(sql); len(inferred) > 0 {
-		return inferred
-	}
-	if inferred := server.inferPredicateParamOIDs(sql); len(inferred) > 0 {
-		return inferred
+	merged := mergeParamOIDHints(
+		server.inferInsertParamOIDs(sql),
+		server.inferUpdateParamOIDs(sql),
+		server.inferPredicateParamOIDs(sql),
+	)
+	if len(merged) > 0 {
+		return merged
 	}
 	return inferParamOIDCount(sql)
+}
+
+func mergeParamOIDHints(hints ...[]uint32) []uint32 {
+	max := 0
+	for _, hint := range hints {
+		if len(hint) > max {
+			max = len(hint)
+		}
+	}
+	if max == 0 {
+		return nil
+	}
+	merged := make([]uint32, max)
+	for _, hint := range hints {
+		for i, oid := range hint {
+			if oid != 0 {
+				merged[i] = oid
+			}
+		}
+	}
+	return merged
 }
 
 // inferParamOIDCount scans sql for the highest $n placeholder and returns a
@@ -198,6 +221,68 @@ func (server *Server) inferInsertParamOIDs(sql string) []uint32 {
 		}
 		if oid := oids[cols[i]]; oid != 0 {
 			result[paramIndex-1] = oid
+		}
+	}
+	return result
+}
+
+func (server *Server) inferUpdateParamOIDs(sql string) []uint32 {
+	trimmed := stripAsOfComment(strings.TrimSpace(sql))
+	normalized := normalizePlaceholders(trimmed)
+	stmt, err := parser.Parse(normalized)
+	if err != nil {
+		return nil
+	}
+	upd, ok := stmt.(ast.UpdateStatement)
+	if !ok || len(upd.Columns) == 0 {
+		return nil
+	}
+
+	assignmentClause := extractUpdateSetClause(trimmed)
+	if assignmentClause == "" {
+		return nil
+	}
+	assignments := splitTopLevelCSV(assignmentClause)
+	if len(assignments) == 0 {
+		return nil
+	}
+
+	max := 0
+	cols := make([]string, 0, len(assignments))
+	paramIndexes := make([]int, 0, len(assignments))
+	for _, assignment := range assignments {
+		parts := strings.SplitN(assignment, "=", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		col := canonicalParamIdentifier(parts[0])
+		rhs := strings.TrimSpace(parts[1])
+		if col == "" || !strings.HasPrefix(rhs, "$") {
+			continue
+		}
+		paramIndex, err := strconv.Atoi(strings.TrimPrefix(rhs, "$"))
+		if err != nil || paramIndex <= 0 {
+			continue
+		}
+		cols = append(cols, col)
+		paramIndexes = append(paramIndexes, paramIndex)
+		if paramIndex > max {
+			max = paramIndex
+		}
+	}
+	if max == 0 {
+		return nil
+	}
+
+	oids := server.resolveColumnOIDs(upd.TableName, cols)
+	result := make([]uint32, max)
+	for i, col := range cols {
+		idx := paramIndexes[i] - 1
+		if idx < 0 || idx >= len(result) {
+			continue
+		}
+		if oid := oids[col]; oid != 0 {
+			result[idx] = oid
 		}
 	}
 	return result
@@ -362,6 +447,62 @@ func insertParameterOrder(sql string) []int {
 		}
 	}
 	return order
+}
+
+func extractUpdateSetClause(sql string) string {
+	upper := strings.ToUpper(sql)
+	setIdx := strings.Index(upper, " SET ")
+	if setIdx == -1 {
+		return ""
+	}
+	rest := sql[setIdx+len(" SET "):]
+	upperRest := strings.ToUpper(rest)
+	if whereIdx := strings.Index(upperRest, " WHERE "); whereIdx != -1 {
+		return strings.TrimSpace(rest[:whereIdx])
+	}
+	return strings.TrimSpace(rest)
+}
+
+func splitTopLevelCSV(clause string) []string {
+	if strings.TrimSpace(clause) == "" {
+		return nil
+	}
+	parts := make([]string, 0, 4)
+	start := 0
+	depth := 0
+	inString := false
+	quote := byte(0)
+	for i := 0; i < len(clause); i++ {
+		ch := clause[i]
+		if inString {
+			if ch == quote {
+				if i+1 < len(clause) && clause[i+1] == quote {
+					i++
+					continue
+				}
+				inString = false
+			}
+			continue
+		}
+		switch ch {
+		case '\'', '"':
+			inString = true
+			quote = ch
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				parts = append(parts, strings.TrimSpace(clause[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, strings.TrimSpace(clause[start:]))
+	return parts
 }
 
 var whereParamPattern = regexp.MustCompile(`(?i)([a-zA-Z_][a-zA-Z0-9_\."\>]*)\s*(=|<>|!=|>=|<=|>|<|like|ilike|not\s+like|not\s+ilike)\s*\$(\d+)`)
