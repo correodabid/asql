@@ -101,6 +101,7 @@ type persistedIndex struct {
 	Column  string
 	Columns []string
 	Kind    string
+	decodedEntries []indexEntry
 	// v11+: set to true when bucket/entry data is present so the reader
 	// can skip the O(N×indexes) rebuild on startup.
 	DataLoaded bool                  `json:",omitempty"`
@@ -474,13 +475,16 @@ func marshalableToTableState(pt *persistedTable) *tableState {
 					idx.buckets = make(map[string][]int)
 				}
 			case "btree":
-				idx.buckets = make(map[string][]int)
-				idx.entries = make([]indexEntry, len(pi.Entries))
-				for i, e := range pi.Entries {
-					idx.entries[i] = indexEntry{
-						value:  e.Value,
-						values: e.Values,
-						rowID:  e.RowID,
+				if len(pi.decodedEntries) > 0 {
+					idx.entries = pi.decodedEntries
+				} else {
+					idx.entries = make([]indexEntry, len(pi.Entries))
+					for i, e := range pi.Entries {
+						idx.entries[i] = indexEntry{
+							value:  e.Value,
+							values: e.Values,
+							rowID:  e.RowID,
+						}
 					}
 				}
 			default:

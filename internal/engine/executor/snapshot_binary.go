@@ -763,19 +763,19 @@ func (r *binReader) readTable() (string, *persistedTable) {
 						}
 					case "btree":
 						numEntries := int(r.u32())
-						pi.Entries = make([]persistedIndexEntry, numEntries)
+						pi.decodedEntries = make([]indexEntry, numEntries)
 						for e := 0; e < numEntries; e++ {
-							entry := persistedIndexEntry{}
-							entry.Value = r.literal()
+							entry := indexEntry{}
+							entry.value = r.literal()
 							numVals := int(r.u16())
 							if numVals > 0 {
-								entry.Values = make([]ast.Literal, numVals)
+								entry.values = make([]ast.Literal, numVals)
 								for v := 0; v < numVals; v++ {
-									entry.Values[v] = r.literal()
+									entry.values[v] = r.literal()
 								}
 							}
-							entry.RowID = int(r.u32())
-							pi.Entries[e] = entry
+							entry.rowID = int(r.u32())
+							pi.decodedEntries[e] = entry
 						}
 					}
 				}
