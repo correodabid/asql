@@ -199,6 +199,9 @@ func (engine *Engine) buildStateFromRecords(records []ports.WALRecord, targetLSN
 	if targetLSN >= currentState.headLSN && currentState.headLSN > 0 {
 		return currentState, nil
 	}
+	if cachedState, ok := engine.cachedHistoricalState(targetLSN); ok {
+		return cachedState, nil
+	}
 
 	temp := &Engine{
 		catalog:          domains.NewCatalog(),
@@ -224,7 +227,9 @@ func (engine *Engine) buildStateFromRecords(records []ports.WALRecord, targetLSN
 		return nil, err
 	}
 
-	return temp.readState.Load(), nil
+	tempState := temp.readState.Load()
+	engine.storeHistoricalState(targetLSN, tempState)
+	return tempState, nil
 }
 
 func (engine *Engine) rebuildFromRecords(records []ports.WALRecord, targetLSN uint64, bounded bool) error {

@@ -227,8 +227,34 @@ func BenchmarkEngineReadAsOfLSN(b *testing.B) {
 		}
 	}
 
+	b.StopTimer()
 	engine.WaitPendingSnapshots()
 	_ = store.Close()
+}
+
+func BenchmarkEngineReadHistoricalAsOfLSNScaling(b *testing.B) {
+	ctx := context.Background()
+
+	for _, totalRows := range []int{1000, 10000} {
+		b.Run(fmt.Sprintf("rows_%d", totalRows), func(b *testing.B) {
+			store, engine, targetLSN := prepareHistoricalReadBenchmarkFixture(b, totalRows)
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, payload FROM entries WHERE id = 1", []string{"bench"}, targetLSN)
+				if err != nil {
+					b.Fatalf("historical time travel query: %v", err)
+				}
+				if len(result.Rows) != 1 {
+					b.Fatalf("unexpected historical row count: got %d want 1", len(result.Rows))
+				}
+			}
+
+			b.StopTimer()
+			engine.WaitPendingSnapshots()
+			_ = store.Close()
+		})
+	}
 }
 
 func BenchmarkEngineReplayToLSN(b *testing.B) {
@@ -1724,6 +1750,36 @@ func prepareEntityRelatedReadBenchmarkFixture(b *testing.B, orderCount int, line
 		targetOrderID = 1
 	}
 	return store, engine, targetLSN, targetOrderID
+}
+
+func prepareHistoricalReadBenchmarkFixture(b *testing.B, totalRows int) (*wal.SegmentedLogStore, *Engine, uint64) {
+	b.Helper()
+
+	ctx := context.Background()
+	store, engine := newBenchmarkEngine(b)
+
+	halfRows := totalRows / 2
+	if halfRows == 0 {
+		halfRows = 1
+	}
+
+	seed := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, seed, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, seed, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
+	for i := 1; i <= halfRows; i++ {
+		mustExecBenchmark(b, ctx, engine, seed, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+	}
+	mustExecBenchmark(b, ctx, engine, seed, "COMMIT")
+	targetLSN := store.LastLSN()
+
+	advance := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, advance, "BEGIN DOMAIN bench")
+	for i := halfRows + 1; i <= totalRows; i++ {
+		mustExecBenchmark(b, ctx, engine, advance, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+	}
+	mustExecBenchmark(b, ctx, engine, advance, "COMMIT")
+
+	return store, engine, targetLSN
 }
 
 func reportScanStrategyDelta(b *testing.B, engine *Engine, baselineCounts map[string]uint64, strategy string) {

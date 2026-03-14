@@ -133,6 +133,9 @@ const (
 type Engine struct {
 	writeMu                       sync.Mutex                    // serializes write path (commit, beginDomain, replay)
 	readState                     atomic.Pointer[readableState] // lock-free read path
+	walCacheMu                    sync.Mutex
+	walRecordsCache               atomic.Pointer[walRecordCache]
+	historicalStateCache          *historicalStateCache
 	logStore                      ports.LogStore
 	snapDir                       string      // directory for numbered snapshot files ("" = disabled)
 	snapSeq                       uint64      // monotonic sequence number for the next snapshot file
@@ -168,6 +171,80 @@ type Engine struct {
 	// used by fanoutProjections to materialise rows into subscriber domains.
 	vfkSubscriptions map[string][]projectionSubscription
 	replayMode       bool // true during WAL replay; skips VFK validation
+}
+
+type walRecordCache struct {
+	headLSN uint64
+	records []ports.WALRecord
+}
+
+type historicalStateCache struct {
+	mu      sync.Mutex
+	entries map[uint64]*readableState
+	order   []uint64
+}
+
+const historicalStateCacheMaxEntries = 8
+
+func newHistoricalStateCache() *historicalStateCache {
+	return &historicalStateCache{entries: make(map[uint64]*readableState)}
+}
+
+func (cache *historicalStateCache) get(lsn uint64) (*readableState, bool) {
+	if cache == nil {
+		return nil, false
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	state, ok := cache.entries[lsn]
+	if !ok {
+		return nil, false
+	}
+	cache.touch(lsn)
+	return state, true
+}
+
+func (cache *historicalStateCache) put(lsn uint64, state *readableState) {
+	if cache == nil || state == nil {
+		return
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	if _, exists := cache.entries[lsn]; exists {
+		cache.entries[lsn] = state
+		cache.touch(lsn)
+		return
+	}
+	cache.entries[lsn] = state
+	cache.order = append(cache.order, lsn)
+	if len(cache.order) <= historicalStateCacheMaxEntries {
+		return
+	}
+	evict := cache.order[0]
+	cache.order = cache.order[1:]
+	delete(cache.entries, evict)
+}
+
+func (cache *historicalStateCache) clear() {
+	if cache == nil {
+		return
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	cache.entries = make(map[uint64]*readableState)
+	cache.order = cache.order[:0]
+}
+
+func (cache *historicalStateCache) touch(lsn uint64) {
+	for i, candidate := range cache.order {
+		if candidate != lsn {
+			continue
+		}
+		copy(cache.order[i:], cache.order[i+1:])
+		cache.order[len(cache.order)-1] = lsn
+		return
+	}
+	cache.order = append(cache.order, lsn)
 }
 
 // EngineOption configures optional behaviours of the Engine.
@@ -232,6 +309,8 @@ func (engine *Engine) maybeGCWAL(snapLSN uint64) {
 	if err := tr.TruncateBefore(context.Background(), snapLSN); err != nil {
 		slog.Warn("wal: gc after snapshot failed", "lsn", snapLSN, "err", err)
 	} else {
+		engine.clearWALRecordCache()
+		engine.clearHistoricalStateCache()
 		slog.Info("wal: gc complete", "before_lsn", snapLSN)
 	}
 }
@@ -241,15 +320,16 @@ func (engine *Engine) maybeGCWAL(snapLSN uint64) {
 // Pass "" to disable snapshot persistence (tests).
 func New(ctx context.Context, logStore ports.LogStore, snapDir string, opts ...EngineOption) (*Engine, error) {
 	engine := &Engine{
-		logStore:         logStore,
-		snapDir:          snapDir,
-		catalog:          domains.NewCatalog(),
-		scanStats:        make(map[scanStrategy]uint64),
-		snapshots:        newSnapshotStore(),
-		perf:             newPerfStats(),
-		retainWAL:        true, // default: preserve full WAL for compliance
-		timestampIndex:   newTimestampLSNIndex(snapDir),
-		vfkSubscriptions: make(map[string][]projectionSubscription),
+		logStore:             logStore,
+		snapDir:              snapDir,
+		catalog:              domains.NewCatalog(),
+		scanStats:            make(map[scanStrategy]uint64),
+		snapshots:            newSnapshotStore(),
+		historicalStateCache: newHistoricalStateCache(),
+		perf:                 newPerfStats(),
+		retainWAL:            true, // default: preserve full WAL for compliance
+		timestampIndex:       newTimestampLSNIndex(snapDir),
+		vfkSubscriptions:     make(map[string][]projectionSubscription),
 	}
 
 	for _, opt := range opts {
@@ -537,15 +617,94 @@ func (engine *Engine) Explain(sql string, txDomains []string) (Result, error) {
 }
 
 func (engine *Engine) readAllRecords(ctx context.Context) ([]ports.WALRecord, error) {
+	currentHead := uint64(0)
+	if state := engine.readState.Load(); state != nil {
+		currentHead = state.headLSN
+	}
+
+	if cached := engine.walRecordsCache.Load(); cached != nil && cached.headLSN == currentHead {
+		return cached.records, nil
+	}
+
+	engine.walCacheMu.Lock()
+	defer engine.walCacheMu.Unlock()
+
+	if cached := engine.walRecordsCache.Load(); cached != nil && cached.headLSN == currentHead {
+		return cached.records, nil
+	}
+
 	recoverable, ok := engine.logStore.(interface {
 		Recover(ctx context.Context) ([]ports.WALRecord, error)
 	})
 
 	if ok {
-		return recoverable.Recover(ctx)
+		records, err := recoverable.Recover(ctx)
+		if err != nil {
+			return nil, err
+		}
+		engine.storeWALRecordCache(currentHead, records)
+		return records, nil
 	}
 
-	return engine.logStore.ReadFrom(ctx, 1, 0)
+	records, err := engine.logStore.ReadFrom(ctx, 1, 0)
+	if err != nil {
+		return nil, err
+	}
+	engine.storeWALRecordCache(currentHead, records)
+	return records, nil
+}
+
+func (engine *Engine) storeWALRecordCache(headLSN uint64, records []ports.WALRecord) {
+	engine.walRecordsCache.Store(&walRecordCache{headLSN: headLSN, records: records})
+}
+
+func (engine *Engine) clearWALRecordCache() {
+	engine.walRecordsCache.Store(nil)
+}
+
+func (engine *Engine) cachedHistoricalState(targetLSN uint64) (*readableState, bool) {
+	if engine == nil || engine.historicalStateCache == nil {
+		return nil, false
+	}
+	return engine.historicalStateCache.get(targetLSN)
+}
+
+func (engine *Engine) storeHistoricalState(targetLSN uint64, state *readableState) {
+	if engine == nil || engine.historicalStateCache == nil || state == nil {
+		return
+	}
+	engine.historicalStateCache.put(targetLSN, state)
+}
+
+func (engine *Engine) clearHistoricalStateCache() {
+	if engine == nil || engine.historicalStateCache == nil {
+		return
+	}
+	engine.historicalStateCache.clear()
+}
+
+func (engine *Engine) appendWALRecordCache(records []ports.WALRecord) {
+	if len(records) == 0 {
+		return
+	}
+
+	engine.walCacheMu.Lock()
+	defer engine.walCacheMu.Unlock()
+
+	cached := engine.walRecordsCache.Load()
+	if cached == nil {
+		return
+	}
+	firstLSN := records[0].LSN
+	if cached.headLSN+1 != firstLSN {
+		engine.walRecordsCache.Store(nil)
+		return
+	}
+
+	combined := make([]ports.WALRecord, len(cached.records)+len(records))
+	copy(combined, cached.records)
+	copy(combined[len(cached.records):], records)
+	engine.walRecordsCache.Store(&walRecordCache{headLSN: records[len(records)-1].LSN, records: combined})
 }
 
 // TimelineCommit describes a single committed transaction for the timeline UI.

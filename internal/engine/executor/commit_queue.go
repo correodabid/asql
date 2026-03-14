@@ -512,12 +512,14 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 				slog.Warn("timestamp index append failed", "error", err.Error(), "records", len(allWALRecords))
 			}
 		}
+		engine.appendWALRecordCache(allWALRecords)
 	}
 
 	// Update state metadata and atomic swap.
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
 	engine.readState.Store(newState)
+	engine.clearHistoricalStateCache()
 	engine.lastWriteUnixNano.Store(time.Now().UnixNano())
 
 	// Snapshot check: one per batch based on total mutations.

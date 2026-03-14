@@ -3372,6 +3372,164 @@ func TestJoinQueryWithRootAndJoinedFiltersReturnsExpectedRows(t *testing.T) {
 	}
 }
 
+func TestHistoricalQueryReusesCachedWALRecords(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "historical-query-cache.wal")
+
+	inner, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	store := &countingSegmentedStore{inner: inner}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN bench",
+		"CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)",
+		"INSERT INTO entries (id, payload) VALUES (1, 'one')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+	targetLSN := store.inner.LastLSN()
+
+	session = engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN bench",
+		"INSERT INTO entries (id, payload) VALUES (2, 'two')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	engine.clearWALRecordCache()
+	baselineReads := store.readCount.Load()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, payload FROM entries WHERE id = 1", []string{"bench"}, targetLSN)
+	if err != nil {
+		t.Fatalf("first historical query: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("unexpected historical row count: got %d want 1", len(result.Rows))
+	}
+	firstReads := store.readCount.Load()
+	if firstReads <= baselineReads {
+		t.Fatalf("expected first historical query to read WAL, baseline=%d first=%d", baselineReads, firstReads)
+	}
+
+	result, err = engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, payload FROM entries WHERE id = 1", []string{"bench"}, targetLSN)
+	if err != nil {
+		t.Fatalf("second historical query: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("unexpected second historical row count: got %d want 1", len(result.Rows))
+	}
+	secondReads := store.readCount.Load()
+	if secondReads != firstReads {
+		t.Fatalf("expected cached WAL reuse on second historical query, first=%d second=%d", firstReads, secondReads)
+	}
+
+	session = engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN bench",
+		"INSERT INTO entries (id, payload) VALUES (3, 'three')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q after cache warmup: %v", sql, err)
+		}
+	}
+
+	result, err = engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, payload FROM entries WHERE id = 1", []string{"bench"}, targetLSN)
+	if err != nil {
+		t.Fatalf("historical query after append: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("unexpected post-append historical row count: got %d want 1", len(result.Rows))
+	}
+	if finalReads := store.readCount.Load(); finalReads != secondReads {
+		t.Fatalf("expected incremental WAL cache reuse after append, before=%d after=%d", secondReads, finalReads)
+	}
+}
+
+func TestHistoricalQueryReusesCachedHistoricalState(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "historical-state-cache.wal")
+
+	inner, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	store := &countingSegmentedStore{inner: inner}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN bench",
+		"CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)",
+		"INSERT INTO entries (id, payload) VALUES (1, 'one')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+	targetLSN := store.inner.LastLSN()
+
+	session = engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN bench",
+		"INSERT INTO entries (id, payload) VALUES (2, 'two')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	engine.clearWALRecordCache()
+	engine.clearHistoricalStateCache()
+	baselineReads := store.readCount.Load()
+
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, payload FROM entries WHERE id = 1", []string{"bench"}, targetLSN)
+	if err != nil {
+		t.Fatalf("first historical query: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("unexpected first historical row count: got %d want 1", len(result.Rows))
+	}
+	firstReads := store.readCount.Load()
+	if firstReads <= baselineReads {
+		t.Fatalf("expected first historical query to read WAL, baseline=%d first=%d", baselineReads, firstReads)
+	}
+
+	engine.clearWALRecordCache()
+	result, err = engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, payload FROM entries WHERE id = 1", []string{"bench"}, targetLSN)
+	if err != nil {
+		t.Fatalf("second historical query: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("unexpected second historical row count: got %d want 1", len(result.Rows))
+	}
+	if secondReads := store.readCount.Load(); secondReads != firstReads {
+		t.Fatalf("expected cached historical state reuse without extra WAL reads, first=%d second=%d", firstReads, secondReads)
+	}
+}
+
 func TestLeftJoinWithRightIsNullFilterPreservesUnmatchedRows(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "left-join-right-is-null.wal")

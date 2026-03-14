@@ -325,6 +325,18 @@ func (engine *Engine) tableContainsValueAtLSN(state *readableState, domain, tabl
 		return false, fmt.Errorf("cannot perform historical lookup: engine not available")
 	}
 
+	if cachedState, ok := engine.cachedHistoricalState(targetLSN); ok {
+		refDomainState, exists := cachedState.domains[domain]
+		if !exists {
+			return false, nil
+		}
+		refTable, exists := refDomainState.tables[table]
+		if !exists {
+			return false, nil
+		}
+		return tableContainsValue(refTable, column, value), nil
+	}
+
 	records, err := engine.readAllRecords(context.Background())
 	if err != nil {
 		return false, fmt.Errorf("versioned FK historical lookup: %w", err)
@@ -354,6 +366,7 @@ func (engine *Engine) tableContainsValueAtLSN(state *readableState, domain, tabl
 	}
 
 	tempState := temp.readState.Load()
+	engine.storeHistoricalState(targetLSN, tempState)
 	refDomainState, exists := tempState.domains[domain]
 	if !exists {
 		return false, nil

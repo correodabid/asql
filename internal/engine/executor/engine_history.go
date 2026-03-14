@@ -61,6 +61,21 @@ func (engine *Engine) TimeTravelQueryAsOfLSN(ctx context.Context, sql string, tx
 		return Result{Status: "OK", Rows: rows}, nil
 	}
 
+	if cachedState, ok := engine.cachedHistoricalState(targetLSN); ok {
+		if len(imports) > 0 {
+			cachedState, err = applyImports(cachedState, imports)
+			if err != nil {
+				return Result{}, err
+			}
+		}
+		rows, err := engine.executeQueryPlan(ctx, cachedState, plan)
+		if err != nil {
+			return Result{}, err
+		}
+		engine.perf.recordRead(time.Since(readStart))
+		return Result{Status: "OK", Rows: rows}, nil
+	}
+
 	// Slow path: historical query — restore from nearest snapshot + partial replay.
 	records, err := engine.readAllRecords(ctx)
 	if err != nil {
@@ -124,6 +139,7 @@ func (engine *Engine) TimeTravelQueryAsOfLSN(ctx context.Context, sql string, tx
 	}
 
 	tempState := temp.readState.Load()
+	engine.storeHistoricalState(targetLSN, tempState)
 	if len(imports) > 0 {
 		tempState, err = applyImports(tempState, imports)
 		if err != nil {
