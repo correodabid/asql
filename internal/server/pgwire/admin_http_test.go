@@ -6,16 +6,177 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"asql/internal/cluster/coordinator"
 	"asql/internal/cluster/raft"
 	api "asql/pkg/adminapi"
+
+	"github.com/jackc/pgx/v5"
 )
+
+func startAdminSmokeServer(t *testing.T, config Config) (*Server, string, string, func()) {
+	t.Helper()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	server, err := New(config)
+	if err != nil {
+		t.Fatalf("new server: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	var adminAddr string
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if server.adminListener != nil {
+			adminAddr = server.adminListener.Addr().String()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if adminAddr == "" {
+		cancel()
+		server.Stop()
+		t.Fatal("timeout waiting for admin http listener")
+	}
+
+	cleanup := func() {
+		cancel()
+		server.Stop()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	}
+
+	return server, listener.Addr().String(), adminAddr, cleanup
+}
+
+func TestRuntimeAndAdminHTTPSmokeFlow(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	_, pgwireAddr, adminAddr, cleanup := startAdminSmokeServer(t, Config{
+		Address:         "127.0.0.1:0",
+		AdminHTTPAddr:   "127.0.0.1:0",
+		DataDirPath:     filepath.Join(t.TempDir(), "data"),
+		Logger:          logger,
+		AdminReadToken:  "read-secret",
+		AdminWriteToken: "write-secret",
+	})
+	defer cleanup()
+
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+pgwireAddr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT PRIMARY KEY, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"COMMIT",
+	} {
+		if _, err := conn.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	client := &http.Client{Timeout: 2 * time.Second}
+
+	assertStatus := func(path string, want int) []byte {
+		t.Helper()
+		resp, err := client.Get("http://" + adminAddr + path)
+		if err != nil {
+			t.Fatalf("get %s: %v", path, err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read %s response: %v", path, err)
+		}
+		if resp.StatusCode != want {
+			t.Fatalf("unexpected %s status: got %d want %d body=%s", path, resp.StatusCode, want, string(body))
+		}
+		return body
+	}
+
+	livezBody := assertStatus("/livez", http.StatusOK)
+	if !strings.Contains(string(livezBody), `"live":true`) {
+		t.Fatalf("unexpected livez payload: %s", string(livezBody))
+	}
+
+	readyzBody := assertStatus("/readyz", http.StatusOK)
+	if !strings.Contains(string(readyzBody), `"ready":true`) {
+		t.Fatalf("unexpected readyz payload: %s", string(readyzBody))
+	}
+
+	metricsBody := assertStatus("/metrics", http.StatusOK)
+	for _, fragment := range []string{
+		"asql_engine_begins_total",
+		"asql_engine_commits_total 1",
+		"asql_engine_fsync_errors_total 0",
+	} {
+		if !strings.Contains(string(metricsBody), fragment) {
+			t.Fatalf("metrics body missing fragment %q\n%s", fragment, string(metricsBody))
+		}
+	}
+
+	req, err := http.NewRequest(http.MethodGet, "http://"+adminAddr+"/api/v1/last-lsn", nil)
+	if err != nil {
+		t.Fatalf("new authorized request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer read-secret")
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("authorized last-lsn request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected last-lsn status: got %d want %d body=%s", resp.StatusCode, http.StatusOK, string(body))
+	}
+	var lastLSN map[string]uint64
+	if err := json.NewDecoder(resp.Body).Decode(&lastLSN); err != nil {
+		t.Fatalf("decode last-lsn response: %v", err)
+	}
+	if lastLSN["last_lsn"] == 0 {
+		t.Fatalf("expected durable lsn after commit, got %+v", lastLSN)
+	}
+
+	req, err = http.NewRequest(http.MethodGet, "http://"+adminAddr+"/api/v1/last-lsn", nil)
+	if err != nil {
+		t.Fatalf("new unauthorized request: %v", err)
+	}
+	resp, err = client.Do(req)
+	if err != nil {
+		t.Fatalf("unauthorized last-lsn request: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("unexpected unauthorized status: got %d want %d body=%s", resp.StatusCode, http.StatusUnauthorized, string(body))
+	}
+}
 
 func TestAdminMetricsExposeFailoverLeaderAndSafeLSN(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))

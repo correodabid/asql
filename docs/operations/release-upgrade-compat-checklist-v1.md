@@ -15,9 +15,11 @@ Every release candidate should include a short evidence bundle covering:
    - `cmd/asqld` boots locally.
    - the pgwire getting-started flow still works.
    - Studio launch path still works when included in release scope.
+   - concrete smoke evidence should include `internal/server/pgwire/admin_http_test.go`: `TestRuntimeAndAdminHTTPSmokeFlow` whenever runtime/admin boot wiring changes.
 2. Operator sanity:
    - `/livez`, `/readyz`, and `/metrics` respond on the admin HTTP surface.
    - leadership, failover history, and WAL retention admin endpoints respond with expected shapes.
+   - concrete endpoint evidence should include `internal/server/pgwire/admin_http_test.go`: `TestAdminReadyzAndLeadershipEndpoints`, `TestAdminMetricsExposeFailoverLeaderAndSafeLSN`, and `TestRuntimeAndAdminHTTPSmokeFlow` when admin HTTP behavior changes.
 3. Compatibility sanity:
    - compatibility docs were reviewed in the same release window.
    - documented mainstream client/tool flows still pass the current pack in [pgwire-compatibility-test-pack-v1.md](pgwire-compatibility-test-pack-v1.md).
