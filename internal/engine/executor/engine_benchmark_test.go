@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -426,15 +427,23 @@ func BenchmarkEngineReadCompositeNonCoveredBTree(b *testing.B) {
 func benchmarkEngineRestartLoad(b *testing.B, withPersistedSnapshot bool) {
 	ctx := context.Background()
 	walPath, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, withPersistedSnapshot)
+	runRoot := filepath.Join(b.TempDir(), "restart-runs")
+	if err := os.MkdirAll(runRoot, 0o755); err != nil {
+		b.Fatalf("mkdir restart benchmark run root: %v", err)
+	}
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+		b.StopTimer()
+		runWalPath, runSnapDir := cloneRestartBenchmarkFixture(b, runRoot, i, walPath, snapDir)
+		b.StartTimer()
+
+		store, err := wal.NewSegmentedLogStore(runWalPath, wal.AlwaysSync{})
 		if err != nil {
 			b.Fatalf("reopen wal store: %v", err)
 		}
 
-		engine, err := New(ctx, store, snapDir)
+		engine, err := New(ctx, store, runSnapDir)
 		if err != nil {
 			_ = store.Close()
 			b.Fatalf("restart engine: %v", err)
@@ -462,9 +471,112 @@ func benchmarkEngineRestartLoad(b *testing.B, withPersistedSnapshot bool) {
 		b.StopTimer()
 		engine.WaitPendingSnapshots()
 		_ = store.Close()
+		_ = os.RemoveAll(filepath.Dir(runWalPath))
 		b.StartTimer()
 	}
 	b.StopTimer()
+}
+
+func cloneRestartBenchmarkFixture(b *testing.B, runRoot string, run int, walPath string, snapDir string) (string, string) {
+	b.Helper()
+
+	runDir := filepath.Join(runRoot, fmt.Sprintf("run-%06d", run))
+	if err := os.RemoveAll(runDir); err != nil {
+		b.Fatalf("reset restart benchmark run dir: %v", err)
+	}
+	if err := os.MkdirAll(runDir, 0o755); err != nil {
+		b.Fatalf("mkdir restart benchmark run dir: %v", err)
+	}
+
+	runWalPath := filepath.Join(runDir, filepath.Base(walPath))
+	if err := copyWALFixture(walPath, runWalPath); err != nil {
+		b.Fatalf("copy restart benchmark wal fixture: %v", err)
+	}
+
+	if snapDir == "" {
+		return runWalPath, ""
+	}
+
+	runSnapDir := filepath.Join(runDir, filepath.Base(snapDir))
+	if err := copyDir(snapDir, runSnapDir); err != nil {
+		b.Fatalf("copy restart benchmark snapshot fixture: %v", err)
+	}
+	return runWalPath, runSnapDir
+}
+
+func copyWALFixture(srcBasePath string, dstBasePath string) error {
+	srcDir := filepath.Dir(srcBasePath)
+	srcBase := filepath.Base(srcBasePath)
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return fmt.Errorf("read wal fixture dir %s: %w", srcDir, err)
+	}
+
+	copied := false
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), srcBase+".") {
+			continue
+		}
+		suffix := strings.TrimPrefix(entry.Name(), srcBase)
+		srcPath := filepath.Join(srcDir, entry.Name())
+		dstPath := dstBasePath + suffix
+		if err := copyFile(srcPath, dstPath); err != nil {
+			return err
+		}
+		copied = true
+	}
+	if !copied {
+		return fmt.Errorf("no wal segment files found for %s", srcBasePath)
+	}
+	return nil
+}
+
+func copyDir(srcDir string, dstDir string) error {
+	entries, err := os.ReadDir(srcDir)
+	if err != nil {
+		return fmt.Errorf("read dir %s: %w", srcDir, err)
+	}
+	if err := os.MkdirAll(dstDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir dir %s: %w", dstDir, err)
+	}
+	for _, entry := range entries {
+		srcPath := filepath.Join(srcDir, entry.Name())
+		dstPath := filepath.Join(dstDir, entry.Name())
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := copyFile(srcPath, dstPath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func copyFile(srcPath string, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("open %s: %w", srcPath, err)
+	}
+	defer src.Close()
+
+	info, err := src.Stat()
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", srcPath, err)
+	}
+
+	dst, err := os.OpenFile(dstPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, info.Mode().Perm())
+	if err != nil {
+		return fmt.Errorf("create %s: %w", dstPath, err)
+	}
+	defer dst.Close()
+
+	if _, err := io.Copy(dst, src); err != nil {
+		return fmt.Errorf("copy %s to %s: %w", srcPath, dstPath, err)
+	}
+	return nil
 }
 
 func prepareRestartBenchmarkFixture(b *testing.B, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
