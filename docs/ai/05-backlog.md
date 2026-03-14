@@ -491,7 +491,9 @@ Latest directional read evidence:
 - `BenchmarkEngineReadIndexOnlyOrderOffsetBTree` exercised `btree-index-only` and repeated at ~`58–59 µs/op`.
 - `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree` exercised `btree-index-only` and, after bounded early-stop optimization, repeated at ~`274–275 µs/op`.
 - `BenchmarkEngineReadSelectiveNonCoveredBTree` exercised `btree-order` and repeated at ~`406–407 µs/op`.
-- Current interpretation: index-only is strongly justified for simple covered ordered reads, remains strong with `OFFSET`, and is now also justified on the selective covered shape after bounded-scan support. Broader expansion still needs measured decisions for additional query shapes rather than blanket rollout.
+- `BenchmarkEngineReadCompositeCoveredFallbackBTree` still exercised `btree-order` at ~`63–73 µs/op`.
+- `BenchmarkEngineReadCompositeNonCoveredBTree` exercised `btree-order` at ~`75–76 µs/op`.
+- Current interpretation: index-only is strongly justified for simple covered ordered reads, remains strong with `OFFSET`, and is now also justified on the selective covered shape after bounded-scan support. Composite covered order is still falling back to `btree-order`, so broader expansion still needs measured decisions by query shape rather than blanket rollout.
 
 - [ ] Benchmark and improve commit batching on realistic workloads.
 - [ ] Benchmark and improve replay throughput.

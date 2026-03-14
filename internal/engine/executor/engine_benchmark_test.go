@@ -377,6 +377,52 @@ func BenchmarkEngineReadSelectiveNonCoveredBTree(b *testing.B) {
 	_ = store.Close()
 }
 
+func BenchmarkEngineReadCompositeCoveredFallbackBTree(b *testing.B) {
+	ctx := context.Background()
+	store, engine, targetLSN := prepareCompositeIndexedReadBenchmarkFixture(b)
+
+	query := "SELECT email, id FROM entries ORDER BY email ASC, id ASC LIMIT 100"
+	baselineCounts := engine.ScanStrategyCounts()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+		if err != nil {
+			b.Fatalf("composite covered fallback query: %v", err)
+		}
+		if len(result.Rows) != 100 {
+			b.Fatalf("unexpected composite covered row count: got %d want 100", len(result.Rows))
+		}
+	}
+	b.StopTimer()
+	reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyBTreeOrder))
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+}
+
+func BenchmarkEngineReadCompositeNonCoveredBTree(b *testing.B) {
+	ctx := context.Background()
+	store, engine, targetLSN := prepareCompositeIndexedReadBenchmarkFixture(b)
+
+	query := "SELECT email, id, payload FROM entries ORDER BY email ASC, id ASC LIMIT 100"
+	baselineCounts := engine.ScanStrategyCounts()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+		if err != nil {
+			b.Fatalf("composite non-covered query: %v", err)
+		}
+		if len(result.Rows) != 100 {
+			b.Fatalf("unexpected composite non-covered row count: got %d want 100", len(result.Rows))
+		}
+	}
+	b.StopTimer()
+	reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyBTreeOrder))
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+}
+
 func benchmarkEngineRestartLoad(b *testing.B, withPersistedSnapshot bool) {
 	ctx := context.Background()
 	walPath, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, withPersistedSnapshot)
@@ -496,6 +542,25 @@ func prepareIndexedReadBenchmarkFixture(b *testing.B) (*wal.SegmentedLogStore, *
 	}
 	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_id_btree ON entries (id) USING BTREE")
 	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_email_btree ON entries (email) USING BTREE")
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	targetLSN := store.LastLSN()
+	return store, engine, targetLSN
+}
+
+func prepareCompositeIndexedReadBenchmarkFixture(b *testing.B) (*wal.SegmentedLogStore, *Engine, uint64) {
+	b.Helper()
+
+	ctx := context.Background()
+	store, engine := newBenchmarkEngine(b)
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT, payload TEXT, email TEXT)")
+	for i := 0; i < 10000; i++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload, email) VALUES (%d, 'payload-%05d', 'user-%05d@asql.dev')", i, i, i%1000))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_email_id_btree ON entries (email, id) USING BTREE")
 	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
 
 	targetLSN := store.LastLSN()

@@ -50,6 +50,11 @@ Selective covered-vs-non-covered repeated sample on 2026-03-14:
 - `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree-8`: ~`273,630–275,369 ns/op`, `234,072 B/op`, `235 allocs/op` (`btree-index-only`)
 - `BenchmarkEngineReadSelectiveNonCoveredBTree-8`: ~`406,344–407,120 ns/op`, `309,561 B/op`, `656 allocs/op` (`btree-order`)
 
+Composite-order repeated sample on 2026-03-14:
+
+- `BenchmarkEngineReadCompositeCoveredFallbackBTree-8`: ~`62,906–72,783 ns/op`, `304,936–304,940 B/op`, `628 allocs/op` (`btree-order`)
+- `BenchmarkEngineReadCompositeNonCoveredBTree-8`: ~`75,423–75,543 ns/op`, `305,864 B/op`, `732 allocs/op` (`btree-order`)
+
 ### Failover / recovery validation (`test/integration`)
 
 Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench 'BenchmarkFailover(CoordinatorPromotion|RecoveryReplay)$' -benchtime=1x -count=1`:
@@ -66,3 +71,4 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 	- on the simple covered ordered-read shape, `btree-index-only` is about $10\times$ faster than `btree-order` and materially reduces allocations;
 	- adding `OFFSET` to the covered ordered-read shape still keeps `btree-index-only` comfortably fast (about $1.7\times$ slower than the zero-offset variant, but still far below row-fetch ordered reads);
 	- on the selective covered shape, adding bounded early-stop to the index-only path moved it ahead of `btree-order` as well (~`274 µs/op` vs ~`406 µs/op`), while keeping allocations materially lower.
+	- on the current composite-order shape, even the covered projection still falls back to `btree-order`, so composite index-only coverage is not yet justified by implementation evidence.
