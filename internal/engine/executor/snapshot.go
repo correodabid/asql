@@ -344,15 +344,22 @@ func captureSnapshot(state *readableState, catalog *domains.Catalog) engineSnaps
 	return captureSnapshotWithCatalog(state, cloneCatalog(catalog))
 }
 
+func readableStateFromSnapshotShared(snap *engineSnapshot) *readableState {
+	if snap == nil {
+		return &readableState{domains: make(map[string]*domainState)}
+	}
+	return &readableState{
+		domains:   snap.state.domains,
+		logicalTS: snap.logicalTS,
+		headLSN:   snap.lsn,
+	}
+}
+
 // restoreSnapshot replaces the engine's in-memory state with the snapshot's
 // deep-copied data.
 func (engine *Engine) restoreSnapshot(snap *engineSnapshot) {
 	engine.catalog = cloneCatalog(snap.catalog)
-	newState := &readableState{
-		domains:   cloneDomains(snap.state.domains),
-		logicalTS: snap.logicalTS,
-		headLSN:   snap.lsn,
-	}
+	newState := readableStateFromSnapshotShared(snap)
 	engine.readState.Store(newState)
 	engine.logicalTS = snap.logicalTS
 	engine.headLSN = snap.lsn

@@ -52,6 +52,61 @@ func TestCaptureSnapshotWithCatalogStripsChangeLogAndClonesRows(t *testing.T) {
 	}
 }
 
+func TestRestoreSnapshotSharedDomainsStayImmutableAcrossWrite(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "restore-snapshot-shared.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN bench",
+		"CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)",
+		"INSERT INTO entries (id, payload) VALUES (1, 'one')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	snap := captureSnapshot(engine.readState.Load(), engine.catalog)
+	engine.restoreSnapshot(&snap)
+
+	session = engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN bench",
+		"INSERT INTO entries (id, payload) VALUES (2, 'two')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute after restore %q: %v", sql, err)
+		}
+	}
+
+	snapTable := snap.state.domains["bench"].tables["entries"]
+	if got := len(snapTable.rows); got != 1 {
+		t.Fatalf("expected captured snapshot rows to remain immutable, got %d", got)
+	}
+	if got := snapTable.rows[0][1].StringValue; got != "one" {
+		t.Fatalf("expected captured snapshot payload to remain 'one', got %q", got)
+	}
+
+	stateTable := engine.readState.Load().domains["bench"].tables["entries"]
+	if got := len(stateTable.rows); got != 2 {
+		t.Fatalf("expected restored engine state to include new row, got %d", got)
+	}
+}
+
 func TestAdaptiveSnapshotInterval(t *testing.T) {
 	tests := []struct {
 		mutations uint64

@@ -97,11 +97,7 @@ func (engine *Engine) replayFromSnapshots(snapshots []engineSnapshot, records []
 
 	// Restore base state from the latest snapshot.
 	engine.catalog = cloneCatalog(latest.catalog)
-	newState := &readableState{
-		domains:   cloneDomains(latest.state.domains),
-		logicalTS: latest.logicalTS,
-		headLSN:   latest.lsn,
-	}
+	newState := readableStateFromSnapshotShared(latest)
 	engine.readState.Store(newState)
 	engine.logicalTS = latest.logicalTS
 	engine.headLSN = latest.lsn
