@@ -461,6 +461,42 @@ func BenchmarkEngineDecodePersistedSnapshotFilesIndexed(b *testing.B) {
 	b.StopTimer()
 }
 
+func BenchmarkEngineDecodeFullSnapshotDirect(b *testing.B) {
+	compressedFiles, _ := loadPersistedSnapshotFixtureFiles(b)
+	decompressedFiles := decompressSnapshotFixtureFiles(b, compressedFiles)
+	data := decompressedFiles[0]
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		snapshots, err := decodeSnapshotsBinary(data)
+		if err != nil {
+			b.Fatalf("decode full snapshot direct: %v", err)
+		}
+		if len(snapshots) == 0 {
+			b.Fatal("expected directly decoded full snapshot")
+		}
+	}
+	b.StopTimer()
+}
+
+func BenchmarkEngineDecodeFullSnapshotDirectIndexed(b *testing.B) {
+	compressedFiles, _ := loadIndexedPersistedSnapshotFixtureFiles(b)
+	decompressedFiles := decompressSnapshotFixtureFiles(b, compressedFiles)
+	data := decompressedFiles[0]
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		snapshots, err := decodeSnapshotsBinary(data)
+		if err != nil {
+			b.Fatalf("decode indexed full snapshot direct: %v", err)
+		}
+		if len(snapshots) == 0 {
+			b.Fatal("expected directly decoded indexed full snapshot")
+		}
+	}
+	b.StopTimer()
+}
+
 func BenchmarkEngineReadPersistedSnapshotsFromDirIndexed(b *testing.B) {
 	_, snapDir, expectedHeadLSN := prepareIndexedSnapshotBenchmarkFixture(b)
 
