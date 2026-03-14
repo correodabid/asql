@@ -481,7 +481,7 @@ Current evidence already in repo, but not sufficient to close this epic:
 Open gaps before closure:
 - Snapshot restart microbenchmarks now exist, but there is no closure-level baseline/improvement decision yet for snapshot load time.
 - Initial failover promotion/recovery benchmarks now exist, but there is no closure-level baseline/improvement decision yet for failover recovery time.
-- No benchmark-backed closure yet for indexed read latency.
+- Initial indexed-read and index-only benchmarks now exist, but there is no closure-level baseline/improvement decision yet for indexed read latency.
 - No published multi-scenario failover/recovery benchmark suite yet that satisfies the acceptance gates below.
 - No measured decision record yet for persisted index/cache architecture or parallel scan evaluation.
 

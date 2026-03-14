@@ -262,6 +262,46 @@ func BenchmarkEngineRestartFromPersistedSnapshot(b *testing.B) {
 	benchmarkEngineRestartLoad(b, true)
 }
 
+func BenchmarkEngineReadIndexedRangeBTree(b *testing.B) {
+	ctx := context.Background()
+	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)
+
+	query := "SELECT id, payload FROM entries WHERE id >= 9900 ORDER BY id ASC LIMIT 100"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+		if err != nil {
+			b.Fatalf("indexed range query: %v", err)
+		}
+		if len(result.Rows) != 100 {
+			b.Fatalf("unexpected indexed range row count: got %d want 100", len(result.Rows))
+		}
+	}
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+}
+
+func BenchmarkEngineReadIndexOnlyOrderBTree(b *testing.B) {
+	ctx := context.Background()
+	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)
+
+	query := "SELECT email FROM entries ORDER BY email ASC LIMIT 100"
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+		if err != nil {
+			b.Fatalf("index-only query: %v", err)
+		}
+		if len(result.Rows) != 100 {
+			b.Fatalf("unexpected index-only row count: got %d want 100", len(result.Rows))
+		}
+	}
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+}
+
 func benchmarkEngineRestartLoad(b *testing.B, withPersistedSnapshot bool) {
 	ctx := context.Background()
 	walPath, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, withPersistedSnapshot)
@@ -365,6 +405,26 @@ func prepareRestartBenchmarkFixture(b *testing.B, withPersistedSnapshot bool) (w
 	}
 
 	return walPath, snapDir, expectedHeadLSN
+}
+
+func prepareIndexedReadBenchmarkFixture(b *testing.B) (*wal.SegmentedLogStore, *Engine, uint64) {
+	b.Helper()
+
+	ctx := context.Background()
+	store, engine := newBenchmarkEngine(b)
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT, payload TEXT, email TEXT)")
+	for i := 0; i < 10000; i++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload, email) VALUES (%d, 'payload-%05d', 'user-%05d@asql.dev')", i, i, i))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_id_btree ON entries (id) USING BTREE")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_email_btree ON entries (email) USING BTREE")
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	targetLSN := store.LastLSN()
+	return store, engine, targetLSN
 }
 
 func newBenchmarkEngine(b *testing.B) (*wal.SegmentedLogStore, *Engine) {

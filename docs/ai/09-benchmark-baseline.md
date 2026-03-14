@@ -37,6 +37,13 @@ Initial dry-run on 2026-03-14 using `go test ./internal/engine/executor -run '^$
 - `BenchmarkEngineRestartReplayOnly-8`: `10,152,376 ns/op`
 - `BenchmarkEngineRestartFromPersistedSnapshot-8`: `5,134,292 ns/op`
 
+### Indexed-read validation (`internal/engine/executor`)
+
+Initial dry-run on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngineRead(IndexedRangeBTree|IndexOnlyOrderBTree)$' -benchtime=1x -count=1`:
+
+- `BenchmarkEngineReadIndexedRangeBTree-8`: `2,000,362,042 ns/op`
+- `BenchmarkEngineReadIndexOnlyOrderBTree-8`: `2,002,305,583 ns/op`
+
 ### Failover / recovery validation (`test/integration`)
 
 Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench 'BenchmarkFailover(CoordinatorPromotion|RecoveryReplay)$' -benchtime=1x -count=1`:
