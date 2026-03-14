@@ -763,6 +763,49 @@ func BenchmarkEngineReadCompositeNonCoveredBTree(b *testing.B) {
 	_ = store.Close()
 }
 
+func BenchmarkEngineReadEntityRelatedJoinScaling(b *testing.B) {
+	ctx := context.Background()
+	const linesPerOrder = 5
+
+	for _, indexChildFK := range []bool{true, false} {
+		variant := "child_fk_unindexed"
+		expectedStrategy := string(scanStrategyJoinLeftIx)
+		if indexChildFK {
+			variant = "child_fk_indexed"
+			expectedStrategy = string(scanStrategyJoinRightIx)
+		}
+
+		b.Run(variant, func(b *testing.B) {
+			for _, orderCount := range []int{1000, 10000, 25000} {
+				b.Run(fmt.Sprintf("orders_%d", orderCount), func(b *testing.B) {
+					store, engine, targetLSN, targetOrderID := prepareEntityRelatedReadBenchmarkFixture(b, orderCount, linesPerOrder, indexChildFK)
+
+					query := fmt.Sprintf(
+						"SELECT o.id, o.status, l.id, l.sku, l.qty FROM orders o JOIN order_lines l ON o.id = l.order_id WHERE o.id = %d ORDER BY l.id ASC",
+						targetOrderID,
+					)
+					baselineCounts := engine.ScanStrategyCounts()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+						if err != nil {
+							b.Fatalf("entity-related join query: %v", err)
+						}
+						if len(result.Rows) != linesPerOrder {
+							b.Fatalf("unexpected entity-related row count: got %d want %d", len(result.Rows), linesPerOrder)
+						}
+					}
+					b.StopTimer()
+					reportScanStrategyDelta(b, engine, baselineCounts, expectedStrategy)
+
+					engine.WaitPendingSnapshots()
+					_ = store.Close()
+				})
+			}
+		})
+	}
+}
+
 func benchmarkEngineRestartLoad(b *testing.B, withPersistedSnapshot bool) {
 	ctx := context.Background()
 	walPath, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, withPersistedSnapshot)
@@ -1590,6 +1633,52 @@ func prepareCompositeIndexedReadBenchmarkFixture(b *testing.B) (*wal.SegmentedLo
 
 	targetLSN := store.LastLSN()
 	return store, engine, targetLSN
+}
+
+func prepareEntityRelatedReadBenchmarkFixture(b *testing.B, orderCount int, linesPerOrder int, indexChildFK bool) (*wal.SegmentedLogStore, *Engine, uint64, int) {
+	b.Helper()
+
+	ctx := context.Background()
+	store, engine := newBenchmarkEngine(b)
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE orders (id INT PRIMARY KEY, status TEXT)")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE order_lines (id INT PRIMARY KEY, order_id INT REFERENCES orders(id), sku TEXT, qty INT)")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE ENTITY order_aggregate (ROOT orders, INCLUDES order_lines)")
+
+	lineID := 1
+	for orderID := 1; orderID <= orderCount; orderID++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO orders (id, status) VALUES (%d, 'open')", orderID))
+		for line := 0; line < linesPerOrder; line++ {
+			mustExecBenchmark(
+				b,
+				ctx,
+				engine,
+				session,
+				fmt.Sprintf(
+					"INSERT INTO order_lines (id, order_id, sku, qty) VALUES (%d, %d, 'sku-%02d', %d)",
+					lineID,
+					orderID,
+					line,
+					line+1,
+				),
+			)
+			lineID++
+		}
+	}
+
+	if indexChildFK {
+		mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_order_lines_order_id_hash ON order_lines (order_id) USING HASH")
+	}
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	targetLSN := store.LastLSN()
+	targetOrderID := orderCount / 2
+	if targetOrderID == 0 {
+		targetOrderID = 1
+	}
+	return store, engine, targetLSN, targetOrderID
 }
 
 func reportScanStrategyDelta(b *testing.B, engine *Engine, baselineCounts map[string]uint64, strategy string) {
