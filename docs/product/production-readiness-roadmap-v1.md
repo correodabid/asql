@@ -205,10 +205,15 @@ Conclusion:
 
 Evidence:
 - I found no evidence of parallel scan/query execution in the engine.
+- Current benchmarked read shapes are already well served by single-threaded indexed paths:
+  - covered ordered/index-only reads are in the tens of microseconds,
+  - selective covered reads improved via bounded index-only scans,
+  - covered composite ordered reads are also now index-only backed.
 - There is topology-aware connection pooling in the SDK/client side, but not a built-in server-side pooler equivalent to PgBouncer.
 
 Conclusion:
 - Parallel query remains future work.
+- Current decision: **do not pursue parallel scans until a benchmarked workload class shows scan-bound latency that cannot be better addressed by index shape, index-only coverage, or replay/snapshot improvements.**
 - Pooling should be framed as **client/sdk and deployment ergonomics**, not a first-order correctness blocker.
 
 ---
