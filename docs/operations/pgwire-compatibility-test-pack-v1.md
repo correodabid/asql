@@ -156,3 +156,79 @@ When a lane fails, classify it before changing code:
 
 Only widen public compatibility claims when the relevant lane is green and the
 matrix/evidence docs are updated in the same change window.
+
+## Decision rubric for reported compatibility gaps
+
+Use this rubric before accepting any new PostgreSQL-compatibility work:
+
+### 1. Is the behavior already present?
+
+- If **yes**, prefer documenting it and adding regression coverage before
+  changing implementation.
+- If **partially**, tighten docs first so they describe the real supported
+  subset precisely.
+- If **no**, continue to the next questions.
+
+### 2. Does the gap affect a mainstream client/tool flow?
+
+Treat these as high-signal inputs:
+
+- `pgx` application paths,
+- `psql` startup or normal operator flows,
+- mainstream JDBC/GUI startup or schema-browsing flows,
+- release-candidate pack lanes already documented here.
+
+If the issue only appears in a broad ORM/parity-heavy path, default to caution
+and avoid expanding surface area unless adoption evidence is strong.
+
+### 3. Which layer owns the fix?
+
+Choose exactly one primary bucket first:
+
+- **Docs** — the feature works, but the docs are wrong, vague, or incomplete.
+- **Protocol/catalog shim** — startup packets, session shims, `SHOW`,
+  `current_setting`, synthetic catalog tables, metadata, or pgwire message
+  behavior need adjustment.
+- **SQL surface** — parser, planner, executor, or SQLSTATE behavior for a
+  documented SQL shape needs work.
+- **Reject as out of scope** — the request implies broad PostgreSQL parity,
+  TLS/auth/catalog breadth, ORM assumptions, or syntax/semantics beyond the
+  ASQL wedge.
+
+Do not mix buckets prematurely. Fix the smallest owning layer first.
+
+### 4. Does the change preserve ASQL constraints?
+
+Do not take the change if it would weaken:
+
+- determinism,
+- ASQL-native transaction semantics,
+- explicit domain boundaries,
+- minimal product surface area.
+
+If a compatibility request conflicts with those constraints, narrow the public
+claim or reject the request explicitly.
+
+### 5. What is required before the claim becomes public?
+
+Every accepted compatibility expansion must land as one bundle:
+
+1. implementation or doc correction,
+2. regression tests,
+3. compatibility matrix/evidence updates,
+4. release-pack lane impact reviewed.
+
+If those four pieces are not present together, the claim is not release-ready.
+
+## Publication rule for new compatibility claims
+
+No new PostgreSQL-compatibility claim is public until all of the following are
+true in the same change window:
+
+1. the supported behavior is implemented or precisely documented,
+2. at least one regression/conformance test covers the claim,
+3. [../reference/postgres-compatibility-surface-v1.md](../reference/postgres-compatibility-surface-v1.md)
+   reflects the supported boundary,
+4. [../reference/postgres-compatibility-evidence-v1.md](../reference/postgres-compatibility-evidence-v1.md)
+   links the claim to its tests,
+5. this test pack is updated if the new claim changes release-validation lanes.

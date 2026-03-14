@@ -33,9 +33,13 @@ flows, not a claim of broad PostgreSQL behavioral parity.
   [docs/reference/postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md).
 - The claim-to-test evidence pack lives in
   [docs/reference/postgres-compatibility-evidence-v1.md](postgres-compatibility-evidence-v1.md).
+- The operating model, triage rubric, and release pack live in
+  [docs/operations/pgwire-compatibility-test-pack-v1.md](../operations/pgwire-compatibility-test-pack-v1.md).
 - Practical client guidance lives in
   [docs/reference/pgwire-driver-guidance-v1.md](pgwire-driver-guidance-v1.md).
 - Public compatibility claims must be backed by regression tests.
+- New compatibility claims are not public until docs, tests, matrix entries,
+  and evidence links land together.
 
 ## Intended usage
 

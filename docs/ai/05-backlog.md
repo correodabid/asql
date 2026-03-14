@@ -224,12 +224,12 @@ P2 — targeted high-return compatibility expansion:
 
 P3 — compatibility operating model:
 - [x] Add a repeatable compatibility test pack grouped by client/tool (`psql`, `pgx`, JDBC/GUI baseline) and make it part of release validation.
-- [ ] Add a triage rubric for deciding whether a reported PostgreSQL-compatibility gap should be solved in docs, protocol/catalog shim, SQL surface, or explicitly rejected as out of scope.
-- [ ] Establish a rule that new PostgreSQL-compatibility claims are not public until docs, regression tests, and compatibility matrix entries land together.
+- [x] Add a triage rubric for deciding whether a reported PostgreSQL-compatibility gap should be solved in docs, protocol/catalog shim, SQL surface, or explicitly rejected as out of scope.
+- [x] Establish a rule that new PostgreSQL-compatibility claims are not public until docs, regression tests, and compatibility matrix entries land together.
 
 Acceptance gates (must pass before closing Epic AF)
 - [ ] Public compatibility docs match real behavior closely enough that “implemented but undocumented” is no longer a recurring source of surprise.
-- [ ] Each public PostgreSQL compatibility claim is backed by at least one regression test.
+- [x] Each public PostgreSQL compatibility claim is backed by at least one regression test.
 - [ ] Net-new compatibility work is prioritized by observed client/tool adoption friction, not by parity for parity’s sake.
 - [ ] ASQL remains explicitly a deterministic engine with a pragmatic PostgreSQL-compatible subset, not a drop-in PostgreSQL replacement.
 
