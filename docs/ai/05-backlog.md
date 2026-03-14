@@ -485,6 +485,11 @@ Open gaps before closure:
 - No published multi-scenario failover/recovery benchmark suite yet that satisfies the acceptance gates below.
 - No measured decision record yet for persisted index/cache architecture or parallel scan evaluation.
 
+Subline status:
+- The `Expand index-only scan coverage where benchmarks justify it` item is now evidence-backed for covered simple ordered reads, covered ordered reads with `OFFSET`, covered selective reads with bounded early-stop, and covered composite ordered reads.
+- The broader `Benchmark and improve indexed read/query latency` item remains open because not all indexed shapes have been benchmarked or optimized, and the closure decision still needs to be stated at the epic level.
+- The persisted-index/cache item is now narrower than it first appeared: a persisted timestamp→LSN side index already exists and is restart-validated, but there is still no evidence-backed need yet for general persisted table indexes or a broader cache layer.
+
 Latest directional read evidence:
 - `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and repeated at ~`353–361 µs/op`.
 - `BenchmarkEngineReadIndexOnlyOrderBTree` exercised `btree-index-only` and repeated at ~`34 µs/op`.
@@ -501,7 +506,7 @@ Latest directional read evidence:
 - [ ] Benchmark and improve indexed read/query latency.
 - [ ] Benchmark and improve failover recovery time.
 - [ ] Evaluate persisted index/cache architecture from measured IO behavior.
-- [ ] Expand index-only scan coverage where benchmarks justify it.
+- [x] Expand index-only scan coverage where benchmarks justify it.
 - [ ] Evaluate parallel scans only for proven workload classes.
 
 Acceptance gates (must pass before closing Epic AB)

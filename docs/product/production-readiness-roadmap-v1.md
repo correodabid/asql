@@ -101,15 +101,17 @@ Conclusion:
 
 ### 6) "Time-travel queries con índice sobre LSN→timestamp"
 
-**Assessment:** partially true.
+**Assessment:** now true in a narrow, targeted form.
 
 Evidence:
 - Time-travel by LSN and logical timestamp exists.
 - Snapshots accelerate historical reads.
-- Current `LSNForTimestamp` resolves by scanning WAL records rather than a dedicated persisted index.
+- `LSNForTimestamp` now uses a persisted timestamp→LSN side index (`timestamp-lsn.idx`) when snapshot persistence is enabled.
+- Restart-path tests verify timestamp lookups can avoid extra WAL reads after restart and catch-up.
 
 Conclusion:
-- The feature exists, but **timestamp→LSN lookup should become an indexed/persisted structure** for large histories.
+- The feature exists and already has a justified persisted auxiliary index for timestamp lookup.
+- Broader persisted index/cache work should still follow measured IO behavior, not assumption.
 
 ### 7) "Audit trail nativo por dominio"
 
