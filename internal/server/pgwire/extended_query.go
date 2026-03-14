@@ -193,7 +193,7 @@ func (server *Server) handleBind(backend *pgproto3.Backend, state *connState, ms
 	}
 	// INSERT/UPDATE/DELETE ... RETURNING also produces rows.
 	if !isSelect {
-		if cols := returningColumns(sql); len(cols) > 0 {
+		if cols := server.returningResultColumns(sql); len(cols) > 0 {
 			isSelect = true
 			columns = cols
 		}
@@ -264,17 +264,8 @@ func (server *Server) handleDescribe(backend *pgproto3.Backend, state *connState
 		// NoData — without this, pgx treats the statement as non-row-returning
 		// and QueryRow().Scan() fails with "no rows in result set".
 		if fields == nil {
-			if cols := returningColumns(stmt.sql); len(cols) > 0 {
-				fields = make([]pgproto3.FieldDescription, len(cols))
-				for i, c := range cols {
-					fields[i] = pgproto3.FieldDescription{
-						Name:                 []byte(c),
-						TableAttributeNumber: uint16(i + 1),
-						DataTypeOID:          25, // text
-						DataTypeSize:         -1,
-						TypeModifier:         -1,
-					}
-				}
+			if returningFields := server.describeReturningFields(stmt.sql); len(returningFields) > 0 {
+				fields = returningFields
 			}
 		}
 		if fields != nil {
@@ -294,15 +285,18 @@ func (server *Server) handleDescribe(backend *pgproto3.Backend, state *connState
 		} else {
 			fields := server.describeFields(p.sql)
 			if fields == nil && len(p.columns) > 0 {
-				// INSERT...RETURNING or similar: build fields from the known column list.
-				fields = make([]pgproto3.FieldDescription, len(p.columns))
-				for i, c := range p.columns {
-					fields[i] = pgproto3.FieldDescription{
-						Name:                 []byte(c),
-						TableAttributeNumber: uint16(i + 1),
-						DataTypeOID:          25, // text; refined when rows arrive
-						DataTypeSize:         -1,
-						TypeModifier:         -1,
+				if returningFields := server.describeReturningFields(p.sql); len(returningFields) > 0 {
+					fields = returningFields
+				} else {
+					fields = make([]pgproto3.FieldDescription, len(p.columns))
+					for i, c := range p.columns {
+						fields[i] = pgproto3.FieldDescription{
+							Name:                 []byte(c),
+							TableAttributeNumber: uint16(i + 1),
+							DataTypeOID:          25,
+							DataTypeSize:         -1,
+							TypeModifier:         -1,
+						}
 					}
 				}
 			}
@@ -543,6 +537,62 @@ func returningColumns(sql string) []string {
 		return nil
 	}
 	return cols
+}
+
+func (server *Server) returningResultColumns(sql string) []string {
+	trimmed := stripAsOfComment(strings.TrimSpace(sql))
+	normalized := normalizePlaceholders(trimmed)
+	stmt, err := parser.Parse(normalized)
+	if err != nil {
+		return returningColumns(sql)
+	}
+	ins, ok := stmt.(ast.InsertStatement)
+	if !ok || len(ins.ReturningColumns) == 0 {
+		return returningColumns(sql)
+	}
+	if len(ins.ReturningColumns) == 1 && ins.ReturningColumns[0] == "*" {
+		return server.resolveTableColumns(ins.TableName)
+	}
+	cols := make([]string, 0, len(ins.ReturningColumns))
+	for _, c := range ins.ReturningColumns {
+		col := strings.ToLower(strings.TrimSpace(c))
+		if col != "" {
+			cols = append(cols, col)
+		}
+	}
+	if len(cols) == 0 {
+		return returningColumns(sql)
+	}
+	return cols
+}
+
+func (server *Server) describeReturningFields(sql string) []pgproto3.FieldDescription {
+	trimmed := stripAsOfComment(strings.TrimSpace(sql))
+	normalized := normalizePlaceholders(trimmed)
+	stmt, err := parser.Parse(normalized)
+	if err != nil {
+		return nil
+	}
+	ins, ok := stmt.(ast.InsertStatement)
+	if !ok || len(ins.ReturningColumns) == 0 {
+		return nil
+	}
+	cols := server.returningResultColumns(sql)
+	if len(cols) == 0 {
+		return nil
+	}
+	oids := server.resolveColumnOIDs(ins.TableName, cols)
+	fields := make([]pgproto3.FieldDescription, len(cols))
+	for i, c := range cols {
+		fields[i] = pgproto3.FieldDescription{
+			Name:                 []byte(c),
+			TableAttributeNumber: uint16(i + 1),
+			DataTypeOID:          oids[c],
+			DataTypeSize:         -1,
+			TypeModifier:         -1,
+		}
+	}
+	return fields
 }
 
 // describeFields returns the FieldDescriptions for a SELECT query (all columns
@@ -804,6 +854,40 @@ func (server *Server) resolveStarColumns(sel ast.SelectStatement) []string {
 				sortColumns(cols)
 				return cols
 			}
+		}
+	}
+	return nil
+}
+
+func (server *Server) resolveTableColumns(tableName string) []string {
+	from := strings.ToLower(strings.TrimSpace(tableName))
+	if from == "" {
+		return nil
+	}
+
+	parts := strings.SplitN(from, ".", 2)
+	var domainName, tblName string
+	if len(parts) == 2 {
+		domainName = parts[0]
+		tblName = parts[1]
+	} else {
+		tblName = parts[0]
+	}
+
+	snap := server.engine.SchemaSnapshot(nil)
+	for _, d := range snap.Domains {
+		if domainName != "" && strings.ToLower(d.Name) != domainName {
+			continue
+		}
+		for _, t := range d.Tables {
+			if strings.ToLower(t.Name) != tblName {
+				continue
+			}
+			cols := make([]string, 0, len(t.Columns))
+			for _, c := range t.Columns {
+				cols = append(cols, strings.ToLower(c.Name))
+			}
+			return cols
 		}
 	}
 	return nil

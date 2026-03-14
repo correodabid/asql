@@ -434,6 +434,60 @@ func TestExtendedQueryDescribeStatementInfersParameterCount(t *testing.T) {
 	}
 }
 
+func TestExtendedQueryInsertReturningUsesSchemaAwareRowDescription(t *testing.T) {
+	addr, cleanup := startConformanceServer(t)
+	defer cleanup()
+
+	client := newRawProtoClient(t, addr)
+	defer client.close()
+
+	client.simpleQuery("BEGIN DOMAIN accounts")
+	client.simpleQuery("CREATE TABLE users (id INT PRIMARY KEY, active BOOL, email TEXT)")
+	client.simpleQuery("COMMIT")
+
+	client.send(
+		&pgproto3.Parse{Name: "ins_ret", Query: "INSERT INTO accounts.users (id, active, email) VALUES ($1, $2, $3) RETURNING id, active, email"},
+		&pgproto3.Describe{ObjectType: 'S', Name: "ins_ret"},
+		&pgproto3.Bind{
+			DestinationPortal: "ins_ret_portal",
+			PreparedStatement: "ins_ret",
+			Parameters: [][]byte{
+				[]byte("7"),
+				[]byte("true"),
+				[]byte("seven@asql.dev"),
+			},
+		},
+		&pgproto3.Describe{ObjectType: 'P', Name: "ins_ret_portal"},
+		&pgproto3.Sync{},
+	)
+	messages := client.receiveUntilReady()
+
+	var rowDescs []*pgproto3.RowDescription
+	for _, raw := range messages {
+		if msg, ok := raw.(*pgproto3.RowDescription); ok {
+			rowDescs = append(rowDescs, msg)
+		}
+	}
+	if len(rowDescs) != 2 {
+		t.Fatalf("unexpected row description count: got %d want 2", len(rowDescs))
+	}
+
+	for i, desc := range rowDescs {
+		if len(desc.Fields) != 3 {
+			t.Fatalf("row description %d field count: got %d want 3", i, len(desc.Fields))
+		}
+		if got := string(desc.Fields[0].Name); got != "id" || desc.Fields[0].DataTypeOID != 20 {
+			t.Fatalf("row description %d field 0 = (%q,%d), want (id,20)", i, got, desc.Fields[0].DataTypeOID)
+		}
+		if got := string(desc.Fields[1].Name); got != "active" || desc.Fields[1].DataTypeOID != 16 {
+			t.Fatalf("row description %d field 1 = (%q,%d), want (active,16)", i, got, desc.Fields[1].DataTypeOID)
+		}
+		if got := string(desc.Fields[2].Name); got != "email" || desc.Fields[2].DataTypeOID != 25 {
+			t.Fatalf("row description %d field 2 = (%q,%d), want (email,25)", i, got, desc.Fields[2].DataTypeOID)
+		}
+	}
+}
+
 func TestExtendedQueryBinaryBindSupportsInt4Int8AndBool(t *testing.T) {
 	addr, cleanup := startConformanceServer(t)
 	defer cleanup()
