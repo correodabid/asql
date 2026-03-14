@@ -191,6 +191,27 @@ func TestPGWireCompatibilitySupportedPatterns(t *testing.T) {
 		t.Fatalf("unexpected parameterized query ids: %v", gotIDs)
 	}
 
+	offsetRows, err := conn.Query(ctx, "SELECT id FROM accounts.users ORDER BY id ASC LIMIT 2 OFFSET 1")
+	if err != nil {
+		t.Fatalf("limit/offset compatibility query: %v", err)
+	}
+	defer offsetRows.Close()
+
+	gotIDs = gotIDs[:0]
+	for offsetRows.Next() {
+		var id int64
+		if err := offsetRows.Scan(&id); err != nil {
+			t.Fatalf("scan OFFSET row: %v", err)
+		}
+		gotIDs = append(gotIDs, id)
+	}
+	if err := offsetRows.Err(); err != nil {
+		t.Fatalf("iterate OFFSET rows: %v", err)
+	}
+	if len(gotIDs) != 2 || gotIDs[0] != 2 || gotIDs[1] != 3 {
+		t.Fatalf("unexpected LIMIT/OFFSET query ids: %v", gotIDs)
+	}
+
 	inRows, err := conn.Query(ctx, "SELECT id FROM accounts.users WHERE id IN (1, 3) ORDER BY id ASC LIMIT 2")
 	if err != nil {
 		t.Fatalf("literal IN compatibility query: %v", err)

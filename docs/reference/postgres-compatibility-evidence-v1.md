@@ -40,7 +40,7 @@ Status meanings:
 |---|---|---|---|
 | Parameterized predicates over pgwire (`WHERE id >= $1`) | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilitySupportedPatterns` | Direct | Exercises bind parameters in a mainstream pgx query flow. |
 | `ORDER BY ... LIMIT n` | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilitySupportedPatterns`; `internal/engine/executor/engine_test.go`: `TestTimeTravelQueryAppliesOrderByAndLimit`, `TestTimeTravelQueryAppliesMultiColumnOrderBy` | Direct | Good pgwire plus engine coverage. |
-| `LIMIT ... OFFSET ...` | Parser/planner implementation exists; no dedicated executor or pgwire regression identified in this audit | Gap | Keep documented as supported in the matrix only if a dedicated regression lands. |
+| `LIMIT ... OFFSET ...` | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilitySupportedPatterns`; `internal/engine/executor/engine_test.go`: `TestTimeTravelQueryAppliesLimitAndOffset` | Direct | Covered in both pgwire and engine regression tests, including large-offset empty results. |
 | Literal `IN (...)` | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilitySupportedPatterns` | Direct | Covered in pgwire integration flow. |
 | Subquery `IN (SELECT ...)` / `NOT IN (SELECT ...)` | `internal/engine/executor/engine_test.go`: `TestSubqueryIN`, `TestSubqueryNOTIN`, `TestSubqueryINWithAND`, `TestSubqueryINEmpty` | Direct | Engine-level evidence exists for current supported shapes. |
 | `EXISTS (SELECT ...)` / `NOT EXISTS (SELECT ...)` | `internal/engine/executor/engine_test.go`: `TestSubqueryEXISTS`, `TestSubqueryNOTEXISTS` | Direct | Engine-level evidence exists for current supported shapes. |
@@ -64,9 +64,8 @@ Status meanings:
 The following public claims or sub-claims are still weaker than they should be
 for a release-quality compatibility pack:
 
-1. Add explicit regression coverage for `LIMIT ... OFFSET ...`.
-2. Add dedicated CSV-mode `COPY FROM STDIN` / `COPY TO STDOUT` tests.
-3. Add direct pgwire tests for the currently documented narrow binary bind
+1. Add dedicated CSV-mode `COPY FROM STDIN` / `COPY TO STDOUT` tests.
+2. Add direct pgwire tests for the currently documented narrow binary bind
    parameter support (`int4`, `int8`, `bool`).
 
 Until those gaps are closed, treat those sub-parts as implementation-backed but
