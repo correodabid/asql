@@ -811,8 +811,8 @@ func (server *Server) resolveStarColumns(sel ast.SelectStatement) []string {
 // ── Parameter substitution ────────────────────────────────────────────────────
 
 // substituteParams replaces $1…$n placeholders in sql with the values provided
-// by the Bind message.  Only text-format parameters are supported; binary
-// format returns an error.
+// by the Bind message. Text-format parameters are supported broadly; binary
+// format is intentionally narrow and currently only decodes int4/int8/bool.
 func substituteParams(sql string, params [][]byte, formats []int16, paramOIDs []uint32) (string, error) {
 	if len(params) == 0 {
 		return sql, nil

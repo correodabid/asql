@@ -880,13 +880,17 @@ func (server *Server) resolveShowParam(_ *executor.Session, param string) (strin
 	case "lc_collate", "lc_ctype", "lc_messages", "lc_monetary", "lc_numeric", "lc_time":
 		return "en_US.UTF-8", true
 	default:
-		return "", false
+		if strings.HasPrefix(param, "asql_") {
+			return "", false
+		}
+		return "", true
 	}
 }
 
 // handleShowParam responds to a SHOW <param> command using the server's live
 // runtime state.  Supports all four asql_* cluster params plus common
-// PostgreSQL compatibility parameters.  Unknown parameters return an error.
+// PostgreSQL compatibility parameters. Unknown non-asql parameters fall back
+// to an empty string to keep mainstream tool probes moving.
 func (server *Server) handleShowParam(backend *pgproto3.Backend, session *executor.Session, param string) error {
 	value, ok := server.resolveShowParam(session, param)
 	if !ok {
@@ -1023,7 +1027,7 @@ func sendInterceptedResult(backend *pgproto3.Backend, session *executor.Session,
 	columns := ir.columns
 	rows := ir.result.Rows
 
-	if len(columns) > 0 && len(rows) > 0 {
+	if len(columns) > 0 {
 		columnTypeOIDs := inferColumnTypeOIDs(columns, rows)
 		fields := make([]pgproto3.FieldDescription, 0, len(columns))
 		for i, col := range columns {
@@ -1038,6 +1042,8 @@ func sendInterceptedResult(backend *pgproto3.Backend, session *executor.Session,
 			})
 		}
 		backend.Send(&pgproto3.RowDescription{Fields: fields})
+	}
+	if len(columns) > 0 && len(rows) > 0 {
 		for _, row := range rows {
 			values := make([][]byte, 0, len(columns))
 			for _, col := range columns {

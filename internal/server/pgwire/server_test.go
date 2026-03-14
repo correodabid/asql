@@ -1456,6 +1456,27 @@ func TestCatalogStartupIntrospectionQueries(t *testing.T) {
 		}
 	})
 
+	t.Run("show_unknown_param_returns_empty", func(t *testing.T) {
+		got := scalar(t, "SHOW application_name")
+		if got != "" {
+			t.Errorf("SHOW application_name = %q, want empty", got)
+		}
+	})
+
+	t.Run("reset_and_deallocate_are_noop", func(t *testing.T) {
+		for _, sql := range []string{
+			"SET application_name = 'myapp'",
+			"RESET application_name",
+			"RESET ALL",
+			"DEALLOCATE temp_stmt",
+			"DEALLOCATE ALL",
+		} {
+			if _, err := conn.Exec(ctx, sql); err != nil {
+				t.Fatalf("exec %q: %v", sql, err)
+			}
+		}
+	})
+
 	// ── pg_encoding_to_char ────────────────────────────────────
 	t.Run("pg_encoding_to_char", func(t *testing.T) {
 		got := scalar(t, "SELECT pg_encoding_to_char(6)")
@@ -1539,4 +1560,125 @@ func TestCatalogStartupIntrospectionQueries(t *testing.T) {
 			t.Error("pg_settings returned 0 rows, expected at least 1")
 		}
 	})
+}
+
+func TestCatalogEmptyInterceptsExposeSchemaAcrossProtocols(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "empty-catalog-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.ServeOnListener(ctx, listener) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire shutdown")
+		}
+	})
+
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+
+	tables := []string{"pg_index", "pg_constraint", "pg_proc", "pg_am", "pg_extension", "pg_roles", "pg_authid", "pg_user"}
+	for _, table := range tables {
+		t.Run(table, func(t *testing.T) {
+			rows, err := conn.Query(ctx, "SELECT * FROM "+table)
+			if err != nil {
+				t.Fatalf("query %s: %v", table, err)
+			}
+			defer rows.Close()
+
+			fields := rows.FieldDescriptions()
+			if len(fields) == 0 {
+				t.Fatalf("expected schema for %s empty intercept", table)
+			}
+
+			if rows.Next() {
+				t.Fatalf("expected %s to return no rows", table)
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatalf("iterate %s: %v", table, err)
+			}
+		})
+	}
+}
+
+func TestShowUnknownParamFallbackWorksOnExtendedProtocol(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "show-fallback-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.ServeOnListener(ctx, listener) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire shutdown")
+		}
+	})
+
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+
+	var value string
+	if err := conn.QueryRow(ctx, "SHOW application_name").Scan(&value); err != nil {
+		t.Fatalf("SHOW application_name: %v", err)
+	}
+	if value != "" {
+		t.Fatalf("SHOW application_name = %q, want empty", value)
+	}
+
+	if err := conn.QueryRow(ctx, "SHOW asql_unknown_param").Scan(&value); err == nil {
+		t.Fatal("expected unknown asql_* SHOW param to remain an error")
+	}
 }

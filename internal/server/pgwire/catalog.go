@@ -252,16 +252,59 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string) (interce
 		return catalogPgDatabase()
 
 	// ── pg_catalog.pg_index / pg_constraint / pg_proc ────────────────────
-	// Return empty result sets for tables we haven't fully implemented.
-	case strings.Contains(lower, "pg_index"),
-		strings.Contains(lower, "pg_constraint"),
-		strings.Contains(lower, "pg_proc"),
-		strings.Contains(lower, "pg_am"),
-		strings.Contains(lower, "pg_extension"),
-		strings.Contains(lower, "pg_roles"),
-		strings.Contains(lower, "pg_authid"),
-		strings.Contains(lower, "pg_user"):
-		return emptyResult()
+	// Return schema-stable empty result sets for tables we haven't fully
+	// implemented so clients still receive RowDescription metadata.
+	case strings.Contains(lower, "pg_index"):
+		return emptyResultWithColumns(
+			"indexrelid", "indrelid", "indnatts", "indnkeyatts", "indisunique",
+			"indnullsnotdistinct", "indisprimary", "indisexclusion", "indimmediate",
+			"indisclustered", "indisvalid", "indcheckxmin", "indisready",
+			"indislive", "indisreplident", "indkey", "indcollation", "indclass",
+			"indoption", "indexprs", "indpred",
+		)
+	case strings.Contains(lower, "pg_constraint"):
+		return emptyResultWithColumns(
+			"oid", "conname", "connamespace", "contype", "condeferrable",
+			"condeferred", "convalidated", "conrelid", "contypid", "conindid",
+			"conparentid", "confrelid", "confupdtype", "confdeltype",
+			"confmatchtype", "conislocal", "coninhcount", "connoinherit",
+			"conkey", "confkey", "conpfeqop", "conppeqop", "conffeqop",
+			"confdelsetcols", "conexclop", "conbin",
+		)
+	case strings.Contains(lower, "pg_proc"):
+		return emptyResultWithColumns(
+			"oid", "proname", "pronamespace", "proowner", "prolang", "procost",
+			"prorows", "provariadic", "prosupport", "prokind", "prosecdef",
+			"proleakproof", "proisstrict", "proretset", "provolatile",
+			"proparallel", "pronargs", "pronargdefaults", "prorettype",
+			"proargtypes", "proallargtypes", "proargmodes", "proargnames",
+			"proargdefaults", "protrftypes", "prosrc", "probin", "prosqlbody",
+			"proconfig", "proacl",
+		)
+	case strings.Contains(lower, "pg_am"):
+		return emptyResultWithColumns("oid", "amname", "amhandler", "amtype")
+	case strings.Contains(lower, "pg_extension"):
+		return emptyResultWithColumns(
+			"oid", "extname", "extowner", "extnamespace", "extrelocatable",
+			"extversion", "extconfig", "extcondition",
+		)
+	case strings.Contains(lower, "pg_roles"):
+		return emptyResultWithColumns(
+			"oid", "rolname", "rolsuper", "rolinherit", "rolcreaterole",
+			"rolcreatedb", "rolcanlogin", "rolreplication", "rolbypassrls",
+			"rolconnlimit", "rolpassword", "rolvaliduntil", "rolconfig",
+		)
+	case strings.Contains(lower, "pg_authid"):
+		return emptyResultWithColumns(
+			"oid", "rolname", "rolsuper", "rolinherit", "rolcreaterole",
+			"rolcreatedb", "rolcanlogin", "rolreplication", "rolbypassrls",
+			"rolconnlimit", "rolpassword", "rolvaliduntil",
+		)
+	case strings.Contains(lower, "pg_user"):
+		return emptyResultWithColumns(
+			"usename", "usesysid", "usecreatedb", "usesuper", "userepl",
+			"usebypassrls", "passwd", "valuntil", "useconfig",
+		)
 
 	// ── asql_admin virtual schema ─────────────────────────────────────────
 	// Each sub-table exposes engine internals as SQL rows, allowing admin
@@ -1131,6 +1174,13 @@ func emptyResult() (interceptResult, bool) {
 	return interceptResult{
 		result:  executor.Result{Status: "OK", Rows: nil},
 		columns: nil,
+	}, true
+}
+
+func emptyResultWithColumns(columns ...string) (interceptResult, bool) {
+	return interceptResult{
+		result:  executor.Result{Status: "OK", Rows: nil},
+		columns: append([]string(nil), columns...),
 	}, true
 }
 
