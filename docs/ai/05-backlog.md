@@ -479,7 +479,8 @@ Current evidence already in repo, but not sufficient to close this epic:
 - `internal/engine/executor/engine_query.go` and `internal/engine/executor/engine_scan.go` already contain index-only scan support.
 
 Open gaps before closure:
-- No benchmark-backed closure yet for snapshot load time, indexed read latency, or failover recovery time.
+- Snapshot restart microbenchmarks now exist, but there is no closure-level baseline/improvement decision yet for snapshot load time.
+- No benchmark-backed closure yet for indexed read latency or failover recovery time.
 - No published failover/recovery benchmark suite that satisfies the acceptance gates below.
 - No measured decision record yet for persisted index/cache architecture or parallel scan evaluation.
 

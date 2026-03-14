@@ -30,7 +30,15 @@ make bench
 - `BenchmarkFileLogStoreReadFrom-8`: `15,634,191 ns/op`, `5,593,017 B/op`, `60,029 allocs/op`
 - `BenchmarkFileLogStoreRecover-8`: `13,377,896 ns/op`, `5,592,932 B/op`, `60,028 allocs/op`
 
+### Restart-path validation (`internal/engine/executor`)
+
+Initial dry-run on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngineRestart(ReplayOnly|FromPersistedSnapshot)$' -benchtime=1x -count=1`:
+
+- `BenchmarkEngineRestartReplayOnly-8`: `10,152,376 ns/op`
+- `BenchmarkEngineRestartFromPersistedSnapshot-8`: `5,134,292 ns/op`
+
 ## Notes
 
 - This baseline is deterministic in workload shape and command path.
 - Values are hardware/OS dependent and serve as a regression reference, not cross-machine SLA numbers.
+- The restart-path numbers above are a single-iteration validation sample, useful for directional comparison only; they are not yet closure-grade AB evidence.

@@ -38,6 +38,8 @@ Coverage:
 - `BenchmarkEngineWriteCommitReturningUUID`
 - `BenchmarkEngineWriteCommitBulk10ReturningUUID`
 - `BenchmarkEngineWriteCommitConcurrent`
+- `BenchmarkEngineRestartReplayOnly`
+- `BenchmarkEngineRestartFromPersistedSnapshot`
 - WAL append/read/recover benchmarks
 
 Primary metrics:
@@ -53,6 +55,7 @@ Optimization hypotheses this layer can validate:
 - `INSERT ... RETURNING` overhead
 - UUID/default resolution overhead
 - commit queue/group commit effectiveness
+- snapshot-backed restart versus full WAL replay cost
 - WAL sync policy impact
 
 ### L1 — SQL scenario benchmarks

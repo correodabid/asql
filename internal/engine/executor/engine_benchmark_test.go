@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -251,6 +252,119 @@ func BenchmarkEngineReplayToLSN(b *testing.B) {
 
 	engine.WaitPendingSnapshots()
 	_ = store.Close()
+}
+
+func BenchmarkEngineRestartReplayOnly(b *testing.B) {
+	benchmarkEngineRestartLoad(b, false)
+}
+
+func BenchmarkEngineRestartFromPersistedSnapshot(b *testing.B) {
+	benchmarkEngineRestartLoad(b, true)
+}
+
+func benchmarkEngineRestartLoad(b *testing.B, withPersistedSnapshot bool) {
+	ctx := context.Background()
+	walPath, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, withPersistedSnapshot)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+		if err != nil {
+			b.Fatalf("reopen wal store: %v", err)
+		}
+
+		engine, err := New(ctx, store, snapDir)
+		if err != nil {
+			_ = store.Close()
+			b.Fatalf("restart engine: %v", err)
+		}
+
+		headLSN := engine.readState.Load().headLSN
+		if headLSN != expectedHeadLSN {
+			engine.WaitPendingSnapshots()
+			_ = store.Close()
+			b.Fatalf("unexpected head LSN after restart: got %d want %d", headLSN, expectedHeadLSN)
+		}
+
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, payload FROM entries WHERE id = 1", []string{"bench"}, headLSN)
+		if err != nil {
+			engine.WaitPendingSnapshots()
+			_ = store.Close()
+			b.Fatalf("validate restarted state: %v", err)
+		}
+		if len(result.Rows) != 1 {
+			engine.WaitPendingSnapshots()
+			_ = store.Close()
+			b.Fatalf("unexpected validation row count: got %d want 1", len(result.Rows))
+		}
+
+		b.StopTimer()
+		engine.WaitPendingSnapshots()
+		_ = store.Close()
+		b.StartTimer()
+	}
+	b.StopTimer()
+}
+
+func prepareRestartBenchmarkFixture(b *testing.B, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
+	b.Helper()
+
+	ctx := context.Background()
+	dir := b.TempDir()
+	walPath = filepath.Join(dir, "restart-bench.wal")
+	if withPersistedSnapshot {
+		snapDir = filepath.Join(dir, "snapshots")
+		if err := os.MkdirAll(snapDir, 0o755); err != nil {
+			b.Fatalf("mkdir snapshot dir: %v", err)
+		}
+	}
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("new wal store: %v", err)
+	}
+
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		_ = store.Close()
+		b.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
+	for i := 1; i <= defaultSnapshotInterval+50; i++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	engine.WaitPendingSnapshots()
+	expectedHeadLSN = store.LastLSN()
+
+	if withPersistedSnapshot {
+		entries, err := os.ReadDir(snapDir)
+		if err != nil {
+			_ = store.Close()
+			b.Fatalf("read snapshot dir: %v", err)
+		}
+		hasSnapshotFile := false
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				hasSnapshotFile = true
+				break
+			}
+		}
+		if !hasSnapshotFile {
+			_ = store.Close()
+			b.Fatal("expected persisted snapshot fixture files")
+		}
+	}
+
+	if err := store.Close(); err != nil {
+		b.Fatalf("close seeded wal store: %v", err)
+	}
+
+	return walPath, snapDir, expectedHeadLSN
 }
 
 func newBenchmarkEngine(b *testing.B) (*wal.SegmentedLogStore, *Engine) {
