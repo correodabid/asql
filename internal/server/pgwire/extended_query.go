@@ -529,7 +529,7 @@ func splitTopLevelCSV(clause string) []string {
 }
 
 var (
-	whereParamPattern           = regexp.MustCompile(`(?i)([a-zA-Z_][a-zA-Z0-9_\."\>]*)\s*(=|<>|!=|>=|<=|>|<|like|ilike|not\s+like|not\s+ilike)\s*\$(\d+)`)
+	whereParamPattern            = regexp.MustCompile(`(?i)([a-zA-Z_][a-zA-Z0-9_\."\>]*)\s*(=|<>|!=|>=|<=|>|<|like|ilike|not\s+like|not\s+ilike)\s*\$(\d+)`)
 	updateArithmeticParamPattern = regexp.MustCompile(`(?i)^([a-zA-Z_][a-zA-Z0-9_\."\>]*)\s*([+\-*/])\s*\$(\d+)$`)
 )
 
