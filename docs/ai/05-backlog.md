@@ -488,9 +488,9 @@ Open gaps before closure:
 Latest directional read evidence:
 - `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and repeated at ~`353–361 µs/op`.
 - `BenchmarkEngineReadIndexOnlyOrderBTree` exercised `btree-index-only` and repeated at ~`34 µs/op`.
-- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree` exercised `btree-index-only` and repeated at ~`723–734 µs/op`.
+- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree` exercised `btree-index-only` and, after bounded early-stop optimization, repeated at ~`274–275 µs/op`.
 - `BenchmarkEngineReadSelectiveNonCoveredBTree` exercised `btree-order` and repeated at ~`406–407 µs/op`.
-- Current interpretation: index-only is strongly justified for the simple covered ordered-read shape, but the selective covered shape still underperforms, so broader expansion should wait for path-level profiling and likely bounded-scan improvements.
+- Current interpretation: index-only is strongly justified for simple covered ordered reads and is now also justified on the selective covered shape after bounded-scan support. Broader expansion still needs measured decisions for additional query shapes rather than blanket rollout.
 
 - [ ] Benchmark and improve commit batching on realistic workloads.
 - [ ] Benchmark and improve replay throughput.

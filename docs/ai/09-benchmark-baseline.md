@@ -46,7 +46,7 @@ Repeated sample on 2026-03-14 using `go test ./internal/engine/executor -run '^$
 
 Selective covered-vs-non-covered repeated sample on 2026-03-14:
 
-- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree-8`: ~`722,951–734,480 ns/op`, `234,072–234,073 B/op`, `235 allocs/op` (`btree-index-only`)
+- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree-8`: ~`273,630–275,369 ns/op`, `234,072 B/op`, `235 allocs/op` (`btree-index-only`)
 - `BenchmarkEngineReadSelectiveNonCoveredBTree-8`: ~`406,344–407,120 ns/op`, `309,561 B/op`, `656 allocs/op` (`btree-order`)
 
 ### Failover / recovery validation (`test/integration`)
@@ -63,4 +63,4 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 - The restart-path numbers above are a single-iteration validation sample, useful for directional comparison only; they are not yet closure-grade AB evidence.
 - Current read-path interpretation:
 	- on the simple covered ordered-read shape, `btree-index-only` is about $10\times$ faster than `btree-order` and materially reduces allocations;
-	- on the selective covered shape, `btree-index-only` is slower than `btree-order`, which points to path-shape limitations rather than a general verdict against index-only reads.
+	- on the selective covered shape, adding bounded early-stop to the index-only path moved it ahead of `btree-order` as well (~`274 µs/op` vs ~`406 µs/op`), while keeping allocations materially lower.

@@ -667,12 +667,12 @@ func joinColumnForTable(tableName string, columnRef string) (string, bool) {
 // ── EXPLAIN access plan ─────────────────────────────────────────────
 
 type accessPlanInfo struct {
-	Strategy      string         `json:"strategy"`
-	TableRows     int            `json:"table_rows"`
-	EstimatedRows int            `json:"estimated_rows,omitempty"`
-	IndexUsed     string         `json:"index_used,omitempty"`
-	IndexType     string         `json:"index_type,omitempty"`
-	IndexColumn   string         `json:"index_column,omitempty"`
+	Strategy      string          `json:"strategy"`
+	TableRows     int             `json:"table_rows"`
+	EstimatedRows int             `json:"estimated_rows,omitempty"`
+	IndexUsed     string          `json:"index_used,omitempty"`
+	IndexType     string          `json:"index_type,omitempty"`
+	IndexColumn   string          `json:"index_column,omitempty"`
 	Candidates    []candidateInfo `json:"candidates,omitempty"`
 	Joins         []joinPlanInfo  `json:"joins,omitempty"`
 }
@@ -1048,13 +1048,29 @@ func orderedRowsFromBTreeIndexOnly(
 	limit := plan.Limit
 	descending := plan.OrderBy[0].Direction == ast.SortDesc
 	rows := make([]map[string]ast.Literal, 0, len(entries))
+	useBoundedScan := false
+	if plan.Filter != nil && isSimplePredicate(plan.Filter) && strings.EqualFold(strings.TrimSpace(plan.Filter.Column), strings.TrimSpace(plan.OrderBy[0].Column)) {
+		switch plan.Filter.Operator {
+		case "=", ">", ">=", "<", "<=":
+			useBoundedScan = true
+		}
+	}
 
 	if descending {
 		for i := len(entries) - 1; i >= 0; i-- {
 			if limit != nil && *limit >= 0 && len(rows) >= *limit {
 				break
 			}
-			if !matchEntry(entries[i]) {
+			if useBoundedScan {
+				cmp := compareLiterals(entryVal(entries[i], plan.Filter.Column), plan.Filter.Value)
+				accept, stop := btreeBoundDecision(cmp, plan.Filter.Operator, true)
+				if stop {
+					break
+				}
+				if !accept {
+					continue
+				}
+			} else if !matchEntry(entries[i]) {
 				continue
 			}
 			rows = append(rows, buildRow(entries[i]))
@@ -1064,7 +1080,16 @@ func orderedRowsFromBTreeIndexOnly(
 			if limit != nil && *limit >= 0 && len(rows) >= *limit {
 				break
 			}
-			if !matchEntry(e) {
+			if useBoundedScan {
+				cmp := compareLiterals(entryVal(e, plan.Filter.Column), plan.Filter.Value)
+				accept, stop := btreeBoundDecision(cmp, plan.Filter.Operator, false)
+				if stop {
+					break
+				}
+				if !accept {
+					continue
+				}
+			} else if !matchEntry(e) {
 				continue
 			}
 			rows = append(rows, buildRow(e))
