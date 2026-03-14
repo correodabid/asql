@@ -85,6 +85,23 @@ Restart-tail/cadence spot checks on 2026-03-14 using `-benchtime=1x`:
 			- `replay_only_total_11000`: `3,497,548,041–3,544,605,791 ns/op`, `8,438,490,400–8,438,490,864 B/op`, `36,303,196–36,303,203 allocs/op`
 			- `persisted_snapshot_total_11000_tail_500`: `3,314,063,625–3,434,278,375 ns/op`, `8,408,820,560–8,408,820,720 B/op`, `36,132,048–36,132,054 allocs/op`
 
+- Natural policy-driven restart repeated sample after implementing mutation-mix-aware persisted checkpoints (`BenchmarkEngineRestartNaturalWorkloadCadenceSweep`, `-benchmem -benchtime=1x -count=2`):
+	- `insert_heavy`
+		- `replay_only_total_1000`: `15,953,290–18,086,999 ns/op`, `4,477,888–4,488,640 B/op`, `29,928–29,939 allocs/op`
+		- `policy_persisted_total_1000_tail_500`: `11,542,874–13,014,082 ns/op`, `2,094,512–2,094,704 B/op`, `11,310 allocs/op`
+		- `replay_only_total_10500`: `94,088,751–96,111,791 ns/op`, `62,167,448–62,266,056 B/op`, `361,319–361,326 allocs/op`
+		- `policy_persisted_total_10500_tail_500`: `50,912,334–51,357,292 ns/op`, `24,960,192–24,969,080 B/op`, `115,895–115,897 allocs/op`
+	- `update_heavy`
+		- `replay_only_total_1000`: `286,147,167–290,157,876 ns/op`, `616,013,736–616,016,648 B/op`, `2,541,945–2,541,974 allocs/op`
+		- `policy_persisted_total_1000_tail_500`: `11,578,166–12,223,459 ns/op`, `1,622,624–1,622,640 B/op`, `8,806 allocs/op`
+		- `replay_only_total_10500`: `5,125,040,167–5,259,311,416 ns/op`, `12,084,649,328–12,084,651,632 B/op`, `50,458,480–50,458,505 allocs/op`
+		- `policy_persisted_total_10500_tail_500`: `4,789,426,459–4,794,677,000 ns/op`, `12,055,916,320–12,055,916,608 B/op`, `50,291,852–50,291,862 allocs/op`
+	- `delete_heavy`
+		- `replay_only_total_1500`: `295,197,000–311,076,417 ns/op`, `617,718,120–617,719,904 B/op`, `2,672,316–2,672,317 allocs/op`
+		- `policy_persisted_total_1500_tail_500`: `13,082,083–16,060,834 ns/op`, `2,140,400–2,140,416 B/op`, `11,809 allocs/op`
+		- `replay_only_total_11000`: `3,518,639,292–3,553,196,959 ns/op`, `8,438,595,312–8,438,688,208 B/op`, `36,303,215–36,303,220 allocs/op`
+		- `policy_persisted_total_11000_tail_500`: `3,354,867,793–3,375,866,541 ns/op`, `8,408,820,000–8,408,822,032 B/op`, `36,132,044–36,132,066 allocs/op`
+
 Focused persisted-snapshot load split on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngine(ReadPersistedSnapshotsFromDir|ReplayFromPersistedSnapshots)$' -benchmem -benchtime=100ms -count=1`:
 
 - `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `302,163–377,369 ns/op`, `353,257–633,829 B/op`, `1,724–2,277 allocs/op`
@@ -149,6 +166,9 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 	- memory follows the same pattern: by the medium anchor, persisted snapshots cut restart allocation volume materially for `insert_heavy` (~`35.6 MB` vs ~`62.1–62.4 MB`) and trim it modestly for `update_heavy`/`delete_heavy`, so the cadence choice affects both wall-clock restart time and heap pressure;
 	- that policy has now been implemented for persisted checkpoints: the existing volume-based anchors in [internal/engine/executor/snapshot.go](internal/engine/executor/snapshot.go#L10-L40) remain the baseline, but the engine now tracks a rolling recent mutation-pressure window (`insert=1`, `update=4`, `delete=3`) and halves the persisted-checkpoint mutation interval when weighted update/delete pressure dominates, with a floor of `250` mutations;
 	- disk and memory policy are still treated separately at the policy level: the new heuristic only targets persisted checkpoint cadence, while in-memory snapshot retention and the base in-memory capture anchors remain unchanged for now;
+	- repeated natural-cadence runs now make that result much more credible: without forcing a final flush, the policy-driven persisted path consistently cuts small-anchor restart from ~`16–18 ms` to ~`11.5–13.0 ms` for `insert_heavy`, from ~`286–290 ms` to ~`11.6–12.2 ms` for `update_heavy`, and from ~`295–311 ms` to ~`13.1–16.1 ms` for `delete_heavy` when a runtime checkpoint lands near the tail;
+	- at the medium anchor, the policy still preserves meaningful wins with less dramatic variance: `insert_heavy` drops from ~`94–96 ms` to ~`51 ms`, `update_heavy` from ~`5.13–5.26 s` to ~`4.79 s`, and `delete_heavy` from ~`3.52–3.55 s` to ~`3.35–3.38 s`;
+	- allocation pressure also drops sharply in the natural small-anchor cases because restart no longer has to replay the long tail: for example `update_heavy` falls from ~`616 MB` / ~`2.54M` allocs to ~`1.62 MB` / ~`8.8k` allocs, and `delete_heavy` from ~`618 MB` / ~`2.67M` allocs to ~`2.14 MB` / ~`11.8k` allocs;
 	- the focused split shows the persisted restart cost is still dominated by snapshot-directory read/decompress/decode/materialization (~`302–377 µs/op`), while the in-memory `replayFromSnapshots` restore step itself is comparatively small (~`60 µs/op`);
 	- inside the snapshot-directory load, binary decode remains the largest measured in-process component, but the direct positional-row decode path pushed it down materially to roughly `79–166 µs/op`, `186–458 KB/op`, and `1.1k–1.7k allocs/op`, ahead of raw file I/O (~`87 µs/op`), zstd decompression (~`74 µs/op`), and snapshot materialization (~`49–57 µs/op`);
 	- delta-chain merge is negligible on the current fixture because the harness is effectively loading a single persisted snapshot file, so this AB slice is presently about file read + decode efficiency rather than cross-file snapshot chaining.

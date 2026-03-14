@@ -326,6 +326,27 @@ func BenchmarkEngineRestartWorkloadCadenceSweep(b *testing.B) {
 	}
 }
 
+func BenchmarkEngineRestartNaturalWorkloadCadenceSweep(b *testing.B) {
+	const replayTail = 500
+	for _, workload := range []restartWorkloadKind{
+		restartWorkloadInsertHeavy,
+		restartWorkloadUpdateHeavy,
+		restartWorkloadDeleteHeavy,
+	} {
+		b.Run(string(workload), func(b *testing.B) {
+			for _, baseMutations := range []int{defaultSnapshotInterval, snapshotIntervalMedium} {
+				totalMutations := restartWorkloadTotalMutations(workload, baseMutations, replayTail)
+				b.Run(fmt.Sprintf("replay_only_total_%d", totalMutations), func(b *testing.B) {
+					benchmarkEngineRestartNaturalWorkloadLoad(b, workload, baseMutations, replayTail, false)
+				})
+				b.Run(fmt.Sprintf("policy_persisted_total_%d_tail_%d", totalMutations, replayTail), func(b *testing.B) {
+					benchmarkEngineRestartNaturalWorkloadLoad(b, workload, baseMutations, replayTail, true)
+				})
+			}
+		})
+	}
+}
+
 func BenchmarkEngineReadPersistedSnapshotsFromDir(b *testing.B) {
 	_, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, true)
 
@@ -776,6 +797,12 @@ func benchmarkEngineRestartWorkloadCustomLoad(b *testing.B, workload restartWork
 	benchmarkEngineRestartFixtureLoad(b, ctx, walPath, snapDir, expectedHeadLSN)
 }
 
+func benchmarkEngineRestartNaturalWorkloadLoad(b *testing.B, workload restartWorkloadKind, baseMutations int, tailMutations int, withPersistedSnapshot bool) {
+	ctx := context.Background()
+	walPath, snapDir, expectedHeadLSN := prepareRestartNaturalWorkloadFixture(b, workload, baseMutations, tailMutations, withPersistedSnapshot)
+	benchmarkEngineRestartFixtureLoad(b, ctx, walPath, snapDir, expectedHeadLSN)
+}
+
 func benchmarkEngineRestartFixtureLoad(b *testing.B, ctx context.Context, walPath string, snapDir string, expectedHeadLSN uint64) {
 	runRoot := filepath.Join(b.TempDir(), "restart-runs")
 	if err := os.MkdirAll(runRoot, 0o755); err != nil {
@@ -1185,6 +1212,71 @@ const (
 
 func prepareRestartWorkloadFixture(b *testing.B, workload restartWorkloadKind, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
 	return prepareRestartWorkloadFixtureWithBase(b, workload, defaultSnapshotInterval, defaultSnapshotInterval, withPersistedSnapshot)
+}
+
+func prepareRestartNaturalWorkloadFixture(b *testing.B, workload restartWorkloadKind, baseMutations int, tailMutations int, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
+	b.Helper()
+	if baseMutations <= 0 {
+		b.Fatalf("base mutations must be positive: %d", baseMutations)
+	}
+	if tailMutations < 0 {
+		b.Fatalf("tail mutations must be non-negative: %d", tailMutations)
+	}
+
+	ctx := context.Background()
+	dir := b.TempDir()
+	walPath = filepath.Join(dir, fmt.Sprintf("restart-natural-%s-bench.wal", workload))
+	if withPersistedSnapshot {
+		snapDir = filepath.Join(dir, "snapshots")
+		if err := os.MkdirAll(snapDir, 0o755); err != nil {
+			b.Fatalf("mkdir snapshot dir: %v", err)
+		}
+	}
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("new wal store: %v", err)
+	}
+
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		_ = store.Close()
+		b.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
+	applyRestartWorkloadSeed(b, ctx, engine, session, workload, baseMutations, tailMutations)
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	session = engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	applyRestartWorkloadTail(b, ctx, engine, session, workload, baseMutations, tailMutations)
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	waitInFlightSnapshotsWithoutFlush(engine)
+	expectedHeadLSN = store.LastLSN()
+	if err := store.Close(); err != nil {
+		b.Fatalf("close natural workload wal store: %v", err)
+	}
+
+	if !withPersistedSnapshot {
+		return walPath, "", expectedHeadLSN
+	}
+	return walPath, snapDir, expectedHeadLSN
+}
+
+func waitInFlightSnapshotsWithoutFlush(engine *Engine) {
+	if engine.commitQ != nil {
+		engine.commitQ.stop()
+		engine.commitQ = nil
+	}
+	if engine.groupSync != nil {
+		engine.groupSync.stop()
+		engine.groupSync = nil
+	}
+	engine.snapshotWg.Wait()
 }
 
 func prepareRestartWorkloadFixtureWithBase(b *testing.B, workload restartWorkloadKind, baseMutations int, tailMutations int, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {

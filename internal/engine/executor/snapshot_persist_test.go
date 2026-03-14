@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"asql/internal/engine/ports"
 	"asql/internal/storage/wal"
 )
 
@@ -190,6 +191,163 @@ func TestDeltaReplayDoesNotPersistCheckpoint(t *testing.T) {
 	if engine.snapSeq != baselineSeq {
 		t.Fatalf("expected snap sequence to remain %d during delta replay, got %d", baselineSeq, engine.snapSeq)
 	}
+}
+
+func TestMutationMixAdaptivePersistedCheckpointCadence(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("insert heavy waits for base interval", func(t *testing.T) {
+		engine, store, snapDir := newCadencePolicyTestEngine(t, ctx)
+		defer func() {
+			engine.WaitPendingSnapshots()
+			_ = store.Close()
+		}()
+
+		session := engine.NewSession()
+		exec := func(sql string) {
+			t.Helper()
+			if _, err := engine.Execute(ctx, session, sql); err != nil {
+				t.Fatalf("execute %q: %v", sql, err)
+			}
+		}
+
+		exec("BEGIN DOMAIN policy")
+		exec("CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
+		exec("COMMIT")
+
+		resetPersistedCheckpointPolicyStateForTest(t, engine)
+		clearSnapshotFilesForTest(t, snapDir)
+
+		session = engine.NewSession()
+		exec("BEGIN DOMAIN policy")
+		for i := 1; i <= minPersistedCheckpointMutationInterval; i++ {
+			exec(fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+		}
+		exec("COMMIT")
+
+		awaitRuntimeSnapshotsForTest(engine)
+
+		if got := countSnapshotFilesForTest(t, snapDir); got != 0 {
+			t.Fatalf("expected no persisted checkpoints for insert-heavy %d-mutation window, got %d", minPersistedCheckpointMutationInterval, got)
+		}
+	})
+
+	t.Run("update heavy checkpoints at reduced interval", func(t *testing.T) {
+		engine, store, snapDir := newCadencePolicyTestEngine(t, ctx)
+		defer func() {
+			engine.WaitPendingSnapshots()
+			_ = store.Close()
+		}()
+
+		session := engine.NewSession()
+		exec := func(sql string) {
+			t.Helper()
+			if _, err := engine.Execute(ctx, session, sql); err != nil {
+				t.Fatalf("execute %q: %v", sql, err)
+			}
+		}
+
+		exec("BEGIN DOMAIN policy")
+		exec("CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
+		for i := 1; i <= 100; i++ {
+			exec(fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'seed-%d')", i, i))
+		}
+		exec("COMMIT")
+
+		resetPersistedCheckpointPolicyStateForTest(t, engine)
+		clearSnapshotFilesForTest(t, snapDir)
+
+		session = engine.NewSession()
+		exec("BEGIN DOMAIN policy")
+		for i := 1; i <= minPersistedCheckpointMutationInterval; i++ {
+			targetID := ((i - 1) % 100) + 1
+			exec(fmt.Sprintf("UPDATE entries SET payload = 'updated-%d' WHERE id = %d", i, targetID))
+		}
+		exec("COMMIT")
+
+		awaitRuntimeSnapshotsForTest(engine)
+
+		if got := countSnapshotFilesForTest(t, snapDir); got == 0 {
+			t.Fatalf("expected persisted checkpoint for update-heavy %d-mutation window, got none", minPersistedCheckpointMutationInterval)
+		}
+	})
+}
+
+func newCadencePolicyTestEngine(t *testing.T, ctx context.Context) (*Engine, *wal.SegmentedLogStore, string) {
+	t.Helper()
+	dir := t.TempDir()
+	walBasePath := filepath.Join(dir, "policy-cadence.wal")
+	snapDir := filepath.Join(dir, "snap")
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		t.Fatalf("mkdir snap dir: %v", err)
+	}
+
+	store, err := wal.NewSegmentedLogStore(walBasePath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new log store: %v", err)
+	}
+
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		_ = store.Close()
+		t.Fatalf("new engine: %v", err)
+	}
+	return engine, store, snapDir
+}
+
+func resetPersistedCheckpointPolicyStateForTest(t *testing.T, engine *Engine) {
+	t.Helper()
+	engine.snapshotWg.Wait()
+	engine.mutationCount = 0
+	engine.recentMutationPressure = 0
+	engine.recentMutationCount = 0
+	engine.recentMutationIndex = 0
+	engine.lastDiskSnapshotMutationCount = 0
+	engine.lastDiskSnapshotLogicalTS = 0
+	engine.recentMutationWeights = [recentMutationWindowSize]uint8{}
+	if sizer, ok := engine.logStore.(ports.Sizer); ok {
+		if sz, err := sizer.TotalSize(); err == nil && sz > 0 {
+			engine.lastCheckpointWALSize = uint64(sz)
+			return
+		}
+	}
+	engine.lastCheckpointWALSize = 0
+}
+
+func clearSnapshotFilesForTest(t *testing.T, snapDir string) {
+	t.Helper()
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		t.Fatalf("read snap dir: %v", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		if err := os.Remove(filepath.Join(snapDir, entry.Name())); err != nil {
+			t.Fatalf("remove snapshot file %s: %v", entry.Name(), err)
+		}
+	}
+}
+
+func awaitRuntimeSnapshotsForTest(engine *Engine) {
+	engine.lastWriteUnixNano.Store(1)
+	engine.snapshotWg.Wait()
+}
+
+func countSnapshotFilesForTest(t *testing.T, snapDir string) int {
+	t.Helper()
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		t.Fatalf("read snap dir: %v", err)
+	}
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			count++
+		}
+	}
+	return count
 }
 
 // TestSnapshotPersistPartialReplay verifies that after loading a snapshot,
