@@ -7,6 +7,9 @@ Applies to: every release candidate and GA release.
 
 Ensure release candidates and GA upgrades are safe, observable, and stable enough to ship.
 
+Use [release-evidence-bundle-v1.md](release-evidence-bundle-v1.md) as the
+recommended format for the short release evidence summary referenced below.
+
 ## Release-candidate gate (`v1.0.0-rc*` and later)
 
 Every release candidate should include a short evidence bundle covering:
@@ -111,6 +114,7 @@ Release can proceed only if all below are true:
 ## Required release artifacts
 
 - Test evidence summary
+- Release evidence bundle summary (recommended format: [release-evidence-bundle-v1.md](release-evidence-bundle-v1.md))
 - Release-candidate gate summary (`runtime`, `compatibility`, `recovery`, `operations`)
 - Compatibility matrix result
 - Upgrade guide notes
