@@ -471,6 +471,18 @@ Acceptance gates (must pass before closing Epic AA)
 
 ## Epic AB — Performance after correctness (Phase 6)
 
+Current evidence already in repo, but not sufficient to close this epic:
+- `docs/ai/09-benchmark-baseline.md` captures an internal deterministic engine/WAL baseline.
+- `docs/product/performance-benchmark-plan-v1.md` defines the active L0–L4 benchmark ladder, including cluster scenarios.
+- `internal/engine/executor/engine_benchmark_test.go` covers commit, concurrent commit, read-as-of-LSN, and replay-to-LSN microbenchmarks.
+- `internal/storage/wal/store_benchmark_test.go` covers append, read, and recovery microbenchmarks.
+- `internal/engine/executor/engine_query.go` and `internal/engine/executor/engine_scan.go` already contain index-only scan support.
+
+Open gaps before closure:
+- No benchmark-backed closure yet for snapshot load time, indexed read latency, or failover recovery time.
+- No published failover/recovery benchmark suite that satisfies the acceptance gates below.
+- No measured decision record yet for persisted index/cache architecture or parallel scan evaluation.
+
 - [ ] Benchmark and improve commit batching on realistic workloads.
 - [ ] Benchmark and improve replay throughput.
 - [ ] Benchmark and improve snapshot load time.
