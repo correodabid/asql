@@ -488,6 +488,8 @@ Open gaps before closure:
 Subline status:
 - The `Expand index-only scan coverage where benchmarks justify it` item is now evidence-backed for covered simple ordered reads, covered ordered reads with `OFFSET`, covered selective reads with bounded early-stop, and covered composite ordered reads.
 - The broader `Benchmark and improve indexed read/query latency` item remains open because not all indexed shapes have been benchmarked or optimized, and the closure decision still needs to be stated at the epic level.
+- Replay-throughput now has a stable repeated benchmark sample (~`2.0 ms/op` on the current fixture), but no improvement decision is recorded yet.
+- Snapshot-load benchmarking is now better grounded, and the current result is specifically that persisted-snapshot restart is not yet beating replay-only restart on the present harness; this item therefore remains open as an optimization target rather than a closed win.
 - The persisted-index/cache item is now narrower than it first appeared: a persisted timestamp→LSN side index already exists and is restart-validated, but there is still no evidence-backed need yet for general persisted table indexes or a broader cache layer.
 - The parallel-scan item has now been evaluated to a defer decision: there is still no proven workload class that justifies intra-query parallel scan complexity over the current deterministic single-threaded indexed paths.
 
