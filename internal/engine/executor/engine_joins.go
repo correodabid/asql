@@ -346,6 +346,33 @@ func predicateRejectsNull(predicate *ast.Predicate) bool {
 	}
 }
 
+func matchTablePredicateOnRow(table *tableState, row []ast.Literal, predicate *ast.Predicate) bool {
+	if predicate == nil {
+		return true
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
+	case "AND":
+		return matchTablePredicateOnRow(table, row, predicate.Left) && matchTablePredicateOnRow(table, row, predicate.Right)
+	case "OR", "NOT":
+		return false
+	}
+
+	colPos, ok := table.columnIndex[predicate.Column]
+	if !ok || colPos < 0 || colPos >= len(row) {
+		return false
+	}
+	value := row[colPos]
+
+	operator := strings.ToUpper(strings.TrimSpace(predicate.Operator))
+	switch operator {
+	case "IS NULL", "IS NOT NULL", "=", ">", "<", ">=", "<=":
+		return compareLiteralByOperator(value, operator, predicate.Value)
+	default:
+		return false
+	}
+}
+
 func normalizeBasePredicateColumn(column string, aliasMap map[string]string, baseTableName string, basePrefix string, baseTable *tableState) (string, bool) {
 	trimmed := strings.TrimSpace(strings.ToLower(column))
 	if trimmed == "" {
@@ -880,7 +907,7 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 		pushRightPredicate := rightPredicate != nil && (joinType == ast.JoinInner || (joinType == ast.JoinLeft && predicateRejectsNull(rightPredicate)))
 
 		var reusableRightRows []map[string]ast.Literal
-		if (!hasRightIndex && !hasLeftIndex) || pushRightPredicate || bestRightPredicate != nil {
+		if !hasRightIndex && !(hasLeftIndex && leftIndexTable != nil && bestRightPredicate == nil) {
 			reusableRightRows = rowsForPredicate(rightTable, bestRightPredicate, state, engine)
 			if pushRightPredicate {
 				filteredRightRows := reusableRightRows[:0]
@@ -919,13 +946,23 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 					}
 				}
 			} else {
+				rightColPos, ok := rightTable.columnIndex[rightColName]
+				if !ok {
+					return nil, scanStrategyFullScan, errTableNotFound
+				}
 				for _, rightRowSlice := range rightTable.rows {
-					rightRow := rowToMap(rightTable, rightRowSlice)
-					rightVal, rightOK := rightRow[rightColName]
-					if !rightOK {
+					if rightColPos < 0 || rightColPos >= len(rightRowSlice) {
 						continue
 					}
+					rightVal := rightRowSlice[rightColPos]
 					key := literalKey(rightVal)
+					if len(pipelineByVal[key]) == 0 {
+						continue
+					}
+					if pushRightPredicate && !matchTablePredicateOnRow(rightTable, rightRowSlice, rightPredicate) {
+						continue
+					}
+					rightRow := rowToMap(rightTable, rightRowSlice)
 					for _, idx := range pipelineByVal[key] {
 						nextRows = append(nextRows, mergePipelineRows(currentRows[idx], rightPrefix, rightRow))
 						leftMatched[idx] = true

@@ -806,6 +806,51 @@ func BenchmarkEngineReadEntityRelatedJoinScaling(b *testing.B) {
 	}
 }
 
+func BenchmarkEngineReadEntityRelatedJoinRightFilterScaling(b *testing.B) {
+	ctx := context.Background()
+	const linesPerOrder = 5
+	const targetSKU = "sku-03"
+
+	for _, indexChildFK := range []bool{true, false} {
+		variant := "child_fk_unindexed"
+		expectedStrategy := string(scanStrategyJoinLeftIx)
+		if indexChildFK {
+			variant = "child_fk_indexed"
+			expectedStrategy = string(scanStrategyJoinRightIx)
+		}
+
+		b.Run(variant, func(b *testing.B) {
+			for _, orderCount := range []int{1000, 10000} {
+				b.Run(fmt.Sprintf("orders_%d", orderCount), func(b *testing.B) {
+					store, engine, targetLSN, targetOrderID := prepareEntityRelatedReadBenchmarkFixture(b, orderCount, linesPerOrder, indexChildFK)
+
+					query := fmt.Sprintf(
+						"SELECT o.id, o.status, l.id, l.sku, l.qty FROM orders o JOIN order_lines l ON o.id = l.order_id WHERE o.id = %d AND l.sku = '%s' ORDER BY l.id ASC",
+						targetOrderID,
+						targetSKU,
+					)
+					baselineCounts := engine.ScanStrategyCounts()
+					b.ResetTimer()
+					for i := 0; i < b.N; i++ {
+						result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+						if err != nil {
+							b.Fatalf("entity-related join right-filter query: %v", err)
+						}
+						if len(result.Rows) != 1 {
+							b.Fatalf("unexpected entity-related right-filter row count: got %d want 1", len(result.Rows))
+						}
+					}
+					b.StopTimer()
+					reportScanStrategyDelta(b, engine, baselineCounts, expectedStrategy)
+
+					engine.WaitPendingSnapshots()
+					_ = store.Close()
+				})
+			}
+		})
+	}
+}
+
 func benchmarkEngineRestartLoad(b *testing.B, withPersistedSnapshot bool) {
 	ctx := context.Background()
 	walPath, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, withPersistedSnapshot)
