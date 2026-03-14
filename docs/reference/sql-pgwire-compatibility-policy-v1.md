@@ -38,6 +38,8 @@ flows, not a claim of broad PostgreSQL behavioral parity.
   [docs/operations/pgwire-compatibility-test-pack-v1.md](../operations/pgwire-compatibility-test-pack-v1.md).
 - Practical client guidance lives in
   [docs/reference/pgwire-driver-guidance-v1.md](pgwire-driver-guidance-v1.md).
+- Current pgwire error and SQLSTATE behavior lives in
+  [docs/reference/pgwire-error-sqlstate-behavior-v1.md](pgwire-error-sqlstate-behavior-v1.md).
 - Public compatibility claims must be backed by regression tests.
 - New compatibility claims are not public until docs, tests, matrix entries,
   and evidence links land together.

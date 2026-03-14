@@ -9,6 +9,7 @@ Use it together with:
 
 - [sql-pgwire-compatibility-policy-v1.md](sql-pgwire-compatibility-policy-v1.md)
 - [postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md)
+- [pgwire-error-sqlstate-behavior-v1.md](pgwire-error-sqlstate-behavior-v1.md)
 - [pgwire-driver-guidance-v1.md](pgwire-driver-guidance-v1.md)
 - [../operations/pgwire-compatibility-test-pack-v1.md](../operations/pgwire-compatibility-test-pack-v1.md)
 
@@ -60,6 +61,11 @@ Status meanings:
 |---|---|---|---|
 | Bare `BEGIN` is rejected with ASQL transaction guidance | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilityUnsupportedPatternGuidance` | Direct | Confirms explicit steer toward `BEGIN DOMAIN ...` / `BEGIN CROSS DOMAIN ...`. |
 | `ANY(...)` / `ARRAY[...]` assumptions are rejected with actionable guidance | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilityUnsupportedPatternGuidance` | Direct | Matches the compatibility-matrix guardrail language. |
+
+For the fuller current pgwire error/SQLSTATE picture — including
+end-to-end-covered cancellation/input cases, unit-covered mapper behavior, and
+partial startup/redirect paths — see
+[pgwire-error-sqlstate-behavior-v1.md](pgwire-error-sqlstate-behavior-v1.md).
 
 ## Evidence gaps to close next
 

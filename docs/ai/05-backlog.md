@@ -213,7 +213,7 @@ P1 — close documentation and regression gaps first:
 - [ ] Add regression tests for already-implemented compatibility behaviors that are presently relied on implicitly but not claimed explicitly.
 - [x] Close the remaining evidence gaps called out in `docs/reference/postgres-compatibility-evidence-v1.md` (CSV `COPY`).
 - [x] Publish a concise “mainstream Postgres client/tool flows that work today” guide for `psql`, `pgx`, and GUI tools, including required caveats.
-- [ ] Document current error/SQLSTATE behavior and identify where ASQL already matches PostgreSQL closely enough to claim compatibility.
+- [x] Document current error/SQLSTATE behavior and identify where ASQL already matches PostgreSQL closely enough to claim compatibility.
 - [x] Document the currently supported SQL subset already present in parser/planner/executor but not clearly surfaced in compatibility docs.
 
 P2 — targeted high-return compatibility expansion:
