@@ -3372,6 +3372,53 @@ func TestJoinQueryWithRootAndJoinedFiltersReturnsExpectedRows(t *testing.T) {
 	}
 }
 
+func TestLeftJoinWithRightIsNullFilterPreservesUnmatchedRows(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "left-join-right-is-null.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	if _, err := engine.Execute(ctx, session, "BEGIN DOMAIN bench"); err != nil {
+		t.Fatalf("begin domain: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE users (id INT PRIMARY KEY, name TEXT)"); err != nil {
+		t.Fatalf("create users table: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE orders (id INT PRIMARY KEY, user_id INT REFERENCES users(id), amount INT)"); err != nil {
+		t.Fatalf("create orders table: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "INSERT INTO users (id, name) VALUES (1, 'ana'), (2, 'bob')"); err != nil {
+		t.Fatalf("insert users: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "INSERT INTO orders (id, user_id, amount) VALUES (10, 1, 100)"); err != nil {
+		t.Fatalf("insert orders: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "COMMIT"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT users.id, users.name FROM users LEFT JOIN orders ON users.id = orders.user_id WHERE orders.amount IS NULL ORDER BY users.id ASC", []string{"bench"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("left join is null query: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("unexpected left join row count: got %d want 1", len(result.Rows))
+	}
+	if result.Rows[0]["users.id"].NumberValue != 2 {
+		t.Fatalf("unexpected left join row: %+v", result.Rows[0])
+	}
+}
+
 func TestCreateCompositeHashIndexReturnsError(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "composite-hash-index-error.wal")

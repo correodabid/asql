@@ -331,6 +331,21 @@ func conjunctiveRootJoinPredicate(predicate *ast.Predicate, aliasMap map[string]
 	}
 }
 
+func predicateRejectsNull(predicate *ast.Predicate) bool {
+	if predicate == nil {
+		return false
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
+	case "AND":
+		return predicateRejectsNull(predicate.Left) && predicateRejectsNull(predicate.Right)
+	case "IS NULL", "OR", "NOT":
+		return false
+	default:
+		return true
+	}
+}
+
 func normalizeBasePredicateColumn(column string, aliasMap map[string]string, baseTableName string, basePrefix string, baseTable *tableState) (string, bool) {
 	trimmed := strings.TrimSpace(strings.ToLower(column))
 	if trimmed == "" {
@@ -860,6 +875,25 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 			}
 		}
 
+		rightPredicate := conjunctiveRootJoinPredicate(plan.Filter, aliasMap, j.TableName, rightPrefix, rightTable)
+		bestRightPredicate := bestBaseJoinPredicate(plan.Filter, aliasMap, j.TableName, rightPrefix, rightTable)
+		pushRightPredicate := rightPredicate != nil && (joinType == ast.JoinInner || (joinType == ast.JoinLeft && predicateRejectsNull(rightPredicate)))
+
+		var reusableRightRows []map[string]ast.Literal
+		if (!hasRightIndex && !hasLeftIndex) || pushRightPredicate || bestRightPredicate != nil {
+			reusableRightRows = rowsForPredicate(rightTable, bestRightPredicate, state, engine)
+			if pushRightPredicate {
+				filteredRightRows := reusableRightRows[:0]
+				for _, rightRow := range reusableRightRows {
+					if !matchPredicate(rightRow, rightPredicate, state, engine) {
+						continue
+					}
+					filteredRightRows = append(filteredRightRows, rightRow)
+				}
+				reusableRightRows = filteredRightRows
+			}
+		}
+
 		if hasLeftIndex && leftIndexTable != nil {
 			// Left-index strategy: iterate right rows, probe left table index.
 			pipelineByVal := make(map[string][]int) // serialized value → pipeline row indices
@@ -872,19 +906,36 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 				pipelineByVal[key] = append(pipelineByVal[key], i)
 			}
 
-			for _, rightRowSlice := range rightTable.rows {
-				rightRow := rowToMap(rightTable, rightRowSlice)
-				rightVal, rightOK := rightRow[rightColName]
-				if !rightOK {
-					continue
+			if reusableRightRows != nil {
+				for _, rightRow := range reusableRightRows {
+					rightVal, rightOK := rightRow[rightColName]
+					if !rightOK {
+						continue
+					}
+					key := literalKey(rightVal)
+					for _, idx := range pipelineByVal[key] {
+						nextRows = append(nextRows, mergePipelineRows(currentRows[idx], rightPrefix, rightRow))
+						leftMatched[idx] = true
+					}
 				}
-				key := literalKey(rightVal)
-				for _, idx := range pipelineByVal[key] {
-					nextRows = append(nextRows, mergePipelineRows(currentRows[idx], rightPrefix, rightRow))
-					leftMatched[idx] = true
+			} else {
+				for _, rightRowSlice := range rightTable.rows {
+					rightRow := rowToMap(rightTable, rightRowSlice)
+					rightVal, rightOK := rightRow[rightColName]
+					if !rightOK {
+						continue
+					}
+					key := literalKey(rightVal)
+					for _, idx := range pipelineByVal[key] {
+						nextRows = append(nextRows, mergePipelineRows(currentRows[idx], rightPrefix, rightRow))
+						leftMatched[idx] = true
+					}
 				}
 			}
 		} else {
+			if !hasRightIndex && reusableRightRows == nil {
+				reusableRightRows = tableRowsToMaps(rightTable)
+			}
 			for i, leftRow := range currentRows {
 				leftVal, leftOK := leftRow[pipelineColKey]
 				if !leftOK {
@@ -894,8 +945,18 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 				var candidates []map[string]ast.Literal
 				if hasRightIndex {
 					candidates = joinCandidateRows(rightTable, j.TableName, j.TableName+"."+rightColName, leftVal)
+					if pushRightPredicate {
+						filteredCandidates := candidates[:0]
+						for _, rightRow := range candidates {
+							if !matchPredicate(rightRow, rightPredicate, state, engine) {
+								continue
+							}
+							filteredCandidates = append(filteredCandidates, rightRow)
+						}
+						candidates = filteredCandidates
+					}
 				} else {
-					candidates = tableRowsToMaps(rightTable)
+					candidates = reusableRightRows
 				}
 
 				for _, rightRow := range candidates {
