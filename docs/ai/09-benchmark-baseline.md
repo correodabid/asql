@@ -39,15 +39,15 @@ Initial dry-run on 2026-03-14 using `go test ./internal/engine/executor -run '^$
 
 ### Indexed-read validation (`internal/engine/executor`)
 
-Initial dry-run on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngineRead(IndexedRangeBTree|IndexOnlyOrderBTree)$' -benchtime=1x -count=1`:
+Repeated sample on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench ... -benchmem -benchtime=200ms -count=3`:
 
-- `BenchmarkEngineReadIndexedRangeBTree-8`: `432,792 ns/op` (`btree-order-count=1`)
-- `BenchmarkEngineReadIndexOnlyOrderBTree-8`: `132,958 ns/op` (`btree-index-only-count=1`)
+- `BenchmarkEngineReadIndexedRangeBTree-8`: ~`353,070–360,654 ns/op`, `309,272–309,273 B/op`, `656 allocs/op` (`btree-order`)
+- `BenchmarkEngineReadIndexOnlyOrderBTree-8`: ~`34,027–34,369 ns/op`, `233,320–233,321 B/op`, `220 allocs/op` (`btree-index-only`)
 
-Selective covered-vs-non-covered dry-run on 2026-03-14:
+Selective covered-vs-non-covered repeated sample on 2026-03-14:
 
-- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree-8`: `912,083 ns/op` (`btree-index-only-count=1`)
-- `BenchmarkEngineReadSelectiveNonCoveredBTree-8`: `549,875 ns/op` (`btree-order-count=1`)
+- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree-8`: ~`722,951–734,480 ns/op`, `234,072–234,073 B/op`, `235 allocs/op` (`btree-index-only`)
+- `BenchmarkEngineReadSelectiveNonCoveredBTree-8`: ~`406,344–407,120 ns/op`, `309,561 B/op`, `656 allocs/op` (`btree-order`)
 
 ### Failover / recovery validation (`test/integration`)
 
@@ -61,4 +61,6 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 - This baseline is deterministic in workload shape and command path.
 - Values are hardware/OS dependent and serve as a regression reference, not cross-machine SLA numbers.
 - The restart-path numbers above are a single-iteration validation sample, useful for directional comparison only; they are not yet closure-grade AB evidence.
-- The selective covered/non-covered read numbers are also single-iteration validation samples; because they are close and partially counterintuitive, they should not be used for product decisions without repeated runs and deeper profiling.
+- Current read-path interpretation:
+	- on the simple covered ordered-read shape, `btree-index-only` is about $10\times$ faster than `btree-order` and materially reduces allocations;
+	- on the selective covered shape, `btree-index-only` is slower than `btree-order`, which points to path-shape limitations rather than a general verdict against index-only reads.

@@ -486,11 +486,11 @@ Open gaps before closure:
 - No measured decision record yet for persisted index/cache architecture or parallel scan evaluation.
 
 Latest directional read evidence:
-- `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and measured `432,792 ns/op`.
-- `BenchmarkEngineReadIndexOnlyOrderBTree` exercised `btree-index-only` and measured `132,958 ns/op`.
-- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree` exercised `btree-index-only` and measured `912,083 ns/op`.
-- `BenchmarkEngineReadSelectiveNonCoveredBTree` exercised `btree-order` and measured `549,875 ns/op`.
-- Current interpretation: index-only is clearly better on the simple covered ordered read shape, but the selective covered-vs-non-covered shape is still noisy/counterintuitive and needs repeated runs plus profiling before using it to justify broader index-only expansion.
+- `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and repeated at ~`353–361 µs/op`.
+- `BenchmarkEngineReadIndexOnlyOrderBTree` exercised `btree-index-only` and repeated at ~`34 µs/op`.
+- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree` exercised `btree-index-only` and repeated at ~`723–734 µs/op`.
+- `BenchmarkEngineReadSelectiveNonCoveredBTree` exercised `btree-order` and repeated at ~`406–407 µs/op`.
+- Current interpretation: index-only is strongly justified for the simple covered ordered-read shape, but the selective covered shape still underperforms, so broader expansion should wait for path-level profiling and likely bounded-scan improvements.
 
 - [ ] Benchmark and improve commit batching on realistic workloads.
 - [ ] Benchmark and improve replay throughput.
