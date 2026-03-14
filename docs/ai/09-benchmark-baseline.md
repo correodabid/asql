@@ -59,6 +59,13 @@ Restart-tail/cadence spot checks on 2026-03-14 using `-benchtime=1x`:
 	- `persisted_snapshot_total_10500_tail_500`: `57,602,874 ns/op`
 	- `replay_only_total_50500`: `307,145,457 ns/op`
 	- `persisted_snapshot_total_50500_tail_500`: `289,921,333 ns/op`
+- Workload-shape samples at the default 500-record anchor (`BenchmarkEngineRestartWorkloadSweep`):
+	- `insert_heavy/replay_only`: `16,582,625 ns/op`
+	- `insert_heavy/persisted_snapshot`: `20,895,125 ns/op`
+	- `update_heavy/replay_only`: `274,081,334 ns/op`
+	- `update_heavy/persisted_snapshot`: `276,550,875 ns/op`
+	- `delete_heavy/replay_only`: `270,285,125 ns/op`
+	- `delete_heavy/persisted_snapshot`: `277,909,042 ns/op`
 
 Focused persisted-snapshot load split on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngine(ReadPersistedSnapshotsFromDir|ReplayFromPersistedSnapshots)$' -benchmem -benchtime=100ms -count=1`:
 
@@ -118,6 +125,7 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 	- the repeated longer-benchtime sample now shows persisted-snapshot restart stabilizing around ~`3.91 ms/op` versus ~`3.33–3.41 ms/op` for replay-only, while cutting restart allocations to ~`1.12 MB/op` and ~`6.3k allocs/op`;
 	- new spot-check benchmarks now separate two different questions: how much a fixed snapshot anchor helps as the replay tail grows, and how the current adaptive cadence behaves when the engine skips roughly one full interval then replays only the last ~`500` records;
 	- on the current M1 spot checks, a snapshot plus ~`500` replayed records clearly beats replay-only at ~`1k` total rows (`12.7 ms` vs `16.2 ms`) and around the current medium anchor of ~`10.5k` total rows (`57.6 ms` vs `95.8 ms`), while the win narrows again by ~`50.5k` total rows (`289.9 ms` vs `307.1 ms`), so cadence is materially workload-size dependent and should be tuned with these sweeps rather than inferred from the old best-case restart fixture alone;
+	- the new workload-shape sweep also confirms that “same tail length” is not enough by itself: with a default 500-record anchor, append-heavy restart remained in the ~`16–21 ms` range while update-heavy and delete-heavy shapes landed around ~`270–278 ms`, so mutation mix has to be treated as a first-class input to any eventual snapshot-cadence policy;
 	- the focused split shows the persisted restart cost is still dominated by snapshot-directory read/decompress/decode/materialization (~`302–377 µs/op`), while the in-memory `replayFromSnapshots` restore step itself is comparatively small (~`60 µs/op`);
 	- inside the snapshot-directory load, binary decode remains the largest measured in-process component, but the direct positional-row decode path pushed it down materially to roughly `79–166 µs/op`, `186–458 KB/op`, and `1.1k–1.7k allocs/op`, ahead of raw file I/O (~`87 µs/op`), zstd decompression (~`74 µs/op`), and snapshot materialization (~`49–57 µs/op`);
 	- delta-chain merge is negligible on the current fixture because the harness is effectively loading a single persisted snapshot file, so this AB slice is presently about file read + decode efficiency rather than cross-file snapshot chaining.

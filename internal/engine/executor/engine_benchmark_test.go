@@ -288,6 +288,23 @@ func BenchmarkEngineRestartSnapshotCadenceSweep(b *testing.B) {
 	}
 }
 
+func BenchmarkEngineRestartWorkloadSweep(b *testing.B) {
+	for _, workload := range []restartWorkloadKind{
+		restartWorkloadInsertHeavy,
+		restartWorkloadUpdateHeavy,
+		restartWorkloadDeleteHeavy,
+	} {
+		b.Run(string(workload), func(b *testing.B) {
+			b.Run("replay_only", func(b *testing.B) {
+				benchmarkEngineRestartWorkloadLoad(b, workload, false)
+			})
+			b.Run("persisted_snapshot", func(b *testing.B) {
+				benchmarkEngineRestartWorkloadLoad(b, workload, true)
+			})
+		})
+	}
+}
+
 func BenchmarkEngineReadPersistedSnapshotsFromDir(b *testing.B) {
 	_, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, true)
 
@@ -726,6 +743,12 @@ func benchmarkEngineRestartCustomTailLoad(b *testing.B, baseRows int, tailInsert
 	benchmarkEngineRestartFixtureLoad(b, ctx, walPath, snapDir, expectedHeadLSN)
 }
 
+func benchmarkEngineRestartWorkloadLoad(b *testing.B, workload restartWorkloadKind, withPersistedSnapshot bool) {
+	ctx := context.Background()
+	walPath, snapDir, expectedHeadLSN := prepareRestartWorkloadFixture(b, workload, withPersistedSnapshot)
+	benchmarkEngineRestartFixtureLoad(b, ctx, walPath, snapDir, expectedHeadLSN)
+}
+
 func benchmarkEngineRestartFixtureLoad(b *testing.B, ctx context.Context, walPath string, snapDir string, expectedHeadLSN uint64) {
 	runRoot := filepath.Join(b.TempDir(), "restart-runs")
 	if err := os.MkdirAll(runRoot, 0o755); err != nil {
@@ -1123,6 +1146,134 @@ func prepareRestartBenchmarkFixture(b *testing.B, withPersistedSnapshot bool) (w
 
 func prepareRestartTailBenchmarkFixture(b *testing.B, tailInserts int, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
 	return prepareRestartTailBenchmarkFixtureWithBase(b, defaultSnapshotInterval, tailInserts, withPersistedSnapshot)
+}
+
+type restartWorkloadKind string
+
+const (
+	restartWorkloadInsertHeavy restartWorkloadKind = "insert_heavy"
+	restartWorkloadUpdateHeavy restartWorkloadKind = "update_heavy"
+	restartWorkloadDeleteHeavy restartWorkloadKind = "delete_heavy"
+)
+
+func prepareRestartWorkloadFixture(b *testing.B, workload restartWorkloadKind, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
+	b.Helper()
+
+	ctx := context.Background()
+	dir := b.TempDir()
+	walPath = filepath.Join(dir, fmt.Sprintf("restart-%s-bench.wal", workload))
+	if withPersistedSnapshot {
+		snapDir = filepath.Join(dir, "snapshots")
+		if err := os.MkdirAll(snapDir, 0o755); err != nil {
+			b.Fatalf("mkdir snapshot dir: %v", err)
+		}
+	}
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("new wal store: %v", err)
+	}
+
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		_ = store.Close()
+		b.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
+	applyRestartWorkloadSeed(b, ctx, engine, session, workload)
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	if withPersistedSnapshot {
+		engine.WaitPendingSnapshots()
+		expectedHeadLSN = store.LastLSN()
+		if err := store.Close(); err != nil {
+			b.Fatalf("close workload baseline wal store: %v", err)
+		}
+
+		entries, err := os.ReadDir(snapDir)
+		if err != nil {
+			b.Fatalf("read snapshot dir: %v", err)
+		}
+		hasSnapshotFile := false
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				hasSnapshotFile = true
+				break
+			}
+		}
+		if !hasSnapshotFile {
+			b.Fatal("expected persisted snapshot fixture files")
+		}
+
+		store, err = wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+		if err != nil {
+			b.Fatalf("reopen workload wal store for tail: %v", err)
+		}
+		engine, err = New(ctx, store, "")
+		if err != nil {
+			_ = store.Close()
+			b.Fatalf("reopen workload engine for tail: %v", err)
+		}
+		session = engine.NewSession()
+	}
+
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	applyRestartWorkloadTail(b, ctx, engine, session, workload)
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	engine.WaitPendingSnapshots()
+	expectedHeadLSN = store.LastLSN()
+	if err := store.Close(); err != nil {
+		b.Fatalf("close workload wal store: %v", err)
+	}
+
+	if !withPersistedSnapshot {
+		return walPath, "", expectedHeadLSN
+	}
+	return walPath, snapDir, expectedHeadLSN
+}
+
+func applyRestartWorkloadSeed(b *testing.B, ctx context.Context, engine *Engine, session *Session, workload restartWorkloadKind) {
+	b.Helper()
+
+	switch workload {
+	case restartWorkloadInsertHeavy, restartWorkloadUpdateHeavy:
+		for i := 1; i <= defaultSnapshotInterval; i++ {
+			mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+		}
+	case restartWorkloadDeleteHeavy:
+		for i := 1; i <= defaultSnapshotInterval*2; i++ {
+			mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+		}
+	default:
+		b.Fatalf("unsupported restart workload: %s", workload)
+	}
+}
+
+func applyRestartWorkloadTail(b *testing.B, ctx context.Context, engine *Engine, session *Session, workload restartWorkloadKind) {
+	b.Helper()
+
+	switch workload {
+	case restartWorkloadInsertHeavy:
+		for i := defaultSnapshotInterval + 1; i <= defaultSnapshotInterval*2; i++ {
+			mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+		}
+	case restartWorkloadUpdateHeavy:
+		const workingSet = 100
+		for i := 1; i <= defaultSnapshotInterval; i++ {
+			targetID := ((i - 1) % workingSet) + 1
+			mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("UPDATE entries SET payload = 'payload-updated-%d' WHERE id = %d", i, targetID))
+		}
+	case restartWorkloadDeleteHeavy:
+		for i := defaultSnapshotInterval * 2; i > defaultSnapshotInterval; i-- {
+			mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("DELETE FROM entries WHERE id = %d", i))
+		}
+	default:
+		b.Fatalf("unsupported restart workload: %s", workload)
+	}
 }
 
 func prepareRestartTailBenchmarkFixtureWithBase(b *testing.B, baseRows int, tailInserts int, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
