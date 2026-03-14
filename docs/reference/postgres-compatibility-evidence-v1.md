@@ -1,0 +1,79 @@
+# PostgreSQL Compatibility Evidence Map v1
+
+## Purpose
+
+This note ties ASQL's public PostgreSQL-compatibility claims to concrete test
+coverage.
+
+Use it together with:
+
+- [sql-pgwire-compatibility-policy-v1.md](sql-pgwire-compatibility-policy-v1.md)
+- [postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md)
+- [pgwire-driver-guidance-v1.md](pgwire-driver-guidance-v1.md)
+
+Status meanings:
+
+- **Direct**: explicit regression or conformance coverage exists today.
+- **Partial**: the claim is substantially exercised, but some sub-parts are only
+  indirectly covered.
+- **Gap**: the public doc claims more than the current direct regression pack
+  proves.
+
+## pgwire and startup/session/catalog evidence
+
+| Claim family | Evidence | Status | Notes |
+|---|---|---|---|
+| Startup + simple-query pgwire roundtrip | `internal/server/pgwire/server_test.go`: `TestPGWireSimpleQueryRoundtrip` | Direct | Covers connection startup, pgx simple protocol, domain transaction, DDL, DML, and ordered query roundtrip. |
+| SSL negotiation fallback (`sslmode=prefer` / `allow` / `disable`) | `internal/server/pgwire/server_test.go`: `TestSSLModePreferFallback` | Direct | Confirms `SSLRequest -> N` fallback works for the documented plaintext-compatible modes. |
+| Cleartext token auth when `AuthToken` is configured | `internal/server/pgwire/server_test.go`: `TestPGWirePasswordAuthenticationWithAuthToken` | Direct | Covers success and failure cases for the shared-token auth flow. |
+| Session/setup compatibility shim (`current_database()`, `current_user`, `SHOW`, `version()`, `SET`) | `internal/server/pgwire/server_test.go`: `TestCatalogStartupIntrospectionQueries`; tool-flow coverage around `psql_startup` and `dbeaver_datagrip_startup` | Partial | Strong coverage exists for common startup probes; generic `SHOW <param>` fallback and `RESET` / `DEALLOCATE` no-op paths still need direct tests. |
+| Catalog/introspection shim (`current_setting`, `pg_is_in_recovery`, `pg_backend_pid`, `pg_database`, `pg_type`, `pg_settings`, `pg_namespace`) | `internal/server/pgwire/server_test.go`: `TestCatalogStartupIntrospectionQueries`; tool-flow coverage around `psql_startup` and `dbeaver_datagrip_startup` | Partial | Mainstream introspection paths are covered. The empty-result compatibility intercepts (`pg_index`, `pg_constraint`, `pg_proc`, `pg_am`, `pg_extension`, `pg_roles`, `pg_authid`, `pg_user`) remain implementation-backed but not directly regression-tested. |
+| Extended query pipeline (`Parse` / `Bind` / `Describe` / `Execute` / `Sync`) | `internal/server/pgwire/extended_query_conformance_test.go`: `TestExtendedQueryPortalResumesAcrossExecuteCalls`, `TestExtendedQueryDescribeStatementInfersParameterCount`, `TestExtendedQueryDiscardsMessagesUntilSyncAfterError` | Direct | Covers prepared statements, portals, `ParameterDescription`, suspend/resume behavior, and `Sync` recovery semantics. |
+| CancelRequest + SQLSTATE `57014` + connection remains usable | `internal/server/pgwire/extended_query_conformance_test.go`: `TestCancelRequestCancelsSimpleQueryAndKeepsConnectionUsable` | Direct | Matches the documented best-effort cancellation claim at pgwire-managed execution boundaries. |
+| `COPY FROM STDIN` / `COPY TO STDOUT`, chunked `CopyData`, `CopyFail` rollback | `internal/server/pgwire/extended_query_conformance_test.go`: `TestCopyFromStdinInsertsRowsAndAcceptsChunkedCopyData`, `TestCopyToStdoutStreamsRows`, `TestCopyFailRollsBackInsertedRows` | Partial | Text-mode copy semantics are well covered. CSV-mode support is implemented in `internal/server/pgwire/copy.go` but lacks dedicated regression tests. |
+| `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` over pgwire | `internal/server/pgwire/server_test.go`: `TestPGWireCreateIfNotExistsRegression` | Direct | Confirms duplicate create fails without the guard and succeeds with `IF NOT EXISTS`. |
+| `pgx` client roundtrip and metadata stability | `internal/server/pgwire/history_regression_test.go`: `TestPGWireForHistoryRegressionStableMetadataAndRows` | Direct | Covers stable column names and OIDs for a pgwire `FOR HISTORY` workflow. |
+
+## Common SQL subset evidence
+
+| Public pattern | Evidence | Status | Notes |
+|---|---|---|---|
+| Parameterized predicates over pgwire (`WHERE id >= $1`) | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilitySupportedPatterns` | Direct | Exercises bind parameters in a mainstream pgx query flow. |
+| `ORDER BY ... LIMIT n` | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilitySupportedPatterns`; `internal/engine/executor/engine_test.go`: `TestTimeTravelQueryAppliesOrderByAndLimit`, `TestTimeTravelQueryAppliesMultiColumnOrderBy` | Direct | Good pgwire plus engine coverage. |
+| `LIMIT ... OFFSET ...` | Parser/planner implementation exists; no dedicated executor or pgwire regression identified in this audit | Gap | Keep documented as supported in the matrix only if a dedicated regression lands. |
+| Literal `IN (...)` | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilitySupportedPatterns` | Direct | Covered in pgwire integration flow. |
+| Subquery `IN (SELECT ...)` / `NOT IN (SELECT ...)` | `internal/engine/executor/engine_test.go`: `TestSubqueryIN`, `TestSubqueryNOTIN`, `TestSubqueryINWithAND`, `TestSubqueryINEmpty` | Direct | Engine-level evidence exists for current supported shapes. |
+| `EXISTS (SELECT ...)` / `NOT EXISTS (SELECT ...)` | `internal/engine/executor/engine_test.go`: `TestSubqueryEXISTS`, `TestSubqueryNOTEXISTS` | Direct | Engine-level evidence exists for current supported shapes. |
+| `INNER JOIN`, `LEFT JOIN`, `RIGHT JOIN`, `CROSS JOIN` | `internal/engine/executor/engine_test.go`: `TestTimeTravelQueryAppliesInnerJoin`, `TestLeftJoinWithUnmatched`, `TestRightJoinWithUnmatched`, `TestCrossJoinCardinality`, `TestLeftJoinAllMatched` | Direct | Join-family coverage exists in executor tests. |
+| Simple non-recursive CTEs | `internal/engine/executor/engine_test.go`: `TestCTEBasic`, `TestCTEWithMainWhere`, `TestCTEMultiple` | Direct | Supports the current non-recursive claim. |
+| `ILIKE` / case-insensitive matching | `internal/engine/executor/engine_test.go`: `TestILikeOperator` | Partial | Strong `ILIKE` evidence exists. A dedicated `LIKE` / `NOT ILIKE` regression would make the doc claim tighter. |
+| `INSERT ... RETURNING ...` | `internal/engine/executor/engine_test.go`: early `INSERT ... RETURNING id` coverage near the file start; `TestRowHistoryWithUUIDAndReturning`; `internal/engine/parser/parser_test.go`: `TestParseInsertReturning`, `TestParseInsertReturningMultiple`, `TestParseInsertReturningStar` | Direct | Parser and executor both cover insert-focused `RETURNING`. |
+| `INSERT ... ON CONFLICT ...` | `internal/engine/executor/engine_test.go`: `TestInsertOnConflictDoNothing`, `TestInsertOnConflictDoUpdate`, `TestInsertOnConflictExcludedColumn` | Direct | Covers current `DO NOTHING`, `DO UPDATE`, and `EXCLUDED` shapes. |
+| `TRUNCATE TABLE` | `internal/engine/executor/engine_test.go`: `TestTruncateTableBasic` | Direct | Confirms truncation clears rows while keeping the table usable. |
+| `DROP TABLE IF EXISTS` / `DROP INDEX IF EXISTS` | `internal/engine/executor/engine_test.go`: `TestDropTableIfExistsNonExistent`, `TestDropIndexIfExistsNonExistent` | Direct | Confirms deterministic no-error behavior for absent objects. |
+
+## Guardrail/error-path evidence
+
+| Public claim | Evidence | Status | Notes |
+|---|---|---|---|
+| Bare `BEGIN` is rejected with ASQL transaction guidance | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilityUnsupportedPatternGuidance` | Direct | Confirms explicit steer toward `BEGIN DOMAIN ...` / `BEGIN CROSS DOMAIN ...`. |
+| `ANY(...)` / `ARRAY[...]` assumptions are rejected with actionable guidance | `internal/server/pgwire/server_test.go`: `TestPGWireCompatibilityUnsupportedPatternGuidance` | Direct | Matches the compatibility-matrix guardrail language. |
+
+## Evidence gaps to close next
+
+The following public claims or sub-claims are still weaker than they should be
+for a release-quality compatibility pack:
+
+1. Add explicit regression coverage for `LIMIT ... OFFSET ...`.
+2. Add direct tests for session-management no-ops: `RESET`, `RESET ALL`,
+   `DEALLOCATE`, and `DEALLOCATE ALL`.
+3. Add direct tests for the generic `SHOW <param>` fallback behavior.
+4. Add direct regression coverage for the empty-result catalog intercept set
+   (`pg_index`, `pg_constraint`, `pg_proc`, `pg_am`, `pg_extension`,
+   `pg_roles`, `pg_authid`, `pg_user`).
+5. Add dedicated CSV-mode `COPY FROM STDIN` / `COPY TO STDOUT` tests.
+6. Add direct pgwire tests for the currently documented narrow binary bind
+   parameter support (`int4`, `int8`, `bool`).
+
+Until those gaps are closed, treat those sub-parts as implementation-backed but
+not yet fully evidence-hardened compatibility promises.

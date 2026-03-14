@@ -14,6 +14,9 @@ subset from broader PostgreSQL parity.
 For practical client recommendations by driver and query mode, see
 [pgwire-driver-guidance-v1.md](pgwire-driver-guidance-v1.md).
 
+For claim-to-test traceability and current evidence gaps, see
+[postgres-compatibility-evidence-v1.md](postgres-compatibility-evidence-v1.md).
+
 ## Supported (Spike v1)
 - Protocol: PostgreSQL startup, simple query flow, and the extended query pipeline (`Parse` / `Bind` / `Describe` / `Execute` / `Sync`).
 - SSL negotiation: `SSLRequest` is handled with `N` (no TLS). Clients using `sslmode=prefer` (the default for psql, pgx, JDBC, DBeaver, DataGrip, pgAdmin) fall back to plaintext successfully. `sslmode=disable` and `sslmode=allow` also work. `sslmode=require` / `verify-ca` / `verify-full` are unsupported and will fail.
