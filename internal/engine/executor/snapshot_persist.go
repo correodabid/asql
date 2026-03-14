@@ -742,6 +742,29 @@ func readAllSnapshotsFromDisk(snapshotPath string) ([]engineSnapshot, error) {
 	return decodeSnapshotsBinary(data)
 }
 
+func loadRawSnapshotFile(filePath string) ([]rawSnapshotFileEntry, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("read snapshot file: %w", err)
+	}
+
+	if isZstd(data) {
+		data, err = decompressZstd(data)
+		if err != nil {
+			return nil, fmt.Errorf("decompress snapshot file: %w", err)
+		}
+	}
+
+	entries, err := decodeSnapshotFileBinaryRaw(data)
+	if err != nil {
+		return nil, fmt.Errorf("decode snapshot file: %w", err)
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("decode snapshot file: empty snapshot file")
+	}
+	return entries, nil
+}
+
 // ---------- multi-file snapshot directory I/O ----------
 //
 // Snapshot files are stored as snap.NNNNNN inside the snapDir directory.
@@ -856,27 +879,10 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 	result := make([]engineSnapshot, 0, len(files))
 
 	for _, file := range files {
-		filePath := filepath.Join(snapDir, file.name)
-		data, err := os.ReadFile(filePath)
+		fileEntries, err := loadRawSnapshotFile(filepath.Join(snapDir, file.name))
 		if err != nil {
-			return nil, 0, fmt.Errorf("read snapshot file %s: %w", file.name, err)
+			return nil, 0, fmt.Errorf("%s: %w", file.name, err)
 		}
-
-		if isZstd(data) {
-			data, err = decompressZstd(data)
-			if err != nil {
-				return nil, 0, fmt.Errorf("decompress snapshot file %s: %w", file.name, err)
-			}
-		}
-
-		fileEntries, err := decodeSnapshotFileBinaryRaw(data)
-		if err != nil || len(fileEntries) == 0 {
-			if err != nil {
-				return nil, 0, fmt.Errorf("decode snapshot file %s: %w", file.name, err)
-			}
-			return nil, 0, fmt.Errorf("decode snapshot file %s: empty snapshot file", file.name)
-		}
-
 		for _, e := range fileEntries {
 			if e.isFull || accumulated == nil {
 				// Full snapshot (or first file seen — treat orphan delta as full).
