@@ -39,6 +39,27 @@ Repeated sample on 2026-03-14 using isolated fixtures and `go test ./internal/en
 - `BenchmarkEngineRestartReplayOnly-8`: `3,330,478–3,413,274 ns/op`, `2,303,626–2,303,673 B/op`, `15,573 allocs/op`
 - `BenchmarkEngineRestartFromPersistedSnapshot-8`: `3,910,771–3,918,000 ns/op`, `1,122,907–1,123,694 B/op`, `6,309 allocs/op`
 
+Scope note on 2026-03-14: the current `BenchmarkEngineRestartFromPersistedSnapshot` fixture calls `WaitPendingSnapshots()` before shutdown, so it benchmarks a head snapshot plus effectively `0` trailing WAL records rather than a snapshot plus a non-zero replay tail.
+
+Restart-tail/cadence spot checks on 2026-03-14 using `-benchtime=1x`:
+
+- Fixed 500-record snapshot anchor, varying replay tail (`BenchmarkEngineRestartReplayTailSweep`):
+	- `replay_only_tail_0`: `8,684,291 ns/op`
+	- `persisted_snapshot_tail_0`: `8,390,041 ns/op`
+	- `replay_only_tail_500`: `16,025,499 ns/op`
+	- `persisted_snapshot_tail_500`: `14,568,958 ns/op`
+	- `replay_only_tail_5000`: `35,608,000 ns/op`
+	- `persisted_snapshot_tail_5000`: `50,201,501 ns/op`
+	- `replay_only_tail_10000`: `94,399,250 ns/op`
+	- `persisted_snapshot_tail_10000`: `108,807,917 ns/op`
+- Adaptive-cadence anchor samples with a fixed 500-record tail (`BenchmarkEngineRestartSnapshotCadenceSweep`):
+	- `replay_only_total_1000`: `16,160,000 ns/op`
+	- `persisted_snapshot_total_1000_tail_500`: `12,671,750 ns/op`
+	- `replay_only_total_10500`: `95,817,917 ns/op`
+	- `persisted_snapshot_total_10500_tail_500`: `57,602,874 ns/op`
+	- `replay_only_total_50500`: `307,145,457 ns/op`
+	- `persisted_snapshot_total_50500_tail_500`: `289,921,333 ns/op`
+
 Focused persisted-snapshot load split on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngine(ReadPersistedSnapshotsFromDir|ReplayFromPersistedSnapshots)$' -benchmem -benchtime=100ms -count=1`:
 
 - `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `302,163–377,369 ns/op`, `353,257–633,829 B/op`, `1,724–2,277 allocs/op`
@@ -92,8 +113,11 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 - The restart/replay numbers above are useful internal evidence but are not closure-grade AB evidence yet.
 - Current restart-path interpretation:
 	- replay-to-LSN is now benchmarked with a stable repeated sample around ~`2.0 ms/op` on this fixture;
+	- the current end-to-end restart comparison is a head-snapshot best-case (`0` post-snapshot replay records), so it is good for measuring raw snapshot-load overhead but not for choosing snapshot cadence by itself;
 	- after fixing the restart benchmark harness, removing one extra deep copy during snapshot materialization, reducing dictionary-string allocation in the binary decoder, and decoding table rows directly into positional slices, the persisted-snapshot path is now much closer to replay-only on repeated runs while still allocating materially less, but it is still slower on this fixture, so snapshot-load work remains open rather than justified for closure;
 	- the repeated longer-benchtime sample now shows persisted-snapshot restart stabilizing around ~`3.91 ms/op` versus ~`3.33–3.41 ms/op` for replay-only, while cutting restart allocations to ~`1.12 MB/op` and ~`6.3k allocs/op`;
+	- new spot-check benchmarks now separate two different questions: how much a fixed snapshot anchor helps as the replay tail grows, and how the current adaptive cadence behaves when the engine skips roughly one full interval then replays only the last ~`500` records;
+	- on the current M1 spot checks, a snapshot plus ~`500` replayed records clearly beats replay-only at ~`1k` total rows (`12.7 ms` vs `16.2 ms`) and around the current medium anchor of ~`10.5k` total rows (`57.6 ms` vs `95.8 ms`), while the win narrows again by ~`50.5k` total rows (`289.9 ms` vs `307.1 ms`), so cadence is materially workload-size dependent and should be tuned with these sweeps rather than inferred from the old best-case restart fixture alone;
 	- the focused split shows the persisted restart cost is still dominated by snapshot-directory read/decompress/decode/materialization (~`302–377 µs/op`), while the in-memory `replayFromSnapshots` restore step itself is comparatively small (~`60 µs/op`);
 	- inside the snapshot-directory load, binary decode remains the largest measured in-process component, but the direct positional-row decode path pushed it down materially to roughly `79–166 µs/op`, `186–458 KB/op`, and `1.1k–1.7k allocs/op`, ahead of raw file I/O (~`87 µs/op`), zstd decompression (~`74 µs/op`), and snapshot materialization (~`49–57 µs/op`);
 	- delta-chain merge is negligible on the current fixture because the harness is effectively loading a single persisted snapshot file, so this AB slice is presently about file read + decode efficiency rather than cross-file snapshot chaining.

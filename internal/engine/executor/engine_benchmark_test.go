@@ -264,6 +264,30 @@ func BenchmarkEngineRestartFromPersistedSnapshot(b *testing.B) {
 	benchmarkEngineRestartLoad(b, true)
 }
 
+func BenchmarkEngineRestartReplayTailSweep(b *testing.B) {
+	for _, tailInserts := range []int{0, 50, 100, 500, 1000, 5000, 10000} {
+		b.Run(fmt.Sprintf("replay_only_tail_%d", tailInserts), func(b *testing.B) {
+			benchmarkEngineRestartTailLoad(b, tailInserts, false)
+		})
+		b.Run(fmt.Sprintf("persisted_snapshot_tail_%d", tailInserts), func(b *testing.B) {
+			benchmarkEngineRestartTailLoad(b, tailInserts, true)
+		})
+	}
+}
+
+func BenchmarkEngineRestartSnapshotCadenceSweep(b *testing.B) {
+	const replayTail = 500
+	for _, baseRows := range []int{defaultSnapshotInterval, snapshotIntervalMedium, snapshotIntervalHigh} {
+		totalRows := baseRows + replayTail
+		b.Run(fmt.Sprintf("replay_only_total_%d", totalRows), func(b *testing.B) {
+			benchmarkEngineRestartReplayOnlyRowsLoad(b, totalRows)
+		})
+		b.Run(fmt.Sprintf("persisted_snapshot_total_%d_tail_%d", totalRows, replayTail), func(b *testing.B) {
+			benchmarkEngineRestartCustomTailLoad(b, baseRows, replayTail, true)
+		})
+	}
+}
+
 func BenchmarkEngineReadPersistedSnapshotsFromDir(b *testing.B) {
 	_, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, true)
 
@@ -683,6 +707,26 @@ func BenchmarkEngineReadCompositeNonCoveredBTree(b *testing.B) {
 func benchmarkEngineRestartLoad(b *testing.B, withPersistedSnapshot bool) {
 	ctx := context.Background()
 	walPath, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, withPersistedSnapshot)
+	benchmarkEngineRestartFixtureLoad(b, ctx, walPath, snapDir, expectedHeadLSN)
+}
+
+func benchmarkEngineRestartTailLoad(b *testing.B, tailInserts int, withPersistedSnapshot bool) {
+	benchmarkEngineRestartCustomTailLoad(b, defaultSnapshotInterval, tailInserts, withPersistedSnapshot)
+}
+
+func benchmarkEngineRestartReplayOnlyRowsLoad(b *testing.B, totalRows int) {
+	ctx := context.Background()
+	walPath, snapDir, expectedHeadLSN := prepareRestartReplayOnlyFixture(b, totalRows)
+	benchmarkEngineRestartFixtureLoad(b, ctx, walPath, snapDir, expectedHeadLSN)
+}
+
+func benchmarkEngineRestartCustomTailLoad(b *testing.B, baseRows int, tailInserts int, withPersistedSnapshot bool) {
+	ctx := context.Background()
+	walPath, snapDir, expectedHeadLSN := prepareRestartTailBenchmarkFixtureWithBase(b, baseRows, tailInserts, withPersistedSnapshot)
+	benchmarkEngineRestartFixtureLoad(b, ctx, walPath, snapDir, expectedHeadLSN)
+}
+
+func benchmarkEngineRestartFixtureLoad(b *testing.B, ctx context.Context, walPath string, snapDir string, expectedHeadLSN uint64) {
 	runRoot := filepath.Join(b.TempDir(), "restart-runs")
 	if err := os.MkdirAll(runRoot, 0o755); err != nil {
 		b.Fatalf("mkdir restart benchmark run root: %v", err)
@@ -1075,6 +1119,136 @@ func prepareRestartBenchmarkFixture(b *testing.B, withPersistedSnapshot bool) (w
 	}
 
 	return walPath, snapDir, expectedHeadLSN
+}
+
+func prepareRestartTailBenchmarkFixture(b *testing.B, tailInserts int, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
+	return prepareRestartTailBenchmarkFixtureWithBase(b, defaultSnapshotInterval, tailInserts, withPersistedSnapshot)
+}
+
+func prepareRestartTailBenchmarkFixtureWithBase(b *testing.B, baseRows int, tailInserts int, withPersistedSnapshot bool) (walPath string, snapDir string, expectedHeadLSN uint64) {
+	b.Helper()
+
+	if baseRows <= 0 {
+		b.Fatalf("base rows must be positive: %d", baseRows)
+	}
+	if tailInserts < 0 {
+		b.Fatalf("tail inserts must be non-negative: %d", tailInserts)
+	}
+	if !withPersistedSnapshot {
+		return prepareRestartReplayOnlyFixture(b, baseRows+tailInserts)
+	}
+
+	ctx := context.Background()
+	dir := b.TempDir()
+	walPath = filepath.Join(dir, "restart-tail-bench.wal")
+	snapDir = filepath.Join(dir, "snapshots")
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		b.Fatalf("mkdir snapshot dir: %v", err)
+	}
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("new wal store: %v", err)
+	}
+
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		_ = store.Close()
+		b.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
+	for i := 1; i <= baseRows; i++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	engine.WaitPendingSnapshots()
+	expectedHeadLSN = store.LastLSN()
+	if err := store.Close(); err != nil {
+		b.Fatalf("close baseline wal store: %v", err)
+	}
+
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		b.Fatalf("read snapshot dir: %v", err)
+	}
+	hasSnapshotFile := false
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			hasSnapshotFile = true
+			break
+		}
+	}
+	if !hasSnapshotFile {
+		b.Fatal("expected persisted snapshot fixture files")
+	}
+
+	if tailInserts == 0 {
+		return walPath, snapDir, expectedHeadLSN
+	}
+
+	store, err = wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("reopen wal store for tail: %v", err)
+	}
+	engine, err = New(ctx, store, "")
+	if err != nil {
+		_ = store.Close()
+		b.Fatalf("reopen engine for tail: %v", err)
+	}
+
+	session = engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	for i := baseRows + 1; i <= baseRows+tailInserts; i++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	engine.WaitPendingSnapshots()
+	expectedHeadLSN = store.LastLSN()
+	if err := store.Close(); err != nil {
+		b.Fatalf("close tail wal store: %v", err)
+	}
+
+	return walPath, snapDir, expectedHeadLSN
+}
+
+func prepareRestartReplayOnlyFixture(b *testing.B, totalRows int) (walPath string, snapDir string, expectedHeadLSN uint64) {
+	b.Helper()
+
+	ctx := context.Background()
+	dir := b.TempDir()
+	walPath = filepath.Join(dir, "restart-replay-only-bench.wal")
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("new wal store: %v", err)
+	}
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		_ = store.Close()
+		b.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
+	for i := 1; i <= totalRows; i++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	engine.WaitPendingSnapshots()
+	expectedHeadLSN = store.LastLSN()
+	if err := store.Close(); err != nil {
+		b.Fatalf("close replay-only wal store: %v", err)
+	}
+
+	return walPath, "", expectedHeadLSN
 }
 
 func prepareIndexedReadBenchmarkFixture(b *testing.B) (*wal.SegmentedLogStore, *Engine, uint64) {
