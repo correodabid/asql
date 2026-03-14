@@ -28,6 +28,7 @@ Every release candidate should include a short evidence bundle covering:
    - replay/restart parity suite passes.
    - backup/restore parity suite passes.
    - failover continuity suite passes for the supported replicated runtime path.
+   - concrete recovery evidence should include `test/integration/restart_replay_test.go`: `TestRestartReplayRestoresState`, `test/integration/backup_restore_test.go`: `TestBackupWipeRestorePreservesQueryParity`, and `test/integration/recovery_restore_test.go`: `TestBaseBackupRestoreToLSNAndTimestamp`.
 5. Documentation sanity:
    - `README.md`, `docs/getting-started/`, `docs/reference/`, and `site/` were updated when user-visible behavior changed.
 
@@ -39,6 +40,7 @@ Every release candidate should include a short evidence bundle covering:
    - security scan lane
 2. Determinism checks green:
    - replay equivalence suite
+   - at minimum, `go test ./test/integration -run 'TestRestartReplayRestoresState|TestBackupWipeRestorePreservesQueryParity|TestBaseBackupRestoreToLSNAndTimestamp' -v`
 3. WAL compatibility tests green:
    - legacy fixture read
    - version mismatch rejection
@@ -69,6 +71,10 @@ Run on representative datasets:
 3. Restore from backup.
 4. Execute parity test:
    - `backup -> wipe -> restore -> query parity`.
+5. Prefer the repository's current executable evidence set as the default gate:
+   - `test/integration/backup_restore_test.go`: `TestBackupWipeRestorePreservesQueryParity`
+   - `test/integration/recovery_restore_test.go`: `TestBaseBackupRestoreToLSNAndTimestamp`
+   - `test/integration/recovery_restore_test.go`: `TestBaseBackupVerificationFailsOnChecksumMismatch`
 
 ## API contract checks
 
