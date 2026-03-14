@@ -216,6 +216,65 @@ func prefixRowWithNames(qualifiedNames map[string]string, prefix string, row map
 	return out
 }
 
+func baseJoinPredicate(plan planner.Plan, aliasMap map[string]string, baseTable *tableState) *ast.Predicate {
+	if !isSimplePredicate(plan.Filter) {
+		return nil
+	}
+
+	basePrefix := displayPrefix(plan.TableName, plan.TableAlias)
+	column, ok := normalizeBasePredicateColumn(plan.Filter.Column, aliasMap, plan.TableName, basePrefix, baseTable)
+	if !ok {
+		return nil
+	}
+
+	return &ast.Predicate{
+		Column:   column,
+		Operator: plan.Filter.Operator,
+		Value:    plan.Filter.Value,
+		Value2:   plan.Filter.Value2,
+		InValues: plan.Filter.InValues,
+		Subquery: plan.Filter.Subquery,
+	}
+}
+
+func normalizeBasePredicateColumn(column string, aliasMap map[string]string, baseTableName string, basePrefix string, baseTable *tableState) (string, bool) {
+	trimmed := strings.TrimSpace(strings.ToLower(column))
+	if trimmed == "" {
+		return "", false
+	}
+
+	parts := strings.SplitN(trimmed, ".", 2)
+	if len(parts) == 2 {
+		resolvedPrefix := parts[0]
+		if aliasPrefix, ok := aliasMap[parts[0]]; ok {
+			resolvedPrefix = aliasPrefix
+		}
+		if resolvedPrefix != strings.ToLower(basePrefix) {
+			return "", false
+		}
+		if !tableHasColumn(baseTable, parts[1]) {
+			return "", false
+		}
+		return parts[1], true
+	}
+
+	if !tableHasColumn(baseTable, trimmed) {
+		return "", false
+	}
+
+	for tableName, prefix := range aliasMap {
+		if tableName == baseTableName || prefix != tableName {
+			continue
+		}
+		if prefix == basePrefix {
+			continue
+		}
+		return "", false
+	}
+
+	return trimmed, true
+}
+
 // mergePipelineRows merges a left pipeline row (already prefixed) with a raw right
 // table row, prefixing the right columns with rightPrefix.
 func mergePipelineRows(left map[string]ast.Literal, rightPrefix string, right map[string]ast.Literal) map[string]ast.Literal {
@@ -285,9 +344,10 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 	// Materialise the base table with prefixed keys.
 	basePrefix := displayPrefix(plan.TableName, plan.TableAlias)
 	baseQualifiedNames := qualifiedColumnNames(basePrefix, baseTable.columns)
-	currentRows := make([]map[string]ast.Literal, 0, len(baseTable.rows))
-	for _, rowSlice := range baseTable.rows {
-		currentRows = append(currentRows, prefixRowWithNames(baseQualifiedNames, basePrefix, rowToMap(baseTable, rowSlice)))
+	baseRows := rowsForPredicate(baseTable, baseJoinPredicate(plan, aliasMap, baseTable), state, engine)
+	currentRows := make([]map[string]ast.Literal, 0, len(baseRows))
+	for _, row := range baseRows {
+		currentRows = append(currentRows, prefixRowWithNames(baseQualifiedNames, basePrefix, row))
 	}
 
 	lastStrategy := scanStrategyJoinNested
@@ -440,18 +500,18 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 								}
 
 								matched := false
-							for _, rRowSlice := range versionedRightTable.rows {
-								rRow := rowToMap(versionedRightTable, rRowSlice)
-								rVal, rOK := rRow[rightColName]
-								if !rOK {
-									continue
+								for _, rRowSlice := range versionedRightTable.rows {
+									rRow := rowToMap(versionedRightTable, rRowSlice)
+									rVal, rOK := rRow[rightColName]
+									if !rOK {
+										continue
+									}
+									if !literalEqual(leftVal, rVal) {
+										continue
+									}
+									cascadeNextRows = append(cascadeNextRows, mergePipelineRows(leftRow, rightPrefix, rRow))
+									matched = true
 								}
-								if !literalEqual(leftVal, rVal) {
-									continue
-								}
-								cascadeNextRows = append(cascadeNextRows, mergePipelineRows(leftRow, rightPrefix, rRow))
-								matched = true
-							}
 
 								if !matched && joinType == ast.JoinLeft {
 									nullRight := nullFilledRow(tableColumnNames(rightTable))
@@ -635,24 +695,24 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 						}
 
 						matched := false
-					for _, rRowSlice := range versionedRightTable.rows {
-						rRow := rowToMap(versionedRightTable, rRowSlice)
-						rVal, rOK := rRow[rightColName]
-						if !rOK {
-							continue
+						for _, rRowSlice := range versionedRightTable.rows {
+							rRow := rowToMap(versionedRightTable, rRowSlice)
+							rVal, rOK := rRow[rightColName]
+							if !rOK {
+								continue
+							}
+							if !literalEqual(leftVal, rVal) {
+								continue
+							}
+							vfkNextRows = append(vfkNextRows, mergePipelineRows(leftRow, rightPrefix, rRow))
+							matched = true
 						}
-						if !literalEqual(leftVal, rVal) {
-							continue
-						}
-						vfkNextRows = append(vfkNextRows, mergePipelineRows(leftRow, rightPrefix, rRow))
-						matched = true
-					}
 
-					if !matched && joinType == ast.JoinLeft {
-						nullRight := nullFilledRow(tableColumnNames(rightTable))
-						vfkNextRows = append(vfkNextRows, mergePipelineRows(leftRow, rightPrefix, nullRight))
+						if !matched && joinType == ast.JoinLeft {
+							nullRight := nullFilledRow(tableColumnNames(rightTable))
+							vfkNextRows = append(vfkNextRows, mergePipelineRows(leftRow, rightPrefix, nullRight))
+						}
 					}
-				}
 
 					currentRows = vfkNextRows
 					lastStrategy = scanStrategyJoinNested
@@ -796,4 +856,3 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 
 	return result, lastStrategy, nil
 }
-
