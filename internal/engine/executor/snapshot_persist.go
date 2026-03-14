@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -785,6 +786,11 @@ func loadRawSnapshotEntries(filePath string) ([]rawSnapshotFileEntry, error) {
 
 const snapFilePrefix = "snap."
 
+type snapshotDirFile struct {
+	seq  uint64
+	name string
+}
+
 // snapFilePath returns the path for a snapshot file with the given sequence number.
 func snapFilePath(snapDir string, seq uint64) string {
 	return filepath.Join(snapDir, fmt.Sprintf("%s%06d", snapFilePrefix, seq))
@@ -854,11 +860,7 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 		return nil, 0, fmt.Errorf("read snapshot dir: %w", err)
 	}
 
-	type seqFile struct {
-		seq  uint64
-		name string
-	}
-	var files []seqFile
+	var files []snapshotDirFile
 	var maxSeq uint64
 
 	for _, entry := range entries {
@@ -874,7 +876,7 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 		if seq > maxSeq {
 			maxSeq = seq
 		}
-		files = append(files, seqFile{seq: seq, name: name})
+		files = append(files, snapshotDirFile{seq: seq, name: name})
 	}
 
 	if len(files) == 0 {
@@ -886,14 +888,16 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 		return files[i].seq < files[j].seq
 	})
 
+	decodedFiles, err := loadRawSnapshotEntriesFromDir(snapDir, files)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	var accumulated map[string]*persistedDomain
 	result := make([]engineSnapshot, 0, len(files))
 
-	for _, file := range files {
-		fileEntries, err := loadRawSnapshotEntries(filepath.Join(snapDir, file.name))
-		if err != nil {
-			return nil, 0, fmt.Errorf("%s: %w", file.name, err)
-		}
+	for fileIdx := range files {
+		fileEntries := decodedFiles[fileIdx]
 		for _, entry := range fileEntries {
 			if entry.isFull || accumulated == nil {
 				// Full snapshot (or first file seen — treat orphan delta as full).
@@ -928,6 +932,64 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 
 	return result, maxSeq, nil
 
+}
+
+func loadRawSnapshotEntriesFromDir(snapDir string, files []snapshotDirFile) ([][]rawSnapshotFileEntry, error) {
+	if len(files) == 0 {
+		return nil, nil
+	}
+	if len(files) == 1 {
+		entries, err := loadRawSnapshotEntries(filepath.Join(snapDir, files[0].name))
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", files[0].name, err)
+		}
+		return [][]rawSnapshotFileEntry{entries}, nil
+	}
+
+	workerCount := runtime.GOMAXPROCS(0)
+	if workerCount > len(files) {
+		workerCount = len(files)
+	}
+	if workerCount > 4 {
+		workerCount = 4
+	}
+	if workerCount < 1 {
+		workerCount = 1
+	}
+
+	results := make([][]rawSnapshotFileEntry, len(files))
+	jobs := make(chan int, len(files))
+	var wg sync.WaitGroup
+	var errOnce sync.Once
+	var firstErr error
+
+	for worker := 0; worker < workerCount; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for idx := range jobs {
+				entries, err := loadRawSnapshotEntries(filepath.Join(snapDir, files[idx].name))
+				if err != nil {
+					errOnce.Do(func() {
+						firstErr = fmt.Errorf("%s: %w", files[idx].name, err)
+					})
+					continue
+				}
+				results[idx] = entries
+			}
+		}()
+	}
+
+	for idx := range files {
+		jobs <- idx
+	}
+	close(jobs)
+	wg.Wait()
+
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	return results, nil
 }
 
 // cleanupOldSnapshotFiles removes the oldest snapshot files in the directory,
