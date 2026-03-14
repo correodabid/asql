@@ -583,6 +583,103 @@ func TestCopyToStdoutStreamsRows(t *testing.T) {
 	}
 }
 
+func TestCopyFromStdinCSVInsertsQuotedValues(t *testing.T) {
+	addr, cleanup := startConformanceServer(t)
+	defer cleanup()
+
+	client := newRawProtoClient(t, addr)
+	defer client.close()
+
+	client.simpleQuery("BEGIN DOMAIN accounts")
+	client.simpleQuery("CREATE TABLE users (id INT, email TEXT, note TEXT)")
+	client.simpleQuery("COMMIT")
+
+	client.send(&pgproto3.Query{String: "COPY accounts.users (id, email, note) FROM STDIN WITH CSV"})
+	if _, ok := client.receive().(*pgproto3.CopyInResponse); !ok {
+		t.Fatal("expected CopyInResponse")
+	}
+
+	client.send(
+		&pgproto3.CopyData{Data: []byte("1,one@asql.dev,plain note\n")},
+		&pgproto3.CopyData{Data: []byte("2,two@asql.dev,\"quoted, value\"\n")},
+		&pgproto3.CopyData{Data: []byte("3,three@asql.dev,\"he said \"\"hi\"\"\"\n")},
+		&pgproto3.CopyDone{},
+	)
+	messages := client.receiveUntilReady()
+
+	var commandTag string
+	for _, raw := range messages {
+		if msg, ok := raw.(*pgproto3.CommandComplete); ok {
+			commandTag = string(msg.CommandTag)
+		}
+	}
+	if commandTag != "COPY 3" {
+		t.Fatalf("unexpected COPY command tag: got %q want %q", commandTag, "COPY 3")
+	}
+
+	rows := client.simpleQuery("SELECT id, email, note FROM accounts.users ORDER BY id ASC")
+	var got [][]string
+	for _, raw := range rows {
+		if msg, ok := raw.(*pgproto3.DataRow); ok {
+			got = append(got, []string{string(msg.Values[0]), string(msg.Values[1]), string(msg.Values[2])})
+		}
+	}
+	if !reflect.DeepEqual(got, [][]string{
+		{"1", "one@asql.dev", "plain note"},
+		{"2", "two@asql.dev", "quoted, value"},
+		{"3", "three@asql.dev", `he said "hi"`},
+	}) {
+		t.Fatalf("unexpected rows after CSV COPY FROM: got %v", got)
+	}
+}
+
+func TestCopyToStdoutCSVQuotesValues(t *testing.T) {
+	addr, cleanup := startConformanceServer(t)
+	defer cleanup()
+
+	client := newRawProtoClient(t, addr)
+	defer client.close()
+
+	client.simpleQuery("BEGIN DOMAIN accounts")
+	client.simpleQuery("CREATE TABLE users (id INT, email TEXT, note TEXT)")
+	client.simpleQuery("INSERT INTO users (id, email, note) VALUES (1, 'one@asql.dev', 'plain note')")
+	client.simpleQuery("INSERT INTO users (id, email, note) VALUES (2, 'two@asql.dev', 'quoted, value')")
+	client.simpleQuery("INSERT INTO users (id, email, note) VALUES (3, 'three@asql.dev', 'he said \"hi\"')")
+	client.simpleQuery("COMMIT")
+
+	client.send(&pgproto3.Query{String: "COPY accounts.users (id, email, note) TO STDOUT WITH CSV"})
+	if _, ok := client.receive().(*pgproto3.CopyOutResponse); !ok {
+		t.Fatal("expected CopyOutResponse")
+	}
+	messages := client.receiveUntilReady()
+
+	var (
+		copyRows   []string
+		commandTag string
+	)
+	for _, raw := range messages {
+		switch msg := raw.(type) {
+		case *pgproto3.CopyData:
+			copyRows = append(copyRows, string(msg.Data))
+		case *pgproto3.CommandComplete:
+			commandTag = string(msg.CommandTag)
+		}
+	}
+	sort.Strings(copyRows)
+	wantRows := []string{
+		"1,one@asql.dev,plain note\n",
+		"2,two@asql.dev,\"quoted, value\"\n",
+		"3,three@asql.dev,\"he said \"\"hi\"\"\"\n",
+	}
+	sort.Strings(wantRows)
+	if !reflect.DeepEqual(copyRows, wantRows) {
+		t.Fatalf("unexpected CSV COPY TO rows: got %v want %v", copyRows, wantRows)
+	}
+	if commandTag != "COPY 3" {
+		t.Fatalf("unexpected CSV COPY TO command tag: got %q want %q", commandTag, "COPY 3")
+	}
+}
+
 func TestCopyFailRollsBackInsertedRows(t *testing.T) {
 	addr, cleanup := startConformanceServer(t)
 	defer cleanup()

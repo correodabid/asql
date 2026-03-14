@@ -211,7 +211,7 @@ P0 — reconcile real behavior vs documented surface:
 
 P1 — close documentation and regression gaps first:
 - [ ] Add regression tests for already-implemented compatibility behaviors that are presently relied on implicitly but not claimed explicitly.
-- [ ] Close the remaining evidence gaps called out in `docs/reference/postgres-compatibility-evidence-v1.md` (CSV `COPY`).
+- [x] Close the remaining evidence gaps called out in `docs/reference/postgres-compatibility-evidence-v1.md` (CSV `COPY`).
 - [ ] Publish a concise “mainstream Postgres client/tool flows that work today” guide for `psql`, `pgx`, and GUI tools, including required caveats.
 - [ ] Document current error/SQLSTATE behavior and identify where ASQL already matches PostgreSQL closely enough to claim compatibility.
 - [ ] Document the currently supported SQL subset already present in parser/planner/executor but not clearly surfaced in compatibility docs.

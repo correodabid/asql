@@ -31,7 +31,7 @@ Status meanings:
 | Extended query pipeline (`Parse` / `Bind` / `Describe` / `Execute` / `Sync`) | `internal/server/pgwire/extended_query_conformance_test.go`: `TestExtendedQueryPortalResumesAcrossExecuteCalls`, `TestExtendedQueryDescribeStatementInfersParameterCount`, `TestExtendedQueryDiscardsMessagesUntilSyncAfterError` | Direct | Covers prepared statements, portals, `ParameterDescription`, suspend/resume behavior, and `Sync` recovery semantics. |
 | Narrow binary bind parameter decoding (`int4`, `int8`, `bool`) | `internal/server/pgwire/extended_query_conformance_test.go`: `TestExtendedQueryBinaryBindSupportsInt4Int8AndBool` | Direct | Covers the currently documented binary bind subset, including signed `int4`, large `int8`, and boolean parameters. |
 | CancelRequest + SQLSTATE `57014` + connection remains usable | `internal/server/pgwire/extended_query_conformance_test.go`: `TestCancelRequestCancelsSimpleQueryAndKeepsConnectionUsable` | Direct | Matches the documented best-effort cancellation claim at pgwire-managed execution boundaries. |
-| `COPY FROM STDIN` / `COPY TO STDOUT`, chunked `CopyData`, `CopyFail` rollback | `internal/server/pgwire/extended_query_conformance_test.go`: `TestCopyFromStdinInsertsRowsAndAcceptsChunkedCopyData`, `TestCopyToStdoutStreamsRows`, `TestCopyFailRollsBackInsertedRows` | Partial | Text-mode copy semantics are well covered. CSV-mode support is implemented in `internal/server/pgwire/copy.go` but lacks dedicated regression tests. |
+| `COPY FROM STDIN` / `COPY TO STDOUT`, chunked `CopyData`, `CopyFail` rollback | `internal/server/pgwire/extended_query_conformance_test.go`: `TestCopyFromStdinInsertsRowsAndAcceptsChunkedCopyData`, `TestCopyToStdoutStreamsRows`, `TestCopyFromStdinCSVInsertsQuotedValues`, `TestCopyToStdoutCSVQuotesValues`, `TestCopyFailRollsBackInsertedRows` | Direct | Covers text and CSV copy flows, including quoted CSV fields, chunked input, streaming output, and rollback on `CopyFail`. |
 | `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` over pgwire | `internal/server/pgwire/server_test.go`: `TestPGWireCreateIfNotExistsRegression` | Direct | Confirms duplicate create fails without the guard and succeeds with `IF NOT EXISTS`. |
 | `pgx` client roundtrip and metadata stability | `internal/server/pgwire/history_regression_test.go`: `TestPGWireForHistoryRegressionStableMetadataAndRows` | Direct | Covers stable column names and OIDs for a pgwire `FOR HISTORY` workflow. |
 
@@ -62,10 +62,8 @@ Status meanings:
 
 ## Evidence gaps to close next
 
-The following public claims or sub-claims are still weaker than they should be
-for a release-quality compatibility pack:
+There are no open claim-to-test evidence gaps in the current v1 compatibility
+pack.
 
-1. Add dedicated CSV-mode `COPY FROM STDIN` / `COPY TO STDOUT` tests.
-
-Until those gaps are closed, treat those sub-parts as implementation-backed but
-not yet fully evidence-hardened compatibility promises.
+Future public compatibility claims should only be added when docs, regression
+tests, and evidence-map entries land together.
