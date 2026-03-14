@@ -29,7 +29,8 @@ The recommendation below is about adoption risk, not only protocol capability.
 | CLI/smoke tests/scripts | Recommended | Use `asqlctl shell` or `pgx` with explicit transaction primitives. |
 | `pgx` simple protocol | Lowest-risk path | Keeps behavior closest to literal SQL text sent by the application. |
 | `pgx` extended query protocol | Supported, but validate intentionally | Safe within the documented subset; still not the first path to debug onboarding surprises. |
-| PostgreSQL GUI tools (`psql`, DBeaver, DataGrip, pgAdmin`) | Supported for documented workflows | Good for interactive work, but not a reason to assume full PostgreSQL parity. |
+| PostgreSQL GUI tools (`psql`, DBeaver, DataGrip`) | Supported for documented workflows | Good for interactive work, but not a reason to assume full PostgreSQL parity. |
+| `pgAdmin` | Unvalidated / caution | Likely to benefit from the same startup shim and `sslmode=prefer` fallback behavior, but it is not currently part of the documented regression-covered tool set. |
 | ORMs or query builders that emit broad PostgreSQL syntax | Known-risk path | They often assume broader PostgreSQL semantics than ASQL promises. |
 | Drivers or tools that require TLS-only startup (`sslmode=require`) | Unsupported today | ASQL currently responds to `SSLRequest` with `N`. |
 
@@ -43,6 +44,9 @@ and metadata flows already exercised in regression tests:
 - `pgx` connection setup plus end-to-end CRUD/query flows,
 - PostgreSQL `CancelRequest` handling for supported pgwire execution boundaries,
 - narrow `COPY FROM STDIN` / `COPY TO STDOUT` flows covered by conformance-style tests.
+
+`pgAdmin` should still be treated as a separate validation target rather than
+as a regression-covered mainstream flow.
 
 For interactive tooling, this usually means:
 
@@ -144,4 +148,5 @@ Every ASQL-integrating app should document at least:
 - whether `simple_protocol` is required or only recommended,
 - which driver(s) are blessed,
 - which GUI/CLI tools are known-good,
+- which tools are only expected to work but are not yet regression-covered,
 - which higher-level abstractions are intentionally unsupported or unvalidated.
