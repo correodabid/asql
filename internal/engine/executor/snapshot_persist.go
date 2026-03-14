@@ -742,7 +742,18 @@ func readAllSnapshotsFromDisk(snapshotPath string) ([]engineSnapshot, error) {
 	return decodeSnapshotsBinary(data)
 }
 
-func loadRawSnapshotFile(filePath string) ([]rawSnapshotFileEntry, error) {
+func loadRawSnapshotFile(filePath string) (rawSnapshotFileEntry, error) {
+	entries, err := loadRawSnapshotEntries(filePath)
+	if err != nil {
+		return rawSnapshotFileEntry{}, err
+	}
+	if len(entries) != 1 {
+		return rawSnapshotFileEntry{}, fmt.Errorf("decode snapshot file: expected 1 snapshot entry, got %d", len(entries))
+	}
+	return entries[0], nil
+}
+
+func loadRawSnapshotEntries(filePath string) ([]rawSnapshotFileEntry, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("read snapshot file: %w", err)
@@ -879,27 +890,27 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 	result := make([]engineSnapshot, 0, len(files))
 
 	for _, file := range files {
-		fileEntries, err := loadRawSnapshotFile(filepath.Join(snapDir, file.name))
+		fileEntries, err := loadRawSnapshotEntries(filepath.Join(snapDir, file.name))
 		if err != nil {
 			return nil, 0, fmt.Errorf("%s: %w", file.name, err)
 		}
-		for _, e := range fileEntries {
-			if e.isFull || accumulated == nil {
+		for _, entry := range fileEntries {
+			if entry.isFull || accumulated == nil {
 				// Full snapshot (or first file seen — treat orphan delta as full).
-				if !e.isFull {
+				if !entry.isFull {
 					slog.Warn("snapshot: delta file has no preceding full snapshot, treating as full",
-						"lsn", e.lsn)
+						"lsn", entry.lsn)
 				}
-				accumulated = e.domains
+				accumulated = entry.domains
 			} else {
 				// Delta: overlay changed tables onto accumulated state.
-				accumulated = applyDeltaBinary(accumulated, e.domains, e.catalog)
+				accumulated = applyDeltaBinary(accumulated, entry.domains, entry.catalog)
 			}
 
 			full := persistedSnapshot{
-				LSN:       e.lsn,
-				LogicalTS: e.logicalTS,
-				Catalog:   e.catalog,
+				LSN:       entry.lsn,
+				LogicalTS: entry.logicalTS,
+				Catalog:   entry.catalog,
 				// `marshalableToSnapshot` below materializes a fresh engine state,
 				// so duplicating the accumulated persisted-domain tree first only
 				// adds restart-time copy cost without providing extra isolation.

@@ -702,6 +702,7 @@ func (r *binReader) readTable() (string, *persistedTable) {
 		}
 		pt.decodedRowColumns = rowCols
 		pt.decodedRows = make([][]ast.Literal, numRows)
+		rowValues := make([]ast.Literal, numRows*numRowCols)
 		bitmapLen := (numRowCols + 7) / 8
 		for i := 0; i < numRows; i++ {
 			if !r.need(bitmapLen) {
@@ -709,7 +710,7 @@ func (r *binReader) readTable() (string, *persistedTable) {
 			}
 			bitmap := r.data[r.off : r.off+bitmapLen]
 			r.off += bitmapLen
-			row := make([]ast.Literal, numRowCols)
+			row := rowValues[i*numRowCols : (i+1)*numRowCols]
 			if allBitmapBitsSet(bitmap, numRowCols) {
 				for ci := range rowCols {
 					row[ci] = r.literal()
