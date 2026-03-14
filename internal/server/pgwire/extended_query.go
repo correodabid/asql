@@ -609,7 +609,7 @@ func (server *Server) handleBind(backend *pgproto3.Backend, state *connState, ms
 			isSelect = true
 		}
 	}
-	// INSERT/UPDATE/DELETE ... RETURNING also produces rows.
+	// The currently supported INSERT ... RETURNING path also produces rows.
 	if !isSelect {
 		if cols := server.returningResultColumns(sql); len(cols) > 0 {
 			isSelect = true
@@ -676,7 +676,7 @@ func (server *Server) handleDescribe(backend *pgproto3.Backend, state *connState
 		}
 		backend.Send(&pgproto3.ParameterDescription{ParameterOIDs: stmt.paramOIDs})
 		fields := server.describeFields(stmt.sql)
-		// INSERT/UPDATE/DELETE ... RETURNING produces rows that describeFields
+		// INSERT ... RETURNING produces rows that describeFields
 		// cannot detect (it only handles SELECT/WITH).  Fall back to the
 		// RETURNING column parser so pgx receives a RowDescription instead of
 		// NoData — without this, pgx treats the statement as non-row-returning
@@ -918,7 +918,7 @@ func (server *Server) extendedFollowerRedirect(backend *pgproto3.Backend, state 
 // ── Column description helper ────────────────────────────────────────────────
 
 // returningColumns parses the column names after a RETURNING keyword in an
-// INSERT/UPDATE/DELETE statement.  Returns nil if no RETURNING clause found.
+// insert-focused statement. Returns nil if no RETURNING clause is found.
 func returningColumns(sql string) []string {
 	upper := strings.ToUpper(sql)
 	idx := strings.LastIndex(upper, " RETURNING ")

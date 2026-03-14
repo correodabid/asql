@@ -1126,9 +1126,10 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 		return executor.Result{}, nil, err
 	}
 
-	// For INSERT/UPDATE/DELETE ... RETURNING, the executor populates result.Rows.
-	// Derive column names from the parsed statement's ReturningColumns list so
-	// that the pgwire handler sends a proper RowDescription + DataRow sequence.
+	// For the currently supported INSERT ... RETURNING path, the executor
+	// populates result.Rows. Derive column names from the parsed statement's
+	// ReturningColumns list so that the pgwire handler sends a proper
+	// RowDescription + DataRow sequence.
 	if len(result.Rows) > 0 {
 		var cols []string
 		if parseErr == nil {
