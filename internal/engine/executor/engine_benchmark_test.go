@@ -442,6 +442,47 @@ func BenchmarkEngineMergePersistedSnapshotDeltas(b *testing.B) {
 	b.StopTimer()
 }
 
+func BenchmarkEngineDecodePersistedSnapshotFilesIndexed(b *testing.B) {
+	compressedFiles, _ := loadIndexedPersistedSnapshotFixtureFiles(b)
+	decompressedFiles := decompressSnapshotFixtureFiles(b, compressedFiles)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		for _, data := range decompressedFiles {
+			entries, err := decodeSnapshotFileBinaryRaw(data)
+			if err != nil {
+				b.Fatalf("decode indexed persisted snapshot file: %v", err)
+			}
+			if len(entries) == 0 {
+				b.Fatal("expected decoded indexed snapshot entries")
+			}
+		}
+	}
+	b.StopTimer()
+}
+
+func BenchmarkEngineReadPersistedSnapshotsFromDirIndexed(b *testing.B) {
+	_, snapDir, expectedHeadLSN := prepareIndexedSnapshotBenchmarkFixture(b)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		snapshots, maxSeq, err := readAllSnapshotsFromDir(snapDir)
+		if err != nil {
+			b.Fatalf("read indexed persisted snapshots from dir: %v", err)
+		}
+		if maxSeq == 0 {
+			b.Fatal("expected indexed persisted snapshot sequence")
+		}
+		if len(snapshots) == 0 {
+			b.Fatal("expected indexed persisted snapshots")
+		}
+		if snapshots[len(snapshots)-1].lsn != expectedHeadLSN {
+			b.Fatalf("unexpected indexed latest snapshot lsn: got %d want %d", snapshots[len(snapshots)-1].lsn, expectedHeadLSN)
+		}
+	}
+	b.StopTimer()
+}
+
 func BenchmarkEngineReadIndexedRangeBTree(b *testing.B) {
 	ctx := context.Background()
 	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)
@@ -688,6 +729,33 @@ func loadPersistedSnapshotFixtureFiles(b *testing.B) ([][]byte, uint64) {
 
 	snapDir, names := persistedSnapshotFixtureDir(b)
 	expectedHeadLSN := persistedSnapshotFixtureHeadLSN(b, snapDir)
+	return loadSnapshotFixtureFilesFromDir(b, snapDir, names), expectedHeadLSN
+}
+
+func loadIndexedPersistedSnapshotFixtureFiles(b *testing.B) ([][]byte, uint64) {
+	b.Helper()
+
+	_, snapDir, expectedHeadLSN := prepareIndexedSnapshotBenchmarkFixture(b)
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		b.Fatalf("read indexed persisted snapshot fixture dir: %v", err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), snapFilePrefix) {
+			continue
+		}
+		names = append(names, entry.Name())
+	}
+	if len(names) == 0 {
+		b.Fatal("expected indexed persisted snapshot fixture files")
+	}
+	sort.Strings(names)
+	return loadSnapshotFixtureFilesFromDir(b, snapDir, names), expectedHeadLSN
+}
+
+func loadSnapshotFixtureFilesFromDir(b *testing.B, snapDir string, names []string) [][]byte {
+	b.Helper()
 
 	files := make([][]byte, 0, len(names))
 	for _, name := range names {
@@ -697,8 +765,7 @@ func loadPersistedSnapshotFixtureFiles(b *testing.B) ([][]byte, uint64) {
 		}
 		files = append(files, data)
 	}
-
-	return files, expectedHeadLSN
+	return files
 }
 
 func persistedSnapshotFixtureDir(b *testing.B) (string, []string) {
@@ -735,6 +802,48 @@ func persistedSnapshotFixtureHeadLSN(b *testing.B, snapDir string) uint64 {
 	defer store.Close()
 
 	return store.LastLSN()
+}
+
+func prepareIndexedSnapshotBenchmarkFixture(b *testing.B) (walPath string, snapDir string, expectedHeadLSN uint64) {
+	b.Helper()
+
+	ctx := context.Background()
+	dir := b.TempDir()
+	walPath = filepath.Join(dir, "indexed-restart-bench.wal")
+	snapDir = filepath.Join(dir, "snapshots")
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		b.Fatalf("mkdir indexed snapshot dir: %v", err)
+	}
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("new indexed wal store: %v", err)
+	}
+
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		_ = store.Close()
+		b.Fatalf("new indexed engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT, email TEXT)")
+	for i := 1; i <= defaultSnapshotInterval+50; i++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload, email) VALUES (%d, 'payload-%d', 'user-%04d@asql.dev')", i, i, i))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_email_btree ON entries (email) USING BTREE")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_payload_hash ON entries (payload) USING HASH")
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	engine.WaitPendingSnapshots()
+	expectedHeadLSN = store.LastLSN()
+
+	if err := store.Close(); err != nil {
+		b.Fatalf("close indexed seeded wal store: %v", err)
+	}
+
+	return walPath, snapDir, expectedHeadLSN
 }
 
 func decompressSnapshotFixtureFiles(b *testing.B, compressedFiles [][]byte) [][]byte {
