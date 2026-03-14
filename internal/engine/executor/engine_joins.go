@@ -286,6 +286,51 @@ func rankBaseJoinPredicate(baseTable *tableState, predicate *ast.Predicate) int 
 	}
 }
 
+func rootJoinPredicate(plan planner.Plan, aliasMap map[string]string, baseTable *tableState) *ast.Predicate {
+	basePrefix := displayPrefix(plan.TableName, plan.TableAlias)
+	return conjunctiveRootJoinPredicate(plan.Filter, aliasMap, plan.TableName, basePrefix, baseTable)
+}
+
+func conjunctiveRootJoinPredicate(predicate *ast.Predicate, aliasMap map[string]string, baseTableName string, basePrefix string, baseTable *tableState) *ast.Predicate {
+	if predicate == nil {
+		return nil
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
+	case "AND":
+		left := conjunctiveRootJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
+		right := conjunctiveRootJoinPredicate(predicate.Right, aliasMap, baseTableName, basePrefix, baseTable)
+		switch {
+		case left == nil:
+			return right
+		case right == nil:
+			return left
+		default:
+			return &ast.Predicate{Operator: "AND", Left: left, Right: right}
+		}
+	case "OR", "NOT":
+		return nil
+	}
+
+	if !isSimplePredicate(predicate) {
+		return nil
+	}
+
+	column, ok := normalizeBasePredicateColumn(predicate.Column, aliasMap, baseTableName, basePrefix, baseTable)
+	if !ok {
+		return nil
+	}
+
+	return &ast.Predicate{
+		Column:   column,
+		Operator: predicate.Operator,
+		Value:    predicate.Value,
+		Value2:   predicate.Value2,
+		InValues: predicate.InValues,
+		Subquery: predicate.Subquery,
+	}
+}
+
 func normalizeBasePredicateColumn(column string, aliasMap map[string]string, baseTableName string, basePrefix string, baseTable *tableState) (string, bool) {
 	trimmed := strings.TrimSpace(strings.ToLower(column))
 	if trimmed == "" {
@@ -394,8 +439,12 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 	basePrefix := displayPrefix(plan.TableName, plan.TableAlias)
 	baseQualifiedNames := qualifiedColumnNames(basePrefix, baseTable.columns)
 	baseRows := rowsForPredicate(baseTable, baseJoinPredicate(plan, aliasMap, baseTable), state, engine)
+	rootPredicate := rootJoinPredicate(plan, aliasMap, baseTable)
 	currentRows := make([]map[string]ast.Literal, 0, len(baseRows))
 	for _, row := range baseRows {
+		if rootPredicate != nil && !matchPredicate(row, rootPredicate, state, engine) {
+			continue
+		}
 		currentRows = append(currentRows, prefixRowWithNames(baseQualifiedNames, basePrefix, row))
 	}
 
