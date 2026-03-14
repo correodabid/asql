@@ -73,6 +73,8 @@ type persistedTable struct {
 	Columns              []string
 	ColumnDefinitions    map[string]ast.ColumnDefinition
 	Rows                 []map[string]ast.Literal
+	decodedRowColumns    []string
+	decodedRows          [][]ast.Literal
 	Indexes              map[string]*persistedIndex
 	IndexedColumns       map[string]string
 	IndexedColumnSets    map[string]string
@@ -395,10 +397,34 @@ func marshalableToSnapshot(ps persistedSnapshot) engineSnapshot {
 }
 
 func marshalableToTableState(pt *persistedTable) *tableState {
-	// Convert persisted map rows to positional slices.
-	rows := make([][]ast.Literal, len(pt.Rows))
-	for i, rowMap := range pt.Rows {
-		rows[i] = rowFromMap(pt.Columns, rowMap)
+	var rows [][]ast.Literal
+	if len(pt.decodedRows) > 0 {
+		rows = make([][]ast.Literal, len(pt.decodedRows))
+		if sameStringSlice(pt.Columns, pt.decodedRowColumns) {
+			copy(rows, pt.decodedRows)
+		} else {
+			colIndex := make(map[string]int, len(pt.decodedRowColumns))
+			for i, col := range pt.decodedRowColumns {
+				colIndex[col] = i
+			}
+			for i, decodedRow := range pt.decodedRows {
+				row := make([]ast.Literal, len(pt.Columns))
+				for colIdx, col := range pt.Columns {
+					if srcIdx, ok := colIndex[col]; ok && srcIdx < len(decodedRow) {
+						row[colIdx] = decodedRow[srcIdx]
+					} else {
+						row[colIdx] = ast.Literal{Kind: ast.LiteralNull}
+					}
+				}
+				rows[i] = row
+			}
+		}
+	} else {
+		// Convert persisted map rows to positional slices.
+		rows = make([][]ast.Literal, len(pt.Rows))
+		for i, rowMap := range pt.Rows {
+			rows[i] = rowFromMap(pt.Columns, rowMap)
+		}
 	}
 
 	ts := &tableState{
@@ -529,6 +555,18 @@ func marshalableToTableState(pt *persistedTable) *tableState {
 	}
 
 	return ts
+}
+
+func sameStringSlice(a []string, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // ---------- disk I/O ----------

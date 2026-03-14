@@ -41,14 +41,14 @@ Current clean spot-check on 2026-03-14 using isolated fixtures and `go test ./in
 
 Focused persisted-snapshot load split on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngine(ReadPersistedSnapshotsFromDir|ReplayFromPersistedSnapshots)$' -benchmem -benchtime=100ms -count=1`:
 
-- `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `377,369 ns/op`, `633,829 B/op`, `2,277 allocs/op`
+- `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `302,163–377,369 ns/op`, `353,257–633,829 B/op`, `1,724–2,277 allocs/op`
 - `BenchmarkEngineReplayFromPersistedSnapshots-8`: `59,530 ns/op`, `167,720 B/op`, `1,132 allocs/op`
 
 Finer-grained persisted-snapshot microbenchmarks on 2026-03-14:
 
 - `BenchmarkEngineDecompressPersistedSnapshotFiles-8`: `74,280 ns/op`, `32,784 B/op`, `1 allocs/op`
-- `BenchmarkEngineDecodePersistedSnapshotFiles-8`: `140,427–166,199 ns/op`, `458,386–458,408 B/op`, `1,678 allocs/op`
-- `BenchmarkEngineMaterializePersistedSnapshots-8`: `49,473 ns/op`, `113,050 B/op`, `573 allocs/op`
+- `BenchmarkEngineDecodePersistedSnapshotFiles-8`: `79,390–166,199 ns/op`, `185,552–458,408 B/op`, `1,128–1,678 allocs/op`
+- `BenchmarkEngineMaterializePersistedSnapshots-8`: `49,473–57,281 ns/op`, `113,050–113,054 B/op`, `573 allocs/op`
 
 Replay-throughput repeated sample on 2026-03-14:
 
@@ -86,10 +86,10 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 - The restart/replay numbers above are useful internal evidence but are not closure-grade AB evidence yet.
 - Current restart-path interpretation:
 	- replay-to-LSN is now benchmarked with a stable repeated sample around ~`2.0 ms/op` on this fixture;
-	- after fixing the restart benchmark harness, removing one extra deep copy during snapshot materialization, and reducing dictionary-string allocation in the binary decoder, the persisted-snapshot path now allocates materially less than replay-only, but it is still not yet a clear time win on this fixture, so snapshot-load work remains open rather than justified for closure;
+	- after fixing the restart benchmark harness, removing one extra deep copy during snapshot materialization, reducing dictionary-string allocation in the binary decoder, and decoding table rows directly into positional slices, the persisted-snapshot path now allocates materially less than replay-only, but it is still not yet a clear time win on this fixture, so snapshot-load work remains open rather than justified for closure;
 	- the focused split shows the persisted restart cost is still dominated by snapshot-directory read/decompress/decode/materialization (~`377 µs/op`), while the in-memory `replayFromSnapshots` restore step itself is comparatively small (~`60 µs/op`);
-	- inside the snapshot-directory load, binary decode remains the largest measured in-process component (~`140–166 µs/op`, ~`458 KB/op`, ~`1.7k allocs/op`), ahead of zstd decompression (~`74 µs/op`) and snapshot materialization (~`49 µs/op`), with the remaining gap attributable largely to file reads and surrounding glue work;
-	- a follow-up row-map sizing tweak improved the isolated decode benchmark, but it did not yet produce a clear end-to-end persisted-restart win on this fixture.
+	- inside the snapshot-directory load, binary decode remains the largest measured in-process component, but the direct positional-row decode path pushed it down materially to roughly `79–166 µs/op`, `186–458 KB/op`, and `1.1k–1.7k allocs/op`, ahead of zstd decompression (~`74 µs/op`) and snapshot materialization (~`49–57 µs/op`), with the remaining gap attributable largely to file reads and surrounding glue work;
+	- the positional-row decode change clearly improved isolated decode and snapshot-directory load benchmarks, but the end-to-end persisted-restart timing is still noisy on the current short benchtime harness and needs repeated confirmation before any closure claim.
 - Current read-path interpretation:
 	- on the simple covered ordered-read shape, `btree-index-only` is about $10\times$ faster than `btree-order` and materially reduces allocations;
 	- adding `OFFSET` to the covered ordered-read shape still keeps `btree-index-only` comfortably fast (about $1.7\times$ slower than the zero-offset variant, but still far below row-fetch ordered reads);

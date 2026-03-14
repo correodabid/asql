@@ -674,7 +674,6 @@ func (r *binReader) readTable() (string, *persistedTable) {
 
 	// Rows (column-indexed)
 	numRows := int(r.u32())
-	pt.Rows = make([]map[string]ast.Literal, numRows)
 	if numRows > 0 {
 		// Read column header.
 		numRowCols := int(r.u16())
@@ -682,6 +681,8 @@ func (r *binReader) readTable() (string, *persistedTable) {
 		for i := 0; i < numRowCols; i++ {
 			rowCols[i] = r.str()
 		}
+		pt.decodedRowColumns = rowCols
+		pt.decodedRows = make([][]ast.Literal, numRows)
 		bitmapLen := (numRowCols + 7) / 8
 		for i := 0; i < numRows; i++ {
 			if !r.need(bitmapLen) {
@@ -689,13 +690,15 @@ func (r *binReader) readTable() (string, *persistedTable) {
 			}
 			bitmap := r.data[r.off : r.off+bitmapLen]
 			r.off += bitmapLen
-			row := make(map[string]ast.Literal, countBitmapSetBits(bitmap, numRowCols))
-			for ci, col := range rowCols {
+			row := make([]ast.Literal, numRowCols)
+			for ci := range rowCols {
 				if bitmap[ci/8]&(1<<(uint(ci)%8)) != 0 {
-					row[col] = r.literal()
+					row[ci] = r.literal()
+				} else {
+					row[ci] = ast.Literal{Kind: ast.LiteralNull}
 				}
 			}
-			pt.Rows[i] = row
+			pt.decodedRows[i] = row
 		}
 	}
 
