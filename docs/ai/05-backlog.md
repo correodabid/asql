@@ -217,10 +217,14 @@ P1 — close documentation and regression gaps first:
 - [x] Document the currently supported SQL subset already present in parser/planner/executor but not clearly surfaced in compatibility docs.
 
 P2 — targeted high-return compatibility expansion:
-- [ ] Expand synthetic catalog/introspection coverage only for additional queries proven necessary by mainstream tool startup/metadata flows.
-- [ ] Improve `ParameterDescription` / `RowDescription` / bind-format fidelity for common scalar types where mainstream drivers still degrade or fail.
+- [x] Expand synthetic catalog/introspection coverage only for additional queries proven necessary by mainstream tool startup/metadata flows.
+- [x] Improve `ParameterDescription` / `RowDescription` / bind-format fidelity for common scalar types where mainstream drivers still degrade or fail.
 - [x] Tighten SQLSTATE mapping for common compatibility-critical failures (syntax, missing objects, constraint violations, cancellation, transaction state).
-- [ ] Expand app-facing PostgreSQL-compatible SQL only where it materially reduces migration friction and preserves deterministic replay semantics.
+- [x] Expand app-facing PostgreSQL-compatible SQL only where it materially reduces migration friction and preserves deterministic replay semantics.
+
+AF-P2 closure note:
+- The current documented compatibility wedge has no open evidence-backed mainstream startup/catalog gaps, no open claim-to-test metadata-fidelity gaps for the currently supported common scalar shapes, and no currently justified app-facing SQL expansion that outweighs determinism and surface-area costs.
+- Future compatibility expansion remains demand-driven: reopen only when a mainstream client/tool flow demonstrates concrete adoption friction not already covered by the existing docs, tests, and evidence map.
 
 P3 — compatibility operating model:
 - [x] Add a repeatable compatibility test pack grouped by client/tool (`psql`, `pgx`, JDBC/GUI baseline) and make it part of release validation.
