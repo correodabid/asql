@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"math"
+	"math/bits"
 	"sort"
 	"unsafe"
 
@@ -110,6 +111,25 @@ func bytesToImmutableString(b []byte) string {
 		return ""
 	}
 	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
+func countBitmapSetBits(bitmap []byte, limit int) int {
+	count := 0
+	remaining := limit
+	for _, b := range bitmap {
+		if remaining <= 0 {
+			break
+		}
+		if remaining >= 8 {
+			count += bits.OnesCount8(b)
+			remaining -= 8
+			continue
+		}
+		mask := byte((1 << uint(remaining)) - 1)
+		count += bits.OnesCount8(b & mask)
+		break
+	}
+	return count
 }
 
 // intern adds a string to the dictionary (if absent) and returns its index.
@@ -288,7 +308,7 @@ func (r *binReader) readRowColumnIndexed() map[string]ast.Literal {
 	}
 	bitmap := r.data[r.off : r.off+bitmapLen]
 	r.off += bitmapLen
-	row := make(map[string]ast.Literal, numCols)
+	row := make(map[string]ast.Literal, countBitmapSetBits(bitmap, numCols))
 	for ci, col := range cols {
 		if bitmap[ci/8]&(1<<(uint(ci)%8)) != 0 {
 			row[col] = r.literal()
@@ -669,7 +689,7 @@ func (r *binReader) readTable() (string, *persistedTable) {
 			}
 			bitmap := r.data[r.off : r.off+bitmapLen]
 			r.off += bitmapLen
-			row := make(map[string]ast.Literal, numRowCols)
+			row := make(map[string]ast.Literal, countBitmapSetBits(bitmap, numRowCols))
 			for ci, col := range rowCols {
 				if bitmap[ci/8]&(1<<(uint(ci)%8)) != 0 {
 					row[col] = r.literal()
