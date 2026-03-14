@@ -308,6 +308,29 @@ func BenchmarkEngineReadIndexOnlyOrderBTree(b *testing.B) {
 	_ = store.Close()
 }
 
+func BenchmarkEngineReadIndexOnlyOrderOffsetBTree(b *testing.B) {
+	ctx := context.Background()
+	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)
+
+	query := "SELECT email FROM entries ORDER BY email ASC LIMIT 100 OFFSET 5000"
+	baselineCounts := engine.ScanStrategyCounts()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+		if err != nil {
+			b.Fatalf("index-only offset query: %v", err)
+		}
+		if len(result.Rows) != 100 {
+			b.Fatalf("unexpected index-only offset row count: got %d want 100", len(result.Rows))
+		}
+	}
+	b.StopTimer()
+	reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyBTreeIOScan))
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+}
+
 func BenchmarkEngineReadIndexOnlySelectiveCoveredBTree(b *testing.B) {
 	ctx := context.Background()
 	store, engine, targetLSN := prepareIndexedReadBenchmarkFixture(b)

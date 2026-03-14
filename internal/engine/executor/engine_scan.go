@@ -1046,6 +1046,10 @@ func orderedRowsFromBTreeIndexOnly(
 	}
 
 	limit := plan.Limit
+	offset := 0
+	if plan.Offset != nil && *plan.Offset > 0 {
+		offset = *plan.Offset
+	}
 	descending := plan.OrderBy[0].Direction == ast.SortDesc
 	rows := make([]map[string]ast.Literal, 0, len(entries))
 	useBoundedScan := false
@@ -1073,6 +1077,10 @@ func orderedRowsFromBTreeIndexOnly(
 			} else if !matchEntry(entries[i]) {
 				continue
 			}
+			if offset > 0 {
+				offset--
+				continue
+			}
 			rows = append(rows, buildRow(entries[i]))
 		}
 	} else {
@@ -1090,6 +1098,10 @@ func orderedRowsFromBTreeIndexOnly(
 					continue
 				}
 			} else if !matchEntry(e) {
+				continue
+			}
+			if offset > 0 {
+				offset--
 				continue
 			}
 			rows = append(rows, buildRow(e))

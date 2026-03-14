@@ -42,6 +42,7 @@ Coverage:
 - `BenchmarkEngineRestartFromPersistedSnapshot`
 - `BenchmarkEngineReadIndexedRangeBTree`
 - `BenchmarkEngineReadIndexOnlyOrderBTree`
+- `BenchmarkEngineReadIndexOnlyOrderOffsetBTree`
 - `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree`
 - `BenchmarkEngineReadSelectiveNonCoveredBTree`
 - WAL append/read/recover benchmarks

@@ -1164,6 +1164,55 @@ func TestTimeTravelQueryAppliesLimitAndOffset(t *testing.T) {
 	}
 }
 
+func TestTimeTravelQueryAppliesLimitAndOffsetOnIndexOnlyScan(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "select-limit-offset-index-only.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"INSERT INTO users (id, email) VALUES (2, 'two@asql.dev')",
+		"INSERT INTO users (id, email) VALUES (3, 'three@asql.dev')",
+		"INSERT INTO users (id, email) VALUES (4, 'four@asql.dev')",
+		"CREATE INDEX idx_users_email_btree ON users (email) USING BTREE",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT email FROM users ORDER BY email ASC LIMIT 2 OFFSET 1", []string{"accounts"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("time travel query with index-only offset: %v", err)
+	}
+
+	if len(result.Rows) != 2 {
+		t.Fatalf("unexpected row count: got %d want 2", len(result.Rows))
+	}
+	if result.Rows[0]["email"].StringValue != "one@asql.dev" || result.Rows[1]["email"].StringValue != "three@asql.dev" {
+		t.Fatalf("unexpected emails after index-only offset: %+v", result.Rows)
+	}
+
+	counts := engine.ScanStrategyCounts()
+	if counts[string(scanStrategyBTreeIOScan)] == 0 {
+		t.Fatalf("expected index-only strategy count > 0, got %+v", counts)
+	}
+}
+
 func TestTimeTravelQueryAppliesMultiColumnOrderBy(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "select-multi-order-limit.wal")
