@@ -4,10 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>ASQL — Deterministic SQL Engine</title>
-  <meta name="description" content="A deterministic SQL engine with replay, time-travel queries, domain isolation, and optional clustering. Built in Go.">
+  <meta name="description" content="A deterministic SQL engine with pgwire, replay-safe history, domain isolation, and optional Raft clustering. Built in Go.">
   <meta name="theme-color" content="#0a0e17">
   <meta property="og:title" content="ASQL — Deterministic SQL Engine">
-  <meta property="og:description" content="Replay any state. Query any point in time. From single node to cluster.">
+  <meta property="og:description" content="Replay any state. Query any point in time. Run the canonical pgwire path from single node to cluster.">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
@@ -39,14 +39,14 @@
   <section class="hero">
     <div class="hero-glow"></div>
     <div class="container">
-      <div class="hero-badge">Open Source · Written in Go · pgwire Compatible</div>
+      <div class="hero-badge">Open Source · Written in Go · pgwire Subset</div>
       <h1 class="hero-title">
         The SQL engine that<br>
         <span class="hero-gradient">remembers everything.</span>
       </h1>
       <p class="hero-sub">
         Deterministic replay. Time-travel queries. Domain isolation.<br>
-        From a single binary to a replicated cluster — no tradeoffs.
+        Canonical pgwire path from a single binary to a replicated cluster.
       </p>
       <div class="hero-actions">
         <a href="#quickstart" class="btn btn-primary">Get Started</a>
@@ -62,10 +62,10 @@
           <span class="terminal-dot green"></span>
           <span class="terminal-title">terminal</span>
         </div>
-        <pre class="terminal-body"><code><span class="t-comment"># Start ASQL — one binary, zero dependencies</span>
+        <pre class="terminal-body"><code><span class="t-comment"># Start ASQL on the canonical pgwire path</span>
 <span class="t-prompt">$</span> go run ./cmd/asqld -addr :5433 -data-dir .asql
 
-<span class="t-comment"># Connect with any pgwire client</span>
+      <span class="t-comment"># Connect with supported pgwire clients and flows</span>
 <span class="t-prompt">$</span> psql -h localhost -p 5433 -d asql</code></pre>
       </div>
     </div>
@@ -75,8 +75,8 @@
   <section class="section section-dark" id="why">
     <div class="container">
       <div class="section-header">
-        <h2>Why another database?</h2>
-        <p class="section-sub">Because "good enough" state management costs you every incident, every audit, every debug session.</p>
+        <h2>Why ASQL?</h2>
+        <p class="section-sub">Because deterministic replay, explicit boundaries, and historical visibility should be normal database workflows, not custom infrastructure.</p>
       </div>
       <div class="value-grid">
         <div class="value-card">
@@ -102,7 +102,7 @@
         <div class="value-card">
           <div class="value-icon">🔌</div>
           <h3>Use your existing tools</h3>
-          <p>pgwire protocol means pgx, psql, JDBC, DBeaver, DataGrip — they just work. No proprietary driver lock-in.</p>
+          <p>ASQL exposes a pragmatic PostgreSQL-compatible subset over pgwire for documented `pgx`, `psql`, and mainstream tool flows. No proprietary driver lock-in.</p>
         </div>
         <div class="value-card">
           <div class="value-icon">📈</div>

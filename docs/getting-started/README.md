@@ -4,9 +4,18 @@ This guide set is the recommended entry point for developers adopting ASQL in a 
 
 It is organized by topic so teams can move from first run to production-oriented workflows without reverse engineering engine concepts.
 
+Canonical runtime assumption for this guide set:
+- `cmd/asqld` is the server path used throughout,
+- pgwire is the main application-facing runtime,
+- ASQL Studio connects through `-pgwire-endpoint`.
+
+Compatibility stance for this guide set:
+- ASQL supports a pragmatic PostgreSQL-compatible subset over pgwire.
+- The guides optimize for the documented subset, not for drop-in PostgreSQL parity.
+
 ## Internalize these expectations early
 
-- ASQL is not just "PostgreSQL with a few extras". The pgwire surface is the main application runtime, but the product model adds explicit domains, replay-safe history, and deterministic fixtures.
+- ASQL is not just "PostgreSQL with a few extras". The pgwire surface is the main application runtime, but the product model adds explicit domains, replay-safe history, deterministic fixtures, and operator-facing temporal visibility.
 - Domains are application-visible boundaries, not cosmetic schema prefixes.
 - Time-travel and `FOR HISTORY` are normal debugging workflows, not rare incident-only tools.
 - Most business workflow semantics still belong in the application. ASQL should make those workflows easier to model and inspect, not absorb them.

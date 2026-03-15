@@ -1,6 +1,15 @@
 # ASQL
 
-**A deterministic SQL engine built in Go.** Domain isolation, append-only WAL, time-travel queries, entity versioning, and optional clustered operation through pgwire + Raft.
+**A deterministic SQL engine built in Go.** Domain isolation, append-only WAL, replay-safe history, and optional clustered operation through pgwire + Raft.
+
+Canonical runtime path:
+- `cmd/asqld` for the server,
+- pgwire for application access,
+- `asqlstudio -pgwire-endpoint ...` for the desktop workflow.
+
+Compatibility stance:
+- ASQL exposes a pragmatic PostgreSQL-compatible subset over pgwire.
+- It is not a drop-in PostgreSQL replacement.
 
 ```bash
 go run ./cmd/asqld -addr :5433 -data-dir .asql
@@ -10,14 +19,14 @@ go run ./cmd/asqld -addr :5433 -data-dir .asql
 
 ## Why ASQL?
 
-Every database forces you to choose: **simple** (SQLite) or **powerful** (PostgreSQL). ASQL refuses that tradeoff.
+ASQL is designed for teams that want a database they can reason about under audit, replay, incident response, and failover — without giving up a practical SQL and pgwire application path.
 
 | Problem | ASQL's answer |
 |---|---|
 | You need multi-tenant data isolation but embedded simplicity | **Domain isolation** -- each domain has its own schema, constraints, and rules inside a single engine |
 | You need to audit who changed what and when | **Time-travel queries** -- read historical state by commit LSN |
 | You need cross-service consistency without distributed transactions | **Cross-domain transactions** -- atomic commits across domain boundaries |
-| You need to debug production issues by reproducing exact state | **Deterministic replay** -- same WAL input always produces identical state |
+| You need to debug production issues by reproducing exact state | **Deterministic replay** -- same WAL input produces the same state and query-visible results |
 | You need to track aggregate versions across related tables | **Entity versioning** -- automatic version tracking with versioned foreign keys |
 | You need a database you can reason about | **Append-only WAL** -- the log is truth, materialized state is derived |
 
@@ -26,6 +35,8 @@ Every database forces you to choose: **simple** (SQLite) or **powerful** (Postgr
 ## Quickstart
 
 The primary onboarding path is [docs/getting-started/README.md](docs/getting-started/README.md).
+
+This README keeps the front door short. For the full canonical path, use the getting-started guide and follow the pgwire runtime first.
 
 Short local path:
 
