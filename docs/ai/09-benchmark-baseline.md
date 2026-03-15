@@ -159,10 +159,13 @@ Repeated sample on 2026-03-15:
 - Control-plane promotion using `go test ./test/integration -run '^$' -bench '^BenchmarkFailoverCoordinatorPromotion$' -benchmem -benchtime=200ms -count=3`:
 	- `BenchmarkFailoverCoordinatorPromotion-8`: ~`654.1–805.0 ns/op`, `1,592 B/op`, `16 allocs/op`
 - Recovery replay using `go test ./test/integration -run '^$' -bench 'BenchmarkFailover(RecoveryReplay|RecoveryReplaySweep)$' -benchmem -benchtime=1x -count=3`:
-	- `BenchmarkFailoverRecoveryReplay-8`: ~`192,584–275,583 ns/op`, `97,608–97,816 B/op`, `285–288 allocs/op`
-	- `BenchmarkFailoverRecoveryReplaySweep/small_total_40-8`: ~`411,499–541,459 ns/op`, `244,968–245,224 B/op`, `1,288–1,290 allocs/op`
-	- `BenchmarkFailoverRecoveryReplaySweep/medium_total_640-8`: ~`9,278,041–10,999,625 ns/op`, `2,774,432–2,779,776 B/op`, `18,077–18,083 allocs/op`
-	- `BenchmarkFailoverRecoveryReplaySweep/large_total_4608-8`: ~`31,343,958–61,342,708 ns/op`, `29,639,272–29,734,112 B/op`, `184,713–184,718 allocs/op`
+	- `BenchmarkFailoverRecoveryReplay-8`: ~`143,333–179,334 ns/op`, `95,064 B/op`, `245 allocs/op`
+	- `BenchmarkFailoverRecoveryReplaySweep/small_total_40-8`: ~`438,000 ns/op`, `242,136 B/op`, `1,248 allocs/op`
+	- `BenchmarkFailoverRecoveryReplaySweep/medium_total_640-8`: ~`8,669,333–10,771,083 ns/op`, `2,766,008–2,770,520 B/op`, `18,034–18,038 allocs/op`
+	- `BenchmarkFailoverRecoveryReplaySweep/large_total_4608-8`: ~`44,389,084–56,834,041 ns/op`, `29,590,344–29,688,128 B/op`, `184,668–184,674 allocs/op`
+- Large-scenario phase split using `go test ./test/integration -run '^$' -bench '^BenchmarkFailoverRecoveryReplayLargePhases$' -benchmem -benchtime=1x -count=3`:
+	- `store_reopen`: ~`12,521,959–20,042,500 ns/op`, `2,586,480–2,586,752 B/op`, `14,020–14,022 allocs/op`
+	- `engine_replay`: ~`23,028,875–26,327,249 ns/op`, `27,102,704–27,202,496 B/op`, `170,647–170,660 allocs/op`
 
 ## Notes
 
@@ -201,7 +204,8 @@ Repeated sample on 2026-03-15:
 	- the positional-row decode change clearly improved isolated decode and snapshot-directory load benchmarks, but the end-to-end persisted-restart timing is still noisy on the current short benchtime harness and needs repeated confirmation before any closure claim.
 - Current failover/recovery interpretation:
 	- the benchmark suite now includes both failover promotion and multi-scenario recovery replay, so Epic AB is no longer missing failover/recovery coverage at the benchmark-suite level;
-	- recovery replay currently scales in the expected direction across the `small_total_40`, `medium_total_640`, and `large_total_4608` scenarios, but the large case is still noisy enough on `-benchtime=1x` that it should be treated as a regression reference rather than as a tuned target;
+	- moving correctness validation outside the timed region tightened the baseline so the recovery benchmark now measures reopen + replay more directly instead of mixing in post-recovery query validation;
+	- recovery replay currently scales in the expected direction across the `small_total_40`, `medium_total_640`, and `large_total_4608` scenarios, and the large-case phase split shows the cost is shared between WAL reopen/discovery (~`12.5–20.0 ms`) and engine replay/apply (~`23.0–26.3 ms`), with replay/apply still the larger slice;
 	- the failover recovery item remains open because the suite now provides a baseline, but there is not yet an explicit improvement decision or optimization pass attached to those results.
 - Current read-path interpretation:
 	- on the simple covered ordered-read shape, `btree-index-only` is about $10\times$ faster than `btree-order` and materially reduces allocations;

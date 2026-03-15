@@ -102,6 +102,58 @@ func BenchmarkFailoverRecoveryReplaySweep(b *testing.B) {
 	}
 }
 
+func BenchmarkFailoverRecoveryReplayLargePhases(b *testing.B) {
+	ctx := context.Background()
+	config := failoverRecoveryBenchmarkConfig{
+		preFailoverRows:  4096,
+		postFailoverRows: 512,
+		batchSize:        128,
+	}
+	walPath, expectedLSN, expectedLastEmail := prepareFailoverRecoveryFixture(b, ctx, config)
+
+	b.Run("store_reopen", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+			if err != nil {
+				b.Fatalf("reopen failover wal store: %v", err)
+			}
+			if got := store.LastLSN(); got != expectedLSN {
+				_ = store.Close()
+				b.Fatalf("unexpected reopened store LSN: got %d want %d", got, expectedLSN)
+			}
+			if err := store.Close(); err != nil {
+				b.Fatalf("close reopened store: %v", err)
+			}
+		}
+	})
+
+	b.Run("engine_replay", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+			if err != nil {
+				b.Fatalf("reopen failover wal store: %v", err)
+			}
+			b.StartTimer()
+
+			engine, err := executor.New(ctx, store, "")
+			if err != nil {
+				_ = store.Close()
+				b.Fatalf("new replay engine: %v", err)
+			}
+
+			b.StopTimer()
+			validateRecoveredFailoverState(b, ctx, engine, store, expectedLSN, config.preFailoverRows+config.postFailoverRows, expectedLastEmail)
+			engine.WaitPendingSnapshots()
+			if err := store.Close(); err != nil {
+				b.Fatalf("close reopened store: %v", err)
+			}
+			b.StartTimer()
+		}
+		b.StopTimer()
+	})
+}
+
 func benchmarkFailoverRecoveryReplayFixture(b *testing.B, ctx context.Context, walPath string, expectedLSN uint64, expectedRows int, expectedLastEmail string) {
 	b.Helper()
 
@@ -118,35 +170,40 @@ func benchmarkFailoverRecoveryReplayFixture(b *testing.B, ctx context.Context, w
 			b.Fatalf("new replay engine: %v", err)
 		}
 
-		if got := store.LastLSN(); got != expectedLSN {
-			engine.WaitPendingSnapshots()
-			_ = store.Close()
-			b.Fatalf("unexpected replay LSN: got %d want %d", got, expectedLSN)
-		}
-
-		result, err := engine.TimeTravelQueryAsOfLSN(ctx, fmt.Sprintf("SELECT email FROM users WHERE id = %d", expectedRows), []string{failoverBenchmarkDomain}, expectedLSN)
-		if err != nil {
-			engine.WaitPendingSnapshots()
-			_ = store.Close()
-			b.Fatalf("validate replayed failover state: %v", err)
-		}
-		if len(result.Rows) != 1 {
-			engine.WaitPendingSnapshots()
-			_ = store.Close()
-			b.Fatalf("unexpected replayed row count: got %d want 1", len(result.Rows))
-		}
-		if got := result.Rows[0]["email"].StringValue; got != expectedLastEmail {
-			engine.WaitPendingSnapshots()
-			_ = store.Close()
-			b.Fatalf("unexpected replayed trailing row: got %q want %q", got, expectedLastEmail)
-		}
-
 		b.StopTimer()
+		validateRecoveredFailoverState(b, ctx, engine, store, expectedLSN, expectedRows, expectedLastEmail)
+
 		engine.WaitPendingSnapshots()
 		_ = store.Close()
 		b.StartTimer()
 	}
 	b.StopTimer()
+}
+
+func validateRecoveredFailoverState(b *testing.B, ctx context.Context, engine *executor.Engine, store *wal.SegmentedLogStore, expectedLSN uint64, expectedRows int, expectedLastEmail string) {
+	b.Helper()
+	if got := store.LastLSN(); got != expectedLSN {
+		engine.WaitPendingSnapshots()
+		_ = store.Close()
+		b.Fatalf("unexpected replay LSN: got %d want %d", got, expectedLSN)
+	}
+
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, fmt.Sprintf("SELECT email FROM users WHERE id = %d", expectedRows), []string{failoverBenchmarkDomain}, expectedLSN)
+	if err != nil {
+		engine.WaitPendingSnapshots()
+		_ = store.Close()
+		b.Fatalf("validate replayed failover state: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		engine.WaitPendingSnapshots()
+		_ = store.Close()
+		b.Fatalf("unexpected replayed row count: got %d want 1", len(result.Rows))
+	}
+	if got := result.Rows[0]["email"].StringValue; got != expectedLastEmail {
+		engine.WaitPendingSnapshots()
+		_ = store.Close()
+		b.Fatalf("unexpected replayed trailing row: got %q want %q", got, expectedLastEmail)
+	}
 }
 
 func prepareFailoverRecoveryFixture(b *testing.B, ctx context.Context, config failoverRecoveryBenchmarkConfig) (walPath string, expectedLSN uint64, expectedLastEmail string) {
