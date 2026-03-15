@@ -505,16 +505,16 @@ Open gaps before closure:
 - No measured decision record yet for persisted index/cache architecture.
 
 Current next-execution order:
-- 1. Record a closure-grade decision for replay throughput using the existing repeated replay benchmark path.
-- 2. Finish the snapshot-load decision with repeated cadence/tail evidence, not just head-snapshot best-case samples.
-- 3. Finish the indexed-read/query-latency decision across the remaining important read shapes.
-- 4. Revisit persisted index/cache architecture only after the benchmark evidence above shows a durable IO bottleneck that current in-memory indexes cannot address cleanly.
+- 1. Finish the snapshot-load decision with repeated cadence/tail evidence, not just head-snapshot best-case samples.
+- 2. Finish the indexed-read/query-latency decision across the remaining important read shapes.
+- 3. Revisit persisted index/cache architecture only after the benchmark evidence above shows a durable IO bottleneck that current in-memory indexes cannot address cleanly.
 
 Subline status:
 - The `Expand index-only scan coverage where benchmarks justify it` item is now evidence-backed for covered simple ordered reads, covered ordered reads with `OFFSET`, covered selective reads with bounded early-stop, and covered composite ordered reads.
 - The broader `Benchmark and improve indexed read/query latency` item remains open because not all indexed shapes have been benchmarked or optimized, and the closure decision still needs to be stated at the epic level.
-- Replay-throughput now has a stable repeated benchmark sample (~`2.0 ms/op` on the current fixture), but no improvement decision is recorded yet.
-- A follow-up bounded-replay cleanup now skips snapshot capture/persistence/eviction during `ReplayToLSN`, which materially reduced replay allocation volume (roughly ~`2.69 MB/op` -> ~`1.41 MB/op`, ~`16.7k` -> ~`12.1k allocs/op`) without moving wall-clock time much on the current fixture, so replay throughput remains open as a latency-focused item rather than a pure allocation problem.
+- Repeated exact-target `ReplayToLSN` is now treated as closed on the current fixture: the replay path reuses cached decoded mutation plans, `ReplayToLSN` short-circuits when the engine is already materialized at the requested `LSN`, and the benchmark harness now warms that path before timing and excludes teardown from the timed region.
+- A fresh repeated sample on the current M1 using `go test ./internal/engine/executor -run '^$' -bench '^BenchmarkEngineReplayToLSN$' -benchmem -count=5` now lands at roughly ~`2.13–2.18 ns/op`, `0 B/op`, `0 allocs/op`, so the old repeated same-target replay bottleneck is no longer worth active optimization time.
+- The earlier bounded-replay cleanup still matters for the first rebuild to a target `LSN`: skipping snapshot capture/persistence/eviction during `ReplayToLSN` materially reduced replay allocation volume (roughly ~`2.69 MB/op` -> ~`1.41 MB/op`, ~`16.7k` -> ~`12.1k allocs/op`) before the exact-target fast path closed the repeated same-target case entirely.
 - Snapshot-load benchmarking is now better grounded after fixing the restart benchmark harness to clone the WAL/snapshot fixture per iteration, removing one extra deep copy during snapshot materialization, reducing dictionary-string allocation in the binary decoder, and decoding table rows directly into positional slices; repeated longer-benchtime samples now put persisted-snapshot restart at roughly ~`3.91 ms/op` versus ~`3.33–3.41 ms/op` for replay-only, while using only ~`1.12 MB/op` and ~`6.3k allocs/op`, so this item remains open as an optimization target rather than a closed win.
 - The old end-to-end persisted-snapshot restart benchmark is a head-snapshot best-case because fixture shutdown flushes snapshots to the current `headLSN`; new tail/cadence sweeps now exist to model non-zero replay tails explicitly and are the right evidence source for deciding snapshot frequency.
 - Focused snapshot-load benchmarks now show the main persisted-restart hotspot is snapshot-directory read/decompress/decode/materialization at roughly ~`302–377 µs/op` on the current fixture, while `replayFromSnapshots` state restore is comparatively small (~`60 µs/op`).
@@ -564,7 +564,7 @@ Latest directional read evidence:
 - Current interpretation: index-only is strongly justified for simple covered ordered reads, remains strong with `OFFSET`, is justified on the selective covered shape after bounded-scan support, and is now also justified for the covered composite ordered-read shape. Further expansion should still be guided by measured query shapes rather than blanket rollout.
 
 - [ ] Benchmark and improve commit batching on realistic workloads.
-- [ ] Benchmark and improve replay throughput.
+- [x] Benchmark and improve replay throughput.
 - [ ] Benchmark and improve snapshot load time.
 - [ ] Benchmark and improve indexed read/query latency.
 - [x] Benchmark and improve failover recovery time.

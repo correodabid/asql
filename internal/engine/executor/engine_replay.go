@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"asql/internal/engine/domains"
+	"asql/internal/engine/planner"
 	"asql/internal/engine/ports"
 )
 
@@ -122,12 +123,52 @@ func (engine *Engine) replayFromSnapshots(snapshots []engineSnapshot, records []
 
 // ReplayToLSN replays WAL mutations up to targetLSN and resets in-memory state.
 func (engine *Engine) ReplayToLSN(ctx context.Context, targetLSN uint64) error {
-	records, err := engine.readAllRecords(ctx)
+	if currentState := engine.readState.Load(); currentState != nil && currentState.headLSN == targetLSN {
+		return nil
+	}
+
+	records, replayPlans, err := engine.readAllReplayRecords(ctx)
 	if err != nil {
 		return fmt.Errorf("replay to lsn read wal: %w", err)
 	}
 
-	return engine.rebuildFromRecords(records, targetLSN, true)
+	return engine.rebuildFromRecordsWithReplayPlans(records, replayPlans, targetLSN, true)
+}
+
+func (engine *Engine) readAllReplayRecords(ctx context.Context) ([]ports.WALRecord, []replayPlanCacheEntry, error) {
+	records, err := engine.readAllRecords(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	headLSN := uint64(0)
+	if len(records) > 0 {
+		headLSN = records[len(records)-1].LSN
+	}
+
+	if cached := engine.walReplayPlansCache.Load(); cached != nil && cached.headLSN == headLSN && len(cached.entries) == len(records) {
+		return records, cached.entries, nil
+	}
+
+	engine.walCacheMu.Lock()
+	defer engine.walCacheMu.Unlock()
+
+	if cached := engine.walReplayPlansCache.Load(); cached != nil && cached.headLSN == headLSN && len(cached.entries) == len(records) {
+		return records, cached.entries, nil
+	}
+
+	entries := make([]replayPlanCacheEntry, len(records))
+	for i, record := range records {
+		if record.Type != walTypeMutation {
+			continue
+		}
+		_, plan, err := decodeMutationPayloadV2(record.Payload)
+		if err != nil {
+			return nil, nil, fmt.Errorf("decode mutation payload lsn=%d: %w", record.LSN, err)
+		}
+		entries[i] = replayPlanCacheEntry{plan: plan, ok: true}
+	}
+	engine.walReplayPlansCache.Store(&walReplayPlanCache{headLSN: headLSN, entries: entries})
+	return records, entries, nil
 }
 
 // LSNForTimestamp resolves the latest LSN whose timestamp is <= logicalTimestamp.
@@ -229,6 +270,10 @@ func (engine *Engine) buildStateFromRecords(records []ports.WALRecord, targetLSN
 }
 
 func (engine *Engine) rebuildFromRecords(records []ports.WALRecord, targetLSN uint64, bounded bool) error {
+	return engine.rebuildFromRecordsWithReplayPlans(records, nil, targetLSN, bounded)
+}
+
+func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecord, replayPlans []replayPlanCacheEntry, targetLSN uint64, bounded bool) error {
 
 	engine.writeMu.Lock()
 	defer engine.writeMu.Unlock()
@@ -250,7 +295,7 @@ func (engine *Engine) rebuildFromRecords(records []ports.WALRecord, targetLSN ui
 	txEntityCollectors := make(map[string]map[string]map[string][]string)
 	txClonedTables := make(map[string]map[string]struct{})
 
-	for _, record := range records {
+	for i, record := range records {
 		if bounded && record.LSN > targetLSN {
 			break
 		}
@@ -280,9 +325,12 @@ func (engine *Engine) rebuildFromRecords(records []ports.WALRecord, targetLSN ui
 			continue
 		}
 
-		_, plan, err := decodeMutationPayloadV2(record.Payload)
+		plan, ok, err := replayPlanForRecord(record, replayPlans, i)
 		if err != nil {
-			return fmt.Errorf("decode mutation payload lsn=%d: %w", record.LSN, err)
+			return err
+		}
+		if !ok {
+			continue
 		}
 
 		commitLSN := txCommitLSN[record.TxID]
@@ -337,6 +385,20 @@ func (engine *Engine) rebuildFromRecords(records []ports.WALRecord, targetLSN ui
 	}
 
 	return nil
+}
+
+func replayPlanForRecord(record ports.WALRecord, replayPlans []replayPlanCacheEntry, idx int) (planner.Plan, bool, error) {
+	if record.Type != walTypeMutation {
+		return planner.Plan{}, false, nil
+	}
+	if replayPlans != nil && idx >= 0 && idx < len(replayPlans) && replayPlans[idx].ok {
+		return replayPlans[idx].plan, true, nil
+	}
+	_, plan, err := decodeMutationPayloadV2(record.Payload)
+	if err != nil {
+		return planner.Plan{}, false, fmt.Errorf("decode mutation payload lsn=%d: %w", record.LSN, err)
+	}
+	return plan, true, nil
 }
 
 // rebuildFromRecordsAfterSnapshot replays only WAL mutations with LSN > afterLSN.

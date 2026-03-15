@@ -7994,6 +7994,51 @@ func TestDropTableReplayDeterminism(t *testing.T) {
 	}
 }
 
+func TestReplayToLSNNoopWhenAlreadyAtTarget(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "engine.wal")
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT PRIMARY KEY, name TEXT)",
+		"INSERT INTO users (id, name) VALUES (1, 'alice')",
+		"INSERT INTO users (id, name) VALUES (2, 'bob')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	targetLSN := store.LastLSN()
+	if err := engine.ReplayToLSN(ctx, targetLSN); err != nil {
+		t.Fatalf("initial replay to lsn: %v", err)
+	}
+	stateBefore := engine.readState.Load()
+
+	if err := engine.ReplayToLSN(ctx, targetLSN); err != nil {
+		t.Fatalf("repeat replay to same lsn: %v", err)
+	}
+
+	if stateAfter := engine.readState.Load(); stateAfter != stateBefore {
+		t.Fatalf("expected replay to same lsn to reuse current state")
+	}
+	if got := engine.RowCount("accounts", "users"); got != 2 {
+		t.Fatalf("unexpected row count after repeat replay: got %d want 2", got)
+	}
+}
+
 func TestMultiRowInsertBasic(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "engine.wal")

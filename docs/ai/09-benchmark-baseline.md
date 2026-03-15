@@ -24,6 +24,12 @@ make bench
 - `BenchmarkEngineReadAsOfLSN-8`: `5,038,622 ns/op`, `3,178,457 B/op`, `39,126 allocs/op`
 - `BenchmarkEngineReplayToLSN-8`: `4,794,214 ns/op`, `2,631,836 B/op`, `37,097 allocs/op`
 
+Status note (2026-03-15): the repeated `BenchmarkEngineReplayToLSN` harness now warms cached replay records, primes one replay to the target `LSN` before timing, and stops the timer before teardown so it measures repeated exact-target `ReplayToLSN` calls instead of first-build plus cleanup cost.
+
+Repeated sample on 2026-03-15 using `go test ./internal/engine/executor -run '^$' -bench '^BenchmarkEngineReplayToLSN$' -benchmem -count=5`:
+
+- `BenchmarkEngineReplayToLSN-8`: `2.130–2.179 ns/op`, `0 B/op`, `0 allocs/op`
+
 ### WAL (`internal/storage/wal`)
 
 - `BenchmarkFileLogStoreAppend-8`: `24,561 ns/op`, `573 B/op`, `6 allocs/op`

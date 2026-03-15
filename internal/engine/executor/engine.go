@@ -130,6 +130,7 @@ type Engine struct {
 	readState                     atomic.Pointer[readableState] // lock-free read path
 	walCacheMu                    sync.Mutex
 	walRecordsCache               atomic.Pointer[walRecordCache]
+	walReplayPlansCache           atomic.Pointer[walReplayPlanCache]
 	historicalStateCache          *historicalStateCache
 	logStore                      ports.LogStore
 	snapDir                       string      // directory for numbered snapshot files ("" = disabled)
@@ -171,6 +172,16 @@ type Engine struct {
 type walRecordCache struct {
 	headLSN uint64
 	records []ports.WALRecord
+}
+
+type walReplayPlanCache struct {
+	headLSN uint64
+	entries []replayPlanCacheEntry
+}
+
+type replayPlanCacheEntry struct {
+	plan planner.Plan
+	ok   bool
 }
 
 type historicalStateCache struct {
@@ -665,10 +676,12 @@ func (engine *Engine) readAllRecords(ctx context.Context) ([]ports.WALRecord, er
 
 func (engine *Engine) storeWALRecordCache(headLSN uint64, records []ports.WALRecord) {
 	engine.walRecordsCache.Store(&walRecordCache{headLSN: headLSN, records: records})
+	engine.walReplayPlansCache.Store(nil)
 }
 
 func (engine *Engine) clearWALRecordCache() {
 	engine.walRecordsCache.Store(nil)
+	engine.walReplayPlansCache.Store(nil)
 }
 
 func (engine *Engine) cachedHistoricalState(targetLSN uint64) (*readableState, bool) {
@@ -707,10 +720,12 @@ func (engine *Engine) appendWALRecordCache(records []ports.WALRecord) {
 	firstLSN := records[0].LSN
 	if cached.headLSN+1 != firstLSN {
 		engine.walRecordsCache.Store(nil)
+		engine.walReplayPlansCache.Store(nil)
 		return
 	}
 	if len(cached.records)+len(records) > walRecordCacheMaxIncrementalRecords {
 		engine.walRecordsCache.Store(nil)
+		engine.walReplayPlansCache.Store(nil)
 		return
 	}
 
@@ -718,6 +733,7 @@ func (engine *Engine) appendWALRecordCache(records []ports.WALRecord) {
 	copy(combined, cached.records)
 	copy(combined[len(cached.records):], records)
 	engine.walRecordsCache.Store(&walRecordCache{headLSN: records[len(records)-1].LSN, records: combined})
+	engine.walReplayPlansCache.Store(nil)
 }
 
 // TimelineCommit describes a single committed transaction for the timeline UI.

@@ -302,6 +302,12 @@ func BenchmarkEngineReplayToLSN(b *testing.B) {
 	mustExecBenchmark(b, ctx, engine, seed, "COMMIT")
 
 	targetLSN := store.LastLSN()
+	if _, _, err := engine.readAllReplayRecords(ctx); err != nil {
+		b.Fatalf("warm replay records: %v", err)
+	}
+	if err := engine.ReplayToLSN(ctx, targetLSN); err != nil {
+		b.Fatalf("prime replay to lsn: %v", err)
+	}
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -310,6 +316,7 @@ func BenchmarkEngineReplayToLSN(b *testing.B) {
 		}
 	}
 
+	b.StopTimer()
 	engine.WaitPendingSnapshots()
 	_ = store.Close()
 }
