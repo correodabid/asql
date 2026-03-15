@@ -337,6 +337,97 @@ func TestSegmentedLogStoreTotalSizeMatchesFiles(t *testing.T) {
 	assertSizeMatchesFiles(t, reopened)
 }
 
+func TestSegmentedLogStoreCompactSealedSegmentsMarksCompressed(t *testing.T) {
+	tempDir := t.TempDir()
+	basePath := filepath.Join(tempDir, "segmented-compact-once.wal")
+	ctx := context.Background()
+
+	store, err := NewSegmentedLogStore(basePath, AlwaysSync{}, WithSegmentSize(256))
+	if err != nil {
+		t.Fatalf("new segmented wal store: %v", err)
+	}
+	defer store.Close()
+
+	for i := 0; i < 20; i++ {
+		if _, err := store.Append(ctx, ports.WALRecord{TxID: "seg", Type: "BEGIN", Timestamp: uint64(i + 1), Payload: []byte(strings.Repeat("x", 64))}); err != nil {
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	if err := store.CompactSealedSegments(ctx); err != nil {
+		t.Fatalf("compact sealed segments: %v", err)
+	}
+
+	store.mu.Lock()
+	if len(store.segments) < 2 {
+		store.mu.Unlock()
+		t.Fatalf("expected at least one sealed segment")
+	}
+	for i := 0; i < len(store.segments)-1; i++ {
+		if !store.segments[i].compressed {
+			store.mu.Unlock()
+			t.Fatalf("sealed segment %d not marked compressed", store.segments[i].seqNum)
+		}
+	}
+	beforeSize := store.totalSize
+	store.mu.Unlock()
+
+	if err := store.CompactSealedSegments(ctx); err != nil {
+		t.Fatalf("second compaction pass: %v", err)
+	}
+
+	store.mu.Lock()
+	afterSize := store.totalSize
+	store.mu.Unlock()
+	if afterSize != beforeSize {
+		t.Fatalf("expected second compaction pass to leave size unchanged: got %d want %d", afterSize, beforeSize)
+	}
+
+	reopened, err := NewSegmentedLogStore(basePath, AlwaysSync{}, WithSegmentSize(256))
+	if err != nil {
+		t.Fatalf("reopen segmented wal store: %v", err)
+	}
+	defer reopened.Close()
+
+	reopened.mu.Lock()
+	for i := 0; i < len(reopened.segments)-1; i++ {
+		if !reopened.segments[i].compressed {
+			reopened.mu.Unlock()
+			t.Fatalf("reopened sealed segment %d not marked compressed", reopened.segments[i].seqNum)
+		}
+	}
+	reopened.mu.Unlock()
+}
+
+func TestSegmentedLogStoreFindSegmentIndexForLSN(t *testing.T) {
+	store := &SegmentedLogStore{
+		segments: []*segment{
+			{seqNum: 1, firstLSN: 1, lastLSN: 100},
+			{seqNum: 2, firstLSN: 101, lastLSN: 200},
+			{seqNum: 3, firstLSN: 201, lastLSN: 300},
+			{seqNum: 4, firstLSN: 0, lastLSN: 0}, // empty active segment
+		},
+	}
+
+	for _, tc := range []struct {
+		name    string
+		fromLSN uint64
+		want    int
+	}{
+		{name: "before first", fromLSN: 1, want: 0},
+		{name: "inside first", fromLSN: 99, want: 0},
+		{name: "start second", fromLSN: 101, want: 1},
+		{name: "inside third", fromLSN: 250, want: 2},
+		{name: "after sealed segments", fromLSN: 301, want: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := store.findSegmentIndexForLSN(tc.fromLSN); got != tc.want {
+				t.Fatalf("findSegmentIndexForLSN(%d): got %d want %d", tc.fromLSN, got, tc.want)
+			}
+		})
+	}
+}
+
 func appendInjectedPartialFrame(path string, declaredLength uint32, partialPayload []byte) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {

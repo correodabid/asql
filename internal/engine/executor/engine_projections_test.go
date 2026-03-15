@@ -206,6 +206,71 @@ func TestVFKProjectionFanoutDelete(t *testing.T) {
 	}
 }
 
+// TestVFKProjectionFanoutBatchesSourceMutations verifies that when multiple
+// source-table mutations happen in one commit, the subscriber projection is
+// rebuilt from the final committed state.
+func TestVFKProjectionFanoutBatchesSourceMutations(t *testing.T) {
+	ctx := context.Background()
+	store, err := wal.NewSegmentedLogStore(filepath.Join(t.TempDir(), "proj-batch.wal"), wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+
+	mustExecProj(t, ctx, engine, session, "BEGIN DOMAIN identity")
+	mustExecProj(t, ctx, engine, session, `CREATE TABLE identity.users (id TEXT PRIMARY KEY, name TEXT)`)
+	mustExecProj(t, ctx, engine, session, `INSERT INTO identity.users (id, name) VALUES ('u1', 'Alice')`)
+	mustExecProj(t, ctx, engine, session, `INSERT INTO identity.users (id, name) VALUES ('u2', 'Bob')`)
+	mustExecProj(t, ctx, engine, session, "COMMIT")
+
+	mustExecProj(t, ctx, engine, session, "BEGIN CROSS DOMAIN billing, identity")
+	mustExecProj(t, ctx, engine, session, `CREATE TABLE billing.orders (
+		id TEXT PRIMARY KEY, user_id TEXT, user_lsn INT,
+		VERSIONED FOREIGN KEY (user_id) REFERENCES identity.users(id) AS OF user_lsn
+	)`)
+	mustExecProj(t, ctx, engine, session, "COMMIT")
+
+	mustExecProj(t, ctx, engine, session, "BEGIN DOMAIN identity")
+	mustExecProj(t, ctx, engine, session, `UPDATE identity.users SET name = 'Alicia' WHERE id = 'u1'`)
+	mustExecProj(t, ctx, engine, session, `DELETE FROM identity.users WHERE id = 'u2'`)
+	mustExecProj(t, ctx, engine, session, `INSERT INTO identity.users (id, name) VALUES ('u3', 'Cara')`)
+	mustExecProj(t, ctx, engine, session, "COMMIT")
+
+	state := engine.readState.Load()
+	projTable := state.domains["billing"].tables[projectionTableName("identity", "users")]
+	if projTable == nil {
+		t.Fatal("projection table missing after batched source mutations")
+	}
+	if len(projTable.rows) != 2 {
+		t.Fatalf("projection after batched mutations: expected 2 rows, got %d", len(projTable.rows))
+	}
+
+	gotByID := make(map[string]string, len(projTable.rows))
+	for _, row := range projTable.rows {
+		mapped := rowToMap(projTable, row)
+		gotByID[mapped["id"].StringValue] = mapped["name"].StringValue
+	}
+	if len(gotByID) != 2 {
+		t.Fatalf("projection id map: expected 2 rows, got %d", len(gotByID))
+	}
+	if gotByID["u1"] != "Alicia" {
+		t.Fatalf("projection row u1: got %q want Alicia", gotByID["u1"])
+	}
+	if _, exists := gotByID["u2"]; exists {
+		t.Fatalf("projection should not contain deleted row u2")
+	}
+	if gotByID["u3"] != "Cara" {
+		t.Fatalf("projection row u3: got %q want Cara", gotByID["u3"])
+	}
+}
+
 // TestVFKProjectionReplayIdempotent verifies that projections are correctly
 // reconstructed when the engine is restarted and replays the WAL from scratch.
 func TestVFKProjectionReplayIdempotent(t *testing.T) {

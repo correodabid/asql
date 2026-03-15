@@ -146,6 +146,7 @@ type segment struct {
 	size        int64  // current file size in bytes
 	recordCount uint32 // number of WAL records in this segment
 	hasHeader   bool   // true if file starts with a segment header
+	compressed  bool   // true when the segment is already compacted to WALZ
 	dirty       bool   // true when the segment has writes not yet fsynced
 }
 
@@ -358,6 +359,12 @@ func (store *SegmentedLogStore) openSegment(seqNum uint32) (*segment, error) {
 		f.Close()
 		return nil, fmt.Errorf("stat segment: %w", err)
 	}
+	compressed, err := isWALZSegmentFile(f)
+	if err != nil {
+		f.Close()
+		return nil, fmt.Errorf("inspect segment format: %w", err)
+	}
+	seg.compressed = compressed
 	if validEnd < info.Size() {
 		slog.Warn("wal: truncating partial frame in segment",
 			"segment", seqNum, "valid_end", validEnd, "file_size", info.Size())
@@ -375,6 +382,27 @@ func (store *SegmentedLogStore) openSegment(seqNum uint32) (*segment, error) {
 	}
 
 	return seg, nil
+}
+
+func isWALZSegmentFile(f *os.File) (bool, error) {
+	if f == nil {
+		return false, nil
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return false, fmt.Errorf("seek segment start: %w", err)
+	}
+	var peek [4]byte
+	n, err := io.ReadFull(f, peek[:])
+	if err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return false, nil
+		}
+		return false, fmt.Errorf("read segment peek: %w", err)
+	}
+	if n < len(peek) {
+		return false, nil
+	}
+	return string(peek[:]) == walzMagic, nil
 }
 
 // scanSegmentRecords reads all valid records from a segment file.
@@ -1206,14 +1234,13 @@ func (store *SegmentedLogStore) ReadFrom(ctx context.Context, fromLSN uint64, li
 	if result, ok := store.readRecentLocked(fromLSN, limit); ok {
 		return result, nil
 	}
+	if fromLSN > store.lastLSN {
+		return nil, nil
+	}
 
 	var result []ports.WALRecord
-
-	for _, seg := range store.segments {
-		// Skip segments entirely before fromLSN.
-		if seg.lastLSN > 0 && seg.lastLSN < fromLSN {
-			continue
-		}
+	for i := store.findSegmentIndexForLSN(fromLSN); i < len(store.segments); i++ {
+		seg := store.segments[i]
 
 		records, _, err := scanSegmentRecordsFromLSN(seg.file, fromLSN, limit-len(result))
 		if err != nil {
@@ -1234,6 +1261,24 @@ func (store *SegmentedLogStore) ReadFrom(ctx context.Context, fromLSN uint64, li
 	}
 
 	return result, nil
+}
+
+// findSegmentIndexForLSN returns the earliest segment that may contain fromLSN.
+// Segments are ordered by sequence number and hold monotonically increasing
+// LSN ranges, so earlier segments with lastLSN < fromLSN can be skipped.
+// Must be called while holding store.mu.
+func (store *SegmentedLogStore) findSegmentIndexForLSN(fromLSN uint64) int {
+	if len(store.segments) == 0 {
+		return 0
+	}
+	idx := sort.Search(len(store.segments), func(i int) bool {
+		lastLSN := store.segments[i].lastLSN
+		return lastLSN == 0 || lastLSN >= fromLSN
+	})
+	if idx >= len(store.segments) {
+		return len(store.segments)
+	}
+	return idx
 }
 
 // Recover returns all valid WAL records for startup state rebuild.
@@ -1327,6 +1372,9 @@ func (store *SegmentedLogStore) CompactSealedSegments(ctx context.Context) error
 	for _, seg := range sealed {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if seg.compressed {
+			continue
 		}
 		if err := store.compactSegment(seg); err != nil {
 			slog.Warn("wal: segment compaction failed", "segment", seg.seqNum, "error", err.Error())
@@ -1429,6 +1477,7 @@ func (store *SegmentedLogStore) compactSegment(seg *segment) error {
 	oldSize := seg.size
 	seg.file = newF
 	seg.size = newInfo.Size()
+	seg.compressed = true
 	store.totalSize += newInfo.Size() - oldSize
 	store.mu.Unlock()
 

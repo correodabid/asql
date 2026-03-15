@@ -209,6 +209,7 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 		// Apply mutations (DML-first path for all jobs).
 		clonedTables := make(map[string]struct{}, len(job.ordered))
 		entityCollector := make(map[string]map[string][]string)
+		projectionSources := make(map[projectionSource]struct{})
 
 		applyFailed := false
 		for mi := range job.ordered {
@@ -247,8 +248,9 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 				break
 			}
 
-			// Fan out DML changes to VFK projection shadow tables in subscriber domains.
-			engine.fanoutProjections(newState, mutation.plan)
+			// Rebuild VFK projection shadow tables once per touched source table at
+			// the end of the commit job instead of after every mutation.
+			engine.collectProjectionSource(projectionSources, mutation.plan)
 
 			// Entity tracking for INSERT/UPDATE: collect after mutation.
 			if mutation.plan.Operation == planner.OperationInsert || mutation.plan.Operation == planner.OperationUpdate {
@@ -275,6 +277,8 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 		if applyFailed {
 			continue
 		}
+
+		engine.fanoutProjectionSources(newState, projectionSources)
 
 		// Record entity versions after all mutations for this job.
 		if len(entityCollector) > 0 {

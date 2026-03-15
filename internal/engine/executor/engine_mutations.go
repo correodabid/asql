@@ -1072,9 +1072,10 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		domainState.tables[plan.TableName] = ts
 
 		// Register VFK subscriptions and seed initial projection tables for
-		// any cross-domain VERSIONED FOREIGN KEY constraints.  These shadow
+		// any cross-domain VERSIONED FOREIGN KEY constraints. These shadow
 		// tables live inside the subscriber domain (plan.DomainName) and are
-		// rebuilt on every mutation to the source table via fanoutProjections.
+		// rebuilt from the final source-table state for each commit job that
+		// mutates the source table.
 		for _, vfk := range versionedFKs {
 			if vfk.referencesDomain == "" || vfk.referencesDomain == plan.DomainName {
 				continue // same-domain VFK — no projection needed

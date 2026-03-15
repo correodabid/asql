@@ -1,0 +1,103 @@
+Waiting for cluster quorum...  ready (leader=127.0.0.1:5433)
+
+  [redirect] leader is at 127.0.0.1:5433
+=== ASQL Two-Domain Seed ===
+Engine (pgwire): 127.0.0.1:5433
+Recipe domain:  master_recipe
+Order domain:   process_order
+Sensor domain:  sensor_data
+Seed:           42
+Scale:          1x
+Recipes:        100
+Process orders: 300
+Sensors:        50
+Workers:        4
+
+Resetting process_order domain tables... OK
+Resetting master_recipe domain tables... OK
+Resetting sensor_data domain tables... OK
+Creating master_recipe schema (14 tables)... OK
+Creating process_order schema (5 tables, VFK -> master_recipe.recipes)... OK
+Preparing 100 recipe jobs... OK (13648 planned rows, plan 5b743404becf23b4)
+Inserting master_recipe data with 4 workers... 
+  Top 10 slowest jobs:
+       1. Compression_Metformin_v5                    337ms   153 rows  1 attempts
+       2. Compression_Losartan_v5                     331ms   166 rows  1 attempts
+       3. Compression_Amlodipine_v3                   251ms   133 rows  1 attempts
+       4. Wet_Granulation_Cetirizine_v3               229ms   178 rows  1 attempts
+       5. Drying_Lisinopril_v5                        198ms   178 rows  1 attempts
+       6. Milling_Losartan_v3                         166ms   146 rows  1 attempts
+       7. Filtration_Amlodipine_v5                    163ms   132 rows  1 attempts
+       8. Drying_Diclofenac_v4                        133ms   107 rows  1 attempts
+       9. Compression_Lisinopril_v1                   118ms   221 rows  1 attempts
+      10. Wet_Granulation_Ranitidine_v4               117ms   212 rows  1 attempts
+  Timing: P50=39ms  P95=166ms  P99=331ms
+OK (0 retries)
+Creating master_recipe indexes (18)... OK
+Preparing 300 process order jobs... OK (6913 planned rows, plan f39589902ec8cb2b)
+Inserting process_order data with 4 workers... 
+  Top 10 slowest jobs:
+       1. Milling_Ibuprofen_v3_71                     107ms    22 rows  1 attempts
+       2. Drying_Ciprofloxacin_v2_33                  105ms    11 rows  1 attempts
+       3. Film_Coating_Lisinopril_v3_15               105ms    20 rows  1 attempts
+       4. Film_Coating_Losartan_v3_05                 104ms    17 rows  1 attempts
+       5. Film_Coating_Ranitidine_v3_24                79ms    22 rows  1 attempts
+       6. Milling_Ranitidine_v1_17                     78ms    30 rows  1 attempts
+       7. Tablet_Coating_Azithromycin_v5_10            78ms    22 rows  1 attempts
+       8. Film_Coating_Ibuprofen_v2_06                 74ms    18 rows  1 attempts
+       9. Fluid_Bed_Drying_Gabapentin_v1_94            71ms    27 rows  1 attempts
+      10. Wet_Granulation_Metformin_v2_02              70ms    17 rows  1 attempts
+  Timing: P50=9ms  P95=40ms  P99=104ms
+OK (0 retries)
+Creating process_order indexes (8)... OK
+Creating sensor_data schema (4 tables, all data types)... OK
+Preparing 50 sensor jobs... OK (1233 planned rows, plan 8e9684d0862f2e8c)
+Planned dataset: total=21794 rows plan=519b013848cad250
+Inserting sensor_data with 4 workers... 
+  Top 10 slowest jobs:
+       1. ConductivityMeter-J10-009                    13ms    32 rows  1 attempts
+       2. TempController-H8-013                        12ms    29 rows  1 attempts
+       3. FlowMeter-D4-029                             10ms    29 rows  1 attempts
+       4. HumidSensor-B2-001                           10ms    26 rows  1 attempts
+       5. VibrationSensor-F6-011                       10ms    28 rows  1 attempts
+       6. FlowMeter-D4-003                             10ms    28 rows  1 attempts
+       7. OxygenAnalyzer-I9-004                        10ms    22 rows  1 attempts
+       8. OxygenAnalyzer-I9-012                        10ms    32 rows  1 attempts
+       9. OxygenAnalyzer-I9-025                         9ms    30 rows  1 attempts
+      10. ConductivityMeter-J10-021                     9ms    30 rows  1 attempts
+  Timing: P50=7ms  P95=10ms  P99=13ms
+OK (0 retries)
+Creating sensor_data indexes (7)... OK
+
+=== Done in 2.589s ===
+Plan digest:        519b013848cad250
+Planned rows:       21794
+Total rows:         21794
+  master_recipe:    13648
+  process_order:    6913
+  sensor_data:      1233
+Recipes:            100
+Process orders:     300
+Sensors:            50
+Workers:            4
+Retries (conflict): 0
+Throughput:         8417 rows/sec
+
+Sample queries:
+  -- master_recipe domain
+  SELECT id, name, status, master_recipe_type FROM recipes;
+  SELECT r.name, t.tag FROM recipes r, recipe_tags t WHERE r.id = t.recipe_id;
+  SELECT c.component_id, c.component_type FROM components c, blocks b WHERE c.block_id = b.id;
+
+  -- process_order domain
+  SELECT id, ext_id, status, recipe_id, recipe_version FROM process_orders;
+  SELECT r.record_type, r.value FROM process_order_records r WHERE r.process_order_id = '<uuid>';
+  SELECT e.element_type, e.status FROM execution_statuses e WHERE e.process_order_id = '<uuid>';
+
+  -- sensor_data domain (all types: TEXT, INT, FLOAT, BOOL, TIMESTAMP, JSON)
+  SELECT name, active, latitude, longitude, installed_at FROM sensors;
+  SELECT name, config->>'protocol' AS protocol, config->>'firmware' AS fw FROM sensors;
+  SELECT s.name, r.temperature, r.humidity, r.is_anomaly, r.recorded_at FROM sensors s, readings r WHERE s.id = r.sensor_id;
+  SELECT s.name, a.severity, a.actual_value, a.threshold_value, a.triggered_at FROM sensors s, alerts a WHERE s.id = a.sensor_id;
+  SELECT * FROM readings WHERE is_anomaly = TRUE;
+  SELECT s.name, c.passed, c.drift_ppm, c.report->>'standard' AS standard FROM sensors s, calibrations c WHERE s.id = c.sensor_id;

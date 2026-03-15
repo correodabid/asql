@@ -5,35 +5,64 @@ import (
 	"asql/internal/engine/planner"
 )
 
-// fanoutProjections mirrors DML mutations from a source domain table into all
-// subscriber domains that hold a versioned-foreign-key projection of that table.
-//
-// It must be called after applyPlanToStateTracked succeeds, while still under
-// writeMu. state is the mutable COW clone being built for this commit batch;
-// subscriber domains are guaranteed to be shallow-cloned in state before this
-// function runs (see addProjectionDomainsToAffected in processCommitBatch).
-//
-// Fan-out uses a full-sync strategy (v1): for every DML mutation on a source
-// table that has subscribers, the projected table is rebuilt from the current
-// source rows.  This is O(N) per mutation against a subscribed table but ensures
-// correctness across INSERT / UPDATE / DELETE without tracking per-row deltas.
-// Incremental fan-out can be added later as a performance optimisation.
-func (engine *Engine) fanoutProjections(state *readableState, plan planner.Plan) {
-	if len(engine.vfkSubscriptions) == 0 {
+type projectionSource struct {
+	domainName string
+	tableName  string
+}
+
+// collectProjectionSource records a source table touched by a DML mutation when
+// that table has VFK projection subscribers. The caller can then rebuild each
+// touched source once at the end of the commit job instead of after every
+// mutation in the job.
+func (engine *Engine) collectProjectionSource(targets map[projectionSource]struct{}, plan planner.Plan) {
+	if len(engine.vfkSubscriptions) == 0 || targets == nil {
 		return
 	}
-
+	if plan.Operation != planner.OperationInsert && plan.Operation != planner.OperationUpdate && plan.Operation != planner.OperationDelete {
+		return
+	}
 	subKey := plan.DomainName + "." + plan.TableName
+	if len(engine.vfkSubscriptions[subKey]) == 0 {
+		return
+	}
+	targets[projectionSource{domainName: plan.DomainName, tableName: plan.TableName}] = struct{}{}
+}
+
+// fanoutProjectionSources mirrors the final committed state of each touched
+// source domain table into all subscriber domains that hold a versioned-
+// foreign-key projection of that table.
+//
+// It must be called after all mutations in a commit job have applied
+// successfully, while still under writeMu. state is the mutable COW clone being
+// built for this commit batch; subscriber domains are guaranteed to be shallow-
+// cloned in state before this function runs (see addProjectionDomainsToAffected
+// in processCommitBatch).
+//
+// Fan-out still uses a full-sync strategy, but it now rebuilds each touched
+// source once per commit job instead of once per mutation. This preserves
+// correctness across INSERT / UPDATE / DELETE while removing the worst-case
+// O(mutations × rows) projection rebuild cost inside write-heavy transactions.
+func (engine *Engine) fanoutProjectionSources(state *readableState, targets map[projectionSource]struct{}) {
+	if len(engine.vfkSubscriptions) == 0 || len(targets) == 0 {
+		return
+	}
+	for source := range targets {
+		engine.fanoutProjectionSource(state, source.domainName, source.tableName)
+	}
+}
+
+func (engine *Engine) fanoutProjectionSource(state *readableState, domainName, tableName string) {
+	subKey := domainName + "." + tableName
 	subs := engine.vfkSubscriptions[subKey]
 	if len(subs) == 0 {
 		return
 	}
 
-	srcDS := state.domains[plan.DomainName]
+	srcDS := state.domains[domainName]
 	if srcDS == nil {
 		return
 	}
-	srcTable := srcDS.tables[plan.TableName]
+	srcTable := srcDS.tables[tableName]
 	if srcTable == nil {
 		return
 	}
@@ -47,7 +76,7 @@ func (engine *Engine) fanoutProjections(state *readableState, plan planner.Plan)
 		if projTable == nil {
 			continue
 		}
-		// Rebuild projected table from current source rows and update the
+		// Rebuild projected table from the final source rows and update the
 		// subscriber domain's tables map (which is already COW-mutable).
 		subDS.tables[sub.projTableName] = rebuildProjectionFromSource(srcTable)
 	}
