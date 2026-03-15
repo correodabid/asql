@@ -1948,6 +1948,17 @@ code {
   font-weight: 600;
 }
 
+.doc-note {
+  margin-bottom: 24px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  background: rgba(124, 92, 255, 0.08);
+  color: var(--text-dim);
+  border-radius: 12px;
+  font-size: 0.95rem;
+  line-height: 1.55;
+}
+
 /* ── Loading state ─────────────────────────────────────────────── */
 .doc-loading {
   text-align: center;
