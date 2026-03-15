@@ -130,9 +130,12 @@ Finer-grained persisted-snapshot microbenchmarks on 2026-03-14:
 - `BenchmarkEngineMaterializePersistedSnapshots-8`: `49,473–57,281 ns/op`, `113,050–113,054 B/op`, `573 allocs/op`
 - `BenchmarkEngineReadPersistedSnapshotsFromDirIndexed-8`: `492,740 ns/op`, `655,010 B/op`, `2,293 allocs/op`
 
-Replay-throughput repeated sample on 2026-03-14:
+Replay-throughput repeated sample:
 
-- `BenchmarkEngineReplayToLSN-8`: ~`1,998,773,750–2,000,865,708 ns/op`, `2,693,952–2,704,560 B/op`, `16,664–16,676 allocs/op`
+- 2026-03-14 baseline:
+	- `BenchmarkEngineReplayToLSN-8`: ~`1,998,773,750–2,000,865,708 ns/op`, `2,693,952–2,704,560 B/op`, `16,664–16,676 allocs/op`
+- 2026-03-15 after skipping snapshot maintenance for bounded `ReplayToLSN` rebuilds:
+	- `BenchmarkEngineReplayToLSN-8`: ~`1,995,093,250–1,998,993,334 ns/op`, `1,412,816–1,418,160 B/op`, `12,085–12,091 allocs/op`
 
 ### Indexed-read validation (`internal/engine/executor`)
 
@@ -182,6 +185,7 @@ Repeated sample on 2026-03-15:
 - The restart/replay numbers above are useful internal evidence but are not closure-grade AB evidence yet.
 - Current restart-path interpretation:
 	- replay-to-LSN is now benchmarked with a stable repeated sample around ~`2.0 ms/op` on this fixture;
+	- skipping snapshot capture/persistence/eviction during bounded `ReplayToLSN` did not materially move wall-clock time on the current fixture, but it did cut replay allocation volume from roughly ~`2.69 MB/op` and ~`16.7k allocs/op` to ~`1.41 MB/op` and ~`12.1k allocs/op`;
 	- the current end-to-end restart comparison is a head-snapshot best-case (`0` post-snapshot replay records), so it is good for measuring raw snapshot-load overhead but not for choosing snapshot cadence by itself;
 	- after fixing the restart benchmark harness, removing one extra deep copy during snapshot materialization, reducing dictionary-string allocation in the binary decoder, and decoding table rows directly into positional slices, the persisted-snapshot path is now much closer to replay-only on repeated runs while still allocating materially less, but it is still slower on this fixture, so snapshot-load work remains open rather than justified for closure;
 	- the repeated longer-benchtime sample now shows persisted-snapshot restart stabilizing around ~`3.91 ms/op` versus ~`3.33–3.41 ms/op` for replay-only, while cutting restart allocations to ~`1.12 MB/op` and ~`6.3k allocs/op`;

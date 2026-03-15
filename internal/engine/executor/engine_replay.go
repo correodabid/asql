@@ -244,6 +244,7 @@ func (engine *Engine) rebuildFromRecords(records []ports.WALRecord, targetLSN ui
 	if engine.snapshots != nil {
 		engine.snapshots.clear()
 	}
+	captureReplaySnapshots := !bounded
 
 	txCommitLSN := buildTxCommitLSNIndex(records)
 	txEntityCollectors := make(map[string]map[string]map[string][]string)
@@ -299,7 +300,7 @@ func (engine *Engine) rebuildFromRecords(records []ports.WALRecord, targetLSN ui
 
 		// Capture periodic snapshots for fast time-travel queries.
 		interval := uint64(adaptiveSnapshotInterval(engine.mutationCount))
-		if engine.snapshots != nil && interval > 0 && engine.mutationCount%interval == 0 {
+		if captureReplaySnapshots && engine.snapshots != nil && interval > 0 && engine.mutationCount%interval == 0 {
 			newState.headLSN = engine.headLSN
 			newState.logicalTS = engine.logicalTS
 			engine.snapshots.add(captureSnapshot(newState, engine.catalog))
@@ -320,18 +321,18 @@ func (engine *Engine) rebuildFromRecords(records []ports.WALRecord, targetLSN ui
 	engine.readState.Store(newState)
 
 	// Add a final snapshot at head for time-travel coverage.
-	if engine.snapshots != nil && engine.headLSN > 0 {
+	if captureReplaySnapshots && engine.snapshots != nil && engine.headLSN > 0 {
 		snap := captureSnapshot(newState, engine.catalog)
 		engine.snapshots.add(snap)
 	}
 
 	// Write a single checkpoint to disk for fast restart recovery.
-	if engine.snapDir != "" && engine.headLSN > 0 {
+	if captureReplaySnapshots && engine.snapDir != "" && engine.headLSN > 0 {
 		engine.persistAllSnapshots()
 	}
 
 	// Evict old in-memory snapshots to bound memory usage.
-	if engine.snapshots != nil {
+	if captureReplaySnapshots && engine.snapshots != nil {
 		engine.snapshots.evictOldest(adaptiveMaxMemorySnapshots(engine.mutationCount))
 	}
 
