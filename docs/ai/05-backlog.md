@@ -503,7 +503,7 @@ Open gaps before closure:
 - Snapshot restart microbenchmarks now exist, but there is no closure-level baseline/improvement decision yet for snapshot load time.
 - Initial failover promotion/recovery benchmarks now exist, but there is no closure-level baseline/improvement decision yet for failover recovery time.
 - Initial indexed-read and index-only benchmarks now exist, but there is no closure-level baseline/improvement decision yet for indexed read latency.
-- No published multi-scenario failover/recovery benchmark suite yet that satisfies the acceptance gates below.
+- A published multi-scenario failover/recovery benchmark suite now exists, but there is no closure-level improvement decision yet for it.
 - No measured decision record yet for persisted index/cache architecture.
 
 Current next-execution order:
@@ -575,7 +575,7 @@ Latest directional read evidence:
 
 Acceptance gates (must pass before closing Epic AB)
 - [ ] Performance work is benchmark-driven, not assumption-driven.
-- [ ] Benchmark suite includes failover and recovery scenarios, not only steady-state throughput.
+- [x] Benchmark suite includes failover and recovery scenarios, not only steady-state throughput.
 
 ## Epic AC — Adoption-friction closure from BankApp (Phase 7)
 

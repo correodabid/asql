@@ -130,6 +130,7 @@ Current code-backed hooks:
 
 - `BenchmarkFailoverCoordinatorPromotion`
 - `BenchmarkFailoverRecoveryReplay`
+- `BenchmarkFailoverRecoveryReplaySweep`
 
 Primary metrics:
 

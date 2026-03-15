@@ -154,10 +154,15 @@ Composite-order repeated sample on 2026-03-14:
 
 ### Failover / recovery validation (`test/integration`)
 
-Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench 'BenchmarkFailover(CoordinatorPromotion|RecoveryReplay)$' -benchtime=1x -count=1`:
+Repeated sample on 2026-03-15:
 
-- `BenchmarkFailoverCoordinatorPromotion-8`: `125,667 ns/op`
-- `BenchmarkFailoverRecoveryReplay-8`: `227,584 ns/op`
+- Control-plane promotion using `go test ./test/integration -run '^$' -bench '^BenchmarkFailoverCoordinatorPromotion$' -benchmem -benchtime=200ms -count=3`:
+	- `BenchmarkFailoverCoordinatorPromotion-8`: ~`654.1–805.0 ns/op`, `1,592 B/op`, `16 allocs/op`
+- Recovery replay using `go test ./test/integration -run '^$' -bench 'BenchmarkFailover(RecoveryReplay|RecoveryReplaySweep)$' -benchmem -benchtime=1x -count=3`:
+	- `BenchmarkFailoverRecoveryReplay-8`: ~`192,584–275,583 ns/op`, `97,608–97,816 B/op`, `285–288 allocs/op`
+	- `BenchmarkFailoverRecoveryReplaySweep/small_total_40-8`: ~`411,499–541,459 ns/op`, `244,968–245,224 B/op`, `1,288–1,290 allocs/op`
+	- `BenchmarkFailoverRecoveryReplaySweep/medium_total_640-8`: ~`9,278,041–10,999,625 ns/op`, `2,774,432–2,779,776 B/op`, `18,077–18,083 allocs/op`
+	- `BenchmarkFailoverRecoveryReplaySweep/large_total_4608-8`: ~`31,343,958–61,342,708 ns/op`, `29,639,272–29,734,112 B/op`, `184,713–184,718 allocs/op`
 
 ## Notes
 
@@ -194,6 +199,10 @@ Initial dry-run on 2026-03-14 using `go test ./test/integration -run '^$' -bench
 	- a fresh end-to-end restart spot check after the latest snapshot-load work still shows persisted-snapshot restart slightly behind replay-only on this short head-snapshot fixture (~`4.46 ms/op` vs ~`4.24 ms/op`), but the allocation gap remains large in the snapshot path’s favor (~`1.08 MB/op`, ~`5.2k allocs/op` vs ~`2.30 MB/op`, ~`15.6k allocs/op`), reinforcing that the remaining closure question is about the full restart envelope rather than the already-optimized in-memory restore step.
 	- a fresh representative sweep check after the same changes keeps the broader restart interpretation stable: with a fixed 500-record snapshot anchor and a long 5k replay tail, persisted snapshot restart still loses (~`50.4 ms/op`, ~`38.7 MB/op`, ~`229.7k allocs/op`) to replay-only (~`39.3 ms/op`, ~`33.8 MB/op`, ~`206.0k allocs/op`), while the medium cadence case that replays only the last ~`500` records at `total_10500` still wins clearly (~`61.3 ms/op`, ~`34.6 MB/op`, ~`196.2k allocs/op` vs ~`94.5 ms/op`, ~`62.1 MB/op`, ~`361.3k allocs/op`).
 	- the positional-row decode change clearly improved isolated decode and snapshot-directory load benchmarks, but the end-to-end persisted-restart timing is still noisy on the current short benchtime harness and needs repeated confirmation before any closure claim.
+- Current failover/recovery interpretation:
+	- the benchmark suite now includes both failover promotion and multi-scenario recovery replay, so Epic AB is no longer missing failover/recovery coverage at the benchmark-suite level;
+	- recovery replay currently scales in the expected direction across the `small_total_40`, `medium_total_640`, and `large_total_4608` scenarios, but the large case is still noisy enough on `-benchtime=1x` that it should be treated as a regression reference rather than as a tuned target;
+	- the failover recovery item remains open because the suite now provides a baseline, but there is not yet an explicit improvement decision or optimization pass attached to those results.
 - Current read-path interpretation:
 	- on the simple covered ordered-read shape, `btree-index-only` is about $10\times$ faster than `btree-order` and materially reduces allocations;
 	- adding `OFFSET` to the covered ordered-read shape still keeps `btree-index-only` comfortably fast (about $1.7\times$ slower than the zero-offset variant, but still far below row-fetch ordered reads);
