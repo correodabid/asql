@@ -170,6 +170,10 @@ Repeated sample on 2026-03-15:
 	- current split after skipping non-entity mutation tracking work and per-insert perf instrumentation during replay:
 		- `store_reopen`: ~`13,457,083–21,864,708 ns/op`, `2,587,072–2,587,088 B/op`, `14,023 allocs/op`
 		- `engine_replay`: ~`19,781,042–24,530,917 ns/op`, `23,834,288–23,932,480 B/op`, `161,430–161,432 allocs/op`
+	- current split after persisting segment headers for clean uncompressed reopen:
+		- `store_reopen`: ~`38,083–73,158 ns/op`, `4,688 B/op`, `30 allocs/op`
+		- `engine_replay`: ~`2,098,562–4,252,816 ns/op`, `23,932,512–23,933,712 B/op`, `161,433–161,438 allocs/op`
+		- end-to-end `BenchmarkFailoverRecoveryReplaySweep/large_total_4608-8`: ~`4,210,120–4,311,958 ns/op`, `23,739,048–24,131,616 B/op`, `161,452–161,466 allocs/op`
 
 ## Notes
 
@@ -211,6 +215,7 @@ Repeated sample on 2026-03-15:
 	- moving correctness validation outside the timed region tightened the baseline so the recovery benchmark now measures reopen + replay more directly instead of mixing in post-recovery query validation;
 	- recovery replay currently scales in the expected direction across the `small_total_40`, `medium_total_640`, and `large_total_4608` scenarios, and the large-case phase split shows the cost is shared between WAL reopen/discovery and engine replay/apply, with replay/apply still the larger slice even after the latest cleanup;
 	- the latest replay hot-path cleanup was intentionally narrow: replay now skips entity-tracking row materialization on tables that do not participate in any entity and avoids per-insert mutation perf timing during WAL replay; on the large-case phase split that cut the replay/apply slice from roughly ~`23.0–26.3 ms` / ~`170.6k allocs` to ~`19.8–24.5 ms` / ~`161.4k allocs`;
+	- a follow-up WAL reopen optimization now persists compact segment headers for clean uncompressed segments and trusts them on reopen, collapsing the large-case `store_reopen` slice from roughly ~`13.5–21.9 ms` to ~`38–73 µs`; that shifts the failover recovery bottleneck decisively into engine replay/apply;
 	- the failover recovery item remains open because the suite now provides a baseline, but there is not yet an explicit improvement decision or optimization pass attached to those results.
 - Current read-path interpretation:
 	- on the simple covered ordered-read shape, `btree-index-only` is about $10\times$ faster than `btree-order` and materially reduces allocations;

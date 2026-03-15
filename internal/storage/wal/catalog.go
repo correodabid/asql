@@ -56,7 +56,12 @@ func CatalogSegments(basePath string) ([]SegmentCatalogEntry, error) {
 		if err != nil {
 			return nil, fmt.Errorf("open wal segment %s: %w", file.fileName, err)
 		}
-		records, _, err := scanSegmentRecords(f)
+		header, hasHeader, err := tryReadSegmentHeader(f)
+		if err != nil {
+			_ = f.Close()
+			return nil, fmt.Errorf("read wal segment header %s: %w", file.fileName, err)
+		}
+		records, _, err := scanSegmentRecords(f, hasHeader)
 		if closeErr := f.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}
@@ -72,10 +77,17 @@ func CatalogSegments(basePath string) ([]SegmentCatalogEntry, error) {
 			SeqNum:   file.seqNum,
 			Bytes:    info.Size(),
 		}
+		if hasHeader {
+			entry.Sealed = header.Sealed
+		}
 		if len(records) > 0 {
 			entry.FirstLSN = records[0].LSN
 			entry.LastLSN = records[len(records)-1].LSN
 			entry.RecordCount = uint32(len(records))
+		} else if hasHeader {
+			entry.FirstLSN = header.FirstLSN
+			entry.LastLSN = header.LastLSN
+			entry.RecordCount = header.RecordCount
 		}
 		result = append(result, entry)
 	}

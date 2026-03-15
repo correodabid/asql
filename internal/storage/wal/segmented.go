@@ -47,7 +47,7 @@ const (
 	segmentMagic = "WALS"
 
 	// segmentHeaderVer is the current header format version.
-	segmentHeaderVer = uint8(2)
+	segmentHeaderVer = uint8(3)
 
 	// walzMagic is the 4-byte prefix written at the start of a whole-segment
 	// zstd-compressed (WALZ) sealed segment file.
@@ -86,7 +86,8 @@ func init() {
 //	17      8B    lastLSN
 //	25      4B    recordCount
 //	29      1B    sealed flag (0=active, 1=sealed)
-//	30      30B   reserved
+//	30      8B    dataSize (bytes of WAL frames after the header)
+//	38      22B   reserved
 //	60      4B    CRC32 of bytes [0:60]
 type segmentHeader struct {
 	SeqNum      uint32
@@ -94,6 +95,7 @@ type segmentHeader struct {
 	LastLSN     uint64
 	RecordCount uint32
 	Sealed      bool
+	DataSize    uint64
 }
 
 func encodeSegmentHeader(h segmentHeader) []byte {
@@ -107,7 +109,8 @@ func encodeSegmentHeader(h segmentHeader) []byte {
 	if h.Sealed {
 		buf[29] = 1
 	}
-	// buf[30:60] reserved (zero)
+	binary.BigEndian.PutUint64(buf[30:38], h.DataSize)
+	// buf[38:60] reserved (zero)
 	crc := crc32.Checksum(buf[:60], crc32cTable)
 	binary.BigEndian.PutUint32(buf[60:64], crc)
 	return buf
@@ -134,6 +137,7 @@ func decodeSegmentHeader(buf []byte) (segmentHeader, error) {
 		LastLSN:     binary.BigEndian.Uint64(buf[17:25]),
 		RecordCount: binary.BigEndian.Uint32(buf[25:29]),
 		Sealed:      buf[29] == 1,
+		DataSize:    binary.BigEndian.Uint64(buf[30:38]),
 	}, nil
 }
 
@@ -341,8 +345,42 @@ func (store *SegmentedLogStore) openSegment(seqNum uint32) (*segment, error) {
 		seqNum: seqNum,
 	}
 
+	info, err := f.Stat()
+	if err != nil {
+		f.Close()
+		return nil, fmt.Errorf("stat segment: %w", err)
+	}
+	if header, ok, err := tryReadSegmentHeader(f); err != nil {
+		f.Close()
+		return nil, err
+	} else if ok {
+		seg.hasHeader = true
+		seg.firstLSN = header.FirstLSN
+		seg.lastLSN = header.LastLSN
+		seg.recordCount = header.RecordCount
+		validEnd := segmentHeaderSize + int64(header.DataSize)
+		if validEnd < segmentHeaderSize || validEnd > info.Size() {
+			seg.hasHeader = true
+		} else {
+			if validEnd < info.Size() {
+				slog.Warn("wal: truncating bytes beyond persisted segment header",
+					"segment", seqNum, "valid_end", validEnd, "file_size", info.Size())
+				if err := f.Truncate(validEnd); err != nil {
+					f.Close()
+					return nil, fmt.Errorf("truncate segment to header size: %w", err)
+				}
+			}
+			seg.size = validEnd
+			if _, err := f.Seek(0, io.SeekEnd); err != nil {
+				f.Close()
+				return nil, fmt.Errorf("seek segment end: %w", err)
+			}
+			return seg, nil
+		}
+	}
+
 	// Scan records to get LSN bounds and file size.
-	records, validEnd, err := scanSegmentRecords(f)
+	records, validEnd, err := scanSegmentRecords(f, seg.hasHeader)
 	if err != nil {
 		f.Close()
 		return nil, err
@@ -354,11 +392,6 @@ func (store *SegmentedLogStore) openSegment(seqNum uint32) (*segment, error) {
 	}
 
 	// Truncate any partial trailing frame.
-	info, err := f.Stat()
-	if err != nil {
-		f.Close()
-		return nil, fmt.Errorf("stat segment: %w", err)
-	}
 	compressed, err := isWALZSegmentFile(f)
 	if err != nil {
 		f.Close()
@@ -382,6 +415,24 @@ func (store *SegmentedLogStore) openSegment(seqNum uint32) (*segment, error) {
 	}
 
 	return seg, nil
+}
+
+func tryReadSegmentHeader(f *os.File) (segmentHeader, bool, error) {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return segmentHeader{}, false, fmt.Errorf("seek segment start: %w", err)
+	}
+	buf := make([]byte, segmentHeaderSize)
+	if _, err := io.ReadFull(f, buf); err != nil {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return segmentHeader{}, false, nil
+		}
+		return segmentHeader{}, false, fmt.Errorf("read segment header: %w", err)
+	}
+	header, err := decodeSegmentHeader(buf)
+	if err != nil {
+		return segmentHeader{}, false, nil
+	}
+	return header, true, nil
 }
 
 func isWALZSegmentFile(f *os.File) (bool, error) {
@@ -408,8 +459,12 @@ func isWALZSegmentFile(f *os.File) (bool, error) {
 // scanSegmentRecords reads all valid records from a segment file.
 // Returns the records, the valid end offset, and any fatal error.
 // Transparently handles WALZ (whole-segment zstd compressed) files.
-func scanSegmentRecords(f *os.File) ([]diskRecord, int64, error) {
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+func scanSegmentRecords(f *os.File, hasHeader bool) ([]diskRecord, int64, error) {
+	offset := int64(0)
+	if hasHeader {
+		offset = segmentHeaderSize
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return nil, 0, fmt.Errorf("seek segment start: %w", err)
 	}
 
@@ -418,7 +473,7 @@ func scanSegmentRecords(f *os.File) ([]diskRecord, int64, error) {
 	n, err := io.ReadFull(f, peek[:])
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, int64(n), nil // empty or too-short file
+			return nil, offset + int64(n), nil // empty or too-short file
 		}
 		return nil, 0, fmt.Errorf("read segment peek: %w", err)
 	}
@@ -438,23 +493,31 @@ func scanSegmentRecords(f *os.File) ([]diskRecord, int64, error) {
 			return nil, 0, fmt.Errorf("stat walz segment: %w", err)
 		}
 		// Sealed WALZ segments are always complete — validEnd = full file size.
-		records, _, err := scanRecordsFromBytes(raw)
+		records, _, err := scanRecordsFromBytes(stripSegmentHeaderFromBytes(raw))
 		return records, info.Size(), err
 	}
 
 	// Normal uncompressed segment: seek back and parse length-prefixed records.
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return nil, 0, fmt.Errorf("seek segment start: %w", err)
 	}
 
-	return scanRecordsFromFile(f)
+	records, validEnd, err := scanRecordsFromFile(f)
+	if err != nil {
+		return nil, 0, err
+	}
+	return records, offset + validEnd, nil
 }
 
 // scanSegmentRecordsFromLSN reads records from a segment file, filtering by
 // fromLSN and respecting limit without materializing the entire segment in the
 // common uncompressed case.
-func scanSegmentRecordsFromLSN(f *os.File, fromLSN uint64, limit int) ([]ports.WALRecord, int64, error) {
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+func scanSegmentRecordsFromLSN(f *os.File, fromLSN uint64, limit int, hasHeader bool) ([]ports.WALRecord, int64, error) {
+	offset := int64(0)
+	if hasHeader {
+		offset = segmentHeaderSize
+	}
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return nil, 0, fmt.Errorf("seek segment start: %w", err)
 	}
 
@@ -462,7 +525,7 @@ func scanSegmentRecordsFromLSN(f *os.File, fromLSN uint64, limit int) ([]ports.W
 	n, err := io.ReadFull(f, peek[:])
 	if err != nil {
 		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
-			return nil, int64(n), nil
+			return nil, offset + int64(n), nil
 		}
 		return nil, 0, fmt.Errorf("read segment peek: %w", err)
 	}
@@ -480,7 +543,7 @@ func scanSegmentRecordsFromLSN(f *os.File, fromLSN uint64, limit int) ([]ports.W
 		if err != nil {
 			return nil, 0, fmt.Errorf("stat walz segment: %w", err)
 		}
-		records, _, err := scanRecordsFromBytes(raw)
+		records, _, err := scanRecordsFromBytes(stripSegmentHeaderFromBytes(raw))
 		if err != nil {
 			return nil, 0, err
 		}
@@ -504,11 +567,30 @@ func scanSegmentRecordsFromLSN(f *os.File, fromLSN uint64, limit int) ([]ports.W
 		return result, info.Size(), nil
 	}
 
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
 		return nil, 0, fmt.Errorf("seek segment start: %w", err)
 	}
 
-	return scanRecordsFromFileFiltered(f, fromLSN, limit)
+	records, validEnd, err := scanRecordsFromFileFiltered(f, fromLSN, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	return records, offset + validEnd, nil
+}
+
+func stripSegmentHeaderFromBytes(data []byte) []byte {
+	if len(data) < int(segmentHeaderSize) {
+		return data
+	}
+	header, err := decodeSegmentHeader(data[:segmentHeaderSize])
+	if err != nil {
+		return data
+	}
+	end := segmentHeaderSize + int64(header.DataSize)
+	if end < segmentHeaderSize || end > int64(len(data)) {
+		return data[segmentHeaderSize:]
+	}
+	return data[segmentHeaderSize:end]
 }
 
 // scanRecordsFromBytes parses length-prefixed WAL records from a byte slice.
@@ -663,9 +745,20 @@ func (store *SegmentedLogStore) createSegment() error {
 	}
 
 	seg := &segment{
-		file:   f,
-		seqNum: seqNum,
+		file:      f,
+		seqNum:    seqNum,
+		hasHeader: true,
+		size:      segmentHeaderSize,
 	}
+	if err := writeSegmentHeader(f, segmentHeader{SeqNum: seqNum}); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("write initial segment header: %w", err)
+	}
+	if _, err := f.Seek(0, io.SeekEnd); err != nil {
+		_ = f.Close()
+		return fmt.Errorf("seek new segment end: %w", err)
+	}
+	store.totalSize += segmentHeaderSize
 	store.segments = append(store.segments, seg)
 
 	slog.Debug("wal: created new segment", "segment", seqNum, "path", path)
@@ -693,10 +786,16 @@ func (store *SegmentedLogStore) rotateIfNeeded() error {
 	// append batch already fsyncs before reaching rotation, so forcing another
 	// full-segment sync here only adds periodic stalls.
 	if active.dirty {
+		if err := store.persistSegmentHeader(active, true); err != nil {
+			return fmt.Errorf("persist segment header before rotation: %w", err)
+		}
 		if err := syncWithRetry(active.file); err != nil {
 			return fmt.Errorf("sync segment before rotation: %w", err)
 		}
 		active.dirty = false
+	}
+	if err := store.persistSegmentHeader(active, true); err != nil {
+		return fmt.Errorf("seal segment header before rotation: %w", err)
 	}
 
 	slog.Info("wal: rotating segment",
@@ -742,7 +841,7 @@ func (store *SegmentedLogStore) closeAllSegments() error {
 }
 
 // writeToActive writes encoded bytes to the active segment, updating metadata.
-func (store *SegmentedLogStore) writeToActive(data []byte, firstLSN, lastLSN uint64) error {
+func (store *SegmentedLogStore) writeToActive(data []byte, firstLSN, lastLSN uint64, recordsWritten uint32) error {
 	active := store.activeSegment()
 	if active == nil {
 		return errors.New("no active segment")
@@ -758,9 +857,35 @@ func (store *SegmentedLogStore) writeToActive(data []byte, firstLSN, lastLSN uin
 		active.firstLSN = firstLSN
 	}
 	active.lastLSN = lastLSN
+	active.recordCount += recordsWritten
 	active.dirty = true
 	store.lastWriteUnixNano.Store(time.Now().UnixNano())
 	return nil
+}
+
+func writeSegmentHeader(f *os.File, header segmentHeader) error {
+	if _, err := f.WriteAt(encodeSegmentHeader(header), 0); err != nil {
+		return fmt.Errorf("write segment header: %w", err)
+	}
+	return nil
+}
+
+func (store *SegmentedLogStore) persistSegmentHeader(seg *segment, sealed bool) error {
+	if seg == nil || seg.file == nil || !seg.hasHeader {
+		return nil
+	}
+	dataSize := int64(0)
+	if seg.size > segmentHeaderSize {
+		dataSize = seg.size - segmentHeaderSize
+	}
+	return writeSegmentHeader(seg.file, segmentHeader{
+		SeqNum:      seg.seqNum,
+		FirstLSN:    seg.firstLSN,
+		LastLSN:     seg.lastLSN,
+		RecordCount: seg.recordCount,
+		Sealed:      sealed,
+		DataSize:    uint64(dataSize),
+	})
 }
 
 func (store *SegmentedLogStore) scheduleIdleCompaction() {
@@ -873,13 +998,16 @@ func (store *SegmentedLogStore) Append(ctx context.Context, record ports.WALReco
 		Payload:   record.Payload,
 	})
 
-	if err := store.writeToActive(encoded, nextLSN, nextLSN); err != nil {
+	if err := store.writeToActive(encoded, nextLSN, nextLSN, 1); err != nil {
 		return 0, fmt.Errorf("write wal record: %w", err)
 	}
 
 	store.appendCount++
 	if store.syncStrategy.ShouldSync(store.appendCount) {
 		active := store.activeSegment()
+		if err := store.persistSegmentHeader(active, false); err != nil {
+			return 0, fmt.Errorf("persist wal segment header: %w", err)
+		}
 		if err := syncWithRetry(active.file); err != nil {
 			return 0, fmt.Errorf("sync wal segment: %w", err)
 		}
@@ -942,13 +1070,16 @@ func (store *SegmentedLogStore) AppendBatch(ctx context.Context, records []ports
 
 	firstLSN := lsns[0]
 	lastLSN := lsns[len(lsns)-1]
-	if err := store.writeToActive(buf, firstLSN, lastLSN); err != nil {
+	if err := store.writeToActive(buf, firstLSN, lastLSN, uint32(len(records))); err != nil {
 		return nil, fmt.Errorf("write wal batch: %w", err)
 	}
 
 	store.appendCount += uint64(len(records))
 	if store.syncStrategy.ShouldSync(store.appendCount) {
 		active := store.activeSegment()
+		if err := store.persistSegmentHeader(active, false); err != nil {
+			return nil, fmt.Errorf("persist wal segment header: %w", err)
+		}
 		if err := syncWithRetry(active.file); err != nil {
 			return nil, fmt.Errorf("sync wal segment: %w", err)
 		}
@@ -1017,7 +1148,7 @@ func (store *SegmentedLogStore) AppendBatchNoSync(ctx context.Context, records [
 
 	firstLSN := lsns[0]
 	lastLSN := lsns[len(lsns)-1]
-	if err := store.writeToActive(buf, firstLSN, lastLSN); err != nil {
+	if err := store.writeToActive(buf, firstLSN, lastLSN, uint32(len(records))); err != nil {
 		return nil, fmt.Errorf("write wal batch: %w", err)
 	}
 
@@ -1053,6 +1184,10 @@ func (store *SegmentedLogStore) Sync() error {
 	if active == nil || active.file == nil {
 		store.mu.Unlock()
 		return errors.New("no active segment")
+	}
+	if err := store.persistSegmentHeader(active, false); err != nil {
+		store.mu.Unlock()
+		return err
 	}
 	f := active.file
 	store.mu.Unlock()
@@ -1103,13 +1238,16 @@ func (store *SegmentedLogStore) AppendReplicated(ctx context.Context, record por
 		Payload:   record.Payload,
 	})
 
-	if err := store.writeToActive(encoded, record.LSN, record.LSN); err != nil {
+	if err := store.writeToActive(encoded, record.LSN, record.LSN, 1); err != nil {
 		return fmt.Errorf("write replicated wal record: %w", err)
 	}
 
 	store.appendCount++
 	if store.syncStrategy.ShouldSync(store.appendCount) {
 		active := store.activeSegment()
+		if err := store.persistSegmentHeader(active, false); err != nil {
+			return fmt.Errorf("persist replicated wal segment header: %w", err)
+		}
 		if err := syncWithRetry(active.file); err != nil {
 			return fmt.Errorf("sync replicated wal segment: %w", err)
 		}
@@ -1174,13 +1312,16 @@ func (store *SegmentedLogStore) AppendReplicatedBatch(ctx context.Context, recor
 
 	firstLSN := records[0].LSN
 	lastLSN := records[len(records)-1].LSN
-	if err := store.writeToActive(buf, firstLSN, lastLSN); err != nil {
+	if err := store.writeToActive(buf, firstLSN, lastLSN, uint32(len(records))); err != nil {
 		return fmt.Errorf("write replicated wal batch: %w", err)
 	}
 
 	store.appendCount += uint64(len(records))
 	if store.syncStrategy.ShouldSync(store.appendCount) {
 		active := store.activeSegment()
+		if err := store.persistSegmentHeader(active, false); err != nil {
+			return fmt.Errorf("persist replicated wal segment header: %w", err)
+		}
 		if err := syncWithRetry(active.file); err != nil {
 			return fmt.Errorf("sync replicated wal segment: %w", err)
 		}
@@ -1242,7 +1383,7 @@ func (store *SegmentedLogStore) ReadFrom(ctx context.Context, fromLSN uint64, li
 	for i := store.findSegmentIndexForLSN(fromLSN); i < len(store.segments); i++ {
 		seg := store.segments[i]
 
-		records, _, err := scanSegmentRecordsFromLSN(seg.file, fromLSN, limit-len(result))
+		records, _, err := scanSegmentRecordsFromLSN(seg.file, fromLSN, limit-len(result), seg.hasHeader)
 		if err != nil {
 			return nil, fmt.Errorf("read segment %06d: %w", seg.seqNum, err)
 		}
