@@ -78,6 +78,8 @@ Run on representative datasets:
    - engine startup succeeds,
    - replay succeeds,
    - time-travel queries return expected row parity.
+5. Current executable proxy lane for this workflow:
+   - `test/integration/upgrade_simulation_test.go`: `TestUpgradeSimulationCandidateReplaysPreviousWALAndPreservesHistoricalParity`
 
 ## Backup/restore gate
 

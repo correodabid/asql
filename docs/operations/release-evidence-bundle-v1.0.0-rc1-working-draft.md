@@ -89,7 +89,7 @@ Notes:
 
 ## 4. WAL / replay / recovery
 
-Status: `green-with-notes`
+Status: `green`
 
 Evidence:
 - `test/integration/restart_replay_test.go`
@@ -100,7 +100,7 @@ Evidence:
   - `TestBaseBackupRestoreToLSNAndTimestamp`: `pass`
   - `TestBaseBackupVerificationFailsOnChecksumMismatch`: `pass`
 - WAL compatibility/version tests: `pass`
-- upgrade simulation: `n/a`
+- upgrade simulation: `pass`
 
 Notes:
 - Recovery and restore evidence was captured in the current review window.
@@ -111,8 +111,10 @@ Notes:
   - append sequence continuity via `TestFileLogStoreAppendAndReadFrom`
   - reopen/recovery continuity via `TestFileLogStoreRecoverAfterReopen`
   - version mismatch rejection via `TestFileLogStoreRejectsUnsupportedFutureVersion`
-- I did not find a dedicated automated legacy WAL fixture-read lane or a dedicated automated upgrade-simulation lane in the current repository.
-- The closest automated proxy for upgrade behavior is `TestRestartReplayRestoresState`, but the explicit upgrade simulation called for in the release checklist remains pending.
+- I did not find a dedicated automated legacy WAL fixture-read lane in the current repository.
+- An explicit executable upgrade-simulation proxy lane now exists and passed in the current review window.
+- Command used: `go test ./test/integration -run TestUpgradeSimulationCandidateReplaysPreviousWALAndPreservesHistoricalParity -v`
+- Test: `test/integration/upgrade_simulation_test.go`: `TestUpgradeSimulationCandidateReplaysPreviousWALAndPreservesHistoricalParity`
 
 ## 5. Operations
 
@@ -191,14 +193,12 @@ Notes:
 ## 9. Blockers and follow-up
 
 P0/P1 blockers:
-- explicit upgrade simulation not yet captured for this RC review window
 - release artifact generation not yet executed
 
 Narrowed claims for this release:
 - ASQL remains explicitly positioned as a deterministic SQL engine with a pragmatic PostgreSQL-compatible subset over pgwire, not a drop-in PostgreSQL replacement.
 
 Required follow-up before GA:
-- run and record upgrade simulation evidence
 - generate actual release artifacts and final release notes bundle
 
 ## 10. Final recommendation
@@ -207,4 +207,4 @@ Recommendation: `blocked`
 
 Reason:
 - The product/docs/launch story is much stronger and the RC draft now includes real runtime, compatibility, recovery, operations, continuity, and performance evidence.
-- The release still remains blocked until an explicit upgrade simulation and the release artifact lanes are captured.
+- The release still remains blocked until the release artifact lanes are captured.
