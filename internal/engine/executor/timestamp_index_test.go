@@ -293,6 +293,43 @@ func TestTimestampIndexCatchesUpFromStalePersistedFileOnRestart(t *testing.T) {
 	}
 }
 
+func TestTimestampIndexCompressesContiguousRanges(t *testing.T) {
+	index := newTimestampLSNIndex("")
+	records := []ports.WALRecord{
+		{LSN: 10, Timestamp: 100},
+		{LSN: 11, Timestamp: 101},
+		{LSN: 12, Timestamp: 102},
+		{LSN: 20, Timestamp: 200},
+		{LSN: 21, Timestamp: 201},
+	}
+
+	if err := index.rebuild(records); err != nil {
+		t.Fatalf("rebuild timestamp index: %v", err)
+	}
+
+	index.mu.RLock()
+	rangeCount := len(index.ranges)
+	index.mu.RUnlock()
+	if rangeCount != 2 {
+		t.Fatalf("unexpected compressed range count: got %d want 2", rangeCount)
+	}
+
+	for ts, wantLSN := range map[uint64]uint64{
+		99:  0,
+		100: 10,
+		101: 11,
+		102: 12,
+		150: 12,
+		200: 20,
+		201: 21,
+		250: 21,
+	} {
+		if got := index.Resolve(ts); got != wantLSN {
+			t.Fatalf("resolve(%d): got %d want %d", ts, got, wantLSN)
+		}
+	}
+}
+
 func itoa(v int) string {
 	if v == 0 {
 		return "0"

@@ -27,9 +27,29 @@ type timestampLSNEntry struct {
 	lsn       uint64
 }
 
+type timestampLSNRange struct {
+	startTimestamp uint64
+	startLSN       uint64
+	count          uint64
+}
+
+func (r timestampLSNRange) endTimestamp() uint64 {
+	if r.count == 0 {
+		return r.startTimestamp
+	}
+	return r.startTimestamp + r.count - 1
+}
+
+func (r timestampLSNRange) endLSN() uint64 {
+	if r.count == 0 {
+		return r.startLSN
+	}
+	return r.startLSN + r.count - 1
+}
+
 type timestampLSNIndex struct {
-	mu       sync.RWMutex
-	entries   []timestampLSNEntry
+	mu        sync.RWMutex
+	ranges    []timestampLSNRange
 	filePath  string
 	persistOK bool
 }
@@ -50,13 +70,18 @@ func (index *timestampLSNIndex) Resolve(logicalTimestamp uint64) uint64 {
 	index.mu.RLock()
 	defer index.mu.RUnlock()
 
-	pos := sort.Search(len(index.entries), func(i int) bool {
-		return index.entries[i].timestamp > logicalTimestamp
+	pos := sort.Search(len(index.ranges), func(i int) bool {
+		return index.ranges[i].startTimestamp > logicalTimestamp
 	})
 	if pos == 0 {
 		return 0
 	}
-	return index.entries[pos-1].lsn
+	r := index.ranges[pos-1]
+	offset := logicalTimestamp - r.startTimestamp
+	if offset >= r.count {
+		offset = r.count - 1
+	}
+	return r.startLSN + offset
 }
 
 func (index *timestampLSNIndex) LastLSN() uint64 {
@@ -66,10 +91,10 @@ func (index *timestampLSNIndex) LastLSN() uint64 {
 
 	index.mu.RLock()
 	defer index.mu.RUnlock()
-	if len(index.entries) == 0 {
+	if len(index.ranges) == 0 {
 		return 0
 	}
-	return index.entries[len(index.entries)-1].lsn
+	return index.ranges[len(index.ranges)-1].endLSN()
 }
 
 func (index *timestampLSNIndex) load() (bool, error) {
@@ -90,7 +115,7 @@ func (index *timestampLSNIndex) load() (bool, error) {
 	}
 
 	index.mu.Lock()
-	index.entries = entries
+	index.ranges = compressTimestampEntries(entries)
 	index.persistOK = true
 	index.mu.Unlock()
 	return true, nil
@@ -104,7 +129,7 @@ func (index *timestampLSNIndex) rebuild(records []ports.WALRecord) error {
 	entries := timestampEntriesFromRecords(records)
 
 	index.mu.Lock()
-	index.entries = entries
+	index.ranges = compressTimestampEntries(entries)
 	index.persistOK = true
 	index.mu.Unlock()
 
@@ -137,8 +162,8 @@ func (index *timestampLSNIndex) append(records []ports.WALRecord) error {
 	defer index.mu.Unlock()
 
 	lastLSN := uint64(0)
-	if len(index.entries) > 0 {
-		lastLSN = index.entries[len(index.entries)-1].lsn
+	if len(index.ranges) > 0 {
+		lastLSN = index.ranges[len(index.ranges)-1].endLSN()
 	}
 	start := 0
 	for start < len(entries) && entries[start].lsn <= lastLSN {
@@ -148,7 +173,7 @@ func (index *timestampLSNIndex) append(records []ports.WALRecord) error {
 		return nil
 	}
 	entries = entries[start:]
-	index.entries = append(index.entries, entries...)
+	index.ranges = appendCompressedTimestampEntries(index.ranges, entries)
 
 	if index.filePath == "" || !index.persistOK {
 		return nil
@@ -259,4 +284,34 @@ func timestampEntriesFromRecords(records []ports.WALRecord) []timestampLSNEntry 
 		entries = append(entries, timestampLSNEntry{timestamp: record.Timestamp, lsn: record.LSN})
 	}
 	return entries
+}
+
+func compressTimestampEntries(entries []timestampLSNEntry) []timestampLSNRange {
+	if len(entries) == 0 {
+		return nil
+	}
+	ranges := make([]timestampLSNRange, 0, len(entries))
+	for _, entry := range entries {
+		ranges = appendCompressedTimestampEntry(ranges, entry)
+	}
+	return ranges
+}
+
+func appendCompressedTimestampEntries(ranges []timestampLSNRange, entries []timestampLSNEntry) []timestampLSNRange {
+	for _, entry := range entries {
+		ranges = appendCompressedTimestampEntry(ranges, entry)
+	}
+	return ranges
+}
+
+func appendCompressedTimestampEntry(ranges []timestampLSNRange, entry timestampLSNEntry) []timestampLSNRange {
+	if len(ranges) == 0 {
+		return append(ranges, timestampLSNRange{startTimestamp: entry.timestamp, startLSN: entry.lsn, count: 1})
+	}
+	last := &ranges[len(ranges)-1]
+	if last.endTimestamp()+1 == entry.timestamp && last.endLSN()+1 == entry.lsn {
+		last.count++
+		return ranges
+	}
+	return append(ranges, timestampLSNRange{startTimestamp: entry.timestamp, startLSN: entry.lsn, count: 1})
 }

@@ -337,11 +337,11 @@ func (loop *Loop) tickFollower(ctx context.Context, group string) {
 		if err := loop.replicate(ctx, addr); err != nil {
 			loop.logWarn("heartbeat.replicate_failed", group, err.Error())
 		} else {
-			loop.logInfo("heartbeat.replicated", group)
+			loop.logDebug("heartbeat.replicated", group)
 		}
 	}
 
-	loop.logInfo("heartbeat.follower_ok", group)
+	loop.logDebug("heartbeat.follower_ok", group)
 
 	// Gossip: propagate PgwireAddress for any peer the responder knows that
 	// we don't have (or don't have a pgwire address for) yet.
@@ -553,6 +553,14 @@ func (loop *Loop) logInfo(event, group string, attrs ...any) {
 	}
 	args := append([]any{slog.String("event", event), slog.String("group", group), slog.String("node", loop.config.NodeID)}, attrs...)
 	loop.logger.Info("heartbeat", args...)
+}
+
+func (loop *Loop) logDebug(event, group string, attrs ...any) {
+	if loop.logger == nil {
+		return
+	}
+	args := append([]any{slog.String("event", event), slog.String("group", group), slog.String("node", loop.config.NodeID)}, attrs...)
+	loop.logger.Debug("heartbeat", args...)
 }
 
 func (loop *Loop) logWarn(event, group string, attrs ...any) {
