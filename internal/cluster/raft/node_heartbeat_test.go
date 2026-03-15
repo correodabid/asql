@@ -90,14 +90,14 @@ func (t *delayedPeerTransport) RequestVote(_ context.Context, _ string, _ Reques
 }
 
 func (t *delayedPeerTransport) AppendEntries(_ context.Context, addr string, req AppendEntriesRequest) (AppendEntriesResponse, error) {
-		if responder, ok := t.responses[addr]; ok {
-			return responder(req), nil
-		}
-		lastIndex := req.PrevLogIndex
-		if len(req.Entries) > 0 {
-			lastIndex = req.Entries[len(req.Entries)-1].Index
-		}
-		return AppendEntriesResponse{Term: req.Term, Success: true, LastIndex: lastIndex}, nil
+	if responder, ok := t.responses[addr]; ok {
+		return responder(req), nil
+	}
+	lastIndex := req.PrevLogIndex
+	if len(req.Entries) > 0 {
+		lastIndex = req.Entries[len(req.Entries)-1].Index
+	}
+	return AppendEntriesResponse{Term: req.Term, Success: true, LastIndex: lastIndex}, nil
 }
 
 func newHeartbeatLeaderNode(t *testing.T, transport Transport) *RaftNode {
