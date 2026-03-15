@@ -35,6 +35,14 @@ Current working draft for the first RC pass:
 
 - [release-evidence-bundle-v1.0.0-rc1-working-draft.md](release-evidence-bundle-v1.0.0-rc1-working-draft.md)
 
+Local artifact rehearsal guidance:
+
+- [release-artifact-rehearsal-v1.md](release-artifact-rehearsal-v1.md)
+
+Final CI artifact gate result template:
+
+- [release-artifact-gate-result-v1.0.0-rc1-template.md](release-artifact-gate-result-v1.0.0-rc1-template.md)
+
 ## Minimum bundle shape
 
 Each bundle should contain five sections:

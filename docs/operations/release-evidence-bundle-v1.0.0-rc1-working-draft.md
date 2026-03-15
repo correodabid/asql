@@ -181,25 +181,39 @@ Notes:
 Status: `blocked`
 
 Artifacts:
-- binaries built: `no`
-- checksums generated: `no`
+- binaries built: `yes, local rehearsal`
+- checksums generated: `yes, local rehearsal`
 - SBOM generated: `no`
 - signatures generated: `no`
 - release bundle uploaded: `no`
 
 Notes:
-- This working draft is documentation-first and not a final release artifact run.
+- Local rehearsal completed for build + checksum shape using `/tmp/asql-release-rehearsal`.
+- Rehearsed commands built:
+  - `asqld-linux-amd64`
+  - `asqlctl-linux-amd64`
+  - `asqld-darwin-arm64`
+  - `asqlctl-darwin-arm64`
+- `checksums.txt` was generated locally.
+- Local tool availability in this review window:
+  - `sha256sum`: available
+  - `syft`: unavailable
+  - `cosign`: unavailable
+- The CI source of truth for full release artifacts remains `.github/workflows/ci.yml`, job `release-artifacts`.
+- Full RC artifact evidence remains blocked until SBOM/signature/upload/publish steps are captured from the tagged CI lane.
+- When the tagged CI lane completes, record the final artifact result in `release-artifact-gate-result-v1.0.0-rc1-template.md`.
 
 ## 9. Blockers and follow-up
 
 P0/P1 blockers:
-- release artifact generation not yet executed
+- full CI-backed release artifact lane not yet executed
 
 Narrowed claims for this release:
 - ASQL remains explicitly positioned as a deterministic SQL engine with a pragmatic PostgreSQL-compatible subset over pgwire, not a drop-in PostgreSQL replacement.
 
 Required follow-up before GA:
-- generate actual release artifacts and final release notes bundle
+- capture the tagged CI `release-artifacts` lane output (SBOM, signatures, uploaded bundle, published assets)
+- generate final release notes bundle
 
 ## 10. Final recommendation
 
