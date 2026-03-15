@@ -163,6 +163,7 @@ type SegmentedLogStore struct {
 	syncMu              sync.Mutex // serializes fsync and segment-removal ops
 	basePath            string     // e.g. "/data/asql.wal"
 	segments            []*segment // sorted by seqNum, last is active
+	totalSize           int64      // cached combined on-disk size of all segment files
 	syncStrategy        SyncStrategy
 	appendCount         uint64
 	lastLSN             uint64
@@ -314,6 +315,7 @@ func (store *SegmentedLogStore) discoverSegments() error {
 			return fmt.Errorf("open segment %06d: %w", seqNum, err)
 		}
 		store.segments = append(store.segments, seg)
+		store.totalSize += seg.size
 		if seg.lastLSN > store.lastLSN {
 			store.lastLSN = seg.lastLSN
 		}
@@ -723,6 +725,7 @@ func (store *SegmentedLogStore) writeToActive(data []byte, firstLSN, lastLSN uin
 	}
 
 	active.size += int64(len(data))
+	store.totalSize += int64(len(data))
 	if active.firstLSN == 0 {
 		active.firstLSN = firstLSN
 	}
@@ -1268,6 +1271,7 @@ func (store *SegmentedLogStore) TruncateBefore(ctx context.Context, beforeLSN ui
 		if !isActive && seg.lastLSN > 0 && seg.lastLSN < beforeLSN {
 			// Entire segment is below the truncation point — delete it.
 			path := seg.file.Name()
+			store.totalSize -= seg.size
 			seg.file.Close()
 			if err := os.Remove(path); err != nil {
 				slog.Warn("wal: failed to remove old segment", "path", path, "error", err.Error())
@@ -1422,8 +1426,10 @@ func (store *SegmentedLogStore) compactSegment(seg *segment) error {
 
 	store.mu.Lock()
 	oldF := seg.file
+	oldSize := seg.size
 	seg.file = newF
 	seg.size = newInfo.Size()
+	store.totalSize += newInfo.Size() - oldSize
 	store.mu.Unlock()
 
 	if oldF != nil {
@@ -1465,13 +1471,5 @@ func (store *SegmentedLogStore) SegmentPaths() []string {
 func (store *SegmentedLogStore) TotalSize() (int64, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	var total int64
-	for _, seg := range store.segments {
-		info, err := seg.file.Stat()
-		if err != nil {
-			return 0, fmt.Errorf("stat segment %s: %w", seg.file.Name(), err)
-		}
-		total += info.Size()
-	}
-	return total, nil
+	return store.totalSize, nil
 }

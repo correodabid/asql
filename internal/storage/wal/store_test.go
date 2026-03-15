@@ -275,6 +275,68 @@ func TestSegmentedLogStoreRecoverAfterInjectedPartialTail(t *testing.T) {
 	}
 }
 
+func TestSegmentedLogStoreTotalSizeMatchesFiles(t *testing.T) {
+	tempDir := t.TempDir()
+	basePath := filepath.Join(tempDir, "segmented-size.wal")
+	ctx := context.Background()
+
+	store, err := NewSegmentedLogStore(basePath, AlwaysSync{}, WithSegmentSize(256))
+	if err != nil {
+		t.Fatalf("new segmented wal store: %v", err)
+	}
+
+	for i := 0; i < 20; i++ {
+		if _, err := store.Append(ctx, ports.WALRecord{TxID: "seg", Type: "BEGIN", Timestamp: uint64(i + 1), Payload: []byte(strings.Repeat("x", 64))}); err != nil {
+			_ = store.Close()
+			t.Fatalf("append %d: %v", i, err)
+		}
+	}
+
+	assertSizeMatchesFiles := func(t *testing.T, store *SegmentedLogStore) {
+		t.Helper()
+		got, err := store.TotalSize()
+		if err != nil {
+			t.Fatalf("total size: %v", err)
+		}
+		var want int64
+		for _, path := range store.SegmentPaths() {
+			info, err := os.Stat(path)
+			if err != nil {
+				t.Fatalf("stat %s: %v", path, err)
+			}
+			want += info.Size()
+		}
+		if got != want {
+			t.Fatalf("unexpected total size: got %d want %d", got, want)
+		}
+	}
+
+	assertSizeMatchesFiles(t, store)
+
+	if err := store.CompactSealedSegments(ctx); err != nil {
+		_ = store.Close()
+		t.Fatalf("compact sealed segments: %v", err)
+	}
+	assertSizeMatchesFiles(t, store)
+
+	if err := store.TruncateBefore(ctx, 10); err != nil {
+		_ = store.Close()
+		t.Fatalf("truncate before: %v", err)
+	}
+	assertSizeMatchesFiles(t, store)
+
+	if err := store.Close(); err != nil {
+		t.Fatalf("close segmented store: %v", err)
+	}
+
+	reopened, err := NewSegmentedLogStore(basePath, AlwaysSync{}, WithSegmentSize(256))
+	if err != nil {
+		t.Fatalf("reopen segmented wal store: %v", err)
+	}
+	defer reopened.Close()
+	assertSizeMatchesFiles(t, reopened)
+}
+
 func appendInjectedPartialFrame(path string, declaredLength uint32, partialPayload []byte) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
