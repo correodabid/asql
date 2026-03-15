@@ -29,6 +29,8 @@ flows, not a claim of broad PostgreSQL behavioral parity.
 
 ## Contract shape
 
+- The GA-level compatibility contract lives in
+  [docs/reference/asql-ga-compatibility-contract-v1.md](asql-ga-compatibility-contract-v1.md).
 - The policy lives here.
 - The precise supported/unsupported surface lives in
   [docs/reference/postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md).

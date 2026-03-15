@@ -10,6 +10,10 @@ Ensure release candidates and GA upgrades are safe, observable, and stable enoug
 Use [release-evidence-bundle-v1.md](release-evidence-bundle-v1.md) as the
 recommended format for the short release evidence summary referenced below.
 
+For the contract being validated, use
+[../reference/asql-ga-compatibility-contract-v1.md](../reference/asql-ga-compatibility-contract-v1.md)
+together with the pgwire compatibility policy and surface docs.
+
 ## Release-candidate gate (`v1.0.0-rc*` and later)
 
 Every release candidate should include a short evidence bundle covering:
@@ -24,6 +28,7 @@ Every release candidate should include a short evidence bundle covering:
    - leadership, failover history, and WAL retention admin endpoints respond with expected shapes.
    - concrete endpoint evidence should include `internal/server/pgwire/admin_http_test.go`: `TestAdminReadyzAndLeadershipEndpoints`, `TestAdminMetricsExposeFailoverLeaderAndSafeLSN`, and `TestRuntimeAndAdminHTTPSmokeFlow` when admin HTTP behavior changes.
 3. Compatibility sanity:
+   - the release is reviewed against the GA contract in [../reference/asql-ga-compatibility-contract-v1.md](../reference/asql-ga-compatibility-contract-v1.md).
    - compatibility docs were reviewed in the same release window.
    - documented mainstream client/tool flows still pass the current pack in [pgwire-compatibility-test-pack-v1.md](pgwire-compatibility-test-pack-v1.md).
    - if pgwire error handling or startup/auth code changed, the SQLSTATE/error-shape lane is green in the same release window.
@@ -49,7 +54,10 @@ Every release candidate should include a short evidence bundle covering:
    - legacy fixture read
    - version mismatch rejection
    - append sequence continuity
-4. Production-facing smoke lanes green:
+4. Performance guardrails green:
+   - single-node write scaling guardrail
+   - cluster append-growth guardrail
+5. Production-facing smoke lanes green:
    - pgwire onboarding flow
    - admin HTTP health/metrics flow
    - pgwire compatibility pack baseline lanes
@@ -115,6 +123,7 @@ Release can proceed only if all below are true:
 
 - Test evidence summary
 - Release evidence bundle summary (recommended format: [release-evidence-bundle-v1.md](release-evidence-bundle-v1.md))
+- GA compatibility contract review result
 - Release-candidate gate summary (`runtime`, `compatibility`, `recovery`, `operations`)
 - Compatibility matrix result
 - Upgrade guide notes

@@ -7,6 +7,7 @@ format for release candidates and GA releases.
 
 Use it together with:
 
+- [../reference/asql-ga-compatibility-contract-v1.md](../reference/asql-ga-compatibility-contract-v1.md)
 - [release-upgrade-compat-checklist-v1.md](release-upgrade-compat-checklist-v1.md)
 - [pgwire-compatibility-test-pack-v1.md](pgwire-compatibility-test-pack-v1.md)
 - [runbook.md](runbook.md)
@@ -166,6 +167,8 @@ runtime: green
 - notes: <optional>
 
 compatibility: green
+- GA contract review:
+  - asql-ga-compatibility-contract-v1.md reviewed: yes/no
 - evidence:
   - pgwire compatibility lanes A/B/C-or-D
   - SQLSTATE lane (if changed)
