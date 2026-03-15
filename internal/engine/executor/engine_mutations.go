@@ -619,17 +619,16 @@ func overlayIndexForInsert(source *indexState, replayMode bool) *indexState {
 	}
 	if source.cachedDepth >= maxDepth {
 		// Hash indexes sit directly on the PK/UNIQUE/FK validation path for
-		// foreground writes, so leaders flatten them to restore O(1) lookup
-		// depth. Replay applies already-validated WAL, so followers can keep
-		// the cheaper tiered compaction here and avoid O(table) rebuilds.
+		// foreground writes. Instead of rebuilding the entire hash map on every
+		// threshold crossing, compact the recent overlay delta into a tier above
+		// the base. This keeps lookup depth small (typically 2-3 levels) while
+		// avoiding O(table) flatten work that gets more expensive as the table
+		// grows. Replay applies already-validated WAL, so followers use the same
+		// cheaper tiered compaction path.
 		// Btree indexes always keep the cheaper tiered compaction because their
 		// write path is append-heavy and their read path already merges lazily.
 		if source.kind == "hash" {
-			if replayMode {
-				src = compactOverlayAboveBase(source)
-			} else {
-				src = flattenIndex(source)
-			}
+			src = compactOverlayAboveBase(source)
 		} else {
 			src = compactOverlayAboveBase(source)
 		}
