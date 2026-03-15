@@ -1,7 +1,16 @@
 # ASQL Backlog (Agent-executable)
 
-Status note (2026-03-13): this is the active engineering execution backlog.
+Status note (2026-03-15): this is the active engineering execution backlog.
 Use strategy/product snapshot docs for context, but treat this file as the default source for current implementation priority unless a newer doc explicitly supersedes it.
+
+Current prioritization snapshot for the next execution window:
+- [docs/product/asql-ga-and-delight-plan-v1.md](../product/asql-ga-and-delight-plan-v1.md)
+
+Execution emphasis until Epic P closes:
+1. freeze GA compatibility and release-gate contracts,
+2. finish the canonical docs/examples surface,
+3. improve operator delight around temporal + cluster workflows,
+4. keep PostgreSQL compatibility work selective and adoption-driven.
 
 ## How to use this backlog
 - Pick top-most unchecked task.
@@ -121,8 +130,16 @@ Legend:
 ## Epic P — Launch readiness
 - [x] Create release candidate gate checklist (`v1.0.0-rc1`).
 - [ ] Freeze protocol/WAL compatibility for GA.
+	- [ ] Write the GA compatibility contract for WAL, protocol, and upgrade expectations.
+	- [ ] Make compatibility validation part of release-candidate gating.
+	- [ ] Treat benchmark and determinism guardrails as required release evidence.
 - [ ] Finalize docs portal and examples repo.
+	- [ ] Align `README.md`, `docs/getting-started/`, `docs/reference/`, and `site/` around the canonical pgwire path.
+	- [ ] Package examples by adoption moment (first app, time-travel, fixtures, replication/failover visibility).
+	- [ ] Ensure public docs state ASQL as a PostgreSQL-compatible subset, not a drop-in replacement.
 - [ ] Prepare launch narrative and channels.
+	- [ ] Make the core launch story explicit: domain isolation, deterministic replay, time-travel, and operational clarity.
+	- [ ] Ensure Studio/operator UX supports that story with visible temporal and cluster workflows.
 
 ## Epic Q — SQL capability expansion (technical return)
 - [x] Add `SELECT ... ORDER BY <column> [ASC|DESC] LIMIT <n>` support end-to-end.

@@ -4,6 +4,11 @@ Date: 2026-03-11
 
 ## Executive summary
 
+Priority note (2026-03-15): for the immediate execution window, use
+[docs/product/asql-ga-and-delight-plan-v1.md](asql-ga-and-delight-plan-v1.md)
+as the tighter prioritization snapshot for sequencing GA hardening, docs,
+operator delight, and selective compatibility work.
+
 This document supersedes the older production proposal and should be treated as the current source of truth.
 
 Most importantly:
