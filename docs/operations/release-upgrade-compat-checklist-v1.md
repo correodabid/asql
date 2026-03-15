@@ -12,7 +12,9 @@ recommended format for the short release evidence summary referenced below.
 
 For the contract being validated, use
 [../reference/asql-ga-compatibility-contract-v1.md](../reference/asql-ga-compatibility-contract-v1.md)
-together with the pgwire compatibility policy and surface docs.
+together with the pgwire compatibility policy and surface docs, plus the
+operational review in
+[ga-compatibility-freeze-procedure-v1.md](ga-compatibility-freeze-procedure-v1.md).
 
 ## Release-candidate gate (`v1.0.0-rc*` and later)
 

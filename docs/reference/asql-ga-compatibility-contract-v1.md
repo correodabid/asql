@@ -18,6 +18,7 @@ Use this document together with:
 - [sql-pgwire-compatibility-policy-v1.md](sql-pgwire-compatibility-policy-v1.md)
 - [postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md)
 - [postgres-compatibility-evidence-v1.md](postgres-compatibility-evidence-v1.md)
+- [../operations/ga-compatibility-freeze-procedure-v1.md](../operations/ga-compatibility-freeze-procedure-v1.md)
 - [../operations/pgwire-compatibility-test-pack-v1.md](../operations/pgwire-compatibility-test-pack-v1.md)
 - [../operations/release-upgrade-compat-checklist-v1.md](../operations/release-upgrade-compat-checklist-v1.md)
 - [../operations/release-evidence-bundle-v1.md](../operations/release-evidence-bundle-v1.md)

@@ -8,6 +8,7 @@ format for release candidates and GA releases.
 Use it together with:
 
 - [../reference/asql-ga-compatibility-contract-v1.md](../reference/asql-ga-compatibility-contract-v1.md)
+- [ga-compatibility-freeze-procedure-v1.md](ga-compatibility-freeze-procedure-v1.md)
 - [release-upgrade-compat-checklist-v1.md](release-upgrade-compat-checklist-v1.md)
 - [pgwire-compatibility-test-pack-v1.md](pgwire-compatibility-test-pack-v1.md)
 - [runbook.md](runbook.md)
