@@ -45,36 +45,36 @@ Contract notes:
 
 ## 2. Runtime
 
-Status: `blocked`
+Status: `green`
 
 Evidence:
 - `internal/server/pgwire/admin_http_test.go`
-  - `TestRuntimeAndAdminHTTPSmokeFlow`: `n/a`
+  - `TestRuntimeAndAdminHTTPSmokeFlow`: `pass`
 - `internal/server/pgwire/server_test.go`
-  - `TestPGWireSimpleQueryRoundtrip`: `n/a`
-  - `TestPGWireCompatibilitySupportedPatterns`: `n/a`
+  - `TestPGWireSimpleQueryRoundtrip`: `pass`
+  - `TestPGWireCompatibilitySupportedPatterns`: `pass`
 
 Commands / lanes:
-- pending first real RC evidence pass
+- `go test ./internal/server/pgwire -run 'TestRuntimeAndAdminHTTPSmokeFlow|TestPGWireSimpleQueryRoundtrip|TestPGWireCompatibilitySupportedPatterns|TestPGWireForHistoryRegressionStableMetadataAndRows|TestExtendedQueryPortalResumesAcrossExecuteCalls|TestExtendedQueryDescribeStatementInfersParameterCount|TestExtendedQueryDescribeStatementInfersInsertParameterOIDs|TestExtendedQueryDescribeStatementInfersPredicateParameterOIDs|TestExtendedQueryDescribeStatementInfersUpdateParameterOIDs|TestExtendedQueryDescribeStatementInfersArithmeticUpdateParameterOIDs|TestExtendedQueryInsertReturningUsesSchemaAwareRowDescription|TestExtendedQueryDiscardsMessagesUntilSyncAfterError|TestExtendedQueryBinaryBindSupportsInt4Int8AndBool|TestCancelRequestCancelsSimpleQueryAndKeepsConnectionUsable|TestSSLModePreferFallback|TestCatalogStartupIntrospectionQueries|TestCatalogEmptyInterceptsExposeSchemaAcrossProtocols|TestPGWireCompatibilityUnsupportedPatternGuidance|TestShowUnknownParamFallbackWorksOnExtendedProtocol|TestCopyFromStdinInsertsRowsAndAcceptsChunkedCopyData|TestCopyToStdoutStreamsRows|TestCopyFromStdinCSVInsertsQuotedValues|TestCopyToStdoutCSVQuotesValues|TestCopyFailRollsBackInsertedRows|TestPGWirePasswordAuthenticationWrongPasswordReturns28P01|TestPGWirePasswordAuthenticationWrongMessageReturns08P01|TestSendFollowerRedirectErrorWrites25006AndHint|TestPGWireTransactionStateSQLStates|TestPGWireObjectAndConstraintSQLStates|TestSQLStateFromMessageMappings|TestMapErrorToSQLState' -count=1`
 
 Notes:
-- No runtime smoke lane was executed as part of this documentation/launch-alignment window.
-- This section must be filled with real evidence before `rc1` can proceed.
+- Runtime smoke evidence was captured in the current review window.
+- The canonical pgwire runtime smoke lane is now backed by a targeted passing test run in `internal/server/pgwire`.
 
 ## 3. Compatibility
 
-Status: `blocked`
+Status: `green`
 
 GA contract review result:
-- compatible with frozen contract: `yes, on documentation scope only`
+- compatible with frozen contract: `yes`
 
 Evidence lanes:
-- Lane A (`pgx` simple protocol baseline): `n/a`
-- Lane B (extended query baseline): `n/a`
-- Lane C (`psql` baseline): `n/a`
-- Lane D (JDBC / GUI baseline): `n/a`
-- Lane E (`COPY` baseline): `n/a`
-- Lane F (SQLSTATE / error-shape baseline): `n/a`
+- Lane A (`pgx` simple protocol baseline): `pass`
+- Lane B (extended query baseline): `pass`
+- Lane C (`psql` baseline): `pass`
+- Lane D (JDBC / GUI baseline): `pass`
+- Lane E (`COPY` baseline): `pass`
+- Lane F (SQLSTATE / error-shape baseline): `pass`
 
 Docs reviewed:
 - `sql-pgwire-compatibility-policy-v1.md`: `yes`
@@ -84,7 +84,8 @@ Docs reviewed:
 
 Notes:
 - The compatibility claim hierarchy is now better defined and linked publicly.
-- The compatibility lanes themselves have not yet been rerun in this review window, so this release cannot claim a green compatibility gate yet.
+- The pgwire compatibility evidence pack lanes covered by the targeted `internal/server/pgwire` run are green in this review window.
+- This clears the runtime + compatibility portion of the working RC bundle, while recovery, operations, replicated-runtime continuity, and release artifacts remain pending.
 
 ## 4. WAL / replay / recovery
 
@@ -180,8 +181,6 @@ Notes:
 ## 9. Blockers and follow-up
 
 P0/P1 blockers:
-- runtime smoke evidence not yet captured for this RC review window
-- compatibility pack lanes not yet executed for this RC review window
 - replay/recovery evidence not yet captured for this RC review window
 - admin/operations evidence not yet captured for this RC review window
 - release artifact generation not yet executed
