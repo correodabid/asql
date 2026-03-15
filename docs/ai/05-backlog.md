@@ -504,7 +504,14 @@ Open gaps before closure:
 - Initial failover promotion/recovery benchmarks now exist, but there is no closure-level baseline/improvement decision yet for failover recovery time.
 - Initial indexed-read and index-only benchmarks now exist, but there is no closure-level baseline/improvement decision yet for indexed read latency.
 - No published multi-scenario failover/recovery benchmark suite yet that satisfies the acceptance gates below.
-- No measured decision record yet for persisted index/cache architecture or parallel scan evaluation.
+- No measured decision record yet for persisted index/cache architecture.
+
+Current next-execution order:
+- 1. Turn failover promotion/recovery microbenchmarks into a closure-grade failover recovery benchmark slice with repeated samples and an explicit improvement/baseline decision.
+- 2. Record a closure-grade decision for replay throughput using the existing repeated replay benchmark path.
+- 3. Finish the snapshot-load decision with repeated cadence/tail evidence, not just head-snapshot best-case samples.
+- 4. Finish the indexed-read/query-latency decision across the remaining important read shapes.
+- 5. Revisit persisted index/cache architecture only after the benchmark evidence above shows a durable IO bottleneck that current in-memory indexes cannot address cleanly.
 
 Subline status:
 - The `Expand index-only scan coverage where benchmarks justify it` item is now evidence-backed for covered simple ordered reads, covered ordered reads with `OFFSET`, covered selective reads with bounded early-stop, and covered composite ordered reads.
