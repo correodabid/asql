@@ -27,6 +27,10 @@ Create one bundle for:
 - any release cut that changes pgwire protocol behavior, recovery behavior,
   or the supported clustered runtime path.
 
+For the first release-candidate pass, start from:
+
+- [release-evidence-bundle-v1.0.0-rc1-template.md](release-evidence-bundle-v1.0.0-rc1-template.md)
+
 ## Minimum bundle shape
 
 Each bundle should contain five sections:

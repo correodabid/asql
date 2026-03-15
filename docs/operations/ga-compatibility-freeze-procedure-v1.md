@@ -111,6 +111,9 @@ Treat these as required release evidence, not optional notes:
 
 Record the review in the release evidence bundle with a dedicated GA contract section.
 
+For the first RC, the recommended starting point is:
+- [release-evidence-bundle-v1.0.0-rc1-template.md](release-evidence-bundle-v1.0.0-rc1-template.md)
+
 Recommended fields:
 - contract version reviewed
 - reviewer/date
