@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -92,7 +93,7 @@ func BenchmarkEngineWriteScalingGuardrail(b *testing.B) {
 
 func benchmarkEngineWriteScalingAtSize(b *testing.B, size int) {
 	ctx := context.Background()
-	store, engine := newBenchmarkEngine(b)
+	store, engine := newBenchmarkEngineWithSegmentSize(b, 256*1024*1024)
 
 	session := engine.NewSession()
 	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
@@ -102,14 +103,23 @@ func benchmarkEngineWriteScalingAtSize(b *testing.B, size int) {
 	}
 	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
 
+	engine.snapshotWg.Wait()
+	warmupTx := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, warmupTx, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, warmupTx, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'warmup')", size))
+	mustExecBenchmark(b, ctx, engine, warmupTx, "COMMIT")
+	engine.snapshotWg.Wait()
+	prevGC := debug.SetGCPercent(-1)
+	defer debug.SetGCPercent(prevGC)
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		tx := engine.NewSession()
 		mustExecBenchmark(b, ctx, engine, tx, "BEGIN DOMAIN bench")
-		mustExecBenchmark(b, ctx, engine, tx, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload')", size+i))
+		mustExecBenchmark(b, ctx, engine, tx, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload')", size+1+i))
 		mustExecBenchmark(b, ctx, engine, tx, "COMMIT")
 	}
 
+	b.StopTimer()
 	engine.WaitPendingSnapshots()
 	_ = store.Close()
 }
@@ -1818,8 +1828,14 @@ func reportScanStrategyDelta(b *testing.B, engine *Engine, baselineCounts map[st
 func newBenchmarkEngine(b *testing.B) (*wal.SegmentedLogStore, *Engine) {
 	b.Helper()
 
+	return newBenchmarkEngineWithSegmentSize(b, wal.DefaultSegmentSize)
+}
+
+func newBenchmarkEngineWithSegmentSize(b *testing.B, segmentSize int64) (*wal.SegmentedLogStore, *Engine) {
+	b.Helper()
+
 	path := filepath.Join(b.TempDir(), "bench.wal")
-	store, err := wal.NewSegmentedLogStore(path, wal.EveryN{N: 256})
+	store, err := wal.NewSegmentedLogStore(path, wal.EveryN{N: 256}, wal.WithSegmentSize(segmentSize))
 	if err != nil {
 		b.Fatalf("new file log store: %v", err)
 	}

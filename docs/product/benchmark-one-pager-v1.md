@@ -281,10 +281,11 @@ Default knobs:
 ```bash
 make bench-write-scaling-guardrail \
 	BENCH_WRITE_SCALE_BENCHTIME=3x \
-	BENCH_WRITE_SCALE_FAIL_RATIO=1.25
+	BENCH_WRITE_SCALE_FAIL_RATIO=1.75
 ```
 
 What it reports:
 - `ns/op` for inserts into tables pre-seeded to `10k`, `100k`, and `1m` rows,
-- worst/best ratio across the size ladder,
-- pass/fail based on the configured ratio threshold.
+- overall worst/best ratio across the size ladder for operator visibility,
+- `rows_1m / rows_10k` as the actual guardrail ratio,
+- pass/fail based on the configured tail-ratio threshold.

@@ -181,6 +181,14 @@ type historicalStateCache struct {
 
 const historicalStateCacheMaxEntries = 8
 
+// walRecordCacheMaxIncrementalRecords bounds how many WAL records the engine
+// will maintain via incremental slice appends after a full-WAL cache has been
+// populated. Small cached histories still benefit from cheap append reuse for
+// repeated time-travel/history queries, but once the cache grows beyond this
+// window it is cheaper and safer for the write path to invalidate it than to
+// copy an O(total WAL size) slice on every commit.
+const walRecordCacheMaxIncrementalRecords = 4096
+
 func newHistoricalStateCache() *historicalStateCache {
 	return &historicalStateCache{entries: make(map[uint64]*readableState)}
 }
@@ -698,6 +706,10 @@ func (engine *Engine) appendWALRecordCache(records []ports.WALRecord) {
 	}
 	firstLSN := records[0].LSN
 	if cached.headLSN+1 != firstLSN {
+		engine.walRecordsCache.Store(nil)
+		return
+	}
+	if len(cached.records)+len(records) > walRecordCacheMaxIncrementalRecords {
 		engine.walRecordsCache.Store(nil)
 		return
 	}
