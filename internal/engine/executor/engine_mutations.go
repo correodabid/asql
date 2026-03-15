@@ -867,9 +867,10 @@ func (engine *Engine) applyMutationPlanWithEntityTracking(state *readableState, 
 
 func (engine *Engine) applyMutationPlanWithEntityTrackingTracked(state *readableState, plan planner.Plan, mutationLSN uint64, collector map[string]map[string][]string, clonedTables map[string]struct{}, fkValCache map[string]struct{}) error {
 	domainState := state.domains[plan.DomainName]
+	trackEntities := shouldTrackEntityMutations(domainState, plan.TableName)
 
 	// For DELETE: collect affected entity root PKs BEFORE rows are removed.
-	if plan.Operation == planner.OperationDelete && domainState != nil {
+	if trackEntities && plan.Operation == planner.OperationDelete && domainState != nil {
 		if tbl := domainState.tables[plan.TableName]; tbl != nil {
 			var deletedRows []map[string]ast.Literal
 			for _, rowSlice := range tbl.rows {
@@ -888,7 +889,7 @@ func (engine *Engine) applyMutationPlanWithEntityTrackingTracked(state *readable
 
 	// For INSERT/UPDATE: collect affected entity root PKs AFTER mutation is applied.
 	domainState = state.domains[plan.DomainName]
-	if (plan.Operation == planner.OperationInsert || plan.Operation == planner.OperationUpdate) && domainState != nil {
+	if trackEntities && (plan.Operation == planner.OperationInsert || plan.Operation == planner.OperationUpdate) && domainState != nil {
 		if tbl := domainState.tables[plan.TableName]; tbl != nil {
 			var affectedRows []map[string]ast.Literal
 			if plan.Operation == planner.OperationInsert {
@@ -913,6 +914,17 @@ func (engine *Engine) applyMutationPlanWithEntityTrackingTracked(state *readable
 	}
 
 	return nil
+}
+
+func shouldTrackEntityMutations(domain *domainState, tableName string) bool {
+	if domain == nil || len(domain.entities) == 0 {
+		return false
+	}
+	if len(domain.entityTables) == 0 {
+		return true
+	}
+	_, ok := domain.entityTables[tableName]
+	return ok
 }
 
 // applyPlanToState applies a mutation plan to the given state with COW cloning.
@@ -1445,7 +1457,11 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		allValueRows = append(allValueRows, plan.MultiValues...)
 
 		// Build rows from all value groups.
-		buildStarted := time.Now()
+		collectInsertPerf := !engine.replayMode
+		buildStarted := time.Time{}
+		if collectInsertPerf {
+			buildStarted = time.Now()
+		}
 		rows := make([]map[string]ast.Literal, 0, len(allValueRows))
 		for _, valueRow := range allValueRows {
 			// Pre-size map for ALL columns (user + defaults + _lsn) to avoid
@@ -1477,7 +1493,10 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 
 			rows = append(rows, row)
 		}
-		buildDur := time.Since(buildStarted)
+		buildDur := time.Duration(0)
+		if collectInsertPerf {
+			buildDur = time.Since(buildStarted)
+		}
 
 		// COW: clone table only if not already cloned in this transaction.
 		tableKey := plan.DomainName + "." + plan.TableName
@@ -1510,20 +1529,27 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		indexDur := time.Duration(0)
 		indexCount := len(table.indexes)
 		for _, row := range rows {
-			validateStarted := time.Now()
+			validateStarted := time.Time{}
+			if collectInsertPerf {
+				validateStarted = time.Now()
+			}
 			// Handle ON CONFLICT: pre-check for matching rows on conflict columns.
 			if plan.OnConflict != nil {
 				conflictRowIdx := findConflictingRow(table, row, plan.OnConflict.ConflictColumns)
 				if conflictRowIdx >= 0 {
 					if plan.OnConflict.Action == ast.OnConflictDoNothing {
-						validateDur += time.Since(validateStarted)
+						if collectInsertPerf {
+							validateDur += time.Since(validateStarted)
+						}
 						continue // silently skip this row
 					}
 					if plan.OnConflict.Action == ast.OnConflictDoUpdate {
 						if err := applyOnConflictUpdate(table, row, plan.OnConflict, conflictRowIdx, mutationLSN); err != nil {
 							return err
 						}
-						validateDur += time.Since(validateStarted)
+						if collectInsertPerf {
+							validateDur += time.Since(validateStarted)
+						}
 						continue
 					}
 				}
@@ -1534,18 +1560,26 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 					return err
 				}
 			}
-			validateDur += time.Since(validateStarted)
+			if collectInsertPerf {
+				validateDur += time.Since(validateStarted)
+			}
 
 			// Intern string values to deduplicate repeated categorical data
 			// (status, country, etc.) across rows and reduce GC pressure.
-			applyStarted := time.Now()
+			applyStarted := time.Time{}
+			if collectInsertPerf {
+				applyStarted = time.Now()
+			}
 			internRowStrings(row)
 
 			// Convert map to positional slice for compact storage.
 			rowSlice := rowFromMap(table.columns, row)
 			table.rows = append(table.rows, rowSlice)
 			rowID := len(table.rows) - 1
-			indexStarted := time.Now()
+			indexStarted := time.Time{}
+			if collectInsertPerf {
+				indexStarted = time.Now()
+			}
 			for _, index := range table.indexes {
 				entry, exists := buildIndexEntryForRow(index, rowSlice, table.columnIndex, rowID)
 				if !exists {
@@ -1553,16 +1587,22 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 				}
 				addIndexEntry(index, entry)
 			}
-			indexDur += time.Since(indexStarted)
+			if collectInsertPerf {
+				indexDur += time.Since(indexStarted)
+			}
 			// Change log keeps maps for history/audit readability.
 			table.changeLog = append(table.changeLog, changeLogEntry{
 				commitLSN: mutationLSN,
 				operation: "INSERT",
 				newRow:    row,
 			})
-			applyDur += time.Since(applyStarted)
+			if collectInsertPerf {
+				applyDur += time.Since(applyStarted)
+			}
 		}
-		recordInsertMutationPerf(plan, len(rows), indexCount, buildDur, validateDur, applyDur, indexDur, time.Since(insertStarted))
+		if collectInsertPerf {
+			recordInsertMutationPerf(plan, len(rows), indexCount, buildDur, validateDur, applyDur, indexDur, time.Since(insertStarted))
+		}
 		table.lastMutationTS = engine.logicalTS
 		trimChangeLog(table)
 		return nil

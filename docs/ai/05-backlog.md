@@ -507,7 +507,7 @@ Open gaps before closure:
 - No measured decision record yet for persisted index/cache architecture.
 
 Current next-execution order:
-- 1. Decide whether to optimize failover recovery first in WAL reopen/discovery or in engine replay/apply now that the large-scenario phase split exists.
+- 1. Decide whether the next failover recovery optimization pass should target WAL reopen/discovery, now that replay/apply has already been trimmed once and still remains the larger slice.
 - 2. Record a closure-grade decision for replay throughput using the existing repeated replay benchmark path.
 - 3. Finish the snapshot-load decision with repeated cadence/tail evidence, not just head-snapshot best-case samples.
 - 4. Finish the indexed-read/query-latency decision across the remaining important read shapes.
@@ -549,7 +549,7 @@ Subline status:
 - The parallel-scan item has now been evaluated to a defer decision: there is still no proven workload class that justifies intra-query parallel scan complexity over the current deterministic single-threaded indexed paths.
 - Entity-related join reads now have dedicated scaling coverage: `BenchmarkEngineReadEntityRelatedJoinScaling` and `BenchmarkEngineReadEntityRelatedJoinRightFilterScaling` show that root-table pruning, root-only `AND` conjunct extraction, and safe right-side filtering materially improved the user-reported “entity + related tables” slowdown as row counts grow, but the broader indexed-read/query-latency item remains open because other read shapes still need closure-level decisions.
 - Repeated historical reads now have dedicated scaling coverage via `BenchmarkEngineReadHistoricalAsOfLSNScaling`: exact-`LSN` repeat reads benefit materially from the new WAL-record cache and small historical-state cache, while invalidation on commit and WAL GC keeps correctness explicit.
-- Failover recovery now has a closure-grade benchmark slice: the sweep covers `small_total_40`, `medium_total_640`, and `large_total_4608`, and the phase split on the largest case shows roughly ~`12.5–20.0 ms` in WAL reopen/discovery plus ~`23.0–26.3 ms` in engine replay/apply. The item remains open because no engine-side optimization decision has been recorded yet.
+- Failover recovery now has a closure-grade benchmark slice: the sweep covers `small_total_40`, `medium_total_640`, and `large_total_4608`, and the phase split on the largest case shows WAL reopen/discovery plus engine replay/apply as separate costs. A first replay-side cleanup already reduced the replay/apply slice to roughly ~`19.8–24.5 ms` and ~`161.4k allocs`, but the item remains open because no closure-level target or WAL-reopen decision has been recorded yet.
 
 Latest directional read evidence:
 - `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and repeated at ~`353–361 µs/op`.

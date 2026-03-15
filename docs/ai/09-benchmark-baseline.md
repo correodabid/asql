@@ -164,8 +164,12 @@ Repeated sample on 2026-03-15:
 	- `BenchmarkFailoverRecoveryReplaySweep/medium_total_640-8`: ~`8,669,333–10,771,083 ns/op`, `2,766,008–2,770,520 B/op`, `18,034–18,038 allocs/op`
 	- `BenchmarkFailoverRecoveryReplaySweep/large_total_4608-8`: ~`44,389,084–56,834,041 ns/op`, `29,590,344–29,688,128 B/op`, `184,668–184,674 allocs/op`
 - Large-scenario phase split using `go test ./test/integration -run '^$' -bench '^BenchmarkFailoverRecoveryReplayLargePhases$' -benchmem -benchtime=1x -count=3`:
-	- `store_reopen`: ~`12,521,959–20,042,500 ns/op`, `2,586,480–2,586,752 B/op`, `14,020–14,022 allocs/op`
-	- `engine_replay`: ~`23,028,875–26,327,249 ns/op`, `27,102,704–27,202,496 B/op`, `170,647–170,660 allocs/op`
+	- previous split before the latest replay hot-path cleanup:
+		- `store_reopen`: ~`12,521,959–20,042,500 ns/op`, `2,586,480–2,586,752 B/op`, `14,020–14,022 allocs/op`
+		- `engine_replay`: ~`23,028,875–26,327,249 ns/op`, `27,102,704–27,202,496 B/op`, `170,647–170,660 allocs/op`
+	- current split after skipping non-entity mutation tracking work and per-insert perf instrumentation during replay:
+		- `store_reopen`: ~`13,457,083–21,864,708 ns/op`, `2,587,072–2,587,088 B/op`, `14,023 allocs/op`
+		- `engine_replay`: ~`19,781,042–24,530,917 ns/op`, `23,834,288–23,932,480 B/op`, `161,430–161,432 allocs/op`
 
 ## Notes
 
@@ -205,7 +209,8 @@ Repeated sample on 2026-03-15:
 - Current failover/recovery interpretation:
 	- the benchmark suite now includes both failover promotion and multi-scenario recovery replay, so Epic AB is no longer missing failover/recovery coverage at the benchmark-suite level;
 	- moving correctness validation outside the timed region tightened the baseline so the recovery benchmark now measures reopen + replay more directly instead of mixing in post-recovery query validation;
-	- recovery replay currently scales in the expected direction across the `small_total_40`, `medium_total_640`, and `large_total_4608` scenarios, and the large-case phase split shows the cost is shared between WAL reopen/discovery (~`12.5–20.0 ms`) and engine replay/apply (~`23.0–26.3 ms`), with replay/apply still the larger slice;
+	- recovery replay currently scales in the expected direction across the `small_total_40`, `medium_total_640`, and `large_total_4608` scenarios, and the large-case phase split shows the cost is shared between WAL reopen/discovery and engine replay/apply, with replay/apply still the larger slice even after the latest cleanup;
+	- the latest replay hot-path cleanup was intentionally narrow: replay now skips entity-tracking row materialization on tables that do not participate in any entity and avoids per-insert mutation perf timing during WAL replay; on the large-case phase split that cut the replay/apply slice from roughly ~`23.0–26.3 ms` / ~`170.6k allocs` to ~`19.8–24.5 ms` / ~`161.4k allocs`;
 	- the failover recovery item remains open because the suite now provides a baseline, but there is not yet an explicit improvement decision or optimization pass attached to those results.
 - Current read-path interpretation:
 	- on the simple covered ordered-read shape, `btree-index-only` is about $10\times$ faster than `btree-order` and materially reduces allocations;
