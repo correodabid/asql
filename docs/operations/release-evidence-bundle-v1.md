@@ -31,6 +31,10 @@ For the first release-candidate pass, start from:
 
 - [release-evidence-bundle-v1.0.0-rc1-template.md](release-evidence-bundle-v1.0.0-rc1-template.md)
 
+Current working draft for the first RC pass:
+
+- [release-evidence-bundle-v1.0.0-rc1-working-draft.md](release-evidence-bundle-v1.0.0-rc1-working-draft.md)
+
 ## Minimum bundle shape
 
 Each bundle should contain five sections:
