@@ -103,6 +103,7 @@ func main() {
 	server, err := pgwireserver.New(config)
 	if err != nil {
 		logger.Error("failed to initialize server", slog.String("error", err.Error()))
+		close(logFlushDone)
 		os.Exit(1)
 	}
 

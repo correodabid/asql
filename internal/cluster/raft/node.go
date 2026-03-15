@@ -551,23 +551,33 @@ func (n *RaftNode) HandleAppendEntries(ctx context.Context, req AppendEntriesReq
 	// the RPC; the engine's writeMu serialises with the commit queue.
 	if n.commitIndex > oldCommit && n.cfg.OnEntriesCommitted != nil {
 		ci := n.commitIndex
+		fromLSN := oldCommit + 1
 		committed := committedWALRecordsFromAppend(req.Entries, oldCommit+1, ci)
-		if uint64(len(committed)) != ci-oldCommit {
-			entries, err := n.cfg.Log.Entries(ctx, oldCommit+1, ci+1)
-			if err != nil {
-				if n.cfg.Logger != nil {
-					n.cfg.Logger.Warn("raft: load committed entries failed",
-						slog.String("node", n.cfg.NodeID),
-						slog.Uint64("from", oldCommit+1),
-						slog.Uint64("to", ci),
-						slog.String("error", err.Error()))
+		go func(commitIndex, fromLSN uint64, committed []ports.WALRecord) {
+			if uint64(len(committed)) != commitIndex-fromLSN+1 {
+				// Heartbeats that only advance LeaderCommit often arrive without the
+				// full committed span in req.Entries. Reload any missing records in
+				// the background so the RPC path stays bounded while followers still
+				// receive an exact incremental delta instead of falling back to a
+				// full CatchUp(commitIndex) on every commit advance.
+				entries, err := n.cfg.Log.Entries(context.Background(), fromLSN, commitIndex+1)
+				if err != nil {
+					if n.cfg.Logger != nil {
+						n.cfg.Logger.Warn("raft committed log reload failed",
+							"from_lsn", fromLSN,
+							"to_lsn", commitIndex,
+							"error", err)
+					}
+					committed = nil
+				} else {
+					committed = walRecordsFromEntries(entries)
+					if uint64(len(committed)) != commitIndex-fromLSN+1 {
+						committed = nil
+					}
 				}
-				committed = nil
-			} else {
-				committed = walRecordsFromEntries(entries)
 			}
-		}
-		go n.cfg.OnEntriesCommitted(context.Background(), ci, committed)
+			n.cfg.OnEntriesCommitted(context.Background(), commitIndex, committed)
+		}(ci, fromLSN, committed)
 	}
 
 	resp.Success = true

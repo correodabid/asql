@@ -24,6 +24,11 @@ type memWALStore struct {
 	lastLSN uint64
 }
 
+type countingWALStore struct {
+	memWALStore
+	readCount int
+}
+
 func (m *memWALStore) Append(_ context.Context, r ports.WALRecord) (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -80,6 +85,13 @@ func (m *memWALStore) LastLSN() uint64 {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lastLSN
+}
+
+func (m *countingWALStore) ReadFrom(ctx context.Context, fromLSN uint64, limit int) ([]ports.WALRecord, error) {
+	m.mu.Lock()
+	m.readCount++
+	m.mu.Unlock()
+	return m.memWALStore.ReadFrom(ctx, fromLSN, limit)
 }
 
 // ──────────────────────────────────────────────────────────────────────────────
@@ -601,6 +613,93 @@ func TestAppendEntriesOverlappingPrefix(t *testing.T) {
 	}
 }
 
+func TestAppendEntriesHeartbeatCommitAdvanceDoesNotReloadLog(t *testing.T) {
+	ctx := context.Background()
+	store := &countingWALStore{}
+	log, err := raft.NewWALLog(ctx, store)
+	if err != nil {
+		t.Fatalf("NewWALLog: %v", err)
+	}
+
+	committedCh := make(chan []ports.WALRecord, 1)
+	n, err := raft.NewRaftNode(ctx, raft.Config{
+		NodeID:             "n1",
+		Peers:              nil,
+		Storage:            raft.NewMemStorage(),
+		Log:                log,
+		Transport:          newMemTransport(),
+		Clock:              clock.Realtime{},
+		ElectionMinTimeout: 30 * time.Millisecond,
+		ElectionMaxTimeout: 60 * time.Millisecond,
+		HeartbeatInterval:  10 * time.Millisecond,
+		Logger:             newTestLogger(t),
+		OnEntriesCommitted: func(_ context.Context, _ uint64, records []ports.WALRecord) {
+			committedCh <- records
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRaftNode: %v", err)
+	}
+
+	seedResp, err := n.HandleAppendEntries(ctx, raft.AppendEntriesRequest{
+		Term:         2,
+		LeaderID:     "n2",
+		PrevLogIndex: 0,
+		PrevLogTerm:  0,
+		Entries: []raft.RaftEntry{
+			{Index: 1, Term: 2, TxID: "tx-0", Type: "MUTATION"},
+			{Index: 2, Term: 2, TxID: "tx-1", Type: "MUTATION"},
+			{Index: 3, Term: 2, TxID: "tx-2", Type: "MUTATION"},
+		},
+		LeaderCommit: 0,
+	})
+	if err != nil {
+		t.Fatalf("seed HandleAppendEntries: %v", err)
+	}
+	if !seedResp.Success {
+		t.Fatal("seed AppendEntries must succeed")
+	}
+
+	store.mu.Lock()
+	store.readCount = 0
+	store.mu.Unlock()
+
+	resp, err := n.HandleAppendEntries(ctx, raft.AppendEntriesRequest{
+		Term:         2,
+		LeaderID:     "n2",
+		PrevLogIndex: 3,
+		PrevLogTerm:  2,
+		LeaderCommit: 3,
+	})
+	if err != nil {
+		t.Fatalf("HandleAppendEntries: %v", err)
+	}
+	if !resp.Success {
+		t.Fatal("heartbeat AppendEntries with commit advance must succeed")
+	}
+
+	select {
+	case records := <-committedCh:
+		if len(records) != 3 {
+			t.Fatalf("expected 3 committed records, got %d", len(records))
+		}
+		for i, record := range records {
+			want := uint64(i + 1)
+			if record.LSN != want {
+				t.Fatalf("records[%d].LSN=%d want %d", i, record.LSN, want)
+			}
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for committed callback")
+	}
+
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	if store.readCount != 1 {
+		t.Fatalf("expected async committed log reload, got %d ReadFrom calls", store.readCount)
+	}
+}
+
 // TestLeaderApplyAndReplication: a 3-node cluster elects a leader, then Apply
 // successfully replicates a log entry to a majority.
 func TestLeaderApplyAndReplication(t *testing.T) {
@@ -734,8 +833,8 @@ func TestDeadNodeCannotBecomeLeader(t *testing.T) {
 	if deadIdx < 0 {
 		t.Fatalf("could not find leader %s in ids", leaderID)
 	}
-	cancelFuncs[deadIdx]()           // stop the leader's Run loop
-	transport.drop(leaderID)         // also block any stray in-flight RPCs to it
+	cancelFuncs[deadIdx]()   // stop the leader's Run loop
+	transport.drop(leaderID) // also block any stray in-flight RPCs to it
 
 	// Collect surviving nodes.
 	var surviving []*raft.RaftNode
