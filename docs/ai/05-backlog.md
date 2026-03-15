@@ -129,17 +129,17 @@ Legend:
 
 ## Epic P — Launch readiness
 - [x] Create release candidate gate checklist (`v1.0.0-rc1`).
-- [ ] Freeze protocol/WAL compatibility for GA.
-	- [ ] Write the GA compatibility contract for WAL, protocol, and upgrade expectations.
-	- [ ] Make compatibility validation part of release-candidate gating.
-	- [ ] Treat benchmark and determinism guardrails as required release evidence.
-- [ ] Finalize docs portal and examples repo.
-	- [ ] Align `README.md`, `docs/getting-started/`, `docs/reference/`, and `site/` around the canonical pgwire path.
-	- [ ] Package examples by adoption moment (first app, time-travel, fixtures, replication/failover visibility).
-	- [ ] Ensure public docs state ASQL as a PostgreSQL-compatible subset, not a drop-in replacement.
-- [ ] Prepare launch narrative and channels.
-	- [ ] Make the core launch story explicit: domain isolation, deterministic replay, time-travel, and operational clarity.
-	- [ ] Ensure Studio/operator UX supports that story with visible temporal and cluster workflows.
+- [x] Freeze protocol/WAL compatibility for GA.
+	- [x] Write the GA compatibility contract for WAL, protocol, and upgrade expectations.
+	- [x] Make compatibility validation part of release-candidate gating.
+	- [x] Treat benchmark and determinism guardrails as required release evidence.
+- [x] Finalize docs portal and examples repo.
+	- [x] Align `README.md`, `docs/getting-started/`, `docs/reference/`, and `site/` around the canonical pgwire path.
+	- [x] Package examples by adoption moment (first app, time-travel, fixtures, replication/failover visibility).
+	- [x] Ensure public docs state ASQL as a PostgreSQL-compatible subset, not a drop-in replacement.
+- [x] Prepare launch narrative and channels.
+	- [x] Make the core launch story explicit: domain isolation, deterministic replay, time-travel, and operational clarity.
+	- [x] Ensure Studio/operator UX supports that story with visible temporal and cluster workflows.
 
 ## Epic Q — SQL capability expansion (technical return)
 - [x] Add `SELECT ... ORDER BY <column> [ASC|DESC] LIMIT <n>` support end-to-end.
