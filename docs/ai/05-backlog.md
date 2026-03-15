@@ -501,17 +501,14 @@ Closed sub-slices:
 
 Open gaps before closure:
 - Snapshot restart microbenchmarks now exist, but there is no closure-level baseline/improvement decision yet for snapshot load time.
-- Initial failover promotion/recovery benchmarks now exist, but there is no closure-level baseline/improvement decision yet for failover recovery time.
 - Initial indexed-read and index-only benchmarks now exist, but there is no closure-level baseline/improvement decision yet for indexed read latency.
-- A published multi-scenario failover/recovery benchmark suite now exists, but there is no closure-level improvement decision yet for it.
 - No measured decision record yet for persisted index/cache architecture.
 
 Current next-execution order:
-- 1. Decide whether failover recovery is now good enough to close or whether one more replay/apply pass is justified, now that WAL reopen/discovery has effectively been removed as a meaningful cost.
-- 2. Record a closure-grade decision for replay throughput using the existing repeated replay benchmark path.
-- 3. Finish the snapshot-load decision with repeated cadence/tail evidence, not just head-snapshot best-case samples.
-- 4. Finish the indexed-read/query-latency decision across the remaining important read shapes.
-- 5. Revisit persisted index/cache architecture only after the benchmark evidence above shows a durable IO bottleneck that current in-memory indexes cannot address cleanly.
+- 1. Record a closure-grade decision for replay throughput using the existing repeated replay benchmark path.
+- 2. Finish the snapshot-load decision with repeated cadence/tail evidence, not just head-snapshot best-case samples.
+- 3. Finish the indexed-read/query-latency decision across the remaining important read shapes.
+- 4. Revisit persisted index/cache architecture only after the benchmark evidence above shows a durable IO bottleneck that current in-memory indexes cannot address cleanly.
 
 Subline status:
 - The `Expand index-only scan coverage where benchmarks justify it` item is now evidence-backed for covered simple ordered reads, covered ordered reads with `OFFSET`, covered selective reads with bounded early-stop, and covered composite ordered reads.
@@ -549,7 +546,7 @@ Subline status:
 - The parallel-scan item has now been evaluated to a defer decision: there is still no proven workload class that justifies intra-query parallel scan complexity over the current deterministic single-threaded indexed paths.
 - Entity-related join reads now have dedicated scaling coverage: `BenchmarkEngineReadEntityRelatedJoinScaling` and `BenchmarkEngineReadEntityRelatedJoinRightFilterScaling` show that root-table pruning, root-only `AND` conjunct extraction, and safe right-side filtering materially improved the user-reported “entity + related tables” slowdown as row counts grow, but the broader indexed-read/query-latency item remains open because other read shapes still need closure-level decisions.
 - Repeated historical reads now have dedicated scaling coverage via `BenchmarkEngineReadHistoricalAsOfLSNScaling`: exact-`LSN` repeat reads benefit materially from the new WAL-record cache and small historical-state cache, while invalidation on commit and WAL GC keeps correctness explicit.
-- Failover recovery now has a closure-grade benchmark slice: the sweep covers `small_total_40`, `medium_total_640`, and `large_total_4608`, and the phase split on the largest case shows WAL reopen/discovery plus engine replay/apply as separate costs. After the latest two optimizations, WAL reopen/discovery is effectively gone as a meaningful cost (~`38–73 µs` on the large case), while replay/apply remains the dominant slice at roughly ~`2.1–4.3 ms` end-to-end. The item remains open only because a closure-level target/decision has not yet been recorded.
+- Failover recovery is now treated as closed at the subline level: the benchmark suite covers `small_total_40`, `medium_total_640`, and `large_total_4608`, the largest case has a phase split proving where time goes, replay-side cleanup materially reduced apply cost, and persisted segment headers removed WAL reopen/discovery as a meaningful restart cost (~`38–73 µs` on the large case). The current closure decision is that ~`2.1–4.3 ms` end-to-end large-scenario recovery on the benchmark fixture is strong enough to move this slice out of active optimization and focus AB effort on replay throughput, snapshot load, and indexed-read latency.
 
 Latest directional read evidence:
 - `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and repeated at ~`353–361 µs/op`.
@@ -569,7 +566,7 @@ Latest directional read evidence:
 - [ ] Benchmark and improve replay throughput.
 - [ ] Benchmark and improve snapshot load time.
 - [ ] Benchmark and improve indexed read/query latency.
-- [ ] Benchmark and improve failover recovery time.
+- [x] Benchmark and improve failover recovery time.
 - [ ] Evaluate persisted index/cache architecture from measured IO behavior.
 - [x] Expand index-only scan coverage where benchmarks justify it.
 - [x] Evaluate parallel scans only for proven workload classes.
