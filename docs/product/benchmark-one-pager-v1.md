@@ -216,7 +216,7 @@ make bench-append-growth \
 	BENCH_APPEND_BATCH=250 \
 	BENCH_APPEND_PAYLOAD=96 \
 	BENCH_APPEND_SECONDARY_INDEX=true \
-	BENCH_APPEND_FAIL_RATIO=1.50
+	BENCH_APPEND_FAIL_RATIO=1.25
 ```
 
 What it reports:
@@ -265,4 +265,4 @@ make bench-append-growth-cluster-guardrail
 This target uses the validated `8 x 10k` workload and exits non-zero when
 `worst/best > 1.10`.
 
-Recommended default: `BENCH_APPEND_FAIL_RATIO=1.50`.
+Recommended default: `BENCH_APPEND_FAIL_RATIO=1.25`.
