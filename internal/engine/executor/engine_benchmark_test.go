@@ -67,29 +67,51 @@ func BenchmarkEngineWriteCommitPreSeeded(b *testing.B) {
 func BenchmarkEngineWriteScaling(b *testing.B) {
 	for _, size := range []int{10_000, 50_000, 100_000, 200_000} {
 		b.Run(fmt.Sprintf("rows_%dk", size/1000), func(b *testing.B) {
-			ctx := context.Background()
-			store, engine := newBenchmarkEngine(b)
-
-			session := engine.NewSession()
-			mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
-			mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
-			for i := 0; i < size; i++ {
-				mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'seed')", i))
-			}
-			mustExecBenchmark(b, ctx, engine, session, "COMMIT")
-
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				tx := engine.NewSession()
-				mustExecBenchmark(b, ctx, engine, tx, "BEGIN DOMAIN bench")
-				mustExecBenchmark(b, ctx, engine, tx, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload')", size+i))
-				mustExecBenchmark(b, ctx, engine, tx, "COMMIT")
-			}
-
-			engine.WaitPendingSnapshots()
-			_ = store.Close()
+			benchmarkEngineWriteScalingAtSize(b, size)
 		})
 	}
+}
+
+// BenchmarkEngineWriteScalingGuardrail keeps a fixed size ladder focused on
+// the regression question “does single-row INSERT latency stay effectively
+// flat as the seeded table grows from 10k to 1m rows?”.
+func BenchmarkEngineWriteScalingGuardrail(b *testing.B) {
+	for _, tc := range []struct {
+		name string
+		size int
+	}{
+		{name: "rows_10k", size: 10_000},
+		{name: "rows_100k", size: 100_000},
+		{name: "rows_1m", size: 1_000_000},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			benchmarkEngineWriteScalingAtSize(b, tc.size)
+		})
+	}
+}
+
+func benchmarkEngineWriteScalingAtSize(b *testing.B, size int) {
+	ctx := context.Background()
+	store, engine := newBenchmarkEngine(b)
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
+	for i := 0; i < size; i++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'seed')", i))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		tx := engine.NewSession()
+		mustExecBenchmark(b, ctx, engine, tx, "BEGIN DOMAIN bench")
+		mustExecBenchmark(b, ctx, engine, tx, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload')", size+i))
+		mustExecBenchmark(b, ctx, engine, tx, "COMMIT")
+	}
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
 }
 
 func BenchmarkEngineWriteCommitAlwaysSync(b *testing.B) {

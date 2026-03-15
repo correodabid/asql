@@ -1,6 +1,7 @@
 SHELL := /bin/sh
 
 .PHONY: tidy fmt vet test test-race bench bench-core bench-write bench-wal bench-pgwire \
+	bench-write-scaling-guardrail \
 	bench-env-single bench-env-cluster bench-run-single bench-run-cluster \
 	bench-seed-single bench-seed-cluster bench-matrix-single bench-matrix-cluster \
 	bench-append-growth bench-append-growth-single bench-append-growth-cluster bench-append-growth-cluster-guardrail \
@@ -32,6 +33,8 @@ BENCH_APPEND_BATCH ?= 250
 BENCH_APPEND_PAYLOAD ?= 96
 BENCH_APPEND_SECONDARY_INDEX ?= true
 BENCH_APPEND_FAIL_RATIO ?= 1.25
+BENCH_WRITE_SCALE_BENCHTIME ?= 3x
+BENCH_WRITE_SCALE_FAIL_RATIO ?= 1.25
 DEV_ADMIN_ADDR_A ?= :9091
 DEV_ADMIN_ADDR_B ?= :9092
 DEV_ADMIN_ADDR_C ?= :9093
@@ -62,6 +65,11 @@ bench-core: bench-write bench-wal
 
 bench-write:
 	go test -run '^$$' -bench 'BenchmarkEngineWrite|BenchmarkEngineReadAsOfLSN|BenchmarkEngineReplayToLSN' -benchmem ./internal/engine/executor
+
+bench-write-scaling-guardrail:
+	go run ./scripts/bench_write_scaling_guardrail \
+		-benchtime $(BENCH_WRITE_SCALE_BENCHTIME) \
+		-fail-ratio $(BENCH_WRITE_SCALE_FAIL_RATIO)
 
 bench-wal:
 	go test -run '^$$' -bench BenchmarkFileLogStore -benchmem ./internal/storage/wal

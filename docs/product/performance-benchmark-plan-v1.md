@@ -25,6 +25,7 @@ Commands:
 
 - `make bench-core`
 - `make bench-write`
+- `make bench-write-scaling-guardrail`
 - `make bench-seed-single BENCH_WORKERS=8 BENCH_STEPS=10 BENCH_MATERIALS=5`
 - `make bench-matrix-single`
 - `make bench-matrix-cluster`
@@ -33,6 +34,7 @@ Coverage:
 
 - `BenchmarkEngineWriteCommit`
 - `BenchmarkEngineWriteCommitPreSeeded`
+- `BenchmarkEngineWriteScalingGuardrail` (`10k` / `100k` / `1m` pre-seeded rows)
 - `BenchmarkEngineWriteCommitPreSeededBTree`
 - `BenchmarkEngineWriteCommitBulk10`
 - `BenchmarkEngineWriteCommitReturningUUID`
@@ -59,6 +61,7 @@ Primary metrics:
 Optimization hypotheses this layer can validate:
 
 - PK/unique/index maintenance cost
+- insert-latency slope versus seeded table size
 - `INSERT ... RETURNING` overhead
 - UUID/default resolution overhead
 - commit queue/group commit effectiveness

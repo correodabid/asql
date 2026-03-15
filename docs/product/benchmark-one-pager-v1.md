@@ -266,3 +266,25 @@ This target uses the validated `8 x 10k` workload and exits non-zero when
 `worst/best > 1.10`.
 
 Recommended default: `BENCH_APPEND_FAIL_RATIO=1.25`.
+
+## 10) Engine write-scaling guardrail (10k / 100k / 1m)
+
+To check that single-row engine-direct inserts stay effectively flat as the
+seeded table grows, run the dedicated core guardrail:
+
+```bash
+make bench-write-scaling-guardrail
+```
+
+Default knobs:
+
+```bash
+make bench-write-scaling-guardrail \
+	BENCH_WRITE_SCALE_BENCHTIME=3x \
+	BENCH_WRITE_SCALE_FAIL_RATIO=1.25
+```
+
+What it reports:
+- `ns/op` for inserts into tables pre-seeded to `10k`, `100k`, and `1m` rows,
+- worst/best ratio across the size ladder,
+- pass/fail based on the configured ratio threshold.
