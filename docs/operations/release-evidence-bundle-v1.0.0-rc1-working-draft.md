@@ -89,32 +89,40 @@ Notes:
 
 ## 4. WAL / replay / recovery
 
-Status: `blocked`
+Status: `green-with-notes`
 
 Evidence:
 - `test/integration/restart_replay_test.go`
-  - `TestRestartReplayRestoresState`: `n/a`
+  - `TestRestartReplayRestoresState`: `pass`
 - `test/integration/backup_restore_test.go`
-  - `TestBackupWipeRestorePreservesQueryParity`: `n/a`
+  - `TestBackupWipeRestorePreservesQueryParity`: `pass`
 - `test/integration/recovery_restore_test.go`
-  - `TestBaseBackupRestoreToLSNAndTimestamp`: `n/a`
-  - `TestBaseBackupVerificationFailsOnChecksumMismatch`: `n/a`
-- WAL compatibility/version tests: `n/a`
+  - `TestBaseBackupRestoreToLSNAndTimestamp`: `pass`
+  - `TestBaseBackupVerificationFailsOnChecksumMismatch`: `pass`
+- WAL compatibility/version tests: `pass`
 - upgrade simulation: `n/a`
 
 Notes:
-- Recovery/replay claims remain in place at the documentation level.
-- The executable recovery evidence still needs to be gathered for this actual RC review.
+- Recovery and restore evidence was captured in the current review window.
+- Command used: `go test ./test/integration -run 'TestRestartReplayRestoresState|TestBackupWipeRestorePreservesQueryParity|TestBaseBackupRestoreToLSNAndTimestamp|TestBaseBackupVerificationFailsOnChecksumMismatch' -count=1`
+- WAL compatibility/version evidence was captured in the current review window.
+- Command used: `go test ./internal/storage/wal -run 'TestFileLogStoreAppendAndReadFrom|TestFileLogStoreRecoverAfterReopen|TestFileLogStoreRejectsUnsupportedFutureVersion' -count=1`
+- Covered by that lane:
+  - append sequence continuity via `TestFileLogStoreAppendAndReadFrom`
+  - reopen/recovery continuity via `TestFileLogStoreRecoverAfterReopen`
+  - version mismatch rejection via `TestFileLogStoreRejectsUnsupportedFutureVersion`
+- I did not find a dedicated automated legacy WAL fixture-read lane or a dedicated automated upgrade-simulation lane in the current repository.
+- The closest automated proxy for upgrade behavior is `TestRestartReplayRestoresState`, but the explicit upgrade simulation called for in the release checklist remains pending.
 
 ## 5. Operations
 
-Status: `blocked`
+Status: `green`
 
 Evidence:
 - `internal/server/pgwire/admin_http_test.go`
-  - `TestAdminMetricsExposeFailoverLeaderAndSafeLSN`: `n/a`
-  - `TestAdminReadyzAndLeadershipEndpoints`: `n/a`
-  - `TestAdminRecoveryInspectionAndValidationEndpoints`: `n/a`
+  - `TestAdminMetricsExposeFailoverLeaderAndSafeLSN`: `pass`
+  - `TestAdminReadyzAndLeadershipEndpoints`: `pass`
+  - `TestAdminRecoveryInspectionAndValidationEndpoints`: `pass`
 
 Docs reviewed:
 - `runbook.md`: `yes`
@@ -124,25 +132,27 @@ Docs reviewed:
 
 Notes:
 - Operator-facing docs and site visibility improved in this window.
-- Admin/metrics evidence remains pending for the real RC pass.
+- Admin/metrics evidence was captured in the current review window.
+- Command used: `go test ./internal/server/pgwire -run 'TestAdminMetricsExposeFailoverLeaderAndSafeLSN|TestAdminReadyzAndLeadershipEndpoints|TestAdminRecoveryInspectionAndValidationEndpoints' -count=1`
 
 ## 6. Replicated-runtime continuity
 
-Status: `blocked`
+Status: `green`
 
 Use when cluster/runtime, fencing, promotion, or replicated commit behavior changed.
 
 Evidence:
 - `test/integration/failover_simulation_test.go`
-  - `TestFailoverSimulationLeaderCrashPromotesCandidate`: `n/a`
-  - `TestFailoverSimulationStaleLeaderRecoveryRejectsOldToken`: `n/a`
-  - `TestFailoverSimulationRepeatedSeededTimelineProducesIdenticalSequence`: `n/a`
+  - `TestFailoverSimulationLeaderCrashPromotesCandidate`: `pass`
+  - `TestFailoverSimulationStaleLeaderRecoveryRejectsOldToken`: `pass`
+  - `TestFailoverSimulationRepeatedSeededTimelineProducesIdenticalSequence`: `pass`
 - `test/integration/failover_state_hash_continuity_test.go`
-  - `TestFailoverPromotionPreservesReplayStateHashContinuity`: `n/a`
+  - `TestFailoverPromotionPreservesReplayStateHashContinuity`: `pass`
 
 Notes:
-- No new failover-runtime code was changed in this documentation-focused window.
-- Even so, the RC gate still requires continuity evidence before proceeding.
+- Replicated-runtime continuity evidence was captured in the current review window.
+- Command used: `go test ./test/integration -run 'TestFailoverSimulationLeaderCrashPromotesCandidate|TestFailoverSimulationStaleLeaderRecoveryRejectsOldToken|TestFailoverSimulationRepeatedSeededTimelineProducesIdenticalSequence|TestFailoverPromotionPreservesReplayStateHashContinuity' -count=1`
+- This clears the failover/continuity lane for the working RC draft.
 
 ## 7. Performance guardrails
 
@@ -181,18 +191,14 @@ Notes:
 ## 9. Blockers and follow-up
 
 P0/P1 blockers:
-- replay/recovery evidence not yet captured for this RC review window
-- admin/operations evidence not yet captured for this RC review window
+- explicit upgrade simulation not yet captured for this RC review window
 - release artifact generation not yet executed
 
 Narrowed claims for this release:
 - ASQL remains explicitly positioned as a deterministic SQL engine with a pragmatic PostgreSQL-compatible subset over pgwire, not a drop-in PostgreSQL replacement.
 
 Required follow-up before GA:
-- run and record the runtime smoke lanes
-- run and record pgwire compatibility pack lanes
-- run and record replay/recovery/backup evidence
-- run and record admin and failover continuity evidence
+- run and record upgrade simulation evidence
 - generate actual release artifacts and final release notes bundle
 
 ## 10. Final recommendation
@@ -200,5 +206,5 @@ Required follow-up before GA:
 Recommendation: `blocked`
 
 Reason:
-- The product/docs/launch story is much stronger and the guardrails are in better shape, but this is still only a working RC bundle draft.
-- The first full evidence pass has not yet been executed, so the release should remain blocked until the required runtime, compatibility, recovery, operations, and artifact lanes are captured.
+- The product/docs/launch story is much stronger and the RC draft now includes real runtime, compatibility, recovery, operations, continuity, and performance evidence.
+- The release still remains blocked until an explicit upgrade simulation and the release artifact lanes are captured.
