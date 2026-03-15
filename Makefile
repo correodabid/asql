@@ -436,7 +436,7 @@ bench-append-growth-cluster-guardrail: bench-env-cluster
 		BENCH_APPEND_BATCH=250 \
 		BENCH_APPEND_PAYLOAD=96 \
 		BENCH_APPEND_SECONDARY_INDEX=true \
-		BENCH_APPEND_FAIL_RATIO=1.25
+		BENCH_APPEND_FAIL_RATIO=1.10
 
 bench-matrix-single:
 	@echo "== single-node benchmark matrix =="

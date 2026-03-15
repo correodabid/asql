@@ -230,6 +230,8 @@ Latest cluster investigation result:
 - profiling showed the leader spending most of the slow round inside the Raft replication path `sendHeartbeats -> walLog.Entries() -> SegmentedLogStore.ReadFrom()`;
 - once follower lag pushed `nextIndex` behind the WAL hot-tail cache, the leader started rescanning segment files from disk on heartbeats/broadcasts;
 - increasing the recent WAL read cache in [internal/storage/wal/segmented.go](../internal/storage/wal/segmented.go) removed the cliff in both the original `4 x 20k` case and the split `8 x 10k` case.
+- a second cluster-only spike came from `broadcastAndCommit()` treating a follower as quorum-acked after a single capped `AppendEntries` batch even when it had not yet reached the target index;
+- making the leader continue batched catch-up inside the same quorum round removed the residual size-linked stall from later heartbeat retries.
 
 Current single-node reference with a secondary index on the target table:
 - 10 rounds
@@ -248,6 +250,12 @@ Current cluster reference after enlarging the WAL hot-tail cache:
 	- worst: `740ms`
 	- worst/best: `x1.05`
 
+Current cluster reference after the multi-round Raft catch-up fix:
+- `8 x 10k` rounds with secondary index:
+	- best: `499ms`
+	- worst: `526ms`
+	- worst/best: `x1.05`
+
 Recommended cluster guardrail command:
 
 ```bash
@@ -255,6 +263,6 @@ make bench-append-growth-cluster-guardrail
 ```
 
 This target uses the validated `8 x 10k` workload and exits non-zero when
-`worst/best > 1.25`.
+`worst/best > 1.10`.
 
 Recommended default: `BENCH_APPEND_FAIL_RATIO=1.50`.
