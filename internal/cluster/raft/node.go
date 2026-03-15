@@ -973,6 +973,7 @@ func (n *RaftNode) broadcastAndCommit(ctx context.Context, newIndex uint64) erro
 	quorum := (len(peers)+1)/2 + 1
 
 	type peerResult struct {
+		peer     Peer
 		peerID   string
 		resp     AppendEntriesResponse
 		err      error
@@ -998,7 +999,7 @@ func (n *RaftNode) broadcastAndCommit(ctx context.Context, newIndex uint64) erro
 			entries, err := n.cfg.Log.Entries(rpcCtx, ni, upper)
 			readDur := time.Since(readStart)
 			if err != nil {
-				resultCh <- peerResult{peerID: p.NodeID, resp: AppendEntriesResponse{}, err: err, readDur: readDur}
+				resultCh <- peerResult{peer: p, peerID: p.NodeID, resp: AppendEntriesResponse{}, err: err, readDur: readDur}
 				return
 			}
 			buildStart := time.Now()
@@ -1026,33 +1027,38 @@ func (n *RaftNode) broadcastAndCommit(ctx context.Context, newIndex uint64) erro
 			buildDur := time.Since(buildStart)
 			rpcStart := time.Now()
 			resp, err := n.cfg.Transport.AppendEntries(rpcCtx, p.RaftAddr, req)
-			resultCh <- peerResult{peerID: p.NodeID, resp: resp, err: err, readDur: readDur, buildDur: buildDur, rpcDur: time.Since(rpcStart), entries: len(entries)}
+			resultCh <- peerResult{peer: p, peerID: p.NodeID, resp: resp, err: err, readDur: readDur, buildDur: buildDur, rpcDur: time.Since(rpcStart), entries: len(entries)}
 		}()
 	}
-	processPeerResult := func(persistCtx context.Context, res peerResult) (acked bool, steppedDown bool) {
+	processPeerResult := func(persistCtx context.Context, res peerResult) (acked bool, steppedDown bool, retry bool, retryFrom uint64) {
 		n.mu.Lock()
 		defer n.mu.Unlock()
 
 		// If a concurrent step-down (e.g. heartbeat from higher-term leader)
 		// called becomeFollowerLocked, the maps are nil — bail out safely.
 		if n.state != stateLeader {
-			return false, true
+			return false, true, false, 0
 		}
 		if res.err != nil {
 			n.cfg.Logger.Warn("raft.broadcast peer error",
 				slog.String("peer", res.peerID),
 				slog.String("error", res.err.Error()))
-			return false, false
+			return false, false, false, 0
 		}
 		if res.resp.Term > n.currentTerm {
 			n.becomeFollowerLocked(res.resp.Term)
 			_ = n.persistLocked(persistCtx)
-			return false, true
+			return false, true, false, 0
 		}
 		if res.resp.Success {
-			n.matchIndex[res.peerID] = res.resp.LastIndex
+			if res.resp.LastIndex > n.matchIndex[res.peerID] {
+				n.matchIndex[res.peerID] = res.resp.LastIndex
+			}
 			n.nextIndex[res.peerID] = res.resp.LastIndex + 1
-			return true, false
+			if res.resp.LastIndex >= newIndex {
+				return true, false, false, 0
+			}
+			return false, false, true, n.nextIndex[res.peerID]
 		}
 
 		n.cfg.Logger.Warn("raft.broadcast peer rejected",
@@ -1065,7 +1071,7 @@ func (n *RaftNode) broadcastAndCommit(ctx context.Context, newIndex uint64) erro
 		} else if n.nextIndex[res.peerID] > 1 {
 			n.nextIndex[res.peerID]--
 		}
-		return false, false
+		return false, false, true, n.nextIndex[res.peerID]
 	}
 
 	for _, ps := range peerStates {
@@ -1080,7 +1086,8 @@ func (n *RaftNode) broadcastAndCommit(ctx context.Context, newIndex uint64) erro
 	var maxReadDur time.Duration
 	var maxBuildDur time.Duration
 	var maxRPCDur time.Duration
-	for i := 0; i < len(peers); i++ {
+	pending := len(peers)
+	for pending > 0 {
 		res := <-ch
 		totalReadDur += res.readDur
 		totalBuildDur += res.buildDur
@@ -1095,22 +1102,27 @@ func (n *RaftNode) broadcastAndCommit(ctx context.Context, newIndex uint64) erro
 		if res.rpcDur > maxRPCDur {
 			maxRPCDur = res.rpcDur
 		}
-		acked, steppedDown := processPeerResult(ctx, res)
+		acked, steppedDown, retry, retryFrom := processPeerResult(ctx, res)
 		if steppedDown {
 			return ErrNotLeader
 		}
 		if acked {
 			acks++
 		}
+		if retry {
+			launchPeerReplication(ctx, res.peer, retryFrom, ch)
+			continue
+		}
+		pending--
 
 		if acks >= quorum {
-			remaining := len(peers) - i - 1
+			remaining := pending
 			if remaining > 0 {
 				go func(pending int) {
 					bgCtx := context.Background()
 					for j := 0; j < pending; j++ {
 						res := <-ch
-						_, _ = processPeerResult(bgCtx, res)
+						_, _, _, _ = processPeerResult(bgCtx, res)
 					}
 				}(remaining)
 			}

@@ -2,6 +2,15 @@ package executor
 
 import "testing"
 
+func TestAdaptiveHashOverlayMaxDepthIsStableAcrossSizes(t *testing.T) {
+	sizes := []int{0, 1, 10_000, 100_000, 500_000, 1_000_000}
+	for _, size := range sizes {
+		if got := adaptiveHashOverlayMaxDepth(size); got != 32 {
+			t.Fatalf("adaptiveHashOverlayMaxDepth(%d) = %d, want 32", size, got)
+		}
+	}
+}
+
 func TestOverlayIndexForInsertFlattensHashChainsAtThreshold(t *testing.T) {
 	base := &indexState{
 		name:     "idx_pk",

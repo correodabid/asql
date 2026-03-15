@@ -183,7 +183,7 @@ func TestSendHeartbeatsSkipsDuringActiveReplication(t *testing.T) {
 }
 
 func TestBroadcastAndCommitCapsEntriesPerRPC(t *testing.T) {
-	transport := &captureTransport{appendCh: make(chan AppendEntriesRequest, 1)}
+	transport := &captureTransport{appendCh: make(chan AppendEntriesRequest, 8)}
 	n := newHeartbeatLeaderNode(t, transport)
 
 	store := &heartbeatTestWALStore{}
@@ -223,6 +223,68 @@ func TestBroadcastAndCommitCapsEntriesPerRPC(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for AppendEntries")
+	}
+}
+
+func TestBroadcastAndCommitRetriesUntilFollowerReachesTarget(t *testing.T) {
+	transport := &captureTransport{appendCh: make(chan AppendEntriesRequest, 8)}
+	n := newHeartbeatLeaderNode(t, transport)
+
+	store := &heartbeatTestWALStore{}
+	for i := 0; i < 300; i++ {
+		_, err := store.Append(context.Background(), ports.WALRecord{Term: 1, Type: "MUTATION", TxID: fmt.Sprintf("bulk-%d", i+1)})
+		if err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+	}
+	log, err := NewWALLog(context.Background(), store)
+	if err != nil {
+		t.Fatalf("NewWALLog: %v", err)
+	}
+
+	n.mu.Lock()
+	n.cfg.Log = log
+	n.commitIndex = 0
+	n.nextIndex["n2"] = 1
+	n.matchIndex["n1"] = 300
+	n.matchIndex["n2"] = 0
+	n.mu.Unlock()
+
+	if err := n.broadcastAndCommit(context.Background(), 300); err != nil {
+		t.Fatalf("broadcastAndCommit: %v", err)
+	}
+
+	requests := make([]AppendEntriesRequest, 0, 3)
+	deadline := time.After(time.Second)
+	for len(requests) < 3 {
+		select {
+		case req := <-transport.appendCh:
+			requests = append(requests, req)
+		case <-deadline:
+			t.Fatalf("timed out waiting for AppendEntries, got %d requests", len(requests))
+		}
+	}
+
+	if len(requests[0].Entries) != 128 || len(requests[1].Entries) != 128 || len(requests[2].Entries) != 44 {
+		t.Fatalf("unexpected request sizes: %d, %d, %d", len(requests[0].Entries), len(requests[1].Entries), len(requests[2].Entries))
+	}
+	if requests[0].Entries[0].Index != 1 || requests[0].Entries[len(requests[0].Entries)-1].Index != 128 {
+		t.Fatalf("unexpected first request range: %d..%d", requests[0].Entries[0].Index, requests[0].Entries[len(requests[0].Entries)-1].Index)
+	}
+	if requests[1].Entries[0].Index != 129 || requests[1].Entries[len(requests[1].Entries)-1].Index != 256 {
+		t.Fatalf("unexpected second request range: %d..%d", requests[1].Entries[0].Index, requests[1].Entries[len(requests[1].Entries)-1].Index)
+	}
+	if requests[2].Entries[0].Index != 257 || requests[2].Entries[len(requests[2].Entries)-1].Index != 300 {
+		t.Fatalf("unexpected third request range: %d..%d", requests[2].Entries[0].Index, requests[2].Entries[len(requests[2].Entries)-1].Index)
+	}
+
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.matchIndex["n2"] != 300 {
+		t.Fatalf("matchIndex=%d want 300", n.matchIndex["n2"])
+	}
+	if n.commitIndex != 300 {
+		t.Fatalf("commitIndex=%d want 300", n.commitIndex)
 	}
 }
 

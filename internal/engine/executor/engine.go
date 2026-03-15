@@ -79,23 +79,18 @@ func adaptiveOverlayMaxDepth(baseSize int) int {
 	return indexOverlayXLargeDepth
 }
 
-// adaptiveHashOverlayMaxDepth keeps hash-index overlay chains much shorter
-// than btree chains. Hash indexes sit directly on the validation and lookup
-// path (PK/UNIQUE/FK checks), so long chains penalise leader write latency
-// more than they save in flatten work. Btree indexes keep the larger default
-// thresholds because their hot path is append-only and their reads already
-// defer sorting/merge work lazily.
+// adaptiveHashOverlayMaxDepth keeps hash-index overlay chains short and,
+// critically, stable as the table grows. PK/UNIQUE/FK validation hits
+// `hasBucket()` on almost every foreground insert; letting the permitted
+// chain depth scale up with base index size turns “same shape, bigger table”
+// workloads into progressively more map lookups per insert.
+//
+// Tiered compaction already merges only the recent delta above the nearest
+// compacted tier, so keeping the live-write depth fixed preserves near-O(1)
+// validation while avoiding O(table) full flatten work.
 func adaptiveHashOverlayMaxDepth(baseSize int) int {
-	if baseSize < indexOverlayScaleThreshold {
-		return 32
-	}
-	if baseSize < indexOverlayLargeThreshold {
-		return 64
-	}
-	if baseSize < indexOverlayXLargeThreshold {
-		return 128
-	}
-	return 256
+	_ = baseSize
+	return 32
 }
 
 // adaptiveReplayHashOverlayMaxDepth relaxes hash overlay flattening during
