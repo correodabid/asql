@@ -23,8 +23,8 @@ type raftServiceHandler struct {
 }
 
 var appendEntriesHandlerPerf struct {
-	mu          sync.Mutex
-	samples     int64
+	mu           sync.Mutex
+	samples      int64
 	totalEntries int64
 	totalConvert time.Duration
 	totalHandle  time.Duration
@@ -95,6 +95,9 @@ func (h *raftServiceHandler) AppendEntries(ctx context.Context, req *asqlv1.Raft
 }
 
 func recordAppendEntriesHandlerPerf(logger *slog.Logger, entries int, convertDur, handleDur, totalDur time.Duration) {
+	const appendEntriesSummaryEvery = 1000
+	const appendEntriesSlowThreshold = 50 * time.Millisecond
+
 	appendEntriesHandlerPerf.mu.Lock()
 	defer appendEntriesHandlerPerf.mu.Unlock()
 
@@ -108,7 +111,7 @@ func recordAppendEntriesHandlerPerf(logger *slog.Logger, entries int, convertDur
 		p.maxTotal = totalDur
 	}
 
-	if totalDur >= 25*time.Millisecond {
+	if totalDur >= appendEntriesSlowThreshold {
 		logger.Info("raft.handler.append_entries.slow",
 			slog.Int("entries", entries),
 			slog.Duration("convert", convertDur),
@@ -117,7 +120,7 @@ func recordAppendEntriesHandlerPerf(logger *slog.Logger, entries int, convertDur
 		)
 	}
 
-	if p.samples%25 == 0 {
+	if p.samples%appendEntriesSummaryEvery == 0 {
 		logger.Info("raft.handler.append_entries.summary",
 			slog.Int64("samples", p.samples),
 			slog.Int64("avg_entries", p.totalEntries/p.samples),

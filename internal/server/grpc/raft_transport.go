@@ -124,6 +124,9 @@ func (t *GRPCRaftTransport) AppendEntries(ctx context.Context, addr string, req 
 	}, nil
 }
 func recordAppendEntriesTransportPerf(entries int, getConnDur, invokeDur, totalDur time.Duration) {
+	const appendEntriesSummaryEvery = 1000
+	const appendEntriesSlowThreshold = 50 * time.Millisecond
+
 	appendEntriesTransportPerf.mu.Lock()
 	defer appendEntriesTransportPerf.mu.Unlock()
 
@@ -140,7 +143,7 @@ func recordAppendEntriesTransportPerf(entries int, getConnDur, invokeDur, totalD
 		p.maxInvoke = invokeDur
 	}
 
-	if totalDur >= 25*time.Millisecond {
+	if totalDur >= appendEntriesSlowThreshold {
 		slog.Info("raft.transport.append_entries.slow",
 			slog.Int("entries", entries),
 			slog.Duration("get_conn", getConnDur),
@@ -149,7 +152,7 @@ func recordAppendEntriesTransportPerf(entries int, getConnDur, invokeDur, totalD
 		)
 	}
 
-	if p.samples%25 == 0 {
+	if p.samples%appendEntriesSummaryEvery == 0 {
 		slog.Info("raft.transport.append_entries.summary",
 			slog.Int64("samples", p.samples),
 			slog.Int64("avg_entries", p.totalEntries/p.samples),
