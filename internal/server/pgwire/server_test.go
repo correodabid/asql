@@ -111,6 +111,157 @@ func TestPGWireSimpleQueryRoundtrip(t *testing.T) {
 	}
 }
 
+func TestPGWireSimpleExplainQueryRoundtrip(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	connectionString := "postgres://asql@" + listener.Addr().String() + "/asql?sslmode=disable&default_query_exec_mode=simple_protocol"
+	connection, err := pgx.Connect(ctx, connectionString)
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close(ctx) })
+
+	setup := []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"COMMIT",
+	}
+	for _, sql := range setup {
+		if _, err := connection.Exec(ctx, sql); err != nil {
+			t.Fatalf("setup %q: %v", sql, err)
+		}
+	}
+
+	rows, err := connection.Query(ctx, "EXPLAIN SELECT id, email FROM accounts.users ORDER BY id ASC")
+	if err != nil {
+		t.Fatalf("explain query: %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("expected explain row")
+	}
+
+	var operation, domain, tableName, planShape, accessPlan string
+	if err := rows.Scan(&operation, &domain, &tableName, &planShape, &accessPlan); err != nil {
+		t.Fatalf("scan explain row: %v", err)
+	}
+	if rows.Err() != nil {
+		t.Fatalf("iterate explain rows: %v", rows.Err())
+	}
+
+	if operation == "" || domain != "accounts" || tableName != "users" || planShape == "" || accessPlan == "" {
+		t.Fatalf("unexpected explain row: operation=%q domain=%q table=%q plan=%q access=%q", operation, domain, tableName, planShape, accessPlan)
+	}
+	if rows.Next() {
+		t.Fatal("expected a single explain row")
+	}
+}
+
+func TestPGWireExtendedExplainQueryRoundtrip(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	connection, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close(ctx) })
+
+	setup := []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"COMMIT",
+	}
+	for _, sql := range setup {
+		if _, err := connection.Exec(ctx, sql); err != nil {
+			t.Fatalf("setup %q: %v", sql, err)
+		}
+	}
+
+	var operation, domain, tableName, planShape, accessPlan string
+	if err := connection.QueryRow(ctx, "EXPLAIN SELECT id, email FROM accounts.users ORDER BY id ASC").Scan(&operation, &domain, &tableName, &planShape, &accessPlan); err != nil {
+		t.Fatalf("extended explain query: %v", err)
+	}
+
+	if operation == "" || domain != "accounts" || tableName != "users" || planShape == "" || accessPlan == "" {
+		t.Fatalf("unexpected explain row: operation=%q domain=%q table=%q plan=%q access=%q", operation, domain, tableName, planShape, accessPlan)
+	}
+}
+
 func TestPGWireCompatibilitySupportedPatterns(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

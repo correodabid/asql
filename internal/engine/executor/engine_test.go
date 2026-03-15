@@ -742,6 +742,39 @@ func TestExplainStripsExplainPrefix(t *testing.T) {
 	}
 }
 
+func TestExplainStripsRepeatedExplainPrefix(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "explain-double-prefix.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	withRepeatedPrefix, err := engine.Explain("EXPLAIN explain SELECT id FROM users ORDER BY id DESC LIMIT 5", []string{"accounts"})
+	if err != nil {
+		t.Fatalf("explain with repeated prefix: %v", err)
+	}
+	withoutPrefix, err := engine.Explain("SELECT id FROM users ORDER BY id DESC LIMIT 5", []string{"accounts"})
+	if err != nil {
+		t.Fatalf("explain without prefix: %v", err)
+	}
+
+	if len(withRepeatedPrefix.Rows) != 1 || len(withoutPrefix.Rows) != 1 {
+		t.Fatalf("expected 1 row each, got %d and %d", len(withRepeatedPrefix.Rows), len(withoutPrefix.Rows))
+	}
+
+	if withRepeatedPrefix.Rows[0]["plan_shape"].StringValue != withoutPrefix.Rows[0]["plan_shape"].StringValue {
+		t.Fatalf("plan shapes differ for repeated EXPLAIN prefix")
+	}
+}
+
 func TestExplainAccessPlanWithData(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "explain-access.wal")

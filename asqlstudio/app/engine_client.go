@@ -237,6 +237,10 @@ func (c *engineClient) RollbackTx(ctx context.Context, req *api.RollbackTxReques
 // releases the connection back to the pool. Used for read-only user-table
 // queries (time-travel, explain, etc.) that need a session to resolve table names.
 func (c *engineClient) queryWithDomains(ctx context.Context, domains []string, sql string) ([]map[string]interface{}, error) {
+	return c.queryWithDomainsMode(ctx, domains, sql)
+}
+
+func (c *engineClient) queryWithDomainsMode(ctx context.Context, domains []string, sql string, options ...any) ([]map[string]interface{}, error) {
 	conn, err := c.acquireConn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open connection: %w", err)
@@ -256,7 +260,7 @@ func (c *engineClient) queryWithDomains(ctx context.Context, domains []string, s
 		defer func() { _, _ = conn.Exec(ctx, "ROLLBACK") }()
 	}
 
-	rows, err := conn.Query(ctx, sql)
+	rows, err := conn.Query(ctx, sql, options...)
 	if err != nil {
 		return nil, err
 	}
@@ -315,11 +319,28 @@ func (c *engineClient) EntityVersionHistory(ctx context.Context, req *api.Entity
 }
 
 func (c *engineClient) ExplainQuery(ctx context.Context, req *api.ExplainQueryRequest) (*api.ExplainQueryResponse, error) {
-	result, err := c.queryWithDomains(ctx, req.Domains, "EXPLAIN "+req.SQL)
+	result, err := c.queryWithDomainsMode(ctx, req.Domains, normalizeExplainSQL(req.SQL), pgx.QueryExecModeSimpleProtocol)
 	if err != nil {
 		return nil, fmt.Errorf("explain: %w", err)
 	}
 	return &api.ExplainQueryResponse{Status: "OK", Rows: result}, nil
+}
+
+func normalizeExplainSQL(sql string) string {
+	trimmed := strings.TrimSpace(sql)
+	for len(trimmed) >= len("EXPLAIN") && strings.EqualFold(trimmed[:len("EXPLAIN")], "EXPLAIN") {
+		if len(trimmed) > len("EXPLAIN") {
+			next := trimmed[len("EXPLAIN")]
+			if next != ' ' && next != '\t' && next != '\n' && next != '\r' {
+				break
+			}
+		}
+		trimmed = strings.TrimSpace(trimmed[len("EXPLAIN"):])
+	}
+	if trimmed == "" {
+		return "EXPLAIN"
+	}
+	return "EXPLAIN " + trimmed
 }
 
 func (c *engineClient) SchemaSnapshot(ctx context.Context, req *api.SchemaSnapshotRequest) (*api.SchemaSnapshotResponse, error) {

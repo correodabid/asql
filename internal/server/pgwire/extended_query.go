@@ -595,6 +595,10 @@ func (server *Server) handleBind(backend *pgproto3.Backend, state *connState, ms
 	parsedStmt, parseErr := parser.Parse(sqlForParse)
 	isSelect := false
 	var columns []string
+	if _, isExplain := stripExplainSQLPrefix(sqlForParse); isExplain {
+		isSelect = true
+		columns = append([]string(nil), explainResultColumns...)
+	}
 	if parseErr == nil {
 		if _, ok := parsedStmt.(ast.SelectStatement); ok {
 			isSelect = true
@@ -1055,6 +1059,20 @@ func (server *Server) describeFields(sql string) []pgproto3.FieldDescription {
 			DataTypeSize: -1,
 			TypeModifier: -1,
 		}}
+	}
+
+	if _, isExplain := stripExplainSQLPrefix(trimmed); isExplain {
+		fields := make([]pgproto3.FieldDescription, len(explainResultColumns))
+		for i, column := range explainResultColumns {
+			fields[i] = pgproto3.FieldDescription{
+				Name:                 []byte(column),
+				TableAttributeNumber: uint16(i + 1),
+				DataTypeOID:          25,
+				DataTypeSize:         -1,
+				TypeModifier:         -1,
+			}
+		}
+		return fields
 	}
 
 	upper := strings.ToUpper(trimmed)

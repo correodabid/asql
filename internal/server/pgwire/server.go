@@ -33,6 +33,24 @@ import (
 
 const maxLSN uint64 = ^uint64(0)
 
+var explainResultColumns = []string{"operation", "domain", "table", "plan_shape", "access_plan"}
+
+func stripExplainSQLPrefix(sql string) (string, bool) {
+	trimmed := strings.TrimSpace(sql)
+	found := false
+	for len(trimmed) >= len("EXPLAIN") && strings.EqualFold(trimmed[:len("EXPLAIN")], "EXPLAIN") {
+		if len(trimmed) > len("EXPLAIN") {
+			next := trimmed[len("EXPLAIN")]
+			if next != ' ' && next != '\t' && next != '\n' && next != '\r' {
+				break
+			}
+		}
+		found = true
+		trimmed = strings.TrimSpace(trimmed[len("EXPLAIN"):])
+	}
+	return trimmed, found
+}
+
 // raftCommitterAdapter bridges *raft.RaftNode to the ports.RaftCommitter
 // interface expected by the executor.  When the node is not the leader, Apply
 // returns raft.ErrNotLeader, which propagates as a commit error and causes the
@@ -1092,6 +1110,13 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 	// correct statements.  We also drop any trailing semicolon left behind after
 	// comment removal (e.g. "SELECT ... LIMIT 100; /* as-of-lsn: N */").
 	asOfKind, asOfValue, stripped := extractAsOf(sql)
+	if _, isExplain := stripExplainSQLPrefix(stripped); isExplain {
+		result, err := server.engine.Explain(stripped, session.ActiveDomains())
+		if err != nil {
+			return executor.Result{}, nil, err
+		}
+		return result, append([]string(nil), explainResultColumns...), nil
+	}
 
 	statement, parseErr := parser.Parse(stripped)
 	if parseErr == nil {

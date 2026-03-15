@@ -569,8 +569,14 @@ func (engine *Engine) Explain(sql string, txDomains []string) (Result, error) {
 		return Result{}, errExplainSQLRequired
 	}
 
-	// Strip the EXPLAIN prefix so the parser receives a valid statement.
-	if len(trimmed) >= len("EXPLAIN") && strings.EqualFold(trimmed[:len("EXPLAIN")], "EXPLAIN") {
+	// Strip repeated EXPLAIN prefixes so the parser receives a valid statement.
+	for len(trimmed) >= len("EXPLAIN") && strings.EqualFold(trimmed[:len("EXPLAIN")], "EXPLAIN") {
+		if len(trimmed) > len("EXPLAIN") {
+			next := trimmed[len("EXPLAIN")]
+			if next != ' ' && next != '\t' && next != '\n' && next != '\r' {
+				break
+			}
+		}
 		trimmed = strings.TrimSpace(trimmed[len("EXPLAIN"):])
 		if trimmed == "" {
 			return Result{}, errExplainSQLRequired
