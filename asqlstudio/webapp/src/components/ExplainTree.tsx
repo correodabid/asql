@@ -215,43 +215,128 @@ function renderPrunedCandidates(candidates: NonNullable<AccessPlan['pruned_candi
 }
 
 function IndexSuggestions({ plan, operation }: { plan: AccessPlan; operation: string }) {
-  const suggestions: string[] = []
-
-  // Suggest index for full-scan on large tables
-  if (plan.strategy.includes('full-scan') && plan.table_rows > 100 && operation === 'select') {
-    suggestions.push('Consider adding an index on the filtered column(s) to avoid a full table scan.')
-  }
-
-  // Suggest index if selectivity is high (scanning most of the table)
-  if (plan.estimated_rows !== undefined && plan.table_rows > 0) {
-    const selectivity = (plan.estimated_rows / plan.table_rows) * 100
-    if (selectivity > 80 && plan.index_used) {
-      suggestions.push(`Index "${plan.index_used}" has low selectivity (${selectivity.toFixed(0)}% of rows matched). A more selective index or composite index may help.`)
-    }
-  }
-
-  // Suggest index for joins without indexes
-  if (plan.joins) {
-    for (const j of plan.joins) {
-      if (!j.index_used && j.table_rows > 50) {
-        suggestions.push(`Join on "${j.table}" uses no index (${j.table_rows} rows). Consider an index on the join column.`)
-      }
-    }
-  }
-
+  const suggestions = buildSuggestions(plan, operation)
   if (suggestions.length === 0) return null
 
   return (
     <div className="explain-suggestions">
       <div className="explain-suggestions-title">Suggestions</div>
       {suggestions.map((s, i) => (
-        <div key={i} className="explain-suggestion-item">
-          <span className="explain-suggestion-icon">!</span>
-          <span>{s}</span>
+        <div key={i} className={`explain-suggestion-item ${s.level}`}>
+          <span className="explain-suggestion-icon">{suggestionIcon(s.level)}</span>
+          <div className="explain-suggestion-copy">
+            <div className="explain-suggestion-label">{s.title}</div>
+            <div>{s.body}</div>
+          </div>
         </div>
       ))}
     </div>
   )
+}
+
+type ExplainSuggestion = {
+  title: string
+  body: string
+  level: 'info' | 'warn' | 'good'
+}
+
+function buildSuggestions(plan: AccessPlan, operation: string): ExplainSuggestion[] {
+  const suggestions: ExplainSuggestion[] = []
+
+  if (plan.strategy.includes('full-scan') && plan.table_rows > 100 && operation === 'select') {
+    if (plan.pruned_candidates && plan.pruned_candidates.length > 0) {
+      suggestions.push({
+        title: 'Full scan was chosen intentionally',
+        body: 'The planner discarded broader indexed alternatives because they would still touch most rows. This usually means the current predicate is not selective enough for an index win.',
+        level: 'info',
+      })
+    } else if (!plan.indexed_predicates || plan.indexed_predicates.length === 0) {
+      suggestions.push({
+        title: 'No selective access path found',
+        body: 'Consider adding an index on the filtered column(s) if this query is latency-sensitive and expected to stay selective.',
+        level: 'warn',
+      })
+    }
+  }
+
+  if (plan.indexed_predicates && plan.indexed_predicates.length > 0 && plan.residual_predicate) {
+    suggestions.push({
+      title: 'Partial index pushdown is active',
+      body: `The planner used indexes for ${plan.indexed_predicates.join(', ')} and left ${plan.residual_predicate} as residual filtering. A more targeted composite/indexable predicate shape could remove the extra filter work.`,
+      level: 'info',
+    })
+  }
+
+  if (plan.estimated_rows !== undefined && plan.table_rows > 0) {
+    const selectivity = (plan.estimated_rows / plan.table_rows) * 100
+    if (selectivity > 80 && plan.index_used) {
+      suggestions.push({
+        title: 'Chosen index is broad',
+        body: `Index "${plan.index_used}" still matches ${selectivity.toFixed(0)}% of rows. A more selective predicate or composite index may reduce row visits.`,
+        level: 'warn',
+      })
+    } else if (selectivity <= 15 && plan.index_used) {
+      suggestions.push({
+        title: 'Selective indexed path',
+        body: `The chosen index path looks strong: only ${selectivity.toFixed(1)}% of rows are expected to be visited.`,
+        level: 'good',
+      })
+    }
+  }
+
+  const rejected = plan.candidates?.filter((candidate) => !candidate.chosen && candidate.rejected_reason)
+  if (rejected && rejected.length > 0) {
+    const topRejected = rejected.slice(0, 2).map((candidate) => `${candidate.strategy}: ${candidate.rejected_reason}`).join(' · ')
+    suggestions.push({
+      title: 'Alternative plans were evaluated',
+      body: topRejected,
+      level: 'info',
+    })
+  }
+
+  if (plan.pruned_candidates && plan.pruned_candidates.length > 0) {
+    const firstPruned = plan.pruned_candidates[0]
+    suggestions.push({
+      title: 'A heuristic crossover was applied',
+      body: `${firstPruned.strategy} was pruned before the final cost comparison: ${firstPruned.reason}.`,
+      level: 'info',
+    })
+  }
+
+  if (plan.joins) {
+    for (const join of plan.joins) {
+      if (!join.index_used && join.table_rows > 50) {
+        suggestions.push({
+          title: `Join on ${join.table} has no index help`,
+          body: `The join reads ${join.table_rows} rows without an index-backed path. Consider indexing the join key if this shape is common.`,
+          level: 'warn',
+        })
+      }
+    }
+  }
+
+  return dedupeSuggestions(suggestions)
+}
+
+function dedupeSuggestions(suggestions: ExplainSuggestion[]): ExplainSuggestion[] {
+  const seen = new Set<string>()
+  return suggestions.filter((suggestion) => {
+    const key = `${suggestion.level}:${suggestion.title}:${suggestion.body}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function suggestionIcon(level: ExplainSuggestion['level']): string {
+  switch (level) {
+    case 'good':
+      return '✓'
+    case 'warn':
+      return '!'
+    default:
+      return 'i'
+  }
 }
 
 function strategyClass(strategy: string): string {
