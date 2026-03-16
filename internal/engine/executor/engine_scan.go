@@ -482,12 +482,18 @@ func estimateHybridORLookupCost(table *tableState, predicate *ast.Predicate, tot
 	if !ok {
 		return scanCostEstimate{}, false
 	}
+	if totalRows > 0 && len(candidateRowIDs)*100 >= totalRows*70 {
+		return scanCostEstimate{}, false
+	}
 
 	residualRows := totalRows - len(candidateRowIDs)
 	if residualRows < 0 {
 		residualRows = 0
 	}
-	cost := residualRows + len(candidateRowIDs)/hashOverheadDivisor
+	cost := totalRows - len(candidateRowIDs)/sortCostFactor
+	if cost < 0 {
+		cost = 0
+	}
 	if hasOrderBy {
 		cost += totalRows / sortCostFactor
 	}

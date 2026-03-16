@@ -3024,7 +3024,7 @@ func TestChooseSingleTableScanStrategyUsesIndexUnionForOR(t *testing.T) {
 
 func TestChooseSingleTableScanStrategyUsesPartialIndexUnionForHybridOR(t *testing.T) {
 	buckets := map[string][]int{"s:comp-010": {0}}
-	rows := make([][]ast.Literal, 100)
+	rows := make([][]ast.Literal, 10)
 
 	table := &tableState{
 		rows: rows,
@@ -3037,12 +3037,36 @@ func TestChooseSingleTableScanStrategyUsesPartialIndexUnionForHybridOR(t *testin
 	predicate := &ast.Predicate{
 		Operator: "OR",
 		Left:     &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "comp-010"}},
-		Right:    &ast.Predicate{Column: "sequence_no", Operator: ">", Value: ast.Literal{Kind: ast.LiteralNumber, NumberValue: 90}},
+		Right:    &ast.Predicate{Column: "sequence_no", Operator: ">", Value: ast.Literal{Kind: ast.LiteralNumber, NumberValue: 8}},
 	}
 
 	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
 	if strategy != scanStrategyIndexUnionP {
 		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyIndexUnionP)
+	}
+}
+
+func TestChooseSingleTableScanStrategyFallsBackForBroadHybridOR(t *testing.T) {
+	buckets := map[string][]int{"s:common": {0, 1, 2, 3, 4, 5, 6, 7, 8}}
+	rows := make([][]ast.Literal, 10)
+
+	table := &tableState{
+		rows: rows,
+		indexes: map[string]*indexState{
+			"idx_components_status_hash": {name: "idx_components_status_hash", column: "status", kind: "hash", buckets: buckets},
+		},
+		indexedColumns: map[string]string{"status": "idx_components_status_hash"},
+	}
+
+	predicate := &ast.Predicate{
+		Operator: "OR",
+		Left:     &ast.Predicate{Column: "status", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "common"}},
+		Right:    &ast.Predicate{Column: "sequence_no", Operator: ">", Value: ast.Literal{Kind: ast.LiteralNumber, NumberValue: 8}},
+	}
+
+	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
+	if strategy != scanStrategyFullScan {
+		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyFullScan)
 	}
 }
 
@@ -3248,6 +3272,54 @@ func TestExplainAccessPlanUsesPartialIndexUnionForHybridOR(t *testing.T) {
 	plan := result.Rows[0]["access_plan"].StringValue
 	if !strings.Contains(plan, `"strategy":"index-union-partial"`) {
 		t.Fatalf("expected partial index-union strategy, got: %s", plan)
+	}
+}
+
+func TestExplainAccessPlanFallsBackForBroadHybridOR(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "explain-broad-hybrid-or-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id TEXT PRIMARY KEY, status TEXT, sequence_no INT, name TEXT)")
+	mustExec("CREATE INDEX idx_block_components_status_hash ON block_components (status) USING HASH")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-009', 'common', 9, 'A')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-010', 'common', 10, 'B')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-011', 'common', 11, 'C')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-012', 'common', 12, 'D')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-013', 'common', 13, 'E')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-014', 'common', 14, 'F')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-015', 'common', 15, 'G')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-016', 'common', 16, 'H')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-017', 'common', 17, 'I')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-018', 'rare', 18, 'J')")
+	mustExec("COMMIT")
+
+	result, err := engine.Explain("SELECT * FROM block_components WHERE status = 'common' OR sequence_no > 17", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain broad hybrid OR predicate: %v", err)
+	}
+	plan := result.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(plan, `"strategy":"full-scan"`) {
+		t.Fatalf("expected full-scan strategy for broad hybrid OR, got: %s", plan)
 	}
 }
 

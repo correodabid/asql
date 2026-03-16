@@ -1089,7 +1089,7 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 	})
 
 	b.Run("or_partial_index_union", func(b *testing.B) {
-		query := "SELECT id, status FROM entries WHERE status = 'common' OR payload = 'payload-09999'"
+		query := "SELECT id, status FROM entries WHERE status = 'rare' OR payload = 'payload-05000'"
 		baselineCounts := engine.ScanStrategyCounts()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -1097,8 +1097,8 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 			if err != nil {
 				b.Fatalf("hybrid OR indexed query: %v", err)
 			}
-			if len(result.Rows) != 9901 {
-				b.Fatalf("unexpected hybrid OR row count: got %d want 9901", len(result.Rows))
+			if len(result.Rows) != 101 {
+				b.Fatalf("unexpected hybrid OR row count: got %d want 101", len(result.Rows))
 			}
 		}
 		b.StopTimer()
@@ -1106,7 +1106,7 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 	})
 
 	b.Run("or_partial_full_scan", func(b *testing.B) {
-		query := "SELECT id, status FROM entries WHERE bucket = 'common' OR payload = 'payload-09999'"
+		query := "SELECT id, status FROM entries WHERE bucket = 'rare' OR payload = 'payload-05000'"
 		baselineCounts := engine.ScanStrategyCounts()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -1114,8 +1114,25 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 			if err != nil {
 				b.Fatalf("hybrid OR full-scan query: %v", err)
 			}
+			if len(result.Rows) != 101 {
+				b.Fatalf("unexpected hybrid OR full-scan row count: got %d want 101", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
+	})
+
+	b.Run("or_partial_broad_indexed_falls_back", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE status = 'common' OR payload = 'payload-09999'"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("broad hybrid OR indexed query: %v", err)
+			}
 			if len(result.Rows) != 9901 {
-				b.Fatalf("unexpected hybrid OR full-scan row count: got %d want 9901", len(result.Rows))
+				b.Fatalf("unexpected broad hybrid OR row count: got %d want 9901", len(result.Rows))
 			}
 		}
 		b.StopTimer()
