@@ -3407,6 +3407,15 @@ func TestExplainAccessPlanFallsBackForBroadHybridOR(t *testing.T) {
 	if !strings.Contains(plan, `"strategy":"full-scan"`) {
 		t.Fatalf("expected full-scan strategy for broad hybrid OR, got: %s", plan)
 	}
+	if !strings.Contains(plan, `"pruned_candidates"`) {
+		t.Fatalf("expected pruned candidate list for broad hybrid OR, got: %s", plan)
+	}
+	if !strings.Contains(plan, `"strategy":"index-union-partial"`) {
+		t.Fatalf("expected pruned hybrid OR strategy detail, got: %s", plan)
+	}
+	if !strings.Contains(plan, `"reason":"indexed OR branch covers 9/10 rows; crossover prefers full-scan"`) {
+		t.Fatalf("expected pruned hybrid OR reason, got: %s", plan)
+	}
 }
 
 func TestExplainAccessPlanUsesIndexForINAndNOTIN(t *testing.T) {

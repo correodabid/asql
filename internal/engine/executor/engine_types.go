@@ -178,13 +178,13 @@ type domainState struct {
 }
 
 type tableState struct {
-	columns              []string
-	columnDefinitions    map[string]ast.ColumnDefinition
+	columns           []string
+	columnDefinitions map[string]ast.ColumnDefinition
 	// columnIndex maps each column name to its ordinal position in the columns
 	// slice. Provides O(1) column-name→position lookup and is the backing
 	// schema for the [][]ast.Literal row storage format.
 	// Always kept in sync with columns via rebuildColumnIndex.
-	columnIndex          map[string]int
+	columnIndex map[string]int
 	// rows stores each row as a positional value slice aligned to columns.
 	// Index i in a row corresponds to columns[i]. This eliminates the
 	// per-row map overhead (~240 B/row) and reduces stored-data memory by
@@ -711,12 +711,12 @@ func flattenIndex(idx *indexState) *indexState {
 	}
 
 	return &indexState{
-		name:     idx.name,
-		column:   idx.column,
-		columns:  idx.columns,
-		kind:     idx.kind,
-		buckets:  merged,
-		entries:  mergedEntries,
+		name:    idx.name,
+		column:  idx.column,
+		columns: idx.columns,
+		kind:    idx.kind,
+		buckets: merged,
+		entries: mergedEntries,
 		baseSize: func() int {
 			if idx.kind == "hash" {
 				return len(merged)

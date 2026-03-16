@@ -483,7 +483,7 @@ func mergeORPredicates(left *ast.Predicate, right *ast.Predicate) *ast.Predicate
 }
 
 func estimateHybridORLookupCost(table *tableState, predicate *ast.Predicate, totalRows int, hasOrderBy bool) (scanCostEstimate, bool) {
-	candidateRowIDs, _, ok := decomposeHybridORPredicate(table, predicate, hasOrderBy)
+	candidateRowIDs, residual, ok := decomposeHybridORPredicate(table, predicate, hasOrderBy)
 	if !ok {
 		return scanCostEstimate{}, false
 	}
@@ -502,15 +502,26 @@ func estimateHybridORLookupCost(table *tableState, predicate *ast.Predicate, tot
 	if hasOrderBy {
 		cost += totalRows / sortCostFactor
 	}
+	detail := formatHybridORCandidateDetail(table, predicate, residual)
+	return scanCostEstimate{strategy: scanStrategyIndexUnionP, cost: cost, priority: scanPriorityIndexUnionPartial, detail: detail}, true
+}
+
+func formatHybridORCandidateDetail(table *tableState, predicate *ast.Predicate, residual *ast.Predicate) string {
 	detail := strings.Join(collectExplainIndexedPredicates(table, predicate), " | ")
-	if residual := explainResidualPredicate(table, predicate); residual != "" {
+	residualText := ""
+	if residual != nil {
+		residualText = formatPredicateForExplain(residual)
+	} else {
+		residualText = explainResidualPredicate(table, predicate)
+	}
+	if residualText != "" {
 		if detail != "" {
-			detail += " ; residual: " + residual
+			detail += " ; residual: " + residualText
 		} else {
-			detail = "residual: " + residual
+			detail = "residual: " + residualText
 		}
 	}
-	return scanCostEstimate{strategy: scanStrategyIndexUnionP, cost: cost, priority: scanPriorityIndexUnionPartial, detail: detail}, true
+	return detail
 }
 
 func unionRowIDs(left []int, right []int) []int {
@@ -1229,16 +1240,17 @@ func joinColumnForTable(tableName string, columnRef string) (string, bool) {
 }
 
 type accessPlanInfo struct {
-	Strategy      string          `json:"strategy"`
-	TableRows     int             `json:"table_rows,omitempty"`
-	EstimatedRows int             `json:"estimated_rows,omitempty"`
-	IndexUsed     string          `json:"index_used,omitempty"`
-	IndexType     string          `json:"index_type,omitempty"`
-	IndexColumn   string          `json:"index_column,omitempty"`
-	IndexedPreds  []string        `json:"indexed_predicates,omitempty"`
-	ResidualPred  string          `json:"residual_predicate,omitempty"`
-	Candidates    []candidateInfo `json:"candidates,omitempty"`
-	Joins         []joinPlanInfo  `json:"joins,omitempty"`
+	Strategy      string                `json:"strategy"`
+	TableRows     int                   `json:"table_rows,omitempty"`
+	EstimatedRows int                   `json:"estimated_rows,omitempty"`
+	IndexUsed     string                `json:"index_used,omitempty"`
+	IndexType     string                `json:"index_type,omitempty"`
+	IndexColumn   string                `json:"index_column,omitempty"`
+	IndexedPreds  []string              `json:"indexed_predicates,omitempty"`
+	ResidualPred  string                `json:"residual_predicate,omitempty"`
+	Candidates    []candidateInfo       `json:"candidates,omitempty"`
+	Pruned        []prunedCandidateInfo `json:"pruned_candidates,omitempty"`
+	Joins         []joinPlanInfo        `json:"joins,omitempty"`
 }
 
 type candidateInfo struct {
@@ -1247,6 +1259,12 @@ type candidateInfo struct {
 	Detail         string `json:"detail,omitempty"`
 	Chosen         bool   `json:"chosen,omitempty"`
 	RejectedReason string `json:"rejected_reason,omitempty"`
+}
+
+type prunedCandidateInfo struct {
+	Strategy string `json:"strategy"`
+	Detail   string `json:"detail,omitempty"`
+	Reason   string `json:"reason"`
 }
 
 type joinPlanInfo struct {
@@ -1283,7 +1301,7 @@ func (engine *Engine) buildAccessPlan(plan planner.Plan) accessPlanInfo {
 	switch plan.Operation {
 	case planner.OperationSelect:
 		if len(plan.Joins) == 0 {
-			info.Strategy, info.Candidates = collectScanCandidates(table, plan.Filter, plan.OrderBy)
+			info.Strategy, info.Candidates, info.Pruned = collectScanCandidates(table, plan.Filter, plan.OrderBy)
 		} else {
 			info.Strategy = string(scanStrategyJoinNested)
 			info.Joins = collectJoinPlans(state, ds, plan)
@@ -1514,18 +1532,19 @@ func formatLiteralForExplain(value ast.Literal) string {
 	}
 }
 
-// collectScanCandidates runs the cost model and returns the chosen strategy
-// plus all evaluated candidates with their costs.
-func collectScanCandidates(table *tableState, predicate *ast.Predicate, orderBy []ast.OrderByClause) (string, []candidateInfo) {
+// collectScanCandidates runs the cost model and returns the chosen strategy,
+// all evaluated candidates with their costs, and any heuristic-pruned plans.
+func collectScanCandidates(table *tableState, predicate *ast.Predicate, orderBy []ast.OrderByClause) (string, []candidateInfo, []prunedCandidateInfo) {
 	if table == nil {
-		return string(scanStrategyFullScan), nil
+		return string(scanStrategyFullScan), nil, nil
 	}
 
 	if !supportsIndexSelection(predicate) {
-		return string(scanStrategyFullScan), []candidateInfo{{Strategy: string(scanStrategyFullScan), Cost: len(table.rows), Chosen: true}}
+		return string(scanStrategyFullScan), []candidateInfo{{Strategy: string(scanStrategyFullScan), Cost: len(table.rows), Chosen: true}}, nil
 	}
 
 	totalRows := len(table.rows)
+	pruned := collectPrunedScanCandidates(table, predicate, orderBy)
 	candidates := make([]scanCostEstimate, 0, 4)
 	candidates = append(candidates, estimateFullScanCost(totalRows, orderBy))
 	predicateCandidates := collectIndexablePredicates(predicate)
@@ -1603,7 +1622,32 @@ func collectScanCandidates(table *tableState, predicate *ast.Predicate, orderBy 
 		}
 	}
 
-	return string(best), result
+	return string(best), result, pruned
+}
+
+func collectPrunedScanCandidates(table *tableState, predicate *ast.Predicate, orderBy []ast.OrderByClause) []prunedCandidateInfo {
+	if table == nil || predicate == nil {
+		return nil
+	}
+
+	totalRows := len(table.rows)
+	if totalRows == 0 {
+		return nil
+	}
+
+	if candidateRowIDs, residual, ok := decomposeHybridORPredicate(table, predicate, len(orderBy) > 0); ok {
+		if len(candidateRowIDs)*100 >= totalRows*70 {
+			detail := formatHybridORCandidateDetail(table, predicate, residual)
+			reason := "indexed OR branch covers " + strconv.Itoa(len(candidateRowIDs)) + "/" + strconv.Itoa(totalRows) + " rows; crossover prefers full-scan"
+			return []prunedCandidateInfo{{
+				Strategy: string(scanStrategyIndexUnionP),
+				Detail:   detail,
+				Reason:   reason,
+			}}
+		}
+	}
+
+	return nil
 }
 
 // collectJoinPlans builds access info for each join in the plan.
