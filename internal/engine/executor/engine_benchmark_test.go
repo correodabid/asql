@@ -1003,6 +1003,23 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyHashLookup))
 	})
 
+	b.Run("and_full_scan", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE payload = 'payload-05000' AND bucket = 'common'"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("AND full-scan query: %v", err)
+			}
+			if len(result.Rows) != 1 {
+				b.Fatalf("unexpected AND full-scan row count: got %d want 1", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
+	})
+
 	b.Run("or_index_union", func(b *testing.B) {
 		query := "SELECT id, status FROM entries WHERE id = 5000 OR id = 7500"
 		baselineCounts := engine.ScanStrategyCounts()
@@ -1020,6 +1037,23 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyIndexUnion))
 	})
 
+	b.Run("or_full_scan", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE payload = 'payload-05000' OR payload = 'payload-07500'"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("OR full-scan query: %v", err)
+			}
+			if len(result.Rows) != 2 {
+				b.Fatalf("unexpected OR full-scan row count: got %d want 2", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
+	})
+
 	b.Run("not_index_complement", func(b *testing.B) {
 		query := "SELECT id, status FROM entries WHERE NOT status = 'common'"
 		baselineCounts := engine.ScanStrategyCounts()
@@ -1035,6 +1069,23 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 		}
 		b.StopTimer()
 		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyIndexNot))
+	})
+
+	b.Run("not_full_scan", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE NOT bucket = 'common'"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("NOT full-scan query: %v", err)
+			}
+			if len(result.Rows) != 100 {
+				b.Fatalf("unexpected NOT full-scan row count: got %d want 100", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
 	})
 
 	engine.WaitPendingSnapshots()
@@ -1878,13 +1929,13 @@ func prepareBooleanIndexedReadBenchmarkFixture(b *testing.B) (*wal.SegmentedLogS
 
 	session := engine.NewSession()
 	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
-	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT, status TEXT, payload TEXT)")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT, status TEXT, bucket TEXT, payload TEXT)")
 	for i := 0; i < 10000; i++ {
 		status := "common"
 		if i >= 9900 {
 			status = "rare"
 		}
-		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, status, payload) VALUES (%d, '%s', 'payload-%05d')", i, status, i))
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, status, bucket, payload) VALUES (%d, '%s', '%s', 'payload-%05d')", i, status, status, i))
 	}
 	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_id_hash ON entries (id) USING HASH")
 	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_status_hash ON entries (status) USING HASH")

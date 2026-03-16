@@ -259,6 +259,13 @@ Selective covered-vs-non-covered repeated sample on 2026-03-14:
 - `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree-8`: ~`34,910–48,723 ns/op`, `153,048 B/op`, `235 allocs/op` (`btree-index-only`)
 - `BenchmarkEngineReadSelectiveNonCoveredBTree-8`: ~`305,344–353,132 ns/op`, `228,536 B/op`, `656 allocs/op` (`btree-order`)
 
+Boolean-predicate comparison on 2026-03-16 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngineReadIndexedBooleanPredicates' -benchtime=5x -count=1`:
+
+- `and_hash_lookup`: `86,042 ns/op` vs `and_full_scan`: `3,089,533 ns/op` (~`35.9x` faster with indexed conjunct selection)
+- `or_index_union`: `13,825 ns/op` vs `or_full_scan`: `3,013,692 ns/op` (~`218x` faster with indexed union planning)
+- `not_index_complement`: `562,317 ns/op` vs `not_full_scan`: `2,869,750 ns/op` (~`5.1x` faster with indexed complement planning)
+- Interpretation note: `OR` gets the largest win when both branches collapse to tiny indexed candidate sets; `NOT` still returns a large complement set so it remains materially more expensive than point lookups, but it is still meaningfully cheaper than scanning the whole table.
+
 Composite-order repeated sample on 2026-03-14:
 
 - `BenchmarkEngineReadCompositeCoveredIndexOnlyBTree-8`: ~`33,641–33,963 ns/op`, `152,608 B/op`, `226 allocs/op` (`btree-index-only`)
