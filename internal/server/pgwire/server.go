@@ -944,7 +944,7 @@ func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connSt
 	// pg_is_in_recovery, etc.) so they never reach the SQL engine.
 	{
 		ctx, finish := state.beginQuery()
-		if intercepted, ok := server.interceptCatalog(ctx, trimmed); ok {
+		if intercepted, ok := server.interceptCatalog(ctx, trimmed, session.ActiveDomains()); ok {
 			finish()
 			return sendInterceptedResult(backend, session, intercepted)
 		}

@@ -76,7 +76,7 @@ var currentSettingDefaults = map[string]string{
 
 // interceptCatalog returns a synthetic result when sql is a recognised catalog
 // query.  The second return value is true when the query was intercepted.
-func (server *Server) interceptCatalog(ctx context.Context, sql string) (interceptResult, bool) {
+func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDomains []string) (interceptResult, bool) {
 	trimmed := strings.TrimSpace(sql)
 	trimmed = strings.TrimRight(trimmed, "; \t\n\r")
 	lower := strings.ToLower(trimmed)
@@ -329,7 +329,7 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string) (interce
 		return server.adminLeadershipState(sql)
 
 	case strings.Contains(lower, "asql_admin.row_history"):
-		return server.adminRowHistory(ctx, sql)
+		return server.adminRowHistory(ctx, sql, activeDomains)
 
 	case strings.Contains(lower, "asql_admin.entity_version_history"):
 		return server.adminEntityVersionHistory(ctx, sql)
@@ -904,7 +904,7 @@ func (server *Server) adminLeadershipState(sql string) (interceptResult, bool) {
 // consecutive single quotes = one escaped quote in SQL).
 var reRowHistorySQL = regexp.MustCompile(`(?i)sql\s*=\s*'((?:[^']|'')*)'`)
 
-func (server *Server) adminRowHistory(ctx context.Context, sql string) (interceptResult, bool) {
+func (server *Server) adminRowHistory(ctx context.Context, sql string, activeDomains []string) (interceptResult, bool) {
 	m := reRowHistorySQL.FindStringSubmatch(sql)
 	if m == nil {
 		return interceptResult{
@@ -912,7 +912,7 @@ func (server *Server) adminRowHistory(ctx context.Context, sql string) (intercep
 		}, true
 	}
 	innerSQL := strings.ReplaceAll(m[1], "''", "'") // unescape SQL-escaped single quotes
-	result, err := server.engine.RowHistory(ctx, innerSQL, nil)
+	result, err := server.engine.RowHistory(ctx, innerSQL, activeDomains)
 	if err != nil {
 		return interceptResult{
 			result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)},

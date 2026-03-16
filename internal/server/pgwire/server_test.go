@@ -735,6 +735,114 @@ func TestPGWireCurrentLSNFunction(t *testing.T) {
 	}
 }
 
+func TestPGWireAdminRowHistoryUsesActiveDomainContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dataDir := filepath.Join(t.TempDir(), "admin-row-history-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: dataDir,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("serve pgwire: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	connection, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN history",
+		"CREATE TABLE items (id INT PRIMARY KEY, name TEXT)",
+		"INSERT INTO items (id, name) VALUES (1, 'Alice')",
+		"COMMIT",
+		"BEGIN DOMAIN history",
+		"UPDATE items SET name = 'Bob' WHERE id = 1",
+		"COMMIT",
+	} {
+		if _, err := connection.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	if _, err := connection.Exec(ctx, "BEGIN DOMAIN history"); err != nil {
+		t.Fatalf("begin domain for admin row history: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = connection.Exec(context.Background(), "ROLLBACK")
+	})
+
+	rows, err := connection.Query(ctx, "SELECT * FROM asql_admin.row_history WHERE sql = 'SELECT * FROM items FOR HISTORY WHERE id = 1'")
+	if err != nil {
+		t.Fatalf("admin row history query: %v", err)
+	}
+	defer rows.Close()
+
+	fields := rows.FieldDescriptions()
+	gotColumns := make([]string, 0, len(fields))
+	for _, field := range fields {
+		gotColumns = append(gotColumns, string(field.Name))
+	}
+	wantColumns := []string{executor.HistoryOperationColumnName, executor.HistoryCommitLSNColumnName, "id", "name"}
+	if strings.Join(gotColumns, ",") != strings.Join(wantColumns, ",") {
+		t.Fatalf("unexpected admin row history columns: got %v want %v", gotColumns, wantColumns)
+	}
+
+	var operations []string
+	for rows.Next() {
+		var operation string
+		var commitLSN int64
+		var id int64
+		var name string
+		if err := rows.Scan(&operation, &commitLSN, &id, &name); err != nil {
+			t.Fatalf("scan admin row history row: %v", err)
+		}
+		if commitLSN <= 0 {
+			t.Fatalf("expected positive commit lsn, got %d", commitLSN)
+		}
+		if id != 1 {
+			t.Fatalf("expected id=1, got %d", id)
+		}
+		operations = append(operations, operation)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate admin row history rows: %v", err)
+	}
+
+	if strings.Join(operations, ",") != "INSERT,UPDATE" {
+		t.Fatalf("unexpected admin row history operations: %v", operations)
+	}
+}
+
 func TestPGWireRowLSNAndEntityFunctions(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

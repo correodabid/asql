@@ -283,7 +283,7 @@ func (c *engineClient) TimeTravelQuery(ctx context.Context, req *api.TimeTravelQ
 
 func (c *engineClient) RowHistory(ctx context.Context, req *api.RowHistoryRequest) (*api.RowHistoryResponse, error) {
 	query := fmt.Sprintf("SELECT * FROM asql_admin.row_history WHERE sql = '%s'", pgEscape(req.SQL))
-	result, err := c.queryWithDomains(ctx, req.Domains, query)
+	result, err := c.queryWithDomainsMode(ctx, req.Domains, query, pgx.QueryExecModeSimpleProtocol)
 	if err != nil {
 		return nil, fmt.Errorf("row history: %w", err)
 	}
