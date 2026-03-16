@@ -289,6 +289,72 @@ func BenchmarkEngineReadHistoricalAsOfLSNScaling(b *testing.B) {
 	}
 }
 
+func BenchmarkEngineLSNForTimestampAfterRestart(b *testing.B) {
+	ctx := context.Background()
+	baseDir := b.TempDir()
+	walPath := filepath.Join(baseDir, "timestamp-bench.wal")
+	snapDir := filepath.Join(baseDir, "snaps")
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		b.Fatalf("mkdir snap dir: %v", err)
+	}
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("new log store: %v", err)
+	}
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		_ = store.Close()
+		b.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT PRIMARY KEY, payload TEXT)")
+	for i := 0; i < 1000; i++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload) VALUES (%d, 'payload-%d')", i, i))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	records, err := store.ReadFrom(ctx, 1, 0)
+	if err != nil {
+		engine.WaitPendingSnapshots()
+		_ = store.Close()
+		b.Fatalf("read wal records: %v", err)
+	}
+	target := records[len(records)/2]
+
+	engine.WaitPendingSnapshots()
+	if err := store.Close(); err != nil {
+		b.Fatalf("close store: %v", err)
+	}
+
+	reopenedStore, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		b.Fatalf("reopen log store: %v", err)
+	}
+	restarted, err := New(ctx, reopenedStore, snapDir)
+	if err != nil {
+		_ = reopenedStore.Close()
+		b.Fatalf("restart engine: %v", err)
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		resolvedLSN, err := restarted.LSNForTimestamp(ctx, target.Timestamp)
+		if err != nil {
+			b.Fatalf("resolve lsn for timestamp: %v", err)
+		}
+		if resolvedLSN != target.LSN {
+			b.Fatalf("unexpected resolved lsn: got %d want %d", resolvedLSN, target.LSN)
+		}
+	}
+
+	b.StopTimer()
+	restarted.WaitPendingSnapshots()
+	_ = reopenedStore.Close()
+}
+
 func BenchmarkEngineReplayToLSN(b *testing.B) {
 	ctx := context.Background()
 	store, engine := newBenchmarkEngine(b)

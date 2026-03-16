@@ -40,6 +40,11 @@ Commit-batching follow-up on 2026-03-16:
 	- `BenchmarkEngineWriteCommitConcurrent-8`: `398,980 ns/op`, `16,698 B/op`, `45 allocs/op`
 	- Comparison note: the simpler synthetic concurrent commit benchmark stayed roughly flat versus the earlier ~`391,800 ns/op`, so the meaningful win here is on the more realistic 4-worker multi-table transaction shape rather than on the smallest synthetic path.
 
+Persisted index/cache evaluation follow-up on 2026-03-16:
+
+- `BenchmarkEngineLSNForTimestampAfterRestart-8`: `14.47 ns/op`, `0 B/op`, `0 allocs/op`
+- Interpretation note: ASQL already has the persisted/indexed layers that current evidence justifies — a persisted timestamp→`LSN` side index for restart-time timestamp resolution, plus in-memory WAL/history caches for repeated historical reads. Combined with the latest indexed snapshot-directory load result (~`304 µs/op`) and the absence of a new IO hotspot attributable to missing persisted table indexes, this supports deferring any broader persisted index/cache architecture for now.
+
 ### WAL (`internal/storage/wal`)
 
 - `BenchmarkFileLogStoreAppend-8`: `24,561 ns/op`, `573 B/op`, `6 allocs/op`
