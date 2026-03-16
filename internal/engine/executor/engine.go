@@ -113,6 +113,7 @@ func adaptiveReplayHashOverlayMaxDepth(baseSize int) int {
 const (
 	scanStrategyFullScan    scanStrategy = "full-scan"
 	scanStrategyHashLookup  scanStrategy = "hash"
+	scanStrategyIndexInter  scanStrategy = "index-intersection"
 	scanStrategyIndexUnion  scanStrategy = "index-union"
 	scanStrategyIndexUnionP scanStrategy = "index-union-partial"
 	scanStrategyIndexNot    scanStrategy = "index-not"

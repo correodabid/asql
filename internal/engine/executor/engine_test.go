@@ -2877,6 +2877,32 @@ func TestChooseSingleTableScanStrategyUsesIndexedConjunct(t *testing.T) {
 	}
 }
 
+func TestChooseSingleTableScanStrategyUsesIndexIntersectionForIndexedConjunct(t *testing.T) {
+	idBuckets := map[string][]int{"s:comp-010": {0}}
+	statusBuckets := map[string][]int{"s:ready": {0, 1}}
+	rows := make([][]ast.Literal, 100)
+
+	table := &tableState{
+		rows: rows,
+		indexes: map[string]*indexState{
+			"idx_components_id_hash":     {name: "idx_components_id_hash", column: "id", kind: "hash", buckets: idBuckets},
+			"idx_components_status_hash": {name: "idx_components_status_hash", column: "status", kind: "hash", buckets: statusBuckets},
+		},
+		indexedColumns: map[string]string{"id": "idx_components_id_hash", "status": "idx_components_status_hash"},
+	}
+
+	predicate := &ast.Predicate{
+		Operator: "AND",
+		Left:     &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "comp-010"}},
+		Right:    &ast.Predicate{Column: "status", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "ready"}},
+	}
+
+	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
+	if strategy != scanStrategyIndexInter {
+		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyIndexInter)
+	}
+}
+
 func TestChooseSingleTableScanStrategyUsesHashLookupForINList(t *testing.T) {
 	buckets := map[string][]int{"n:10": {0}, "n:11": {1}}
 	rows := make([][]ast.Literal, 100)
@@ -2946,6 +2972,48 @@ func TestExplainAccessPlanUsesIndexForConjunctivePredicate(t *testing.T) {
 	}
 	if !strings.Contains(plan, `"index_column":"id"`) {
 		t.Fatalf("expected id index column in explain plan, got: %s", plan)
+	}
+}
+
+func TestExplainAccessPlanUsesIndexIntersectionForIndexedConjunct(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "explain-intersection-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id TEXT PRIMARY KEY, status TEXT, name TEXT)")
+	mustExec("CREATE INDEX idx_block_components_status_hash ON block_components (status) USING HASH")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES ('comp-010', 'ready', 'B')")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES ('comp-011', 'ready', 'C')")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES ('comp-012', 'draft', 'D')")
+	mustExec("COMMIT")
+
+	result, err := engine.Explain("SELECT * FROM block_components WHERE id = 'comp-010' AND status = 'ready'", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain intersection predicate: %v", err)
+	}
+
+	plan := result.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(plan, `"strategy":"index-intersection"`) {
+		t.Fatalf("expected index-intersection strategy, got: %s", plan)
 	}
 }
 
@@ -3516,6 +3584,49 @@ func TestSelectUsesIndexedORAndNOTPredicates(t *testing.T) {
 	}
 	if len(notResult.Rows) != 1 {
 		t.Fatalf("unexpected NOT row count: got %d want 1", len(notResult.Rows))
+	}
+}
+
+func TestSelectUsesIndexIntersectionPredicate(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "select-intersection-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id TEXT PRIMARY KEY, status TEXT, name TEXT)")
+	mustExec("CREATE INDEX idx_block_components_status_hash ON block_components (status) USING HASH")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES ('comp-010', 'ready', 'B')")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES ('comp-011', 'ready', 'C')")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES ('comp-012', 'draft', 'D')")
+	mustExec("COMMIT")
+
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT * FROM block_components WHERE id = 'comp-010' AND status = 'ready'", []string{"shop"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("intersection select: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("unexpected intersection row count: got %d want 1", len(result.Rows))
+	}
+	if result.Rows[0]["id"].StringValue != "comp-010" {
+		t.Fatalf("unexpected intersection row: %v", result.Rows[0])
 	}
 }
 

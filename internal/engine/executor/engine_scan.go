@@ -37,6 +37,9 @@ const (
 	// scanPriorityHashLookup is the tiebreaker priority for hash index lookups.
 	scanPriorityHashLookup = 10
 
+	// scanPriorityIndexIntersection is the tiebreaker priority for intersected indexed conjuncts.
+	scanPriorityIndexIntersection = 9
+
 	// scanPriorityIndexUnion is the tiebreaker priority for index-union scans.
 	scanPriorityIndexUnion = 12
 
@@ -244,10 +247,11 @@ func candidateRowIDsForPredicate(table *tableState, predicate *ast.Predicate, ha
 		switch {
 		case leftOK && rightOK:
 			intersected := intersectRowIDs(leftIDs, rightIDs)
-			if len(leftIDs) <= len(rightIDs) {
-				return intersected, leftPredicate, leftStrategy, true
-			}
-			return intersected, rightPredicate, rightStrategy, true
+			_ = leftPredicate
+			_ = leftStrategy
+			_ = rightPredicate
+			_ = rightStrategy
+			return intersected, nil, scanStrategyIndexInter, true
 		case leftOK:
 			return leftIDs, leftPredicate, leftStrategy, true
 		case rightOK:
@@ -304,7 +308,7 @@ func candidateRowIDsForPredicate(table *tableState, predicate *ast.Predicate, ha
 
 func estimateCompoundIndexLookupCost(table *tableState, predicate *ast.Predicate, totalRows int, hasOrderBy bool) (scanCostEstimate, bool) {
 	rowIDs, _, strategy, ok := candidateRowIDsForPredicate(table, predicate, hasOrderBy)
-	if !ok || (strategy != scanStrategyIndexUnion && strategy != scanStrategyIndexNot) {
+	if !ok || (strategy != scanStrategyIndexUnion && strategy != scanStrategyIndexNot && strategy != scanStrategyIndexInter) {
 		return scanCostEstimate{}, false
 	}
 	if strategy == scanStrategyIndexNot {
@@ -320,8 +324,8 @@ func estimateCompoundIndexLookupCost(table *tableState, predicate *ast.Predicate
 		cost += totalRows / btreeOverheadDivisor
 	}
 	priority := scanPriorityIndexUnion
-	if strategy == scanStrategyIndexNot {
-		priority = scanPriorityIndexNot
+	if strategy == scanStrategyIndexInter {
+		priority = scanPriorityIndexIntersection
 	}
 	return scanCostEstimate{strategy: strategy, cost: cost, priority: priority}, true
 }
@@ -1258,7 +1262,7 @@ func (engine *Engine) buildAccessPlan(plan planner.Plan) accessPlanInfo {
 		// Report index and row estimate for filter column.
 		if table != nil {
 			if rowIDs, lookupPredicate, strategy, ok := candidateRowIDsForPredicate(table, plan.Filter, len(plan.OrderBy) > 0); ok {
-				if strategy == scanStrategyIndexUnion || strategy == scanStrategyIndexNot {
+				if strategy == scanStrategyIndexUnion || strategy == scanStrategyIndexNot || strategy == scanStrategyIndexInter {
 					info.EstimatedRows = len(rowIDs)
 				} else if lookupPredicate != nil {
 					if idx, ok := indexForColumn(table, lookupPredicate.Column); ok {
@@ -1281,7 +1285,7 @@ func (engine *Engine) buildAccessPlan(plan planner.Plan) accessPlanInfo {
 		if table != nil {
 			if rowIDs, lookupPredicate, strat, ok := candidateRowIDsForPredicate(table, plan.Filter, false); ok {
 				info.Strategy = string(strat)
-				if strat == scanStrategyIndexUnion || strat == scanStrategyIndexNot {
+				if strat == scanStrategyIndexUnion || strat == scanStrategyIndexNot || strat == scanStrategyIndexInter {
 					info.EstimatedRows = len(rowIDs)
 				} else if lookupPredicate != nil {
 					if idx, ok := indexForColumn(table, lookupPredicate.Column); ok {

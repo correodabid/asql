@@ -987,7 +987,7 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 	store, engine, targetLSN := prepareBooleanIndexedReadBenchmarkFixture(b)
 
 	b.Run("and_hash_lookup", func(b *testing.B) {
-		query := "SELECT id, status FROM entries WHERE id = 5000 AND status = 'common'"
+		query := "SELECT id, status FROM entries WHERE id = 5000 AND bucket = 'common'"
 		baselineCounts := engine.ScanStrategyCounts()
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
@@ -1001,6 +1001,23 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 		}
 		b.StopTimer()
 		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyHashLookup))
+	})
+
+	b.Run("and_index_intersection", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE id = 5000 AND status = 'common'"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("AND intersection query: %v", err)
+			}
+			if len(result.Rows) != 1 {
+				b.Fatalf("unexpected AND intersection row count: got %d want 1", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyIndexInter))
 	})
 
 	b.Run("and_full_scan", func(b *testing.B) {

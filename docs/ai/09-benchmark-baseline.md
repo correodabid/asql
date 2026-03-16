@@ -261,16 +261,17 @@ Selective covered-vs-non-covered repeated sample on 2026-03-14:
 
 Boolean-predicate comparison on 2026-03-16 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngineReadIndexedBooleanPredicates' -benchtime=5x -count=1`:
 
-- `and_hash_lookup`: `91,900 ns/op` vs `and_full_scan`: `3,565,250 ns/op` (~`38.8x` faster with indexed conjunct selection)
+- `and_hash_lookup`: `24,817 ns/op` vs `and_full_scan`: `3,280,450 ns/op` (~`132x` faster with single indexed conjunct + residual post-filter)
+- `and_index_intersection`: `164,983 ns/op` vs `and_full_scan`: `3,280,450 ns/op` (~`19.9x` faster with explicit multi-index conjunct intersection)
 - `or_index_union`: `20,925 ns/op` vs `or_full_scan`: `3,011,825 ns/op` (~`144x` faster with indexed union planning)
-- `in_hash_lookup`: `12,433 ns/op` vs `in_full_scan`: `2,616,808 ns/op` (~`210x` faster with indexed literal-list selection)
+- `in_hash_lookup`: `14,958 ns/op` vs `in_full_scan`: `24,065,233 ns/op` (~`1609x` faster with indexed literal-list selection in this sample)
 - `or_partial_index_union`: `1,278,350 ns/op` vs `or_partial_full_scan`: `3,468,383 ns/op` (~`2.7x` faster with selective hybrid OR planning)
 - `or_partial_broad_indexed_falls_back`: `7,341,258 ns/op` (`full-scan` chosen intentionally for broad hybrid OR with an oversized indexed branch)
-- `not_index_complement`: `613,108 ns/op` vs `not_full_scan`: `2,875,258 ns/op` (~`4.7x` faster with indexed complement planning)
-- `not_in_index_complement`: `560,967 ns/op` vs `not_in_full_scan`: `2,581,650 ns/op` (~`4.6x` faster with indexed `NOT IN` complement planning)
-- `not_broad_indexed_falls_back`: `6,155,558 ns/op` (`full-scan` chosen intentionally for broad indexed `NOT`)
-- `not_in_broad_indexed_falls_back`: `6,040,617 ns/op` (`full-scan` chosen intentionally for broad indexed `NOT IN`)
-- Interpretation note: `OR` and `IN (...)` get the largest wins when the planner can collapse predicates to tiny indexed candidate sets. Hybrid `OR` now also has a crossover: selective indexed branches can still win, while broad indexed branches deliberately fall back to `full-scan` rather than paying for weak partial-union plans.
+- `not_index_complement`: `574,383 ns/op` vs `not_full_scan`: `2,647,167 ns/op` (~`4.6x` faster with indexed complement planning)
+- `not_in_index_complement`: `559,667 ns/op` vs `not_in_full_scan`: `2,812,733 ns/op` (~`5.0x` faster with indexed `NOT IN` complement planning)
+- `not_broad_indexed_falls_back`: `8,852,500 ns/op` (`full-scan` chosen intentionally for broad indexed `NOT`)
+- `not_in_broad_indexed_falls_back`: `6,161,567 ns/op` (`full-scan` chosen intentionally for broad indexed `NOT IN`)
+- Interpretation note: `AND`, `OR`, and `IN (...)` now have explicit compound-path evidence. Single-index `AND` plus residual filtering is still cheapest when one branch is already highly selective, while `index-intersection` gives a truthful and still much cheaper path than `full-scan` when multiple indexed conjuncts cooperate. Hybrid `OR` retains its crossover: selective indexed branches can win, broad indexed branches deliberately fall back to `full-scan`.
 
 Composite-order repeated sample on 2026-03-14:
 
