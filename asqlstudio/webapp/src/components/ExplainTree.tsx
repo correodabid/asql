@@ -61,6 +61,7 @@ function AccessPlanSection({ plan }: { plan: AccessPlan }) {
 
   return (
     <div className={`explain-access-plan ${isHotPath ? 'explain-hot-path' : ''}`}>
+      <PlannerVerdict plan={plan} />
       <div className="explain-access-row">
         <span className="explain-detail-label">Strategy</span>
         <span className={`explain-op-badge ${strategyClass(plan.strategy)}`}>
@@ -200,6 +201,20 @@ function renderCandidatesWithBars(candidates: NonNullable<AccessPlan['candidates
   ))
 }
 
+function PlannerVerdict({ plan }: { plan: AccessPlan }) {
+  const verdict = buildPlannerVerdict(plan)
+
+  return (
+    <div className={`explain-verdict ${verdict.level}`}>
+      <div className="explain-verdict-header">
+        <span className="explain-verdict-kicker">Planner verdict</span>
+        <span className="explain-verdict-title">{verdict.title}</span>
+      </div>
+      <div className="explain-verdict-body">{verdict.body}</div>
+    </div>
+  )
+}
+
 function renderPrunedCandidates(candidates: NonNullable<AccessPlan['pruned_candidates']>) {
   return candidates.map((candidate, i) => (
     <div key={i} className="explain-pruned-card">
@@ -238,6 +253,72 @@ type ExplainSuggestion = {
   title: string
   body: string
   level: 'info' | 'warn' | 'good'
+}
+
+type PlannerVerdict = {
+  title: string
+  body: string
+  level: 'info' | 'warn' | 'good'
+}
+
+function buildPlannerVerdict(plan: AccessPlan): PlannerVerdict {
+  const selectivity = plan.table_rows > 0 && plan.estimated_rows !== undefined
+    ? (plan.estimated_rows / plan.table_rows) * 100
+    : null
+
+  if (plan.pruned_candidates && plan.pruned_candidates.length > 0 && plan.strategy.includes('full-scan')) {
+    return {
+      title: 'Broad fallback to full scan',
+      body: 'Indexed alternatives were considered but pruned because they would still touch too much of the table, so the planner intentionally kept a full scan.',
+      level: 'warn',
+    }
+  }
+
+  if (plan.indexed_predicates && plan.indexed_predicates.length > 0 && plan.residual_predicate) {
+    return {
+      title: 'Partial index pushdown with residual filter',
+      body: `The planner can narrow the search using ${plan.indexed_predicates.join(', ')}, but it still has to apply ${plan.residual_predicate} after fetching candidate rows.`,
+      level: 'info',
+    }
+  }
+
+  if (plan.index_used && selectivity !== null && selectivity <= 15) {
+    return {
+      title: 'Selective indexed path',
+      body: `The chosen index path is tight: only ${selectivity.toFixed(1)}% of rows are expected to be visited.`,
+      level: 'good',
+    }
+  }
+
+  if (plan.index_used && selectivity !== null && selectivity > 80) {
+    return {
+      title: 'Indexed path is still broad',
+      body: `The planner used ${plan.index_used}, but it still expects to visit ${selectivity.toFixed(0)}% of rows, so this path may remain expensive under growth.`,
+      level: 'warn',
+    }
+  }
+
+  if (plan.strategy.includes('full-scan')) {
+    return {
+      title: 'No narrower access path found',
+      body: 'The planner did not find a cheaper indexed strategy for the current predicate shape.',
+      level: 'info',
+    }
+  }
+
+  if (plan.strategy.includes('join')) {
+    return {
+      title: 'Join-driven access path',
+      body: 'The runtime plan is shaped primarily by join execution rather than a single-table lookup path.',
+      level: 'info',
+    }
+  }
+
+  return {
+    title: 'Planner chose the cheapest current path',
+    body: 'The access plan reflects the best deterministic strategy available under the current cost model and predicate shape.',
+    level: 'info',
+  }
 }
 
 function buildSuggestions(plan: AccessPlan, operation: string): ExplainSuggestion[] {
