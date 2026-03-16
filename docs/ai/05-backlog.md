@@ -488,7 +488,7 @@ Acceptance gates (must pass before closing Epic AA)
 
 ## Epic AB — Performance after correctness (Phase 6)
 
-Current evidence already in repo, but not sufficient to close this epic:
+Current evidence already in repo and is now sufficient to close this epic at the current scope:
 - `docs/ai/09-benchmark-baseline.md` captures an internal deterministic engine/WAL baseline.
 - `docs/product/performance-benchmark-plan-v1.md` defines the active L0–L4 benchmark ladder, including cluster scenarios.
 - `internal/engine/executor/engine_benchmark_test.go` covers commit, concurrent commit, read-as-of-LSN, and replay-to-LSN microbenchmarks.
@@ -498,15 +498,13 @@ Current evidence already in repo, but not sufficient to close this epic:
 Closed sub-slices:
 - Restart/cadence policy is now treated as closed at the subline level: the mutation-mix-aware persisted checkpoint policy has deterministic regression coverage and repeated natural-restart evidence that is strong enough for a closure decision, even though the broader snapshot-load optimization item remains open.
 - Repeated historical/time-travel reads at the same target `LSN` are now treated as closed at the subline level: caching full WAL recovery results plus rebuilt historical states materially reduced repeated `AS OF LSN` latency and allocations on the benchmark fixture, even though broader replay-throughput and cross-`LSN` reuse decisions remain open.
+- Snapshot-load is now treated as closed at the current scope: the runtime-state decoder and related restore/load changes materially reduced snapshot-directory cost, and the remaining short-fixture/forced-tail losses are now clearly diagnostic edge cases rather than evidence that the natural runtime path is still mis-tuned.
 
 Open gaps before closure:
-- Snapshot restart microbenchmarks now exist, but there is no closure-level baseline/improvement decision yet for snapshot load time.
-- Initial indexed-read and index-only benchmarks now exist, but there is no closure-level baseline/improvement decision yet for indexed read latency.
-- No measured decision record yet for persisted index/cache architecture.
+- None at the current scope. Remaining performance work should start from new evidence or new workload reports rather than from the old Epic AB placeholders.
 
 Current next-execution order:
-- 1. Finish the snapshot-load decision with repeated cadence/tail evidence, not just head-snapshot best-case samples.
-- 2. Revisit persisted index/cache architecture only after the benchmark evidence above shows a durable IO bottleneck that current in-memory indexes cannot address cleanly.
+- Epic AB is now closure-ready. Any follow-on work should be framed as a new benchmarked slice, not as unfinished Phase 6 carry-over.
 
 Subline status:
 - The `Expand index-only scan coverage where benchmarks justify it` item is now evidence-backed for covered simple ordered reads, covered ordered reads with `OFFSET`, covered selective reads with bounded early-stop, and covered composite ordered reads.
@@ -554,6 +552,7 @@ Subline status:
 - Commit batching on realistic workloads now has direct evidence instead of only the synthetic concurrent INSERT loop. `BenchmarkConcurrentCommit` was corrected to use a real snapshot directory (so runtime checkpoints stop failing during the benchmark), and the commit queue now opportunistically coalesces immediately following jobs via scheduler yields instead of a fixed sleep. On the realistic 4-worker / 9-INSERT transaction benchmark this moved throughput from ~`415 µs/op` to ~`304 µs/op`, tightened p50 from ~`1.63 ms` to ~`0.98 ms`, p95 from ~`3.18 ms` to ~`2.40 ms`, and p99 from ~`4.29 ms` to ~`3.52 ms`, with zero retry regressions. The simpler `BenchmarkEngineWriteCommitConcurrent` stayed roughly flat (~`392 µs/op` -> ~`399 µs/op`), so the win appears workload-shaped rather than a blanket microbenchmark gain.
 - The parallel-scan item has now been evaluated to a defer decision: there is still no proven workload class that justifies intra-query parallel scan complexity over the current deterministic single-threaded indexed paths.
 - The persisted index/cache architecture item can now be narrowed to a defer/close decision rather than a build item. Existing evidence already covers the useful pieces: repeated exact-`LSN` historical reads materially improved via the in-memory WAL/history caches, the persisted timestamp→`LSN` side index is restart-validated and now benchmarks at ~`14.5 ns/op`, `0 B/op`, `0 allocs/op` for `BenchmarkEngineLSNForTimestampAfterRestart`, and the indexed snapshot-load path has dropped from the earlier ~`493 µs/op` band to ~`304 µs/op` without introducing a broader persisted table-index layer. Taken together, measured IO now says ASQL already has the narrowly justified persisted/indexed surfaces it needs, while broader persisted table indexes or a generic restart cache still lack evidence of being the next bottleneck.
+- Final closure interpretation for snapshot load: the short head-snapshot benchmark still trails replay-only on absolute wall-clock, and the synthetic forced-tail sweep still exposes a long-tail break-even region, but the policy-relevant evidence is now strong enough to close the item anyway. Snapshot-directory load has fallen to ~`176–199 µs/op` on the base fixture, the indexed variant to ~`304 µs/op`, natural-policy restart wins are stable across `insert_heavy`, `update_heavy`, and `delete_heavy`, and the remaining losses are now either best-case replay fixtures or intentionally adversarial tail placements rather than the natural operating mode ASQL should optimize around.
 - Entity-related join reads now have dedicated scaling coverage: `BenchmarkEngineReadEntityRelatedJoinScaling` and `BenchmarkEngineReadEntityRelatedJoinRightFilterScaling` show that root-table pruning, root-only `AND` conjunct extraction, and safe right-side filtering materially improved the user-reported “entity + related tables” slowdown as row counts grow, but the broader indexed-read/query-latency item remains open because other read shapes still need closure-level decisions.
 - Repeated historical reads now have dedicated scaling coverage via `BenchmarkEngineReadHistoricalAsOfLSNScaling`: exact-`LSN` repeat reads benefit materially from the new WAL-record cache and small historical-state cache, while invalidation on commit and WAL GC keeps correctness explicit.
 - Failover recovery is now treated as closed at the subline level: the benchmark suite covers `small_total_40`, `medium_total_640`, and `large_total_4608`, the largest case has a phase split proving where time goes, replay-side cleanup materially reduced apply cost, and persisted segment headers removed WAL reopen/discovery as a meaningful restart cost (~`38–73 µs` on the large case). The current closure decision is that ~`2.1–4.3 ms` end-to-end large-scenario recovery on the benchmark fixture is strong enough to move this slice out of active optimization and focus AB effort on replay throughput, snapshot load, and indexed-read latency.
@@ -575,7 +574,7 @@ Latest directional read evidence:
 
 - [x] Benchmark and improve commit batching on realistic workloads.
 - [x] Benchmark and improve replay throughput.
-- [ ] Benchmark and improve snapshot load time.
+- [x] Benchmark and improve snapshot load time.
 - [x] Benchmark and improve indexed read/query latency.
 - [x] Benchmark and improve failover recovery time.
 - [x] Evaluate persisted index/cache architecture from measured IO behavior.
