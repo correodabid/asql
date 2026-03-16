@@ -296,22 +296,21 @@ func orderedRowsFromBTreeIndex(table *tableState, predicate *ast.Predicate, orde
 	}
 
 	entries := index.allEntries()
-	rows := make([]map[string]ast.Literal, 0, len(entries))
+	rowsCap := len(entries)
+	if limit != nil && *limit >= 0 && *limit < rowsCap {
+		rowsCap = *limit
+	}
+	scanStart, scanEnd := 0, len(entries)
+	if useBoundedScan {
+		scanStart, scanEnd = btreeBoundedScanRange(entries, func(entry indexEntry) ast.Literal {
+			return entry.value
+		}, predicate)
+	}
+	rows := make([]map[string]ast.Literal, 0, rowsCap)
 	if orderBy[0].Direction == ast.SortDesc {
-		for i := len(entries) - 1; i >= 0; i-- {
+		for i := scanEnd - 1; i >= scanStart; i-- {
 			if limit != nil && *limit >= 0 && len(rows) >= *limit {
 				break
-			}
-
-			if useBoundedScan {
-				cmp := compareLiterals(entries[i].value, predicate.Value)
-				accept, stop := btreeBoundDecision(cmp, predicate.Operator, true)
-				if stop {
-					break
-				}
-				if !accept {
-					continue
-				}
 			}
 
 			rowID := entries[i].rowID
@@ -327,21 +326,12 @@ func orderedRowsFromBTreeIndex(table *tableState, predicate *ast.Predicate, orde
 		return rows, true
 	}
 
-	for _, entry := range entries {
+	for i := scanStart; i < scanEnd; i++ {
 		if limit != nil && *limit >= 0 && len(rows) >= *limit {
 			break
 		}
 
-		if useBoundedScan {
-			cmp := compareLiterals(entry.value, predicate.Value)
-			accept, stop := btreeBoundDecision(cmp, predicate.Operator, false)
-			if stop {
-				break
-			}
-			if !accept {
-				continue
-			}
-		}
+		entry := entries[i]
 
 		if entry.rowID < 0 || entry.rowID >= len(table.rows) {
 			continue
@@ -563,12 +553,39 @@ func btreeBoundDecision(cmp int, operator string, descending bool) (accept bool,
 	return false, false
 }
 
+func btreeBoundedScanRange(entries []indexEntry, valueAt func(indexEntry) ast.Literal, predicate *ast.Predicate) (start int, end int) {
+	if predicate == nil || len(entries) == 0 {
+		return 0, len(entries)
+	}
+
+	firstGTE := sort.Search(len(entries), func(i int) bool {
+		return compareLiterals(valueAt(entries[i]), predicate.Value) >= 0
+	})
+	firstGT := sort.Search(len(entries), func(i int) bool {
+		return compareLiterals(valueAt(entries[i]), predicate.Value) > 0
+	})
+
+	switch predicate.Operator {
+	case "=":
+		return firstGTE, firstGT
+	case ">":
+		return firstGT, len(entries)
+	case ">=":
+		return firstGTE, len(entries)
+	case "<":
+		return 0, firstGTE
+	case "<=":
+		return 0, firstGT
+	default:
+		return 0, len(entries)
+	}
+}
+
 func joinCandidateRows(table *tableState, tableName string, columnRef string, value ast.Literal) []map[string]ast.Literal {
 	column, ok := joinColumnForTable(tableName, columnRef)
 	if !ok {
 		return tableRowsToMaps(table)
 	}
-
 	index, ok := indexForColumn(table, column)
 	if !ok {
 		return tableRowsToMaps(table)
@@ -664,11 +681,9 @@ func joinColumnForTable(tableName string, columnRef string) (string, bool) {
 	return parts[1], true
 }
 
-// ── EXPLAIN access plan ─────────────────────────────────────────────
-
 type accessPlanInfo struct {
 	Strategy      string          `json:"strategy"`
-	TableRows     int             `json:"table_rows"`
+	TableRows     int             `json:"table_rows,omitempty"`
 	EstimatedRows int             `json:"estimated_rows,omitempty"`
 	IndexUsed     string          `json:"index_used,omitempty"`
 	IndexType     string          `json:"index_type,omitempty"`
@@ -1062,7 +1077,6 @@ func orderedRowsFromBTreeIndexOnly(
 		offset = *plan.Offset
 	}
 	descending := plan.OrderBy[0].Direction == ast.SortDesc
-	rows := make([]map[string]ast.Literal, 0, len(entries))
 	useBoundedScan := false
 	if plan.Filter != nil && isSimplePredicate(plan.Filter) && strings.EqualFold(strings.TrimSpace(plan.Filter.Column), strings.TrimSpace(plan.OrderBy[0].Column)) {
 		switch plan.Filter.Operator {
@@ -1070,22 +1084,27 @@ func orderedRowsFromBTreeIndexOnly(
 			useBoundedScan = true
 		}
 	}
+	scanStart, scanEnd := 0, len(entries)
+	if useBoundedScan {
+		scanStart, scanEnd = btreeBoundedScanRange(entries, func(entry indexEntry) ast.Literal {
+			return entryVal(entry, plan.Filter.Column)
+		}, plan.Filter)
+	}
+	rowsCap := len(entries)
+	if limit != nil && *limit >= 0 {
+		rowsCap = *limit + offset
+		if rowsCap > len(entries) {
+			rowsCap = len(entries)
+		}
+	}
+	rows := make([]map[string]ast.Literal, 0, rowsCap)
 
 	if descending {
-		for i := len(entries) - 1; i >= 0; i-- {
+		for i := scanEnd - 1; i >= scanStart; i-- {
 			if limit != nil && *limit >= 0 && len(rows) >= *limit {
 				break
 			}
-			if useBoundedScan {
-				cmp := compareLiterals(entryVal(entries[i], plan.Filter.Column), plan.Filter.Value)
-				accept, stop := btreeBoundDecision(cmp, plan.Filter.Operator, true)
-				if stop {
-					break
-				}
-				if !accept {
-					continue
-				}
-			} else if !matchEntry(entries[i]) {
+			if !useBoundedScan && !matchEntry(entries[i]) {
 				continue
 			}
 			if offset > 0 {
@@ -1095,20 +1114,12 @@ func orderedRowsFromBTreeIndexOnly(
 			rows = append(rows, buildRow(entries[i]))
 		}
 	} else {
-		for _, e := range entries {
+		for i := scanStart; i < scanEnd; i++ {
 			if limit != nil && *limit >= 0 && len(rows) >= *limit {
 				break
 			}
-			if useBoundedScan {
-				cmp := compareLiterals(entryVal(e, plan.Filter.Column), plan.Filter.Value)
-				accept, stop := btreeBoundDecision(cmp, plan.Filter.Operator, false)
-				if stop {
-					break
-				}
-				if !accept {
-					continue
-				}
-			} else if !matchEntry(e) {
+			e := entries[i]
+			if !useBoundedScan && !matchEntry(e) {
 				continue
 			}
 			if offset > 0 {

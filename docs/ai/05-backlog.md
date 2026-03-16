@@ -553,8 +553,8 @@ Latest directional read evidence:
 - `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and repeated at ~`353–361 µs/op`.
 - `BenchmarkEngineReadIndexOnlyOrderBTree` exercised `btree-index-only` and repeated at ~`34 µs/op`.
 - `BenchmarkEngineReadIndexOnlyOrderOffsetBTree` exercised `btree-index-only` and repeated at ~`58–59 µs/op`.
-- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree` exercised `btree-index-only` and, after bounded early-stop optimization, repeated at ~`274–275 µs/op`.
-- `BenchmarkEngineReadSelectiveNonCoveredBTree` exercised `btree-order` and repeated at ~`406–407 µs/op`.
+- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree` now uses a binary-searched bounded scan window on the ordered index path and repeated at ~`35–49 µs/op` instead of the earlier ~`274–275 µs/op`.
+- `BenchmarkEngineReadSelectiveNonCoveredBTree` now benefits from the same bounded scan window on the ordered btree path and repeated at ~`305–353 µs/op` instead of the earlier ~`406–407 µs/op`.
 - `BenchmarkEngineReadCompositeCoveredIndexOnlyBTree` now exercises `btree-index-only` at ~`36 µs/op`.
 - `BenchmarkEngineReadCompositeNonCoveredBTree` exercises `btree-order` at ~`76–78 µs/op`.
 - `BenchmarkEngineReadEntityRelatedJoinScaling` now shows the indexed related-read path staying in the ~`23–27 µs/op` range at `orders_10000`, while the optimized unindexed path lands around ~`1.8–1.9 ms/op` instead of continuing to pay the earlier broader join-materialization cost.

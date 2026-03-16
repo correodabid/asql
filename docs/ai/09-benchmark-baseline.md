@@ -162,8 +162,8 @@ Repeated sample on 2026-03-14 using `go test ./internal/engine/executor -run '^$
 
 Selective covered-vs-non-covered repeated sample on 2026-03-14:
 
-- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree-8`: ~`273,630–275,369 ns/op`, `234,072 B/op`, `235 allocs/op` (`btree-index-only`)
-- `BenchmarkEngineReadSelectiveNonCoveredBTree-8`: ~`406,344–407,120 ns/op`, `309,561 B/op`, `656 allocs/op` (`btree-order`)
+- `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree-8`: ~`34,910–48,723 ns/op`, `153,048 B/op`, `235 allocs/op` (`btree-index-only`)
+- `BenchmarkEngineReadSelectiveNonCoveredBTree-8`: ~`305,344–353,132 ns/op`, `228,536 B/op`, `656 allocs/op` (`btree-order`)
 
 Composite-order repeated sample on 2026-03-14:
 
