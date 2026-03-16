@@ -1000,6 +1000,7 @@ type scanCostEstimate struct {
 	strategy scanStrategy
 	cost     int
 	priority int
+	detail   string
 }
 
 type ternaryResult int

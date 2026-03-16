@@ -847,6 +847,12 @@ func TestExplainAccessPlanWithData(t *testing.T) {
 	if !strings.Contains(plan, `"candidates"`) {
 		t.Errorf("access_plan missing candidates: %s", plan)
 	}
+	if !strings.Contains(plan, `"detail":"id = 'p1'"`) {
+		t.Errorf("access_plan missing candidate detail: %s", plan)
+	}
+	if !strings.Contains(plan, `"rejected_reason":"higher cost than chosen candidate"`) {
+		t.Errorf("access_plan missing rejected candidate reason: %s", plan)
+	}
 
 	// EXPLAIN a full-scan query (no predicate).
 	result2, err := engine.Explain("SELECT * FROM products", []string{"shop"})

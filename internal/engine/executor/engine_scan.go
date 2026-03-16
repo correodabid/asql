@@ -1,8 +1,8 @@
 package executor
 
 import (
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 
 	"asql/internal/engine/parser/ast"
@@ -328,7 +328,7 @@ func estimateCompoundIndexLookupCost(table *tableState, predicate *ast.Predicate
 	if strategy == scanStrategyIndexInter {
 		priority = scanPriorityIndexIntersection
 	}
-	return scanCostEstimate{strategy: strategy, cost: cost, priority: priority}, true
+	return scanCostEstimate{strategy: strategy, cost: cost, priority: priority, detail: formatPredicateForExplain(predicate)}, true
 }
 
 func estimateIndexNotCost(table *tableState, predicate *ast.Predicate, totalRows int, complementRows int, hasOrderBy bool) (scanCostEstimate, bool) {
@@ -360,7 +360,7 @@ func estimateIndexNotCost(table *tableState, predicate *ast.Predicate, totalRows
 		}
 	}
 
-	return scanCostEstimate{strategy: scanStrategyIndexNot, cost: cost, priority: scanPriorityIndexNot}, true
+	return scanCostEstimate{strategy: scanStrategyIndexNot, cost: cost, priority: scanPriorityIndexNot, detail: formatPredicateForExplain(predicate)}, true
 }
 
 func estimateExcludedRowsForNotPredicate(table *tableState, predicate *ast.Predicate) (int, bool) {
@@ -502,7 +502,15 @@ func estimateHybridORLookupCost(table *tableState, predicate *ast.Predicate, tot
 	if hasOrderBy {
 		cost += totalRows / sortCostFactor
 	}
-	return scanCostEstimate{strategy: scanStrategyIndexUnionP, cost: cost, priority: scanPriorityIndexUnionPartial}, true
+	detail := strings.Join(collectExplainIndexedPredicates(table, predicate), " | ")
+	if residual := explainResidualPredicate(table, predicate); residual != "" {
+		if detail != "" {
+			detail += " ; residual: " + residual
+		} else {
+			detail = "residual: " + residual
+		}
+	}
+	return scanCostEstimate{strategy: scanStrategyIndexUnionP, cost: cost, priority: scanPriorityIndexUnionPartial, detail: detail}, true
 }
 
 func unionRowIDs(left []int, right []int) []int {
@@ -594,7 +602,11 @@ func estimateFullScanCost(totalRows int, orderBy []ast.OrderByClause) scanCostEs
 		cost += totalRows / sortCostFactor
 	}
 
-	return scanCostEstimate{strategy: scanStrategyFullScan, cost: cost, priority: scanPriorityFullScan}
+	detail := "scan all rows"
+	if len(orderBy) > 0 {
+		detail = "scan all rows + sort"
+	}
+	return scanCostEstimate{strategy: scanStrategyFullScan, cost: cost, priority: scanPriorityFullScan, detail: detail}
 }
 
 func estimateHashLookupCost(index *indexState, predicate *ast.Predicate, totalRows int, hasOrderBy bool) (scanCostEstimate, bool) {
@@ -616,7 +628,7 @@ func estimateHashLookupCost(index *indexState, predicate *ast.Predicate, totalRo
 		cost += totalRows / hashOverheadDivisor
 	}
 
-	return scanCostEstimate{strategy: scanStrategyHashLookup, cost: cost, priority: scanPriorityHashLookup}, true
+	return scanCostEstimate{strategy: scanStrategyHashLookup, cost: cost, priority: scanPriorityHashLookup, detail: formatPredicateForExplain(predicate)}, true
 }
 
 func estimateBTreeOrderCost(index *indexState, predicate *ast.Predicate, totalRows int) scanCostEstimate {
@@ -627,7 +639,11 @@ func estimateBTreeOrderCost(index *indexState, predicate *ast.Predicate, totalRo
 		}
 	}
 
-	return scanCostEstimate{strategy: scanStrategyBTreeOrder, cost: estimatedRows, priority: scanPriorityBTreeOrder}
+	detail := "ordered index scan"
+	if predicate != nil {
+		detail = formatPredicateForExplain(predicate)
+	}
+	return scanCostEstimate{strategy: scanStrategyBTreeOrder, cost: estimatedRows, priority: scanPriorityBTreeOrder, detail: detail}
 }
 
 func estimateCompositeBTreeOrderCost(table *tableState, predicate *ast.Predicate, totalRows int) scanCostEstimate {
@@ -640,7 +656,11 @@ func estimateCompositeBTreeOrderCost(table *tableState, predicate *ast.Predicate
 		}
 	}
 
-	return scanCostEstimate{strategy: scanStrategyBTreeOrder, cost: estimatedRows, priority: scanPriorityBTreeOrder}
+	detail := "composite ordered index scan"
+	if predicate != nil {
+		detail = formatPredicateForExplain(predicate)
+	}
+	return scanCostEstimate{strategy: scanStrategyBTreeOrder, cost: estimatedRows, priority: scanPriorityBTreeOrder, detail: detail}
 }
 
 func estimateBTreePrefixCost(index *indexState, predicate *ast.Predicate, totalRows int) scanCostEstimate {
@@ -652,7 +672,11 @@ func estimateBTreePrefixCost(index *indexState, predicate *ast.Predicate, totalR
 	}
 
 	cost := estimatedRows + estimatedRows/btreePrefixMergeOverhead
-	return scanCostEstimate{strategy: scanStrategyBTreePrefix, cost: cost, priority: scanPriorityBTreePrefix}
+	detail := "prefix ordered index scan"
+	if predicate != nil {
+		detail = formatPredicateForExplain(predicate)
+	}
+	return scanCostEstimate{strategy: scanStrategyBTreePrefix, cost: cost, priority: scanPriorityBTreePrefix, detail: detail}
 }
 
 func estimateBTreeLookupCost(index *indexState, predicate *ast.Predicate, totalRows int, hasOrderBy bool) (scanCostEstimate, bool) {
@@ -674,7 +698,7 @@ func estimateBTreeLookupCost(index *indexState, predicate *ast.Predicate, totalR
 		cost += totalRows / btreeOverheadDivisor
 	}
 
-	return scanCostEstimate{strategy: scanStrategyBTreeLookup, cost: cost, priority: scanPriorityBTreeLookup}, true
+	return scanCostEstimate{strategy: scanStrategyBTreeLookup, cost: cost, priority: scanPriorityBTreeLookup, detail: formatPredicateForExplain(predicate)}, true
 }
 
 func estimateRowsByIndexPredicate(index *indexState, predicate *ast.Predicate, totalRows int) (int, bool) {
@@ -1218,9 +1242,11 @@ type accessPlanInfo struct {
 }
 
 type candidateInfo struct {
-	Strategy string `json:"strategy"`
-	Cost     int    `json:"cost"`
-	Chosen   bool   `json:"chosen,omitempty"`
+	Strategy       string `json:"strategy"`
+	Cost           int    `json:"cost"`
+	Detail         string `json:"detail,omitempty"`
+	Chosen         bool   `json:"chosen,omitempty"`
+	RejectedReason string `json:"rejected_reason,omitempty"`
 }
 
 type joinPlanInfo struct {
@@ -1539,13 +1565,41 @@ func collectScanCandidates(table *tableState, predicate *ast.Predicate, orderBy 
 	}
 
 	best := pickBestScanStrategy(candidates)
+	bestEstimate := candidates[0]
+	for _, candidate := range candidates[1:] {
+		if candidate.cost < bestEstimate.cost {
+			bestEstimate = candidate
+			continue
+		}
+		if candidate.cost == bestEstimate.cost && candidate.priority < bestEstimate.priority {
+			bestEstimate = candidate
+		}
+	}
 
 	result := make([]candidateInfo, len(candidates))
 	for i, c := range candidates {
+		chosen := c.strategy == best && c.cost == bestEstimate.cost && c.priority == bestEstimate.priority
+		rejectedReason := ""
+		if !chosen {
+			switch {
+			case c.cost > bestEstimate.cost:
+				if c.priority < bestEstimate.priority {
+					rejectedReason = "higher cost than chosen candidate"
+				} else {
+					rejectedReason = "higher cost than chosen candidate"
+				}
+			case c.cost == bestEstimate.cost && c.priority > bestEstimate.priority:
+				rejectedReason = "lost tie-break on priority"
+			case c.strategy != bestEstimate.strategy:
+				rejectedReason = "another candidate ranked ahead"
+			}
+		}
 		result[i] = candidateInfo{
-			Strategy: string(c.strategy),
-			Cost:     c.cost,
-			Chosen:   c.strategy == best,
+			Strategy:       string(c.strategy),
+			Cost:           c.cost,
+			Detail:         c.detail,
+			Chosen:         chosen,
+			RejectedReason: rejectedReason,
 		}
 	}
 

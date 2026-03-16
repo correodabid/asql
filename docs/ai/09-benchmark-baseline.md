@@ -272,7 +272,7 @@ Boolean-predicate comparison on 2026-03-16 using `go test ./internal/engine/exec
 - `not_broad_indexed_falls_back`: `8,852,500 ns/op` (`full-scan` chosen intentionally for broad indexed `NOT`)
 - `not_in_broad_indexed_falls_back`: `6,161,567 ns/op` (`full-scan` chosen intentionally for broad indexed `NOT IN`)
 - Interpretation note: `AND`, `OR`, and `IN (...)` now have explicit compound-path evidence. Single-index `AND` plus residual filtering is still cheapest when one branch is already highly selective, while `index-intersection` gives a truthful and still much cheaper path than `full-scan` when multiple indexed conjuncts cooperate. Hybrid `OR` retains its crossover: selective indexed branches can win, broad indexed branches deliberately fall back to `full-scan`.
-- EXPLAIN observability note: access plans now include `indexed_predicates` and `residual_predicate` when relevant, so planner output can show which predicate branches generated candidate row ids and which branch still ran as a residual filter.
+- EXPLAIN observability note: access plans now include `indexed_predicates` and `residual_predicate` when relevant, and candidate entries now also expose `detail` plus `rejected_reason`, so planner output can show both which predicate branches generated row-id candidates and why other evaluated strategies lost the cost comparison.
 
 Composite-order repeated sample on 2026-03-14:
 
