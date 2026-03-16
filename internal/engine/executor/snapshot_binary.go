@@ -11,6 +11,7 @@ import (
 	"sort"
 	"unsafe"
 
+	"asql/internal/engine/domains"
 	"asql/internal/engine/parser/ast"
 )
 
@@ -879,6 +880,332 @@ func (r *binReader) readTable() (string, *persistedTable) {
 	return name, pt
 }
 
+func (r *binReader) readCatalogState() *domains.Catalog {
+	cat := domains.NewCatalog()
+	numDomains := int(r.u16())
+	for i := 0; i < numDomains; i++ {
+		domain := r.str()
+		cat.EnsureDomain(domain)
+		numTables := int(r.u16())
+		for j := 0; j < numTables; j++ {
+			cat.RegisterTable(domain, r.str())
+		}
+	}
+	return cat
+}
+
+func (r *binReader) readEntityDefsState() map[string]*entityDefinition {
+	n := int(r.u16())
+	if n == 0 {
+		return nil
+	}
+	result := make(map[string]*entityDefinition, n)
+	for i := 0; i < n; i++ {
+		key := r.str()
+		name := r.str()
+		rootTable := r.str()
+		numTables := int(r.u16())
+		tables := make([]string, numTables)
+		tableSet := make(map[string]struct{}, numTables)
+		for j := 0; j < numTables; j++ {
+			tables[j] = r.str()
+			tableSet[tables[j]] = struct{}{}
+		}
+		numPaths := int(r.u16())
+		var fkPaths map[string][]fkHop
+		if numPaths > 0 {
+			fkPaths = make(map[string][]fkHop, numPaths)
+			for j := 0; j < numPaths; j++ {
+				tableName := r.str()
+				numHops := int(r.u16())
+				hops := make([]fkHop, numHops)
+				for k := 0; k < numHops; k++ {
+					hops[k] = fkHop{
+						fromTable:  r.str(),
+						fromColumn: r.str(),
+						toTable:    r.str(),
+						toColumn:   r.str(),
+					}
+				}
+				fkPaths[tableName] = hops
+			}
+		}
+		result[key] = &entityDefinition{name: name, rootTable: rootTable, tables: tables, tableSet: tableSet, fkPaths: fkPaths}
+	}
+	return result
+}
+
+func (r *binReader) readEntityVersionIndexesState() map[string]*entityVersionIndex {
+	n := int(r.u16())
+	if n == 0 {
+		return nil
+	}
+	result := make(map[string]*entityVersionIndex, n)
+	for i := 0; i < n; i++ {
+		name := r.str()
+		numPKs := int(r.u32())
+		versions := make(map[string][]entityVersion, numPKs)
+		for j := 0; j < numPKs; j++ {
+			pk := r.str()
+			numVers := int(r.u32())
+			vers := make([]entityVersion, numVers)
+			for k := 0; k < numVers; k++ {
+				vers[k] = entityVersion{version: r.u64(), commitLSN: r.u64()}
+				numTables := int(r.u16())
+				vers[k].tables = make([]string, numTables)
+				for l := 0; l < numTables; l++ {
+					vers[k].tables[l] = r.str()
+				}
+			}
+			versions[pk] = vers
+		}
+		result[name] = &entityVersionIndex{versions: versions}
+	}
+	return result
+}
+
+func (r *binReader) readTableState() (string, *tableState) {
+	name := r.str()
+
+	numCols := int(r.u16())
+	columns := make([]string, numCols)
+	columnIndex := make(map[string]int, numCols)
+	for i := 0; i < numCols; i++ {
+		columns[i] = r.str()
+		columnIndex[columns[i]] = i
+	}
+
+	numDefs := int(r.u16())
+	columnDefinitions := make(map[string]ast.ColumnDefinition, numDefs)
+	for i := 0; i < numDefs; i++ {
+		cd := r.columnDef()
+		columnDefinitions[cd.Name] = cd
+	}
+
+	numRows := int(r.u32())
+	rows := make([][]ast.Literal, numRows)
+	if numRows > 0 {
+		numRowCols := int(r.u16())
+		rowCols := make([]string, numRowCols)
+		for i := 0; i < numRowCols; i++ {
+			rowCols[i] = r.str()
+		}
+		bitmapLen := (numRowCols + 7) / 8
+		rowValues := make([]ast.Literal, numRows*len(columns))
+		if sameStringSlice(columns, rowCols) {
+			for i := 0; i < numRows; i++ {
+				if !r.need(bitmapLen) {
+					break
+				}
+				bitmap := r.data[r.off : r.off+bitmapLen]
+				r.off += bitmapLen
+				row := rowValues[i*len(columns) : (i+1)*len(columns)]
+				if allBitmapBitsSet(bitmap, numRowCols) {
+					for ci := range rowCols {
+						row[ci] = r.literal()
+					}
+				} else {
+					for ci := range rowCols {
+						if bitmap[ci/8]&(1<<(uint(ci)%8)) != 0 {
+							row[ci] = r.literal()
+						} else {
+							row[ci] = ast.Literal{Kind: ast.LiteralNull}
+						}
+					}
+				}
+				rows[i] = row
+			}
+		} else {
+			srcToDst := make([]int, numRowCols)
+			for i, col := range rowCols {
+				if dst, ok := columnIndex[col]; ok {
+					srcToDst[i] = dst
+				} else {
+					srcToDst[i] = -1
+				}
+			}
+			for i := 0; i < numRows; i++ {
+				if !r.need(bitmapLen) {
+					break
+				}
+				bitmap := r.data[r.off : r.off+bitmapLen]
+				r.off += bitmapLen
+				row := rowValues[i*len(columns) : (i+1)*len(columns)]
+				for ci := range row {
+					row[ci] = ast.Literal{Kind: ast.LiteralNull}
+				}
+				for ci := range rowCols {
+					if bitmap[ci/8]&(1<<(uint(ci)%8)) == 0 {
+						continue
+					}
+					lit := r.literal()
+					if dst := srcToDst[ci]; dst >= 0 {
+						row[dst] = lit
+					}
+				}
+				rows[i] = row
+			}
+		}
+	}
+
+	indexes := make(map[string]*indexState)
+	indexesLoaded := false
+	numIdx := int(r.u16())
+	if numIdx > 0 {
+		indexes = make(map[string]*indexState, numIdx)
+		for i := 0; i < numIdx; i++ {
+			idxKey := r.str()
+			idx := &indexState{name: r.str(), column: r.str()}
+			numIdxCols := int(r.u16())
+			idx.columns = make([]string, numIdxCols)
+			for j := 0; j < numIdxCols; j++ {
+				idx.columns[j] = r.str()
+			}
+			idx.kind = r.str()
+			if r.version >= 11 {
+				hasData := r.u8()
+				if hasData != 0 {
+					indexesLoaded = true
+					switch idx.kind {
+					case "hash":
+						numBuckets := int(r.u32())
+						idx.buckets = make(map[string][]int, numBuckets)
+						for b := 0; b < numBuckets; b++ {
+							key := r.str()
+							numRIDs := int(r.u32())
+							rids := make([]int, numRIDs)
+							for k := 0; k < numRIDs; k++ {
+								rids[k] = int(r.u32())
+							}
+							idx.buckets[key] = rids
+						}
+					case "btree":
+						numEntries := int(r.u32())
+						idx.entries = make([]indexEntry, numEntries)
+						for e := 0; e < numEntries; e++ {
+							idx.entries[e].value = r.literal()
+							numVals := int(r.u16())
+							if numVals > 0 {
+								idx.entries[e].values = make([]ast.Literal, numVals)
+								for v := 0; v < numVals; v++ {
+									idx.entries[e].values[v] = r.literal()
+								}
+							}
+							idx.entries[e].rowID = int(r.u32())
+						}
+					default:
+						idx.buckets = make(map[string][]int)
+					}
+				} else {
+					idx.buckets = make(map[string][]int)
+				}
+			}
+			indexes[idxKey] = idx
+		}
+	}
+
+	indexedColumns := make(map[string]string)
+	numIC := int(r.u16())
+	if numIC > 0 {
+		indexedColumns = make(map[string]string, numIC)
+		for i := 0; i < numIC; i++ {
+			indexedColumns[r.str()] = r.str()
+		}
+	}
+
+	indexedColumnSets := make(map[string]string)
+	numICS := int(r.u16())
+	if numICS > 0 {
+		indexedColumnSets = make(map[string]string, numICS)
+		for i := 0; i < numICS; i++ {
+			indexedColumnSets[r.str()] = r.str()
+		}
+	}
+
+	primaryKey := r.str()
+	numUC := int(r.u16())
+	uniqueColumns := make(map[string]struct{}, numUC)
+	uniqueColumnList := make([]string, 0, numUC)
+	for i := 0; i < numUC; i++ {
+		col := r.str()
+		uniqueColumns[col] = struct{}{}
+		if col != primaryKey {
+			uniqueColumnList = append(uniqueColumnList, col)
+		}
+	}
+
+	numFK := int(r.u16())
+	var foreignKeys []foreignKeyConstraint
+	if numFK > 0 {
+		foreignKeys = make([]foreignKeyConstraint, numFK)
+		for i := 0; i < numFK; i++ {
+			foreignKeys[i] = foreignKeyConstraint{column: r.str(), referencesTable: r.str(), referencesColumn: r.str()}
+		}
+	}
+
+	numCC := int(r.u16())
+	var checkConstraints []checkConstraint
+	if numCC > 0 {
+		checkConstraints = make([]checkConstraint, numCC)
+		for i := 0; i < numCC; i++ {
+			checkConstraints[i] = checkConstraint{column: r.str(), predicate: r.readPredicate()}
+		}
+	}
+
+	numVFK := int(r.u16())
+	var versionedForeignKeys []versionedForeignKeyConstraint
+	if numVFK > 0 {
+		versionedForeignKeys = make([]versionedForeignKeyConstraint, numVFK)
+		for i := 0; i < numVFK; i++ {
+			versionedForeignKeys[i] = versionedForeignKeyConstraint{column: r.str(), lsnColumn: r.str(), referencesDomain: r.str(), referencesTable: r.str(), referencesColumn: r.str()}
+		}
+	}
+
+	lastMutationTS := r.u64()
+	numEntries := int(r.u32())
+	var changeLog []changeLogEntry
+	if numEntries > 0 {
+		changeLog = make([]changeLogEntry, numEntries)
+		for i := 0; i < numEntries; i++ {
+			changeLog[i] = changeLogEntry{commitLSN: r.u64(), operation: r.str(), oldRow: r.readRowColumnIndexed(), newRow: r.readRowColumnIndexed()}
+		}
+	}
+
+	notNullColumns := make([]string, 0, len(columnDefinitions))
+	pkAutoUUID := false
+	if primaryKey != "" {
+		if def, ok := columnDefinitions[primaryKey]; ok && def.DefaultValue != nil {
+			pkAutoUUID = def.DefaultValue.Kind == ast.DefaultUUIDv7
+		}
+	}
+	for colName, colDef := range columnDefinitions {
+		if colDef.NotNull && colName != primaryKey {
+			notNullColumns = append(notNullColumns, colName)
+		}
+	}
+
+	return name, &tableState{
+		columns:              columns,
+		columnDefinitions:    columnDefinitions,
+		columnIndex:          columnIndex,
+		rows:                 rows,
+		indexes:              indexes,
+		indexedColumns:       indexedColumns,
+		indexedColumnSets:    indexedColumnSets,
+		primaryKey:           primaryKey,
+		uniqueColumns:        uniqueColumns,
+		uniqueColumnList:     uniqueColumnList,
+		notNullColumns:       notNullColumns,
+		pkAutoUUID:           pkAutoUUID,
+		foreignKeys:          foreignKeys,
+		checkConstraints:     checkConstraints,
+		versionedForeignKeys: versionedForeignKeys,
+		lastMutationTS:       lastMutationTS,
+		changeLog:            changeLog,
+		indexesLoaded:        indexesLoaded,
+	}
+}
+
 // ---------- Entity encode/decode ----------
 
 func (w *binWriter) entityDefs(entities map[string]*persistedEntity) {
@@ -1334,6 +1661,78 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 	}
 
 	return result, nil
+}
+
+func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error) {
+	if len(data) < 13 {
+		return nil, false, errors.New("snapshot binary: data too short")
+	}
+	if data[0] != snapMagic[0] || data[1] != snapMagic[1] || data[2] != snapMagic[2] || data[3] != snapMagic[3] {
+		return nil, false, fmt.Errorf("snapshot binary: invalid magic %x", data[:4])
+	}
+	payloadEnd := len(data) - 4
+	storedCRC := binary.BigEndian.Uint32(data[payloadEnd:])
+	computedCRC := crc32.Checksum(data[:payloadEnd], snapCRC32C)
+	if storedCRC != computedCRC {
+		return nil, false, fmt.Errorf("snapshot binary: CRC mismatch stored=%08x computed=%08x", storedCRC, computedCRC)
+	}
+
+	r := &binReader{data: data[:payloadEnd]}
+	r.off = 4
+	version := r.u8()
+	if version != snapVersion {
+		return nil, false, fmt.Errorf("snapshot binary: unsupported version %d (expected %d)", version, snapVersion)
+	}
+	r.version = version
+
+	numStrings := int(r.u32())
+	r.dictTable = make([]string, numStrings)
+	for i := 0; i < numStrings; i++ {
+		n := int(r.u16())
+		if !r.need(n) {
+			return nil, false, fmt.Errorf("snapshot binary: dictionary string %d truncated", i)
+		}
+		r.dictTable[i] = bytesToImmutableString(r.data[r.off : r.off+n])
+		r.off += n
+	}
+	if r.err != nil {
+		return nil, false, r.err
+	}
+
+	if numSnapshots := int(r.u32()); numSnapshots != 1 {
+		return nil, false, nil
+	}
+
+	snap := engineSnapshot{}
+	snap.lsn = r.u64()
+	snap.logicalTS = r.u64()
+	if !r.boolean() {
+		return nil, false, nil
+	}
+	snap.catalog = r.readCatalogState()
+
+	numDomains := int(r.u16())
+	snap.state.domains = make(map[string]*domainState, numDomains)
+	for i := 0; i < numDomains; i++ {
+		domainName := r.str()
+		numTables := int(r.u16())
+		domain := &domainState{tables: make(map[string]*tableState, numTables)}
+		for j := 0; j < numTables; j++ {
+			tableName, table := r.readTableState()
+			domain.tables[tableName] = table
+		}
+		domain.entities = r.readEntityDefsState()
+		domain.entityVersions = r.readEntityVersionIndexesState()
+		if len(domain.entities) > 0 {
+			rebuildEntityTablesSet(domain)
+		}
+		snap.state.domains[domainName] = domain
+	}
+	if r.err != nil {
+		return nil, false, r.err
+	}
+	rebuildAllIndexes(&snap)
+	return []engineSnapshot{snap}, true, nil
 }
 
 // applyDeltaBinary merges delta domains into accumulated state, removing

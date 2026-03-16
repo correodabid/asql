@@ -252,6 +252,86 @@ func TestPersistAllSnapshotsSkipsAlreadyPersistedHead(t *testing.T) {
 	}
 }
 
+func TestLoadSnapshotsFileDirectFullDecodeMatchesGenericDecode(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	walPath := filepath.Join(dir, "engine.wal")
+	snapDir := filepath.Join(dir, "snap")
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		t.Fatalf("mkdir snap dir: %v", err)
+	}
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new log store: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN demo",
+		"CREATE TABLE items (id INT PRIMARY KEY, name TEXT)",
+		"INSERT INTO items (id, name) VALUES (1, 'one')",
+		"INSERT INTO items (id, name) VALUES (2, 'two')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	engine.snapshots.add(captureSnapshot(engine.readState.Load(), engine.catalog))
+	engine.persistAllSnapshots()
+
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		t.Fatalf("read snap dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected one snapshot file, got %d", len(entries))
+	}
+	snapPath := filepath.Join(snapDir, entries[0].Name())
+	raw, err := os.ReadFile(snapPath)
+	if err != nil {
+		t.Fatalf("read snapshot file: %v", err)
+	}
+	if isZstd(raw) {
+		raw, err = decompressZstd(raw)
+		if err != nil {
+			t.Fatalf("decompress snapshot file: %v", err)
+		}
+	}
+
+	generic, err := decodeSnapshotsBinary(raw)
+	if err != nil {
+		t.Fatalf("generic decode: %v", err)
+	}
+	direct, err := loadSnapshotsFile(snapPath)
+	if err != nil {
+		t.Fatalf("direct load snapshots file: %v", err)
+	}
+	if len(direct) != len(generic) {
+		t.Fatalf("snapshot count mismatch: got %d want %d", len(direct), len(generic))
+	}
+	if len(direct) != 1 {
+		t.Fatalf("expected one decoded snapshot, got %d", len(direct))
+	}
+	if direct[0].lsn != generic[0].lsn || direct[0].logicalTS != generic[0].logicalTS {
+		t.Fatalf("decoded snapshot header mismatch: got (lsn=%d ts=%d) want (lsn=%d ts=%d)", direct[0].lsn, direct[0].logicalTS, generic[0].lsn, generic[0].logicalTS)
+	}
+	if len(direct[0].state.domains) != len(generic[0].state.domains) {
+		t.Fatalf("decoded domain count mismatch: got %d want %d", len(direct[0].state.domains), len(generic[0].state.domains))
+	}
+	if got := len(direct[0].state.domains["demo"].tables["items"].rows); got != 2 {
+		t.Fatalf("expected direct decode rows=2, got %d", got)
+	}
+}
+
 func TestMutationMixAdaptivePersistedCheckpointCadence(t *testing.T) {
 	ctx := context.Background()
 

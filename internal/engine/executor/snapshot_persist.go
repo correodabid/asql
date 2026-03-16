@@ -988,6 +988,11 @@ func loadSnapshotsFile(path string) ([]engineSnapshot, error) {
 			return nil, fmt.Errorf("decompress snapshot file: %w", err)
 		}
 	}
+	if snapshots, ok, err := decodeSingleFullSnapshotBinary(data); err != nil {
+		return nil, err
+	} else if ok {
+		return snapshots, nil
+	}
 	return decodeSnapshotsBinary(data)
 }
 

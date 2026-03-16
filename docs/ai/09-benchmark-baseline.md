@@ -59,6 +59,20 @@ Follow-up sample on 2026-03-16 after fast-pathing single-file snapshot directori
 - `BenchmarkEngineRestartFromPersistedSnapshot-8`: `2,263,819–2,437,330 ns/op`, `767,349–772,868 B/op`, `2,974–2,975 allocs/op`
 - `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `235,134–237,537 ns/op`, `352,351–354,822 B/op`, `1,172 allocs/op`
 
+Follow-up sample on 2026-03-16 after decoding single-file full snapshots directly into runtime state with `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngine(RestartFromPersistedSnapshot|ReadPersistedSnapshotsFromDir|DecodeFullSnapshotDirect)(Indexed)?$' -benchmem`:
+
+- `BenchmarkEngineRestartFromPersistedSnapshot-8`: `2,267,591 ns/op`, `678,646 B/op`, `2,418 allocs/op`
+- `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `175,658 ns/op`, `241,742 B/op`, `609 allocs/op`
+- `BenchmarkEngineDecodeFullSnapshotDirect-8`: `94,210 ns/op`, `299,802 B/op`, `1,151 allocs/op`
+- `BenchmarkEngineDecodeFullSnapshotDirectIndexed-8`: `180,197 ns/op`, `485,234 B/op`, `1,713 allocs/op`
+- `BenchmarkEngineReadPersistedSnapshotsFromDirIndexed-8`: `304,087 ns/op`, `474,543 B/op`, `1,174 allocs/op`
+
+Repeated comparison on 2026-03-16 using `go test ./internal/engine/executor -run '^$' -bench '^(BenchmarkEngine(RestartReplayOnly|RestartFromPersistedSnapshot|ReadPersistedSnapshotsFromDir))$' -benchmem -benchtime=200ms -count=2`:
+
+- `BenchmarkEngineRestartReplayOnly-8`: `1,976,196–2,412,504 ns/op`, `1,718,644–1,718,743 B/op`, `12,809 allocs/op`
+- `BenchmarkEngineRestartFromPersistedSnapshot-8`: `2,577,547–2,728,238 ns/op`, `638,328–658,626 B/op`, `2,405–2,411 allocs/op`
+- `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `196,872–198,813 ns/op`, `240,459–240,518 B/op`, `608 allocs/op`
+
 Scope note on 2026-03-14: the current `BenchmarkEngineRestartFromPersistedSnapshot` fixture calls `WaitPendingSnapshots()` before shutdown, so it benchmarks a head snapshot plus effectively `0` trailing WAL records rather than a snapshot plus a non-zero replay tail.
 
 Restart-tail/cadence spot checks on 2026-03-14 using `-benchtime=1x`:
@@ -150,6 +164,12 @@ Finer-grained persisted-snapshot microbenchmarks on 2026-03-14:
 - `BenchmarkEngineMaterializePersistedSnapshots-8`: `49,473–57,281 ns/op`, `113,050–113,054 B/op`, `573 allocs/op`
 - `BenchmarkEngineReadPersistedSnapshotsFromDirIndexed-8`: `492,740 ns/op`, `655,010 B/op`, `2,293 allocs/op`
 
+Follow-up after the direct runtime-state full-snapshot decoder on 2026-03-16:
+
+- `BenchmarkEngineDecodeFullSnapshotDirect-8`: `94,210 ns/op`, `299,802 B/op`, `1,151 allocs/op`
+- `BenchmarkEngineDecodeFullSnapshotDirectIndexed-8`: `180,197 ns/op`, `485,234 B/op`, `1,713 allocs/op`
+- `BenchmarkEngineReadPersistedSnapshotsFromDirIndexed-8`: `304,087 ns/op`, `474,543 B/op`, `1,174 allocs/op`
+
 Replay-throughput repeated sample:
 
 - 2026-03-14 baseline:
@@ -227,11 +247,11 @@ Repeated sample on 2026-03-15:
 	- delta-chain merge is negligible on the current fixture because the harness is effectively loading a single persisted snapshot file, so this AB slice is presently about file read + decode efficiency rather than cross-file snapshot chaining.
 	- an index-rich snapshot fixture (primary key + hash + btree persisted) raises full snapshot-directory load to about `493 µs/op`, but decode still stays in the same order of magnitude (~`167 µs/op`), so persisted index payload is not causing a new dominant hotspot beyond the existing file-read + decode path.
 	- removing the extra raw-file accumulation pass in `readAllSnapshotsFromDir()` did not materially shift the measured timings on the current fixture, which further suggests the remaining opportunity is inside file-read/decompress/decode itself rather than in the old two-pass control flow.
-	- a direct full-snapshot decode experiment using `decodeSnapshotsBinary()` did not show a compelling win over the current raw-decode + materialize path on either the base or index-rich fixture, so a larger refactor toward that direct path is not yet justified by the current evidence.
+	- the first direct full-snapshot decode experiment using `decodeSnapshotsBinary()` was not compelling, but a later decoder that loads single-file full snapshots directly into runtime state does materially improve the measured hot path: base `BenchmarkEngineReadPersistedSnapshotsFromDir` is now ~`175.7 µs/op` with `609 allocs/op`, and the indexed variant is ~`304.1 µs/op` with `1,174 allocs/op`.
 	- the latest spot check now overlaps independent per-file read/decompress/decode work before the deterministic in-order merge in `readAllSnapshotsFromDir()`, and on the current two-file fixture that moved `BenchmarkEngineReadPersistedSnapshotsFromDir` from about ~`407 µs/op` to ~`343 µs/op` and `BenchmarkEngineReadPersistedSnapshotsFromDirIndexed` from about ~`564 µs/op` to ~`504 µs/op` at `-benchmem -benchtime=100ms -count=1`.
 	- a follow-up restore-path change now preserves decoded btree entries in restore-ready `indexEntry` form instead of copying them again during `marshalableToTableState`; the base fixture stayed roughly flat, but the indexed snapshot-directory load improved its heap profile from about ~`842 KB/op` to ~`746 KB/op` while landing around ~`499 µs/op`, which suggests the remaining indexed restart cost is no longer dominated by btree-entry rematerialization.
 	- another follow-up now reuses snapshot domain state directly during `restoreSnapshot()` / `replayFromSnapshots()` while still cloning the catalog for mutation safety; focused regression coverage confirms post-restore writes do not mutate the captured snapshot, and `BenchmarkEngineReplayFromPersistedSnapshots` fell to roughly ~`690 ns/op`, `640 B/op`, `8 allocs/op` on the current fixture, making the in-memory restore step effectively negligible compared with snapshot-directory read/decompress/decode/materialization.
-	- a fresh end-to-end restart spot check after the latest snapshot-load work still shows persisted-snapshot restart slightly behind replay-only on this short head-snapshot fixture (~`4.46 ms/op` vs ~`4.24 ms/op`), but the allocation gap remains large in the snapshot path’s favor (~`1.08 MB/op`, ~`5.2k allocs/op` vs ~`2.30 MB/op`, ~`15.6k allocs/op`), reinforcing that the remaining closure question is about the full restart envelope rather than the already-optimized in-memory restore step.
+	- a fresher repeated restart comparison after the direct runtime-state decoder keeps the same interpretation but at a much lower cost level: persisted-snapshot restart is now ~`2.58–2.73 ms/op` versus ~`1.98–2.41 ms/op` for replay-only, while still using far less heap (~`638–659 KB/op` vs ~`1.72 MB/op`) and far fewer allocations (`~2.4k` vs `12.8k`).
 	- a fresh representative sweep check after the same changes keeps the broader restart interpretation stable: with a fixed 500-record snapshot anchor and a long 5k replay tail, persisted snapshot restart still loses (~`50.4 ms/op`, ~`38.7 MB/op`, ~`229.7k allocs/op`) to replay-only (~`39.3 ms/op`, ~`33.8 MB/op`, ~`206.0k allocs/op`), while the medium cadence case that replays only the last ~`500` records at `total_10500` still wins clearly (~`61.3 ms/op`, ~`34.6 MB/op`, ~`196.2k allocs/op` vs ~`94.5 ms/op`, ~`62.1 MB/op`, ~`361.3k allocs/op`).
 	- the positional-row decode change clearly improved isolated decode and snapshot-directory load benchmarks, but the end-to-end persisted-restart timing is still noisy on the current short benchtime harness and needs repeated confirmation before any closure claim.
 - Current failover/recovery interpretation:
