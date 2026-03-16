@@ -550,12 +550,12 @@ Subline status:
 - Failover recovery is now treated as closed at the subline level: the benchmark suite covers `small_total_40`, `medium_total_640`, and `large_total_4608`, the largest case has a phase split proving where time goes, replay-side cleanup materially reduced apply cost, and persisted segment headers removed WAL reopen/discovery as a meaningful restart cost (~`38–73 µs` on the large case). The current closure decision is that ~`2.1–4.3 ms` end-to-end large-scenario recovery on the benchmark fixture is strong enough to move this slice out of active optimization and focus AB effort on replay throughput, snapshot load, and indexed-read latency.
 
 Latest directional read evidence:
-- `BenchmarkEngineReadIndexedRangeBTree` exercised `btree-order` and repeated at ~`353–361 µs/op`.
-- `BenchmarkEngineReadIndexOnlyOrderBTree` exercised `btree-index-only` and repeated at ~`34 µs/op`.
-- `BenchmarkEngineReadIndexOnlyOrderOffsetBTree` exercised `btree-index-only` and repeated at ~`58–59 µs/op`.
+- `BenchmarkEngineReadIndexedRangeBTree` now benefits from the same bounded btree windowing and repeated at ~`270–273 µs/op`.
+- `BenchmarkEngineReadIndexOnlyOrderBTree` repeated at ~`31–32 µs/op`.
+- `BenchmarkEngineReadIndexOnlyOrderOffsetBTree` repeated at ~`56–57 µs/op`.
 - `BenchmarkEngineReadIndexOnlySelectiveCoveredBTree` now uses a binary-searched bounded scan window on the ordered index path and repeated at ~`35–49 µs/op` instead of the earlier ~`274–275 µs/op`.
-- `BenchmarkEngineReadSelectiveNonCoveredBTree` now benefits from the same bounded scan window on the ordered btree path and repeated at ~`305–353 µs/op` instead of the earlier ~`406–407 µs/op`.
-- `BenchmarkEngineReadCompositeCoveredIndexOnlyBTree` now exercises `btree-index-only` at ~`36 µs/op`.
+- `BenchmarkEngineReadSelectiveNonCoveredBTree` now benefits from the same bounded scan window on the ordered btree path and repeated at ~`304–305 µs/op` instead of the earlier ~`406–407 µs/op`.
+- `BenchmarkEngineReadCompositeCoveredIndexOnlyBTree` now exercises `btree-index-only` at ~`33–34 µs/op`.
 - `BenchmarkEngineReadCompositeNonCoveredBTree` exercises `btree-order` at ~`76–78 µs/op`.
 - `BenchmarkEngineReadEntityRelatedJoinScaling` now shows the indexed related-read path staying in the ~`23–27 µs/op` range at `orders_10000`, while the optimized unindexed path lands around ~`1.8–1.9 ms/op` instead of continuing to pay the earlier broader join-materialization cost.
 - `BenchmarkEngineReadEntityRelatedJoinRightFilterScaling` now keeps the unindexed related-read + right-side filter shape around ~`1.87 ms/op` at `orders_10000`, which is directionally consistent with the new pruning/filtering improvements rather than a fresh regression cliff.

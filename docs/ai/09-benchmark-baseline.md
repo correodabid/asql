@@ -156,9 +156,9 @@ Replay-throughput repeated sample:
 
 Repeated sample on 2026-03-14 using `go test ./internal/engine/executor -run '^$' -bench ... -benchmem -benchtime=200ms -count=3`:
 
-- `BenchmarkEngineReadIndexedRangeBTree-8`: ~`353,070–360,654 ns/op`, `309,272–309,273 B/op`, `656 allocs/op` (`btree-order`)
-- `BenchmarkEngineReadIndexOnlyOrderBTree-8`: ~`34,027–34,369 ns/op`, `233,320–233,321 B/op`, `220 allocs/op` (`btree-index-only`)
-- `BenchmarkEngineReadIndexOnlyOrderOffsetBTree-8`: ~`58,433–58,963 ns/op`, `233,392 B/op`, `222 allocs/op` (`btree-index-only`)
+- `BenchmarkEngineReadIndexedRangeBTree-8`: ~`269,974–272,623 ns/op`, `228,249 B/op`, `656 allocs/op` (`btree-order`)
+- `BenchmarkEngineReadIndexOnlyOrderBTree-8`: ~`31,255–31,704 ns/op`, `152,296 B/op`, `220 allocs/op` (`btree-index-only`)
+- `BenchmarkEngineReadIndexOnlyOrderOffsetBTree-8`: ~`56,048–57,085 ns/op`, `192,432–192,433 B/op`, `222 allocs/op` (`btree-index-only`)
 
 Selective covered-vs-non-covered repeated sample on 2026-03-14:
 
@@ -167,7 +167,7 @@ Selective covered-vs-non-covered repeated sample on 2026-03-14:
 
 Composite-order repeated sample on 2026-03-14:
 
-- `BenchmarkEngineReadCompositeCoveredIndexOnlyBTree-8`: ~`36,164–36,575 ns/op`, `233,632–233,633 B/op`, `226 allocs/op` (`btree-index-only`)
+- `BenchmarkEngineReadCompositeCoveredIndexOnlyBTree-8`: ~`33,641–33,963 ns/op`, `152,608 B/op`, `226 allocs/op` (`btree-index-only`)
 - `BenchmarkEngineReadCompositeNonCoveredBTree-8`: ~`76,383–77,565 ns/op`, `305,872 B/op`, `733 allocs/op` (`btree-order`)
 
 ### Failover / recovery validation (`test/integration`)
