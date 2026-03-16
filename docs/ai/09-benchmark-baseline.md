@@ -54,6 +54,11 @@ Repeated sample on 2026-03-16 using `go test ./internal/engine/executor -run '^$
 - `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `239,629–242,662 ns/op`, `353,609–360,022 B/op`, `1,175–1,177 allocs/op`
 - `BenchmarkEngineReplayFromPersistedSnapshots-8`: `452.1–456.5 ns/op`, `640 B/op`, `8 allocs/op`
 
+Follow-up sample on 2026-03-16 after fast-pathing single-file snapshot directories through direct binary decode:
+
+- `BenchmarkEngineRestartFromPersistedSnapshot-8`: `2,263,819–2,437,330 ns/op`, `767,349–772,868 B/op`, `2,974–2,975 allocs/op`
+- `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `235,134–237,537 ns/op`, `352,351–354,822 B/op`, `1,172 allocs/op`
+
 Scope note on 2026-03-14: the current `BenchmarkEngineRestartFromPersistedSnapshot` fixture calls `WaitPendingSnapshots()` before shutdown, so it benchmarks a head snapshot plus effectively `0` trailing WAL records rather than a snapshot plus a non-zero replay tail.
 
 Restart-tail/cadence spot checks on 2026-03-14 using `-benchtime=1x`:

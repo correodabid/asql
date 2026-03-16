@@ -918,6 +918,13 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 	if len(files) == 0 {
 		return nil, 0, nil
 	}
+	if len(files) == 1 {
+		snapshots, err := loadSnapshotsFile(filepath.Join(snapDir, files[0].name))
+		if err != nil {
+			return nil, 0, fmt.Errorf("%s: %w", files[0].name, err)
+		}
+		return snapshots, maxSeq, nil
+	}
 
 	// Process files in seq order to maintain delta chain integrity.
 	sort.Slice(files, func(i, j int) bool {
@@ -968,6 +975,20 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 
 	return result, maxSeq, nil
 
+}
+
+func loadSnapshotsFile(path string) ([]engineSnapshot, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read snapshot file: %w", err)
+	}
+	if isZstd(data) {
+		data, err = decompressZstd(data)
+		if err != nil {
+			return nil, fmt.Errorf("decompress snapshot file: %w", err)
+		}
+	}
+	return decodeSnapshotsBinary(data)
 }
 
 func loadRawSnapshotEntriesFromDir(snapDir string, files []snapshotDirFile) ([][]rawSnapshotFileEntry, error) {
