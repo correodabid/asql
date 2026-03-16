@@ -31,6 +31,8 @@ type Props = {
 }
 
 export function ExplainTree({ planShape, accessPlan, operation, domain, table }: Props) {
+  const [activePredicate, setActivePredicate] = useState<PredicateFocus | null>(null)
+
   return (
     <div className="explain-tree">
       <div className="explain-header">
@@ -39,13 +41,20 @@ export function ExplainTree({ planShape, accessPlan, operation, domain, table }:
         {domain && <span className="result-meta">{domain}</span>}
         {table && <span className="result-meta">{table}</span>}
       </div>
-      {accessPlan && <AccessPlanSection plan={accessPlan} />}
+      {accessPlan && (
+        <AccessPlanSection
+          plan={accessPlan}
+          activePredicate={activePredicate}
+          onPredicateFocus={setActivePredicate}
+        />
+      )}
       <div className="explain-nodes">
         <PlanNode
           plan={planShape as PlanShape}
           depth={0}
           indexedPredicates={accessPlan?.indexed_predicates ?? []}
           residualPredicate={accessPlan?.residual_predicate}
+          activePredicate={activePredicate}
         />
       </div>
       {accessPlan && <IndexSuggestions plan={accessPlan} operation={operation} />}
@@ -53,7 +62,20 @@ export function ExplainTree({ planShape, accessPlan, operation, domain, table }:
   )
 }
 
-function AccessPlanSection({ plan }: { plan: AccessPlan }) {
+type PredicateFocus = {
+  text: string
+  level: 'index' | 'residual'
+}
+
+function AccessPlanSection({
+  plan,
+  activePredicate,
+  onPredicateFocus,
+}: {
+  plan: AccessPlan
+  activePredicate: PredicateFocus | null
+  onPredicateFocus: (focus: PredicateFocus | null) => void
+}) {
   const [showCandidates, setShowCandidates] = useState(false)
   const [showPruned, setShowPruned] = useState(false)
   const selectivity = plan.table_rows > 0 && plan.estimated_rows !== undefined
@@ -112,7 +134,19 @@ function AccessPlanSection({ plan }: { plan: AccessPlan }) {
           <span className="explain-detail-label">Indexed</span>
           <div className="explain-token-list">
             {plan.indexed_predicates.map((predicate, i) => (
-              <span key={`${predicate}-${i}`} className="explain-token mono">{predicate}</span>
+              <button
+                key={`${predicate}-${i}`}
+                type="button"
+                className={`explain-token mono explain-token-button${
+                  activePredicate?.text === predicate && activePredicate.level === 'index' ? ' active' : ''
+                }`}
+                onMouseEnter={() => onPredicateFocus({ text: predicate, level: 'index' })}
+                onMouseLeave={() => onPredicateFocus(null)}
+                onFocus={() => onPredicateFocus({ text: predicate, level: 'index' })}
+                onBlur={() => onPredicateFocus(null)}
+              >
+                {predicate}
+              </button>
             ))}
           </div>
         </div>
@@ -120,7 +154,18 @@ function AccessPlanSection({ plan }: { plan: AccessPlan }) {
       {plan.residual_predicate && (
         <div className="explain-access-row explain-access-row-wrap">
           <span className="explain-detail-label">Residual</span>
-          <span className="explain-detail-value mono">{plan.residual_predicate}</span>
+          <button
+            type="button"
+            className={`explain-detail-value mono explain-token-button explain-inline-button${
+              activePredicate?.text === plan.residual_predicate && activePredicate.level === 'residual' ? ' active' : ''
+            }`}
+            onMouseEnter={() => onPredicateFocus({ text: plan.residual_predicate!, level: 'residual' })}
+            onMouseLeave={() => onPredicateFocus(null)}
+            onFocus={() => onPredicateFocus({ text: plan.residual_predicate!, level: 'residual' })}
+            onBlur={() => onPredicateFocus(null)}
+          >
+            {plan.residual_predicate}
+          </button>
         </div>
       )}
       {plan.candidates && plan.candidates.length > 0 && (
@@ -437,11 +482,13 @@ function PlanNode({
   depth,
   indexedPredicates,
   residualPredicate,
+  activePredicate,
 }: {
   plan: PlanShape
   depth: number
   indexedPredicates: string[]
   residualPredicate?: string
+  activePredicate: PredicateFocus | null
 }) {
   const [expanded, setExpanded] = useState(true)
   const hasDetails = !!(
@@ -462,10 +509,10 @@ function PlanNode({
   const opClass = operationClass(plan.operation)
   const filterValue = plan.filter ? formatPredicate(plan.filter) : null
   const filterHighlights = filterValue ? classifyPredicateHighlights(filterValue, indexedPredicates, residualPredicate) : []
-  const filterTerms = filterValue ? buildPredicateHighlightTerms(filterValue, indexedPredicates, residualPredicate) : []
+  const filterTerms = filterValue ? buildPredicateHighlightTerms(filterValue, indexedPredicates, residualPredicate, activePredicate) : []
   const havingValue = plan.having ? formatPredicate(plan.having) : null
   const havingHighlights = havingValue ? classifyPredicateHighlights(havingValue, indexedPredicates, residualPredicate) : []
-  const havingTerms = havingValue ? buildPredicateHighlightTerms(havingValue, indexedPredicates, residualPredicate) : []
+  const havingTerms = havingValue ? buildPredicateHighlightTerms(havingValue, indexedPredicates, residualPredicate, activePredicate) : []
 
   return (
     <div className="explain-node" style={{ marginLeft: depth * 20 }}>
@@ -543,6 +590,7 @@ type DetailHighlight = {
 type PredicateHighlightTerm = {
   text: string
   level: 'index' | 'residual'
+  active?: boolean
 }
 
 function DetailRow({
@@ -601,17 +649,26 @@ function buildPredicateHighlightTerms(
   predicateText: string,
   indexedPredicates: string[],
   residualPredicate?: string,
+  activePredicate?: PredicateFocus | null,
 ): PredicateHighlightTerm[] {
   const terms: PredicateHighlightTerm[] = []
 
   for (const predicate of indexedPredicates) {
     if (predicate && predicateText.includes(predicate)) {
-      terms.push({ text: predicate, level: 'index' })
+      terms.push({
+        text: predicate,
+        level: 'index',
+        active: activePredicate?.text === predicate && activePredicate.level === 'index',
+      })
     }
   }
 
   if (residualPredicate && predicateText.includes(residualPredicate)) {
-    terms.push({ text: residualPredicate, level: 'residual' })
+    terms.push({
+      text: residualPredicate,
+      level: 'residual',
+      active: activePredicate?.text === residualPredicate && activePredicate.level === 'residual',
+    })
   }
 
   terms.sort((a, b) => b.text.length - a.text.length)
@@ -638,7 +695,10 @@ function renderHighlightedPredicate(value: string, terms: PredicateHighlightTerm
       parts.push(value.slice(cursor, match.start))
     }
     parts.push(
-      <span key={`${match.start}-${match.end}-${index}`} className={`explain-inline-highlight ${match.level}`}>
+      <span
+        key={`${match.start}-${match.end}-${index}`}
+        className={`explain-inline-highlight ${match.level}${match.active ? ' active' : ''}`}
+      >
         {value.slice(match.start, match.end)}
       </span>,
     )
@@ -651,7 +711,7 @@ function renderHighlightedPredicate(value: string, terms: PredicateHighlightTerm
 }
 
 function collectPredicateMatches(value: string, terms: PredicateHighlightTerm[]) {
-  const matches: Array<{ start: number; end: number; level: 'index' | 'residual' }> = []
+  const matches: Array<{ start: number; end: number; level: 'index' | 'residual'; active?: boolean }> = []
 
   for (const term of terms) {
     let fromIndex = 0
@@ -661,7 +721,7 @@ function collectPredicateMatches(value: string, terms: PredicateHighlightTerm[])
       const end = start + term.text.length
       const overlaps = matches.some((match) => start < match.end && end > match.start)
       if (!overlaps) {
-        matches.push({ start, end, level: term.level })
+        matches.push({ start, end, level: term.level, active: term.active })
       }
       fromIndex = end
     }

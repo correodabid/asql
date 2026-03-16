@@ -3555,6 +3555,49 @@ select.editor-input {
   flex-wrap: wrap;
 }
 
+.toolbar-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-main);
+  color: var(--text-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: all var(--transition);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.toolbar-check:hover {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--text-primary);
+}
+
+.toolbar-check.active {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-main));
+  color: var(--text-primary);
+}
+
+.toolbar-check input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.toolbar-check input:disabled {
+  cursor: not-allowed;
+}
+
+.toolbar-check:has(input:disabled) {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 /* Workspace Editor — Syntax-Highlighted SQL Editor */
 .sql-editor-container {
   position: relative;
@@ -6207,6 +6250,10 @@ select.editor-input {
   color: #fb923c;
 }
 
+.explain-inline-highlight.active {
+  box-shadow: 0 0 0 1px currentColor;
+}
+
 .explain-detail-highlights {
   display: inline-flex;
   flex-wrap: wrap;
@@ -6364,6 +6411,28 @@ select.editor-input {
   background: rgba(96, 165, 250, 0.08);
   border: 1px solid rgba(96, 165, 250, 0.18);
   color: var(--text-primary);
+}
+
+.explain-token-button {
+  cursor: pointer;
+  font: inherit;
+}
+
+.explain-inline-button,
+.explain-token-button {
+  appearance: none;
+  background: transparent;
+}
+
+.explain-token-button.active {
+  border-color: rgba(96, 165, 250, 0.45);
+  box-shadow: 0 0 0 1px rgba(96, 165, 250, 0.25);
+}
+
+.explain-inline-button {
+  padding: 0;
+  border: 0;
+  text-align: left;
 }
 
 .explain-candidate-card,

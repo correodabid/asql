@@ -111,8 +111,10 @@ export function Workspace({ domain }: Props) {
         <WorkspaceToolbar
           loading={tab.loading}
           sql={tab.sql}
+          explainEnabled={tab.explainEnabled}
           txState={workspace.txState}
           onRun={() => workspace.executeTab(tab.id)}
+          onToggleExplain={(enabled) => workspace.setTabExplainEnabled(tab.id, enabled)}
           onFormat={() => workspace.setTabSql(tab.id, formatSQL(tab.sql))}
           onBegin={workspace.beginTransaction}
           onCommit={workspace.commitTransaction}

@@ -4,9 +4,11 @@ import { IconCheck, IconCode, IconFormat, IconHistory, IconKey, IconLayers, Icon
 type Props = {
   loading: boolean
   sql: string
+  explainEnabled: boolean
   txState: TxState | null
   showHistory: boolean
   onRun: () => void
+  onToggleExplain: (enabled: boolean) => void
   onFormat: () => void
   onBegin: () => void
   onCommit: () => void
@@ -20,9 +22,11 @@ type Props = {
 export function WorkspaceToolbar({
   loading,
   sql,
+  explainEnabled,
   txState,
   showHistory,
   onRun,
+  onToggleExplain,
   onFormat,
   onBegin,
   onCommit,
@@ -43,6 +47,18 @@ export function WorkspaceToolbar({
         >
           <IconPlay /> Run
         </button>
+        <label
+          className={`toolbar-check ${explainEnabled ? 'active' : ''}`}
+          title="Run this tab through EXPLAIN without changing the SQL text"
+        >
+          <input
+            type="checkbox"
+            checked={explainEnabled}
+            onChange={(event) => onToggleExplain(event.target.checked)}
+            disabled={loading}
+          />
+          <span>EXPLAIN</span>
+        </label>
         <button
           className="toolbar-btn"
           onClick={onFormat}

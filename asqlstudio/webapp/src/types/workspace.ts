@@ -2,6 +2,7 @@ export type WorkspaceTab = {
   id: string
   label: string
   sql: string
+  explainEnabled: boolean
   result: QueryResult | null
   results: QueryResult[]
   error: string | null

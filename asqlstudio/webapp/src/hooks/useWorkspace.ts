@@ -42,6 +42,7 @@ function createTab(label?: string): WorkspaceTab {
     id,
     label: label || `Query ${tabCounter - 1}`,
     sql: '',
+    explainEnabled: false,
     result: null,
     results: [],
     error: null,
@@ -106,6 +107,13 @@ export function useWorkspace(domain: string) {
     [updateTab],
   )
 
+  const setTabExplainEnabled = useCallback(
+    (id: string, explainEnabled: boolean) => {
+      updateTab(id, { explainEnabled })
+    },
+    [updateTab],
+  )
+
   const setSelectedRow = useCallback(
     (tabId: string, rowIndex: number | null) => {
       updateTab(tabId, { selectedRow: rowIndex })
@@ -150,10 +158,37 @@ export function useWorkspace(domain: string) {
     }
   }, [])
 
+  const validateExplainStatement = useCallback(
+    (sql: string): string | null => {
+      if (timeTravelMode && timeTravelLSN > 0) {
+        return 'EXPLAIN mode is unavailable during time travel.'
+      }
+
+      const normalized = sql.replace(/^[\s;]+/, '').toUpperCase()
+      if (normalized.startsWith('IMPORT')) {
+        return 'EXPLAIN mode does not support IMPORT statements.'
+      }
+      if (isForHistoryQuery(sql)) {
+        return 'EXPLAIN mode does not support FOR HISTORY queries.'
+      }
+      if (!isReadQuery(sql)) {
+        return 'EXPLAIN mode only supports read queries.'
+      }
+      return null
+    },
+    [timeTravelLSN, timeTravelMode],
+  )
+
   // ─── Query execution ──────────────────────────────────
 
   const executeSingleStatement = useCallback(
-    async (sql: string, start: number): Promise<{ result: QueryResult; explain: ExplainPlan | null }> => {
+    async (
+      sql: string,
+      start: number,
+      options?: { explainMode?: boolean },
+    ): Promise<{ result: QueryResult; explain: ExplainPlan | null }> => {
+      const explainMode = options?.explainMode === true
+
       // Time-travel mode
       if (timeTravelMode && timeTravelLSN > 0) {
         const response = await api<{
@@ -176,6 +211,13 @@ export function useWorkspace(domain: string) {
 
       // READ queries
       if (isReadQuery(sql)) {
+        if (explainMode) {
+          const explainError = validateExplainStatement(sql)
+          if (explainError) {
+            throw new Error(explainError)
+          }
+        }
+
         // FOR HISTORY
         if (isForHistoryQuery(sql)) {
           const response = await api<{ status: string; rows?: Record<string, unknown>[] }>(
@@ -191,9 +233,12 @@ export function useWorkspace(domain: string) {
         }
 
         // EXPLAIN
-        if (isExplainQuery(sql)) {
+        if (explainMode || isExplainQuery(sql)) {
+          const explainSQL = explainMode && !isExplainQuery(sql)
+            ? `EXPLAIN ${sql.trim().replace(/;\s*$/, '')}`
+            : sql
           const response = await api<{ status: string; rows?: Record<string, unknown>[] }>(
-            '/api/explain', 'POST', { sql, domains: [domain] },
+            '/api/explain', 'POST', { sql: explainSQL, domains: [domain] },
           )
           const dur = performance.now() - start
           const rows = response.rows || []
@@ -236,6 +281,10 @@ export function useWorkspace(domain: string) {
         }
       }
 
+      if (explainMode) {
+        throw new Error('EXPLAIN mode only supports read queries.')
+      }
+
       // WRITE queries
       if (txState) {
         const response = await api<{ status: string; rows_affected?: number }>(
@@ -264,7 +313,7 @@ export function useWorkspace(domain: string) {
         throw execError
       }
     },
-    [domain, txState, timeTravelMode, timeTravelLSN],
+    [domain, txState, timeTravelMode, timeTravelLSN, validateExplainStatement],
   )
 
   const executeTab = useCallback(
@@ -292,9 +341,20 @@ export function useWorkspace(domain: string) {
         }
         if (importBuffer) stmts.push(importBuffer.trim())
 
+        if (tab.explainEnabled) {
+          const explainError = stmts
+            .map((stmt) => validateExplainStatement(stmt))
+            .find((msg): msg is string => Boolean(msg))
+          if (explainError) {
+            throw new Error(explainError)
+          }
+        }
+
         if (stmts.length <= 1) {
           // Single statement — existing behavior
-          const { result, explain } = await executeSingleStatement(trimmed, startRef.current)
+          const { result, explain } = await executeSingleStatement(trimmed, startRef.current, {
+            explainMode: tab.explainEnabled,
+          })
           updateTab(id, { loading: false, result, results: [result], explainPlan: explain })
           pushHistory({ sql: trimmed, ts: Date.now(), ok: true, duration: result.duration, rowCount: result.rowCount })
           return
@@ -308,7 +368,9 @@ export function useWorkspace(domain: string) {
           const sql = stmt.trim()
           if (!sql) continue
           const stmtStart = performance.now()
-          const { result, explain } = await executeSingleStatement(sql + ';', stmtStart)
+          const { result, explain } = await executeSingleStatement(sql + ';', stmtStart, {
+            explainMode: tab.explainEnabled,
+          })
           allResults.push(result)
           if (explain) lastExplain = explain
         }
@@ -329,7 +391,7 @@ export function useWorkspace(domain: string) {
         pushHistory({ sql: trimmed, ts: Date.now(), ok: false, duration: dur, rowCount: 0 })
       }
     },
-    [tabs, executeSingleStatement, pushHistory, updateTab],
+    [tabs, executeSingleStatement, pushHistory, updateTab, validateExplainStatement],
   )
 
   // ─── Table browsing shortcut ──────────────────────────
@@ -454,6 +516,7 @@ export function useWorkspace(domain: string) {
     addTab,
     closeTab,
     setTabSql,
+    setTabExplainEnabled,
     executeTab,
     updateTab,
     selectTableIntoTab,
