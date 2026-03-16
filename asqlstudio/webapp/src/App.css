@@ -6171,6 +6171,7 @@ select.editor-input {
 .explain-detail-row {
   display: flex;
   align-items: baseline;
+  flex-wrap: wrap;
   gap: 10px;
   padding: 3px 0;
   font-size: 12px;
@@ -6187,6 +6188,41 @@ select.editor-input {
 .explain-detail-value {
   color: var(--text-primary);
   word-break: break-all;
+}
+
+.explain-detail-highlights {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.explain-detail-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.explain-detail-chip.index {
+  background: rgba(52, 211, 153, 0.12);
+  border: 1px solid rgba(52, 211, 153, 0.22);
+  color: #34d399;
+}
+
+.explain-detail-chip.residual {
+  background: rgba(251, 146, 60, 0.12);
+  border: 1px solid rgba(251, 146, 60, 0.22);
+  color: #fb923c;
+}
+
+.explain-detail-chip.mixed {
+  background: rgba(96, 165, 250, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.22);
+  color: #60a5fa;
 }
 
 /* ── Access Plan (EXPLAIN runtime info) ──────────────────── */

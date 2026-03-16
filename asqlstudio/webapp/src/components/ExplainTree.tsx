@@ -41,7 +41,12 @@ export function ExplainTree({ planShape, accessPlan, operation, domain, table }:
       </div>
       {accessPlan && <AccessPlanSection plan={accessPlan} />}
       <div className="explain-nodes">
-        <PlanNode plan={planShape as PlanShape} depth={0} />
+        <PlanNode
+          plan={planShape as PlanShape}
+          depth={0}
+          indexedPredicates={accessPlan?.indexed_predicates ?? []}
+          residualPredicate={accessPlan?.residual_predicate}
+        />
       </div>
       {accessPlan && <IndexSuggestions plan={accessPlan} operation={operation} />}
     </div>
@@ -427,7 +432,17 @@ function strategyClass(strategy: string): string {
   return ''
 }
 
-function PlanNode({ plan, depth }: { plan: PlanShape; depth: number }) {
+function PlanNode({
+  plan,
+  depth,
+  indexedPredicates,
+  residualPredicate,
+}: {
+  plan: PlanShape
+  depth: number
+  indexedPredicates: string[]
+  residualPredicate?: string
+}) {
   const [expanded, setExpanded] = useState(true)
   const hasDetails = !!(
     plan.filter ||
@@ -445,6 +460,10 @@ function PlanNode({ plan, depth }: { plan: PlanShape; depth: number }) {
 
   const opLabel = formatOperation(plan.operation)
   const opClass = operationClass(plan.operation)
+  const filterValue = plan.filter ? formatPredicate(plan.filter) : null
+  const filterHighlights = filterValue ? classifyPredicateHighlights(filterValue, indexedPredicates, residualPredicate) : []
+  const havingValue = plan.having ? formatPredicate(plan.having) : null
+  const havingHighlights = havingValue ? classifyPredicateHighlights(havingValue, indexedPredicates, residualPredicate) : []
 
   return (
     <div className="explain-node" style={{ marginLeft: depth * 20 }}>
@@ -465,7 +484,7 @@ function PlanNode({ plan, depth }: { plan: PlanShape; depth: number }) {
       {expanded && hasDetails && (
         <div className="explain-node-detail">
           {plan.filter && (
-            <DetailRow label="Filter" value={formatPredicate(plan.filter)} />
+            <DetailRow label="Filter" value={filterValue ?? ''} highlights={filterHighlights} />
           )}
           {plan.join && (
             <DetailRow label="Join" value={formatJoin(plan.join)} />
@@ -474,7 +493,7 @@ function PlanNode({ plan, depth }: { plan: PlanShape; depth: number }) {
             <DetailRow label="Group By" value={plan.group_by.join(', ')} />
           )}
           {plan.having && (
-            <DetailRow label="Having" value={formatPredicate(plan.having)} />
+            <DetailRow label="Having" value={havingValue ?? ''} highlights={havingHighlights} />
           )}
           {plan.order_by && plan.order_by.length > 0 && (
             <DetailRow label="Order By" value={plan.order_by.map((o) => `${o.column} ${o.direction || 'ASC'}`).join(', ')} />
@@ -514,13 +533,49 @@ function PlanNode({ plan, depth }: { plan: PlanShape; depth: number }) {
   )
 }
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+type DetailHighlight = {
+  label: string
+  level: 'index' | 'residual' | 'mixed'
+}
+
+function DetailRow({ label, value, highlights = [] }: { label: string; value: string; highlights?: DetailHighlight[] }) {
   return (
     <div className="explain-detail-row">
       <span className="explain-detail-label">{label}</span>
       <span className="explain-detail-value mono">{value}</span>
+      {highlights.length > 0 && (
+        <span className="explain-detail-highlights">
+          {highlights.map((highlight) => (
+            <span key={`${label}-${highlight.label}`} className={`explain-detail-chip ${highlight.level}`}>
+              {highlight.label}
+            </span>
+          ))}
+        </span>
+      )}
     </div>
   )
+}
+
+function classifyPredicateHighlights(
+  predicateText: string,
+  indexedPredicates: string[],
+  residualPredicate?: string,
+): DetailHighlight[] {
+  const hasExactIndexed = indexedPredicates.includes(predicateText)
+  const hasContainedIndexed = indexedPredicates.some((predicate) => predicateText.includes(predicate))
+  const hasExactResidual = residualPredicate === predicateText
+  const hasContainedResidual = !!residualPredicate && predicateText.includes(residualPredicate)
+
+  if ((hasExactIndexed || hasContainedIndexed) && (hasExactResidual || hasContainedResidual)) {
+    return [{ label: 'indexed + residual', level: 'mixed' }]
+  }
+  if (hasExactIndexed || hasContainedIndexed) {
+    return [{ label: 'indexed', level: 'index' }]
+  }
+  if (hasExactResidual || hasContainedResidual) {
+    return [{ label: 'residual', level: 'residual' }]
+  }
+  return []
 }
 
 function formatOperation(op: string): string {
