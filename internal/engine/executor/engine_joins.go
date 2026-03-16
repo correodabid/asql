@@ -230,9 +230,39 @@ func bestBaseJoinPredicate(predicate *ast.Predicate, aliasMap map[string]string,
 	case "AND":
 		left := bestBaseJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
 		right := bestBaseJoinPredicate(predicate.Right, aliasMap, baseTableName, basePrefix, baseTable)
-		return preferredBaseJoinPredicate(baseTable, left, right)
-	case "OR", "NOT":
-		return nil
+		switch {
+		case left == nil:
+			return right
+		case right == nil:
+			return left
+		default:
+			candidate := &ast.Predicate{Operator: "AND", Left: left, Right: right}
+			if chooseSingleTableScanStrategy(baseTable, candidate, nil) == scanStrategyFullScan {
+				return preferredBaseJoinPredicate(baseTable, left, right)
+			}
+			return candidate
+		}
+	case "OR":
+		left := bestBaseJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
+		right := bestBaseJoinPredicate(predicate.Right, aliasMap, baseTableName, basePrefix, baseTable)
+		if left == nil || right == nil {
+			return nil
+		}
+		candidate := &ast.Predicate{Operator: "OR", Left: left, Right: right}
+		if chooseSingleTableScanStrategy(baseTable, candidate, nil) == scanStrategyFullScan {
+			return nil
+		}
+		return candidate
+	case "NOT":
+		child := bestBaseJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
+		if child == nil {
+			return nil
+		}
+		candidate := &ast.Predicate{Operator: "NOT", Left: child}
+		if chooseSingleTableScanStrategy(baseTable, candidate, nil) == scanStrategyFullScan {
+			return nil
+		}
+		return candidate
 	}
 
 	if !isSimplePredicate(predicate) {
@@ -308,8 +338,19 @@ func conjunctiveRootJoinPredicate(predicate *ast.Predicate, aliasMap map[string]
 		default:
 			return &ast.Predicate{Operator: "AND", Left: left, Right: right}
 		}
-	case "OR", "NOT":
-		return nil
+	case "OR":
+		left := conjunctiveRootJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
+		right := conjunctiveRootJoinPredicate(predicate.Right, aliasMap, baseTableName, basePrefix, baseTable)
+		if left == nil || right == nil {
+			return nil
+		}
+		return &ast.Predicate{Operator: "OR", Left: left, Right: right}
+	case "NOT":
+		child := conjunctiveRootJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
+		if child == nil {
+			return nil
+		}
+		return &ast.Predicate{Operator: "NOT", Left: child}
 	}
 
 	if !isSimplePredicate(predicate) {
@@ -354,8 +395,10 @@ func matchTablePredicateOnRow(table *tableState, row []ast.Literal, predicate *a
 	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
 	case "AND":
 		return matchTablePredicateOnRow(table, row, predicate.Left) && matchTablePredicateOnRow(table, row, predicate.Right)
-	case "OR", "NOT":
-		return false
+	case "OR":
+		return matchTablePredicateOnRow(table, row, predicate.Left) || matchTablePredicateOnRow(table, row, predicate.Right)
+	case "NOT":
+		return !matchTablePredicateOnRow(table, row, predicate.Left)
 	}
 
 	colPos, ok := table.columnIndex[predicate.Column]

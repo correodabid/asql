@@ -2974,6 +2974,104 @@ func TestExplainUpdateDeleteUseIndexForConjunctivePredicate(t *testing.T) {
 	}
 }
 
+func TestChooseSingleTableScanStrategyUsesIndexUnionForOR(t *testing.T) {
+	buckets := map[string][]int{"s:comp-010": {0}, "s:comp-011": {1}}
+	rows := make([][]ast.Literal, 100)
+
+	table := &tableState{
+		rows: rows,
+		indexes: map[string]*indexState{
+			"idx_components_id_hash": {name: "idx_components_id_hash", column: "id", kind: "hash", buckets: buckets},
+		},
+		indexedColumns: map[string]string{"id": "idx_components_id_hash"},
+	}
+
+	predicate := &ast.Predicate{
+		Operator: "OR",
+		Left: &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "comp-010"}},
+		Right: &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "comp-011"}},
+	}
+
+	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
+	if strategy != scanStrategyIndexUnion {
+		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyIndexUnion)
+	}
+}
+
+func TestChooseSingleTableScanStrategyUsesIndexNotForNOT(t *testing.T) {
+	buckets := map[string][]int{"s:common": {0, 1, 2, 3, 4, 5, 6, 7, 8}}
+	rows := make([][]ast.Literal, 10)
+
+	table := &tableState{
+		rows: rows,
+		indexes: map[string]*indexState{
+			"idx_components_status_hash": {name: "idx_components_status_hash", column: "status", kind: "hash", buckets: buckets},
+		},
+		indexedColumns: map[string]string{"status": "idx_components_status_hash"},
+	}
+
+	predicate := &ast.Predicate{
+		Operator: "NOT",
+		Left:     &ast.Predicate{Column: "status", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "common"}},
+	}
+
+	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
+	if strategy != scanStrategyIndexNot {
+		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyIndexNot)
+	}
+}
+
+func TestExplainAccessPlanUsesIndexForORAndNOT(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "explain-or-not-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id TEXT PRIMARY KEY, status TEXT, sequence_no INT, name TEXT)")
+	mustExec("CREATE INDEX idx_block_components_status_hash ON block_components (status) USING HASH")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-009', 9, 'A')")
+	mustExec("UPDATE block_components SET status = 'common' WHERE id = 'comp-009'")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-010', 'common', 11, 'B')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-011', 'rare', 12, 'C')")
+	mustExec("COMMIT")
+
+	orExplain, err := engine.Explain("SELECT * FROM block_components WHERE id = 'comp-010' OR id = 'comp-011'", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain OR predicate: %v", err)
+	}
+	orPlan := orExplain.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(orPlan, `"strategy":"index-union"`) {
+		t.Fatalf("expected index-union strategy, got: %s", orPlan)
+	}
+
+	notExplain, err := engine.Explain("SELECT * FROM block_components WHERE NOT status = 'common'", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain NOT predicate: %v", err)
+	}
+	notPlan := notExplain.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(notPlan, `"strategy":"index-not"`) {
+		t.Fatalf("expected index-not strategy, got: %s", notPlan)
+	}
+}
+
 func TestBaseJoinPredicateUsesQualifiedRootAlias(t *testing.T) {
 	plan := planner.Plan{
 		TableName:  "orders",
@@ -3020,6 +3118,67 @@ func TestBaseJoinPredicateRejectsJoinedTableFilter(t *testing.T) {
 
 	if predicate := baseJoinPredicate(plan, aliasMap, baseTable); predicate != nil {
 		t.Fatalf("expected nil base join predicate, got %+v", predicate)
+	}
+}
+
+func TestBaseJoinPredicatePreservesIndexedOR(t *testing.T) {
+	plan := planner.Plan{
+		TableName:  "orders",
+		TableAlias: "o",
+		Joins:      []ast.JoinClause{{TableName: "order_lines", Alias: "l"}},
+		Filter: &ast.Predicate{
+			Operator: "OR",
+			Left:     &ast.Predicate{Column: "o.id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralNumber, NumberValue: 41}},
+			Right:    &ast.Predicate{Column: "o.id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralNumber, NumberValue: 42}},
+		},
+	}
+	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	baseTable := &tableState{
+		columns: []string{"id", "status"},
+		indexes: map[string]*indexState{
+			"idx_orders_id_hash": {name: "idx_orders_id_hash", column: "id", kind: "hash", buckets: map[string][]int{"n:41": {0}, "n:42": {1}}},
+		},
+		indexedColumns: map[string]string{"id": "idx_orders_id_hash"},
+		rows:           make([][]ast.Literal, 10),
+	}
+
+	predicate := baseJoinPredicate(plan, aliasMap, baseTable)
+	if predicate == nil {
+		t.Fatal("expected base join OR predicate")
+	}
+	if predicate.Operator != "OR" {
+		t.Fatalf("unexpected predicate operator: got %q want %q", predicate.Operator, "OR")
+	}
+	if chooseSingleTableScanStrategy(baseTable, predicate, nil) != scanStrategyIndexUnion {
+		t.Fatalf("expected index-union strategy for join OR predicate")
+	}
+}
+
+func TestMatchTablePredicateOnRowSupportsORAndNOT(t *testing.T) {
+	table := &tableState{
+		columns:     []string{"id", "status"},
+		columnIndex: map[string]int{"id": 0, "status": 1},
+	}
+	row := []ast.Literal{
+		{Kind: ast.LiteralNumber, NumberValue: 42},
+		{Kind: ast.LiteralString, StringValue: "ready"},
+	}
+
+	orPredicate := &ast.Predicate{
+		Operator: "OR",
+		Left:     &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralNumber, NumberValue: 42}},
+		Right:    &ast.Predicate{Column: "status", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "blocked"}},
+	}
+	if !matchTablePredicateOnRow(table, row, orPredicate) {
+		t.Fatal("expected OR predicate to match row")
+	}
+
+	notPredicate := &ast.Predicate{
+		Operator: "NOT",
+		Left:     &ast.Predicate{Column: "status", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "blocked"}},
+	}
+	if !matchTablePredicateOnRow(table, row, notPredicate) {
+		t.Fatal("expected NOT predicate to match row")
 	}
 }
 
@@ -3119,7 +3278,7 @@ func TestRootJoinPredicateKeepsRootConjunctsOnly(t *testing.T) {
 	}
 }
 
-func TestRootJoinPredicateRejectsOrTree(t *testing.T) {
+func TestRootJoinPredicatePreservesOrTree(t *testing.T) {
 	plan := planner.Plan{
 		TableName:  "orders",
 		TableAlias: "o",
@@ -3141,8 +3300,12 @@ func TestRootJoinPredicateRejectsOrTree(t *testing.T) {
 	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
 	baseTable := &tableState{columns: []string{"id", "status"}}
 
-	if predicate := rootJoinPredicate(plan, aliasMap, baseTable); predicate != nil {
-		t.Fatalf("expected nil root join predicate for OR tree, got %+v", predicate)
+	predicate := rootJoinPredicate(plan, aliasMap, baseTable)
+	if predicate == nil {
+		t.Fatal("expected root join predicate for OR tree")
+	}
+	if predicate.Operator != "OR" {
+		t.Fatalf("unexpected root join predicate operator: got %q want %q", predicate.Operator, "OR")
 	}
 }
 

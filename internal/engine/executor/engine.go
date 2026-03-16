@@ -113,6 +113,8 @@ func adaptiveReplayHashOverlayMaxDepth(baseSize int) int {
 const (
 	scanStrategyFullScan    scanStrategy = "full-scan"
 	scanStrategyHashLookup  scanStrategy = "hash"
+	scanStrategyIndexUnion  scanStrategy = "index-union"
+	scanStrategyIndexNot    scanStrategy = "index-not"
 	scanStrategyBTreeLookup scanStrategy = "btree-lookup"
 	scanStrategyBTreeOrder  scanStrategy = "btree-order"
 	scanStrategyBTreePrefix scanStrategy = "btree-prefix"

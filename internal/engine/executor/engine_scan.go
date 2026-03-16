@@ -37,6 +37,9 @@ const (
 	// scanPriorityHashLookup is the tiebreaker priority for hash index lookups.
 	scanPriorityHashLookup = 10
 
+	// scanPriorityIndexUnion is the tiebreaker priority for index-union scans.
+	scanPriorityIndexUnion = 12
+
 	// scanPriorityBTreeLookup is the tiebreaker priority for btree equality lookups.
 	scanPriorityBTreeLookup = 15
 
@@ -45,6 +48,9 @@ const (
 
 	// scanPriorityBTreePrefix is the tiebreaker priority for btree prefix scans.
 	scanPriorityBTreePrefix = 30
+
+	// scanPriorityIndexNot is the tiebreaker priority for index-backed NOT scans.
+	scanPriorityIndexNot = 35
 )
 
 func chooseSingleTableScanStrategy(table *tableState, predicate *ast.Predicate, orderBy []ast.OrderByClause) scanStrategy {
@@ -60,6 +66,9 @@ func chooseSingleTableScanStrategy(table *tableState, predicate *ast.Predicate, 
 	candidates := make([]scanCostEstimate, 0, 4)
 	candidates = append(candidates, estimateFullScanCost(totalRows, orderBy))
 	predicateCandidates := collectIndexablePredicates(predicate)
+	if estimate, ok := estimateCompoundIndexLookupCost(table, predicate, totalRows, len(orderBy) > 0); ok {
+		candidates = append(candidates, estimate)
+	}
 
 	if len(orderBy) == 1 {
 		if index, ok := indexForColumn(table, orderBy[0].Column); ok && index.kind == "btree" {
@@ -100,9 +109,11 @@ func supportsIndexSelection(predicate *ast.Predicate) bool {
 
 	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
 	case "AND":
+		return supportsIndexSelection(predicate.Left) || supportsIndexSelection(predicate.Right)
+	case "OR":
 		return supportsIndexSelection(predicate.Left) && supportsIndexSelection(predicate.Right)
-	case "OR", "NOT":
-		return false
+	case "NOT":
+		return supportsIndexSelection(predicate.Left)
 	default:
 		return isSimplePredicate(predicate)
 	}
@@ -192,22 +203,159 @@ func bestLookupPredicate(table *tableState, predicate *ast.Predicate, hasOrderBy
 }
 
 func candidateRowIDsForPredicate(table *tableState, predicate *ast.Predicate, hasOrderBy bool) ([]int, *ast.Predicate, scanStrategy, bool) {
-	lookupPredicate, strategy, ok := bestLookupPredicate(table, predicate, hasOrderBy)
-	if !ok {
+	if table == nil || predicate == nil {
 		return nil, nil, scanStrategyFullScan, false
 	}
 
-	index, ok := indexForColumn(table, lookupPredicate.Column)
-	if !ok {
-		return nil, nil, scanStrategyFullScan, false
+	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
+	case "AND":
+		leftIDs, leftPredicate, leftStrategy, leftOK := candidateRowIDsForPredicate(table, predicate.Left, hasOrderBy)
+		rightIDs, rightPredicate, rightStrategy, rightOK := candidateRowIDsForPredicate(table, predicate.Right, hasOrderBy)
+		switch {
+		case leftOK && rightOK:
+			intersected := intersectRowIDs(leftIDs, rightIDs)
+			if len(leftIDs) <= len(rightIDs) {
+				return intersected, leftPredicate, leftStrategy, true
+			}
+			return intersected, rightPredicate, rightStrategy, true
+		case leftOK:
+			return leftIDs, leftPredicate, leftStrategy, true
+		case rightOK:
+			return rightIDs, rightPredicate, rightStrategy, true
+		default:
+			return nil, nil, scanStrategyFullScan, false
+		}
+	case "OR":
+		leftIDs, _, _, leftOK := candidateRowIDsForPredicate(table, predicate.Left, hasOrderBy)
+		rightIDs, _, _, rightOK := candidateRowIDsForPredicate(table, predicate.Right, hasOrderBy)
+		if !leftOK || !rightOK {
+			return nil, nil, scanStrategyFullScan, false
+		}
+		return unionRowIDs(leftIDs, rightIDs), nil, scanStrategyIndexUnion, true
+	case "NOT":
+		childIDs, _, _, childOK := candidateRowIDsForPredicate(table, predicate.Left, hasOrderBy)
+		if !childOK {
+			return nil, nil, scanStrategyFullScan, false
+		}
+		return complementRowIDs(len(table.rows), childIDs), nil, scanStrategyIndexNot, true
+	default:
+		lookupPredicate, strategy, ok := bestLookupPredicate(table, predicate, hasOrderBy)
+		if !ok {
+			return nil, nil, scanStrategyFullScan, false
+		}
+
+		index, ok := indexForColumn(table, lookupPredicate.Column)
+		if !ok {
+			return nil, nil, scanStrategyFullScan, false
+		}
+
+		rowIDs := rowIDsForPredicate(index, lookupPredicate)
+		if len(rowIDs) == 0 {
+			return nil, lookupPredicate, strategy, true
+		}
+
+		return rowIDs, lookupPredicate, strategy, true
+	}
+}
+
+func estimateCompoundIndexLookupCost(table *tableState, predicate *ast.Predicate, totalRows int, hasOrderBy bool) (scanCostEstimate, bool) {
+	rowIDs, _, strategy, ok := candidateRowIDsForPredicate(table, predicate, hasOrderBy)
+	if !ok || (strategy != scanStrategyIndexUnion && strategy != scanStrategyIndexNot) {
+		return scanCostEstimate{}, false
 	}
 
-	rowIDs := rowIDsForPredicate(index, lookupPredicate)
-	if len(rowIDs) == 0 {
-		return nil, lookupPredicate, strategy, true
+	estimatedRows := len(rowIDs)
+	cost := estimatedRows
+	if hasOrderBy {
+		cost += estimatedRows / sortCostFactor
 	}
+	if totalRows > 0 && estimatedRows*100 >= totalRows*btreeHighSelectivityThreshold {
+		cost += totalRows / btreeOverheadDivisor
+	}
+	priority := scanPriorityIndexUnion
+	if strategy == scanStrategyIndexNot {
+		priority = scanPriorityIndexNot
+	}
+	return scanCostEstimate{strategy: strategy, cost: cost, priority: priority}, true
+}
 
-	return rowIDs, lookupPredicate, strategy, true
+func unionRowIDs(left []int, right []int) []int {
+	if len(left) == 0 {
+		return append([]int(nil), right...)
+	}
+	if len(right) == 0 {
+		return append([]int(nil), left...)
+	}
+	seen := make(map[int]struct{}, len(left)+len(right))
+	merged := make([]int, 0, len(left)+len(right))
+	for _, rowID := range left {
+		if _, exists := seen[rowID]; exists {
+			continue
+		}
+		seen[rowID] = struct{}{}
+		merged = append(merged, rowID)
+	}
+	for _, rowID := range right {
+		if _, exists := seen[rowID]; exists {
+			continue
+		}
+		seen[rowID] = struct{}{}
+		merged = append(merged, rowID)
+	}
+	sort.Ints(merged)
+	return merged
+}
+
+func intersectRowIDs(left []int, right []int) []int {
+	if len(left) == 0 || len(right) == 0 {
+		return nil
+	}
+	seen := make(map[int]struct{}, len(left))
+	for _, rowID := range left {
+		seen[rowID] = struct{}{}
+	}
+	intersected := make([]int, 0, min(len(left), len(right)))
+	for _, rowID := range right {
+		if _, exists := seen[rowID]; !exists {
+			continue
+		}
+		intersected = append(intersected, rowID)
+	}
+	sort.Ints(intersected)
+	return dedupeSortedRowIDs(intersected)
+}
+
+func complementRowIDs(totalRows int, rowIDs []int) []int {
+	if totalRows <= 0 {
+		return nil
+	}
+	excluded := make(map[int]struct{}, len(rowIDs))
+	for _, rowID := range rowIDs {
+		excluded[rowID] = struct{}{}
+	}
+	complement := make([]int, 0, totalRows-len(excluded))
+	for rowID := 0; rowID < totalRows; rowID++ {
+		if _, exists := excluded[rowID]; exists {
+			continue
+		}
+		complement = append(complement, rowID)
+	}
+	return complement
+}
+
+func dedupeSortedRowIDs(rowIDs []int) []int {
+	if len(rowIDs) <= 1 {
+		return rowIDs
+	}
+	write := 1
+	for read := 1; read < len(rowIDs); read++ {
+		if rowIDs[read] == rowIDs[write-1] {
+			continue
+		}
+		rowIDs[write] = rowIDs[read]
+		write++
+	}
+	return rowIDs[:write]
 }
 
 func estimateFullScanCost(totalRows int, orderBy []ast.OrderByClause) scanCostEstimate {
@@ -853,13 +1001,17 @@ func (engine *Engine) buildAccessPlan(plan planner.Plan) accessPlanInfo {
 
 		// Report index and row estimate for filter column.
 		if table != nil {
-			if lookupPredicate, _, ok := bestLookupPredicate(table, plan.Filter, len(plan.OrderBy) > 0); ok {
-				if idx, ok := indexForColumn(table, lookupPredicate.Column); ok {
-					info.IndexUsed = indexNameForColumn(table, lookupPredicate.Column)
-					info.IndexType = idx.kind
-					info.IndexColumn = lookupPredicate.Column
-					if est, ok := estimateRowsByIndexPredicate(idx, lookupPredicate, len(table.rows)); ok {
-						info.EstimatedRows = est
+			if rowIDs, lookupPredicate, strategy, ok := candidateRowIDsForPredicate(table, plan.Filter, len(plan.OrderBy) > 0); ok {
+				if strategy == scanStrategyIndexUnion || strategy == scanStrategyIndexNot {
+					info.EstimatedRows = len(rowIDs)
+				} else if lookupPredicate != nil {
+					if idx, ok := indexForColumn(table, lookupPredicate.Column); ok {
+						info.IndexUsed = indexNameForColumn(table, lookupPredicate.Column)
+						info.IndexType = idx.kind
+						info.IndexColumn = lookupPredicate.Column
+						if est, ok := estimateRowsByIndexPredicate(idx, lookupPredicate, len(table.rows)); ok {
+							info.EstimatedRows = est
+						}
 					}
 				}
 			}
@@ -868,14 +1020,18 @@ func (engine *Engine) buildAccessPlan(plan planner.Plan) accessPlanInfo {
 	case planner.OperationInsert, planner.OperationUpdate, planner.OperationDelete:
 		info.Strategy = string(scanStrategyFullScan)
 		if table != nil {
-			if lookupPredicate, strat, ok := bestLookupPredicate(table, plan.Filter, false); ok {
-				if idx, ok := indexForColumn(table, lookupPredicate.Column); ok {
-					info.Strategy = string(strat)
-					info.IndexUsed = indexNameForColumn(table, lookupPredicate.Column)
-					info.IndexType = idx.kind
-					info.IndexColumn = lookupPredicate.Column
-					if est, ok := estimateRowsByIndexPredicate(idx, lookupPredicate, len(table.rows)); ok {
-						info.EstimatedRows = est
+			if rowIDs, lookupPredicate, strat, ok := candidateRowIDsForPredicate(table, plan.Filter, false); ok {
+				info.Strategy = string(strat)
+				if strat == scanStrategyIndexUnion || strat == scanStrategyIndexNot {
+					info.EstimatedRows = len(rowIDs)
+				} else if lookupPredicate != nil {
+					if idx, ok := indexForColumn(table, lookupPredicate.Column); ok {
+						info.IndexUsed = indexNameForColumn(table, lookupPredicate.Column)
+						info.IndexType = idx.kind
+						info.IndexColumn = lookupPredicate.Column
+						if est, ok := estimateRowsByIndexPredicate(idx, lookupPredicate, len(table.rows)); ok {
+							info.EstimatedRows = est
+						}
 					}
 				}
 			}
@@ -903,6 +1059,9 @@ func collectScanCandidates(table *tableState, predicate *ast.Predicate, orderBy 
 	candidates := make([]scanCostEstimate, 0, 4)
 	candidates = append(candidates, estimateFullScanCost(totalRows, orderBy))
 	predicateCandidates := collectIndexablePredicates(predicate)
+	if estimate, ok := estimateCompoundIndexLookupCost(table, predicate, totalRows, len(orderBy) > 0); ok {
+		candidates = append(candidates, estimate)
+	}
 
 	if len(orderBy) == 1 {
 		if index, ok := indexForColumn(table, orderBy[0].Column); ok && index.kind == "btree" {
