@@ -2988,8 +2988,8 @@ func TestChooseSingleTableScanStrategyUsesIndexUnionForOR(t *testing.T) {
 
 	predicate := &ast.Predicate{
 		Operator: "OR",
-		Left: &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "comp-010"}},
-		Right: &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "comp-011"}},
+		Left:     &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "comp-010"}},
+		Right:    &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "comp-011"}},
 	}
 
 	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
@@ -3069,6 +3069,54 @@ func TestExplainAccessPlanUsesIndexForORAndNOT(t *testing.T) {
 	notPlan := notExplain.Rows[0]["access_plan"].StringValue
 	if !strings.Contains(notPlan, `"strategy":"index-not"`) {
 		t.Fatalf("expected index-not strategy, got: %s", notPlan)
+	}
+}
+
+func TestSelectUsesIndexedORAndNOTPredicates(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "select-or-not-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id TEXT PRIMARY KEY, status TEXT, sequence_no INT, name TEXT)")
+	mustExec("CREATE INDEX idx_block_components_status_hash ON block_components (status) USING HASH")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-009', 'common', 9, 'A')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-010', 'common', 11, 'B')")
+	mustExec("INSERT INTO block_components (id, status, sequence_no, name) VALUES ('comp-011', 'rare', 12, 'C')")
+	mustExec("COMMIT")
+
+	orResult, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT * FROM block_components WHERE id = 'comp-010' OR id = 'comp-011'", []string{"shop"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("OR select: %v", err)
+	}
+	if len(orResult.Rows) != 2 {
+		t.Fatalf("unexpected OR row count: got %d want 2", len(orResult.Rows))
+	}
+
+	notResult, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT * FROM block_components WHERE NOT status = 'common'", []string{"shop"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("NOT select: %v", err)
+	}
+	if len(notResult.Rows) != 1 {
+		t.Fatalf("unexpected NOT row count: got %d want 1", len(notResult.Rows))
 	}
 }
 

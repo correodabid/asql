@@ -982,6 +982,65 @@ func BenchmarkEngineReadEntityRelatedJoinRightFilterScaling(b *testing.B) {
 	}
 }
 
+func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
+	ctx := context.Background()
+	store, engine, targetLSN := prepareBooleanIndexedReadBenchmarkFixture(b)
+
+	b.Run("and_hash_lookup", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE id = 5000 AND status = 'common'"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("AND indexed query: %v", err)
+			}
+			if len(result.Rows) != 1 {
+				b.Fatalf("unexpected AND row count: got %d want 1", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyHashLookup))
+	})
+
+	b.Run("or_index_union", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE id = 5000 OR id = 7500"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("OR indexed query: %v", err)
+			}
+			if len(result.Rows) != 2 {
+				b.Fatalf("unexpected OR row count: got %d want 2", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyIndexUnion))
+	})
+
+	b.Run("not_index_complement", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE NOT status = 'common'"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("NOT indexed query: %v", err)
+			}
+			if len(result.Rows) != 100 {
+				b.Fatalf("unexpected NOT row count: got %d want 100", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyIndexNot))
+	})
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+}
+
 func benchmarkEngineRestartLoad(b *testing.B, withPersistedSnapshot bool) {
 	ctx := context.Background()
 	walPath, snapDir, expectedHeadLSN := prepareRestartBenchmarkFixture(b, withPersistedSnapshot)
@@ -1805,6 +1864,30 @@ func prepareCompositeIndexedReadBenchmarkFixture(b *testing.B) (*wal.SegmentedLo
 		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, payload, email) VALUES (%d, 'payload-%05d', 'user-%05d@asql.dev')", i, i, i%1000))
 	}
 	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_email_id_btree ON entries (email, id) USING BTREE")
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+
+	targetLSN := store.LastLSN()
+	return store, engine, targetLSN
+}
+
+func prepareBooleanIndexedReadBenchmarkFixture(b *testing.B) (*wal.SegmentedLogStore, *Engine, uint64) {
+	b.Helper()
+
+	ctx := context.Background()
+	store, engine := newBenchmarkEngine(b)
+
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE TABLE entries (id INT, status TEXT, payload TEXT)")
+	for i := 0; i < 10000; i++ {
+		status := "common"
+		if i >= 9900 {
+			status = "rare"
+		}
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("INSERT INTO entries (id, status, payload) VALUES (%d, '%s', 'payload-%05d')", i, status, i))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_id_hash ON entries (id) USING HASH")
+	mustExecBenchmark(b, ctx, engine, session, "CREATE INDEX idx_entries_status_hash ON entries (status) USING HASH")
 	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
 
 	targetLSN := store.LastLSN()

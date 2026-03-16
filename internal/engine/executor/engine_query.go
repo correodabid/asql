@@ -67,6 +67,24 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 				matched = append(matched, row)
 			}
 			selectedStrategy = scanStrategyHashLookup
+		case scanStrategyIndexUnion:
+			candidateRows := rowsForPredicate(table, plan.Filter, state, engine)
+			for _, row := range candidateRows {
+				if !matchPredicate(row, plan.Filter, state, engine) {
+					continue
+				}
+				matched = append(matched, row)
+			}
+			selectedStrategy = scanStrategyIndexUnion
+		case scanStrategyIndexNot:
+			candidateRows := rowsForPredicate(table, plan.Filter, state, engine)
+			for _, row := range candidateRows {
+				if !matchPredicate(row, plan.Filter, state, engine) {
+					continue
+				}
+				matched = append(matched, row)
+			}
+			selectedStrategy = scanStrategyIndexNot
 		case scanStrategyBTreeLookup:
 			candidateRows := rowsForPredicate(table, plan.Filter, state, engine)
 			for _, row := range candidateRows {
