@@ -14,7 +14,7 @@ import (
 )
 
 const (
-	commitQueueMaxBatchJobs      = 64
+	commitQueueMaxBatchJobs       = 64
 	commitQueueCoalesceYieldSpins = 2
 )
 
