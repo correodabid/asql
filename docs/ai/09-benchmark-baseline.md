@@ -73,6 +73,31 @@ Repeated comparison on 2026-03-16 using `go test ./internal/engine/executor -run
 - `BenchmarkEngineRestartFromPersistedSnapshot-8`: `2,577,547–2,728,238 ns/op`, `638,328–658,626 B/op`, `2,405–2,411 allocs/op`
 - `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `196,872–198,813 ns/op`, `240,459–240,518 B/op`, `608 allocs/op`
 
+Follow-up cadence/tail spot checks on 2026-03-16 using `-benchtime=1x -count=1`:
+
+- Fixed 500-record snapshot anchor, varying replay tail (`BenchmarkEngineRestartReplayTailSweep`):
+	- `replay_only_tail_0`: `5,897,250 ns/op`, `1,645,048 B/op`, `11,817 allocs/op`
+	- `persisted_snapshot_tail_0`: `6,142,457 ns/op`, `682,456 B/op`, `2,241 allocs/op`
+	- `replay_only_tail_50`: `6,002,709 ns/op`, `1,718,920 B/op`, `12,810 allocs/op`
+	- `persisted_snapshot_tail_50`: `7,821,750 ns/op`, `1,124,128 B/op`, `6,497 allocs/op`
+	- `replay_only_tail_100`: `5,228,250 ns/op`, `1,800,104 B/op`, `13,809 allocs/op`
+	- `persisted_snapshot_tail_100`: `8,295,625 ns/op`, `1,249,824 B/op`, `7,653 allocs/op`
+	- `replay_only_tail_500`: `11,062,957 ns/op`, `3,417,960 B/op`, `24,883 allocs/op`
+	- `persisted_snapshot_tail_500`: `15,532,751 ns/op`, `3,036,032 B/op`, `19,921 allocs/op`
+	- `replay_only_tail_1000`: `11,822,583 ns/op`, `5,191,776 B/op`, `39,444 allocs/op`
+	- `persisted_snapshot_tail_1000`: `22,111,125 ns/op`, `5,110,952 B/op`, `35,981 allocs/op`
+	- `replay_only_tail_5000`: `23,328,166 ns/op`, `26,575,856 B/op`, `178,498 allocs/op`
+	- `persisted_snapshot_tail_5000`: `37,523,960 ns/op`, `31,855,616 B/op`, `202,083 allocs/op`
+	- `replay_only_tail_10000`: `136,021,875 ns/op`, `49,212,544 B/op`, `308,767 allocs/op`
+	- `persisted_snapshot_tail_10000`: `96,407,625 ns/op`, `59,327,800 B/op`, `348,823 allocs/op`
+- Adaptive-cadence anchor samples with a fixed 500-record tail (`BenchmarkEngineRestartSnapshotCadenceSweep`):
+	- `replay_only_total_1000`: `11,488,125 ns/op`, `3,417,912 B/op`, `24,884 allocs/op`
+	- `persisted_snapshot_total_1000_tail_500`: `15,539,708 ns/op`, `3,036,016 B/op`, `19,921 allocs/op`
+	- `replay_only_total_10500`: `69,258,501 ns/op`, `49,112,904 B/op`, `308,761 allocs/op`
+	- `persisted_snapshot_total_10500_tail_500`: `42,842,625 ns/op`, `24,531,768 B/op`, `143,575 allocs/op`
+	- `replay_only_total_50500`: `201,905,458 ns/op`, `221,515,432 B/op`, `1,259,855 allocs/op`
+	- `persisted_snapshot_total_50500_tail_500`: `194,355,625 ns/op`, `118,840,328 B/op`, `664,072 allocs/op`
+
 Scope note on 2026-03-14: the current `BenchmarkEngineRestartFromPersistedSnapshot` fixture calls `WaitPendingSnapshots()` before shutdown, so it benchmarks a head snapshot plus effectively `0` trailing WAL records rather than a snapshot plus a non-zero replay tail.
 
 Restart-tail/cadence spot checks on 2026-03-14 using `-benchtime=1x`:
@@ -252,6 +277,7 @@ Repeated sample on 2026-03-15:
 	- a follow-up restore-path change now preserves decoded btree entries in restore-ready `indexEntry` form instead of copying them again during `marshalableToTableState`; the base fixture stayed roughly flat, but the indexed snapshot-directory load improved its heap profile from about ~`842 KB/op` to ~`746 KB/op` while landing around ~`499 µs/op`, which suggests the remaining indexed restart cost is no longer dominated by btree-entry rematerialization.
 	- another follow-up now reuses snapshot domain state directly during `restoreSnapshot()` / `replayFromSnapshots()` while still cloning the catalog for mutation safety; focused regression coverage confirms post-restore writes do not mutate the captured snapshot, and `BenchmarkEngineReplayFromPersistedSnapshots` fell to roughly ~`690 ns/op`, `640 B/op`, `8 allocs/op` on the current fixture, making the in-memory restore step effectively negligible compared with snapshot-directory read/decompress/decode/materialization.
 	- a fresher repeated restart comparison after the direct runtime-state decoder keeps the same interpretation but at a much lower cost level: persisted-snapshot restart is now ~`2.58–2.73 ms/op` versus ~`1.98–2.41 ms/op` for replay-only, while still using far less heap (~`638–659 KB/op` vs ~`1.72 MB/op`) and far fewer allocations (`~2.4k` vs `12.8k`).
+	- the new `-benchtime=1x` sweep results keep the policy crossover intact after the decoder refactor: persisted snapshots still lose on the small `total_1000` / short-tail cases, but they remain clearly better on the medium cadence point (`total_10500`) and now edge ahead again on the large `total_50500` spot check. Because those runs are still single-iteration samples, they are directionally useful but not yet closure-grade by themselves.
 	- a fresh representative sweep check after the same changes keeps the broader restart interpretation stable: with a fixed 500-record snapshot anchor and a long 5k replay tail, persisted snapshot restart still loses (~`50.4 ms/op`, ~`38.7 MB/op`, ~`229.7k allocs/op`) to replay-only (~`39.3 ms/op`, ~`33.8 MB/op`, ~`206.0k allocs/op`), while the medium cadence case that replays only the last ~`500` records at `total_10500` still wins clearly (~`61.3 ms/op`, ~`34.6 MB/op`, ~`196.2k allocs/op` vs ~`94.5 ms/op`, ~`62.1 MB/op`, ~`361.3k allocs/op`).
 	- the positional-row decode change clearly improved isolated decode and snapshot-directory load benchmarks, but the end-to-end persisted-restart timing is still noisy on the current short benchtime harness and needs repeated confirmation before any closure claim.
 - Current failover/recovery interpretation:
