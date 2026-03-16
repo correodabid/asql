@@ -117,6 +117,16 @@ Natural-policy insert-heavy validation on 2026-03-16 after the direct decoder (`
 	- `insert_heavy/replay_only_total_10500`: `69,062,251–71,383,624 ns/op`, `49,306,760–49,405,576 B/op`, `308,800–308,804 allocs/op`
 	- `insert_heavy/policy_persisted_total_10500_tail_500`: `28,318,833–29,599,083 ns/op`, `14,074,336–14,075,040 B/op`, `42,299 allocs/op`
 
+Natural-policy update/delete validation on 2026-03-16 after the direct decoder (`BenchmarkEngineRestartNaturalWorkloadCadenceSweep`, `-benchmem -benchtime=1x -count=2`):
+	- `update_heavy/replay_only_total_1000`: `210,767,416–219,802,083 ns/op`, `443,279,976–443,280,936 B/op`, `2,037,428–2,037,436 allocs/op`
+	- `update_heavy/policy_persisted_total_1000_tail_500`: `6,521,585–6,992,167 ns/op`, `981,512 B/op`, `3,748 allocs/op`
+	- `update_heavy/replay_only_total_10500`: `3,727,164,499–4,007,153,124 ns/op`, `8,632,111,432–8,632,211,408 B/op`, `40,406,424–40,406,431 allocs/op`
+	- `update_heavy/policy_persisted_total_10500_tail_500`: `3,797,325,250–3,935,712,959 ns/op`, `8,605,198,912–8,605,201,024 B/op`, `40,219,647–40,219,664 allocs/op`
+	- `delete_heavy/replay_only_total_1500`: `205,692,792–208,948,418 ns/op`, `358,282,888–358,283,792 B/op`, `1,915,270–1,915,271 allocs/op`
+	- `delete_heavy/policy_persisted_total_1500_tail_500`: `4,918,166–9,337,792 ns/op`, `1,310,040–1,310,488 B/op`, `5,250–5,251 allocs/op`
+	- `delete_heavy/replay_only_total_11000`: `2,206,388,791–2,229,680,251 ns/op`, `4,897,877,640–4,897,879,048 B/op`, `25,998,656–25,998,658 allocs/op`
+	- `delete_heavy/policy_persisted_total_11000_tail_500`: `2,151,438,958–2,167,686,083 ns/op`, `4,870,369,488–4,870,375,872 B/op`, `25,806,371–25,806,388 allocs/op`
+
 Scope note on 2026-03-14: the current `BenchmarkEngineRestartFromPersistedSnapshot` fixture calls `WaitPendingSnapshots()` before shutdown, so it benchmarks a head snapshot plus effectively `0` trailing WAL records rather than a snapshot plus a non-zero replay tail.
 
 Restart-tail/cadence spot checks on 2026-03-14 using `-benchtime=1x`:
@@ -299,6 +309,7 @@ Repeated sample on 2026-03-15:
 	- the new `-benchtime=1x` sweep results keep the policy crossover intact after the decoder refactor: persisted snapshots still lose on the small `total_1000` / short-tail cases, but they remain clearly better on the medium cadence point (`total_10500`) and now edge ahead again on the large `total_50500` spot check. Because those runs are still single-iteration samples, they are directionally useful but not yet closure-grade by themselves.
 	- the targeted `-count=3` repeats make the cadence story much firmer: the `total_10500` persisted restart win is stable and sizable, the `total_50500` point remains a smaller but still repeatable win, `tail_5000` remains a stable loss for persisted snapshots, and `tail_10000` now looks like the actual break-even band rather than a clean persisted win. That narrows the remaining closure question to where ASQL should place disk checkpoints for real workloads, not whether the direct decoder improved the hot path.
 	- the fresh natural-policy insert-heavy reruns are an important guardrail on interpretation: although the manually forced `tail_5000` synthetic case still loses, the actual adaptive policy does not currently strand insert-heavy restart in that bad zone on the benchmarked small/medium anchors. With natural checkpoint placement, persisted restart is decisively better than replay-only on both current insert-heavy cadence points after the decoder refactor.
+	- the same natural-policy check now holds for the heavier workload mixes too: `update_heavy` and `delete_heavy` both remain decisively better at the small anchor when the runtime checkpoint lands near the tail, and they stay slightly but consistently favorable at the medium anchor. That makes the policy interpretation much stronger after the decoder refactor: the synthetic forced-tail losses are useful for locating break-even regions, but they are not representative of the current natural checkpoint placement on the benchmarked workloads.
 	- a fresh representative sweep check after the same changes keeps the broader restart interpretation stable: with a fixed 500-record snapshot anchor and a long 5k replay tail, persisted snapshot restart still loses (~`50.4 ms/op`, ~`38.7 MB/op`, ~`229.7k allocs/op`) to replay-only (~`39.3 ms/op`, ~`33.8 MB/op`, ~`206.0k allocs/op`), while the medium cadence case that replays only the last ~`500` records at `total_10500` still wins clearly (~`61.3 ms/op`, ~`34.6 MB/op`, ~`196.2k allocs/op` vs ~`94.5 ms/op`, ~`62.1 MB/op`, ~`361.3k allocs/op`).
 	- the positional-row decode change clearly improved isolated decode and snapshot-directory load benchmarks, but the end-to-end persisted-restart timing is still noisy on the current short benchtime harness and needs repeated confirmation before any closure claim.
 - Current failover/recovery interpretation:
