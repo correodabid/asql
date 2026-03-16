@@ -114,6 +114,7 @@ const (
 	scanStrategyFullScan    scanStrategy = "full-scan"
 	scanStrategyHashLookup  scanStrategy = "hash"
 	scanStrategyIndexUnion  scanStrategy = "index-union"
+	scanStrategyIndexUnionP scanStrategy = "index-union-partial"
 	scanStrategyIndexNot    scanStrategy = "index-not"
 	scanStrategyBTreeLookup scanStrategy = "btree-lookup"
 	scanStrategyBTreeOrder  scanStrategy = "btree-order"

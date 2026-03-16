@@ -40,6 +40,9 @@ const (
 	// scanPriorityIndexUnion is the tiebreaker priority for index-union scans.
 	scanPriorityIndexUnion = 12
 
+	// scanPriorityIndexUnionPartial is the tiebreaker priority for hybrid OR scans.
+	scanPriorityIndexUnionPartial = 13
+
 	// scanPriorityBTreeLookup is the tiebreaker priority for btree equality lookups.
 	scanPriorityBTreeLookup = 15
 
@@ -67,6 +70,9 @@ func chooseSingleTableScanStrategy(table *tableState, predicate *ast.Predicate, 
 	candidates = append(candidates, estimateFullScanCost(totalRows, orderBy))
 	predicateCandidates := collectIndexablePredicates(predicate)
 	if estimate, ok := estimateCompoundIndexLookupCost(table, predicate, totalRows, len(orderBy) > 0); ok {
+		candidates = append(candidates, estimate)
+	}
+	if estimate, ok := estimateHybridORLookupCost(table, predicate, totalRows, len(orderBy) > 0); ok {
 		candidates = append(candidates, estimate)
 	}
 
@@ -111,7 +117,7 @@ func supportsIndexSelection(predicate *ast.Predicate) bool {
 	case "AND":
 		return supportsIndexSelection(predicate.Left) || supportsIndexSelection(predicate.Right)
 	case "OR":
-		return supportsIndexSelection(predicate.Left) && supportsIndexSelection(predicate.Right)
+		return supportsIndexSelection(predicate.Left) || supportsIndexSelection(predicate.Right)
 	case "NOT":
 		return supportsIndexSelection(predicate.Left)
 	default:
@@ -315,6 +321,115 @@ func estimateCompoundIndexLookupCost(table *tableState, predicate *ast.Predicate
 		priority = scanPriorityIndexNot
 	}
 	return scanCostEstimate{strategy: strategy, cost: cost, priority: priority}, true
+}
+
+func exactCandidateRowIDsForPredicate(table *tableState, predicate *ast.Predicate, hasOrderBy bool) ([]int, bool) {
+	if table == nil || predicate == nil {
+		return nil, false
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
+	case "AND":
+		leftIDs, leftOK := exactCandidateRowIDsForPredicate(table, predicate.Left, hasOrderBy)
+		rightIDs, rightOK := exactCandidateRowIDsForPredicate(table, predicate.Right, hasOrderBy)
+		if !leftOK || !rightOK {
+			return nil, false
+		}
+		return intersectRowIDs(leftIDs, rightIDs), true
+	case "OR":
+		leftIDs, leftOK := exactCandidateRowIDsForPredicate(table, predicate.Left, hasOrderBy)
+		rightIDs, rightOK := exactCandidateRowIDsForPredicate(table, predicate.Right, hasOrderBy)
+		if !leftOK || !rightOK {
+			return nil, false
+		}
+		return unionRowIDs(leftIDs, rightIDs), true
+	case "NOT":
+		childIDs, childOK := exactCandidateRowIDsForPredicate(table, predicate.Left, hasOrderBy)
+		if !childOK {
+			return nil, false
+		}
+		return complementRowIDs(len(table.rows), childIDs), true
+	case "NOT IN":
+		if predicate.Subquery != nil || len(predicate.InValues) == 0 {
+			return nil, false
+		}
+		index, ok := indexForColumn(table, predicate.Column)
+		if !ok {
+			return nil, false
+		}
+		return complementRowIDs(len(table.rows), rowIDsForPredicate(index, &ast.Predicate{Column: predicate.Column, Operator: "IN", InValues: predicate.InValues})), true
+	default:
+		if !isSimplePredicate(predicate) {
+			return nil, false
+		}
+		lookupPredicate, _, ok := bestLookupPredicate(table, predicate, hasOrderBy)
+		if !ok || lookupPredicate == nil {
+			return nil, false
+		}
+		index, ok := indexForColumn(table, lookupPredicate.Column)
+		if !ok {
+			return nil, false
+		}
+		return rowIDsForPredicate(index, lookupPredicate), true
+	}
+}
+
+func decomposeHybridORPredicate(table *tableState, predicate *ast.Predicate, hasOrderBy bool) ([]int, *ast.Predicate, bool) {
+	if table == nil || predicate == nil || !strings.EqualFold(strings.TrimSpace(predicate.Operator), "OR") {
+		return nil, nil, false
+	}
+
+	candidateRowIDs, residual, found := decomposeHybridORNode(table, predicate, hasOrderBy)
+	if !found || residual == nil || len(candidateRowIDs) == 0 {
+		return nil, nil, false
+	}
+	return candidateRowIDs, residual, true
+}
+
+func decomposeHybridORNode(table *tableState, predicate *ast.Predicate, hasOrderBy bool) ([]int, *ast.Predicate, bool) {
+	if predicate == nil {
+		return nil, nil, false
+	}
+
+	if strings.EqualFold(strings.TrimSpace(predicate.Operator), "OR") {
+		leftIDs, leftResidual, leftFound := decomposeHybridORNode(table, predicate.Left, hasOrderBy)
+		rightIDs, rightResidual, rightFound := decomposeHybridORNode(table, predicate.Right, hasOrderBy)
+		return unionRowIDs(leftIDs, rightIDs), mergeORPredicates(leftResidual, rightResidual), leftFound || rightFound
+	}
+
+	if rowIDs, ok := exactCandidateRowIDsForPredicate(table, predicate, hasOrderBy); ok {
+		return rowIDs, nil, true
+	}
+
+	return nil, predicate, false
+}
+
+func mergeORPredicates(left *ast.Predicate, right *ast.Predicate) *ast.Predicate {
+	switch {
+	case left == nil:
+		return right
+	case right == nil:
+		return left
+	default:
+		return &ast.Predicate{Operator: "OR", Left: left, Right: right}
+	}
+}
+
+func estimateHybridORLookupCost(table *tableState, predicate *ast.Predicate, totalRows int, hasOrderBy bool) (scanCostEstimate, bool) {
+	candidateRowIDs, _, ok := decomposeHybridORPredicate(table, predicate, hasOrderBy)
+	if !ok {
+		return scanCostEstimate{}, false
+	}
+
+	residualRows := totalRows - len(candidateRowIDs)
+	if residualRows < 0 {
+		residualRows = 0
+	}
+	cost := residualRows + len(candidateRowIDs)/hashOverheadDivisor
+	if hasOrderBy {
+		cost += totalRows / sortCostFactor
+	}
+	return scanCostEstimate{strategy: scanStrategyIndexUnionP, cost: cost, priority: scanPriorityIndexUnionPartial}, true
 }
 
 func unionRowIDs(left []int, right []int) []int {
@@ -558,12 +673,19 @@ func rowsForPredicate(table *tableState, predicate *ast.Predicate, state *readab
 
 	rowIDs, _, _, ok := candidateRowIDsForPredicate(table, predicate, false)
 	if !ok {
+		if hybridRowIDs, ok := matchedRowIDsForHybridORPredicate(table, predicate, state, engine); ok {
+			return rowsFromRowIDs(table, hybridRowIDs)
+		}
 		return tableRowsToMaps(table)
 	}
 	if len(rowIDs) == 0 {
 		return nil
 	}
 
+	return rowsFromRowIDs(table, rowIDs)
+}
+
+func rowsFromRowIDs(table *tableState, rowIDs []int) []map[string]ast.Literal {
 	rows := make([]map[string]ast.Literal, 0, len(rowIDs))
 	for _, rowID := range rowIDs {
 		if rowID < 0 || rowID >= len(table.rows) {
@@ -571,8 +693,32 @@ func rowsForPredicate(table *tableState, predicate *ast.Predicate, state *readab
 		}
 		rows = append(rows, rowToMap(table, table.rows[rowID]))
 	}
-
 	return rows
+}
+
+func matchedRowIDsForHybridORPredicate(table *tableState, predicate *ast.Predicate, state *readableState, engine *Engine) ([]int, bool) {
+	candidateRowIDs, residual, ok := decomposeHybridORPredicate(table, predicate, false)
+	if !ok {
+		return nil, false
+	}
+
+	candidateSet := make(map[int]struct{}, len(candidateRowIDs))
+	for _, rowID := range candidateRowIDs {
+		candidateSet[rowID] = struct{}{}
+	}
+
+	matched := make([]int, 0, len(candidateRowIDs))
+	for rowID, rowSlice := range table.rows {
+		if _, exact := candidateSet[rowID]; exact {
+			matched = append(matched, rowID)
+			continue
+		}
+		row := rowToMap(table, rowSlice)
+		if matchPredicate(row, residual, state, engine) {
+			matched = append(matched, rowID)
+		}
+	}
+	return matched, true
 }
 
 func orderedRowsFromBTreeIndex(table *tableState, predicate *ast.Predicate, orderBy []ast.OrderByClause, limit *int, state *readableState, engine *Engine) ([]map[string]ast.Literal, bool) {
@@ -1056,6 +1202,9 @@ func (engine *Engine) buildAccessPlan(plan planner.Plan) accessPlanInfo {
 						}
 					}
 				}
+			} else if hybridRowIDs, ok := matchedRowIDsForHybridORPredicate(table, plan.Filter, state, engine); ok {
+				info.EstimatedRows = len(hybridRowIDs)
+				info.Strategy = string(scanStrategyIndexUnionP)
 			}
 		}
 
@@ -1076,6 +1225,9 @@ func (engine *Engine) buildAccessPlan(plan planner.Plan) accessPlanInfo {
 						}
 					}
 				}
+			} else if hybridRowIDs, ok := matchedRowIDsForHybridORPredicate(table, plan.Filter, state, engine); ok {
+				info.Strategy = string(scanStrategyIndexUnionP)
+				info.EstimatedRows = len(hybridRowIDs)
 			}
 		}
 
@@ -1102,6 +1254,9 @@ func collectScanCandidates(table *tableState, predicate *ast.Predicate, orderBy 
 	candidates = append(candidates, estimateFullScanCost(totalRows, orderBy))
 	predicateCandidates := collectIndexablePredicates(predicate)
 	if estimate, ok := estimateCompoundIndexLookupCost(table, predicate, totalRows, len(orderBy) > 0); ok {
+		candidates = append(candidates, estimate)
+	}
+	if estimate, ok := estimateHybridORLookupCost(table, predicate, totalRows, len(orderBy) > 0); ok {
 		candidates = append(candidates, estimate)
 	}
 

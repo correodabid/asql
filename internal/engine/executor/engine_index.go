@@ -226,4 +226,3 @@ func indexColumnSetKey(columns []string) string {
 	}
 	return strings.Join(columns, ",")
 }
-

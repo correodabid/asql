@@ -245,6 +245,12 @@ func bestBaseJoinPredicate(predicate *ast.Predicate, aliasMap map[string]string,
 	case "OR":
 		left := bestBaseJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
 		right := bestBaseJoinPredicate(predicate.Right, aliasMap, baseTableName, basePrefix, baseTable)
+		if left == nil {
+			left = localBaseJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
+		}
+		if right == nil {
+			right = localBaseJoinPredicate(predicate.Right, aliasMap, baseTableName, basePrefix, baseTable)
+		}
 		if left == nil || right == nil {
 			return nil
 		}
@@ -288,6 +294,46 @@ func bestBaseJoinPredicate(predicate *ast.Predicate, aliasMap map[string]string,
 	}
 
 	return candidate
+}
+
+func localBaseJoinPredicate(predicate *ast.Predicate, aliasMap map[string]string, baseTableName string, basePrefix string, baseTable *tableState) *ast.Predicate {
+	if predicate == nil {
+		return nil
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
+	case "AND", "OR":
+		left := localBaseJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
+		right := localBaseJoinPredicate(predicate.Right, aliasMap, baseTableName, basePrefix, baseTable)
+		if left == nil || right == nil {
+			return nil
+		}
+		return &ast.Predicate{Operator: strings.ToUpper(strings.TrimSpace(predicate.Operator)), Left: left, Right: right}
+	case "NOT":
+		child := localBaseJoinPredicate(predicate.Left, aliasMap, baseTableName, basePrefix, baseTable)
+		if child == nil {
+			return nil
+		}
+		return &ast.Predicate{Operator: "NOT", Left: child}
+	}
+
+	if !isSimplePredicate(predicate) {
+		return nil
+	}
+
+	column, ok := normalizeBasePredicateColumn(predicate.Column, aliasMap, baseTableName, basePrefix, baseTable)
+	if !ok {
+		return nil
+	}
+
+	return &ast.Predicate{
+		Column:   column,
+		Operator: predicate.Operator,
+		Value:    predicate.Value,
+		Value2:   predicate.Value2,
+		InValues: predicate.InValues,
+		Subquery: predicate.Subquery,
+	}
 }
 
 func preferredBaseJoinPredicate(baseTable *tableState, left *ast.Predicate, right *ast.Predicate) *ast.Predicate {

@@ -1627,6 +1627,12 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		}
 		updatedByRowID := make(map[int]rowUpdate)
 		candidateRowIDs, _, _, hasIndexedCandidates := candidateRowIDsForPredicate(table, plan.Filter, false)
+		if chooseSingleTableScanStrategy(table, plan.Filter, nil) == scanStrategyIndexUnionP {
+			if hybridRowIDs, ok := matchedRowIDsForHybridORPredicate(table, plan.Filter, state, engine); ok {
+				candidateRowIDs = hybridRowIDs
+				hasIndexedCandidates = true
+			}
+		}
 		rowIDsToCheck := make([]int, 0, len(table.rows))
 		if hasIndexedCandidates {
 			rowIDsToCheck = append(rowIDsToCheck, candidateRowIDs...)
@@ -1733,6 +1739,12 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		deletedRows := 0
 		matchedDeleteRowIDs := make(map[int]struct{})
 		candidateRowIDs, _, _, hasIndexedCandidates := candidateRowIDsForPredicate(table, plan.Filter, false)
+		if chooseSingleTableScanStrategy(table, plan.Filter, nil) == scanStrategyIndexUnionP {
+			if hybridRowIDs, ok := matchedRowIDsForHybridORPredicate(table, plan.Filter, state, engine); ok {
+				candidateRowIDs = hybridRowIDs
+				hasIndexedCandidates = true
+			}
+		}
 		if hasIndexedCandidates {
 			for _, rowID := range candidateRowIDs {
 				if rowID < 0 || rowID >= len(table.rows) {

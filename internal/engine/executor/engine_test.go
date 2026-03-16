@@ -3022,6 +3022,30 @@ func TestChooseSingleTableScanStrategyUsesIndexUnionForOR(t *testing.T) {
 	}
 }
 
+func TestChooseSingleTableScanStrategyUsesPartialIndexUnionForHybridOR(t *testing.T) {
+	buckets := map[string][]int{"s:comp-010": {0}}
+	rows := make([][]ast.Literal, 100)
+
+	table := &tableState{
+		rows: rows,
+		indexes: map[string]*indexState{
+			"idx_components_id_hash": {name: "idx_components_id_hash", column: "id", kind: "hash", buckets: buckets},
+		},
+		indexedColumns: map[string]string{"id": "idx_components_id_hash"},
+	}
+
+	predicate := &ast.Predicate{
+		Operator: "OR",
+		Left:     &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "comp-010"}},
+		Right:    &ast.Predicate{Column: "sequence_no", Operator: ">", Value: ast.Literal{Kind: ast.LiteralNumber, NumberValue: 90}},
+	}
+
+	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
+	if strategy != scanStrategyIndexUnionP {
+		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyIndexUnionP)
+	}
+}
+
 func TestChooseSingleTableScanStrategyUsesIndexNotForNOT(t *testing.T) {
 	buckets := map[string][]int{"s:common": {0, 1, 2, 3, 4, 5, 6, 7, 8}}
 	rows := make([][]ast.Literal, 10)
@@ -3137,6 +3161,46 @@ func TestExplainAccessPlanUsesIndexForORAndNOT(t *testing.T) {
 	notPlan := notExplain.Rows[0]["access_plan"].StringValue
 	if !strings.Contains(notPlan, `"strategy":"index-not"`) {
 		t.Fatalf("expected index-not strategy, got: %s", notPlan)
+	}
+}
+
+func TestExplainAccessPlanUsesPartialIndexUnionForHybridOR(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "explain-hybrid-or-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id TEXT PRIMARY KEY, sequence_no INT, name TEXT)")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-009', 9, 'A')")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-010', 10, 'B')")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-011', 12, 'C')")
+	mustExec("COMMIT")
+
+	result, err := engine.Explain("SELECT * FROM block_components WHERE id = 'comp-010' OR sequence_no > 11", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain hybrid OR predicate: %v", err)
+	}
+	plan := result.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(plan, `"strategy":"index-union-partial"`) {
+		t.Fatalf("expected partial index-union strategy, got: %s", plan)
 	}
 }
 
@@ -3287,6 +3351,103 @@ func TestSelectUsesIndexedORAndNOTPredicates(t *testing.T) {
 	}
 }
 
+func TestSelectUsesPartialIndexedORPredicate(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "select-hybrid-or-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id TEXT PRIMARY KEY, sequence_no INT, name TEXT)")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-009', 9, 'A')")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-010', 10, 'B')")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-011', 12, 'C')")
+	mustExec("COMMIT")
+
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT * FROM block_components WHERE id = 'comp-010' OR sequence_no > 11 ORDER BY id ASC", []string{"shop"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("hybrid OR select: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("unexpected hybrid OR row count: got %d want 2", len(result.Rows))
+	}
+	if result.Rows[0]["id"].StringValue != "comp-010" || result.Rows[1]["id"].StringValue != "comp-011" {
+		t.Fatalf("unexpected hybrid OR rows: %v", result.Rows)
+	}
+}
+
+func TestUpdateDeleteUsePartialIndexedORPredicate(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "dml-hybrid-or-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id TEXT PRIMARY KEY, sequence_no INT, name TEXT)")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-009', 9, 'A')")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-010', 10, 'B')")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-011', 12, 'C')")
+	mustExec("COMMIT")
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("UPDATE block_components SET name = 'matched' WHERE id = 'comp-010' OR sequence_no > 11")
+	mustExec("COMMIT")
+
+	updated, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id, name FROM block_components WHERE name = 'matched' ORDER BY id ASC", []string{"shop"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("updated rows query: %v", err)
+	}
+	if len(updated.Rows) != 2 {
+		t.Fatalf("unexpected updated row count: got %d want 2", len(updated.Rows))
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("DELETE FROM block_components WHERE id = 'comp-010' OR sequence_no > 11")
+	mustExec("COMMIT")
+
+	remaining, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id FROM block_components ORDER BY id ASC", []string{"shop"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("remaining rows query: %v", err)
+	}
+	if len(remaining.Rows) != 1 || remaining.Rows[0]["id"].StringValue != "comp-009" {
+		t.Fatalf("unexpected remaining rows: %v", remaining.Rows)
+	}
+}
+
 func TestSelectUsesIndexedINAndNOTINPredicates(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "select-in-not-in-access.wal")
@@ -3414,6 +3575,36 @@ func TestBaseJoinPredicatePreservesIndexedOR(t *testing.T) {
 	}
 	if chooseSingleTableScanStrategy(baseTable, predicate, nil) != scanStrategyIndexUnion {
 		t.Fatalf("expected index-union strategy for join OR predicate")
+	}
+}
+
+func TestBaseJoinPredicatePreservesHybridIndexedOR(t *testing.T) {
+	plan := planner.Plan{
+		TableName:  "orders",
+		TableAlias: "o",
+		Joins:      []ast.JoinClause{{TableName: "order_lines", Alias: "l"}},
+		Filter: &ast.Predicate{
+			Operator: "OR",
+			Left:     &ast.Predicate{Column: "o.id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralNumber, NumberValue: 42}},
+			Right:    &ast.Predicate{Column: "o.status", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "open"}},
+		},
+	}
+	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	baseTable := &tableState{
+		columns: []string{"id", "status"},
+		indexes: map[string]*indexState{
+			"idx_orders_id_hash": {name: "idx_orders_id_hash", column: "id", kind: "hash", buckets: map[string][]int{"n:42": {0}}},
+		},
+		indexedColumns: map[string]string{"id": "idx_orders_id_hash"},
+		rows:           make([][]ast.Literal, 10),
+	}
+
+	predicate := baseJoinPredicate(plan, aliasMap, baseTable)
+	if predicate == nil {
+		t.Fatal("expected hybrid base join OR predicate")
+	}
+	if chooseSingleTableScanStrategy(baseTable, predicate, nil) != scanStrategyIndexUnionP {
+		t.Fatalf("expected partial index-union strategy for join OR predicate")
 	}
 }
 

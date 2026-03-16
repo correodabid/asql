@@ -1088,6 +1088,40 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
 	})
 
+	b.Run("or_partial_index_union", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE status = 'common' OR payload = 'payload-09999'"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("hybrid OR indexed query: %v", err)
+			}
+			if len(result.Rows) != 9901 {
+				b.Fatalf("unexpected hybrid OR row count: got %d want 9901", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyIndexUnionP))
+	})
+
+	b.Run("or_partial_full_scan", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE bucket = 'common' OR payload = 'payload-09999'"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("hybrid OR full-scan query: %v", err)
+			}
+			if len(result.Rows) != 9901 {
+				b.Fatalf("unexpected hybrid OR full-scan row count: got %d want 9901", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
+	})
+
 	b.Run("not_index_complement", func(b *testing.B) {
 		query := "SELECT id, status FROM entries WHERE NOT status = 'common'"
 		baselineCounts := engine.ScanStrategyCounts()

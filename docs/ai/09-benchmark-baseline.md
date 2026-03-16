@@ -266,7 +266,9 @@ Boolean-predicate comparison on 2026-03-16 using `go test ./internal/engine/exec
 - `in_hash_lookup`: `23,217 ns/op` vs `in_full_scan`: `3,004,567 ns/op` (~`129x` faster with indexed literal-list selection)
 - `not_index_complement`: `417,550 ns/op` vs `not_full_scan`: `2,639,475 ns/op` (~`6.3x` faster with indexed complement planning)
 - `not_in_index_complement`: `520,300 ns/op` vs `not_in_full_scan`: `2,633,033 ns/op` (~`5.1x` faster with indexed `NOT IN` complement planning)
+- `or_partial_index_union`: `6,335,067 ns/op` vs `or_partial_full_scan`: `7,722,108 ns/op` (~`1.22x` faster with hybrid OR planning when one branch is indexable and the residual branch only needs scanning on the uncovered tail)
 - Interpretation note: `OR` and `IN (...)` get the largest wins when the planner can collapse the predicate to a tiny union of indexed candidate sets. `NOT`/`NOT IN` remain materially more expensive because they still materialize a complement, but they are still meaningfully cheaper than a full table scan when the remaining set is selective enough.
+- Additional note: hybrid `OR` is a smaller win by design because it still needs a residual scan; the gain comes from skipping residual evaluation on rows already proven by the indexed branch.
 
 Composite-order repeated sample on 2026-03-14:
 
