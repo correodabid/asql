@@ -60,6 +60,10 @@ func rowIDsForPredicate(index *indexState, predicate *ast.Predicate) []int {
 		return rowIDsForEquality(index, predicate.Value)
 	}
 
+	if predicate.Operator == "IN" {
+		return rowIDsForInList(index, predicate.InValues)
+	}
+
 	if index.kind != "btree" {
 		return nil
 	}
@@ -72,6 +76,25 @@ func rowIDsForPredicate(index *indexState, predicate *ast.Predicate) []int {
 	}
 
 	return rowIDs
+}
+
+func rowIDsForInList(index *indexState, values []ast.Literal) []int {
+	if index == nil || len(values) == 0 {
+		return nil
+	}
+
+	rowIDs := make([]int, 0, len(values))
+	for _, value := range values {
+		if value.Kind == ast.LiteralNull {
+			continue
+		}
+		rowIDs = append(rowIDs, rowIDsForEquality(index, value)...)
+	}
+	if len(rowIDs) == 0 {
+		return nil
+	}
+	sort.Ints(rowIDs)
+	return dedupeSortedRowIDs(rowIDs)
 }
 
 func rowIDsForEquality(index *indexState, value ast.Literal) []int {

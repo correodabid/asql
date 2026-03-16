@@ -1037,6 +1037,40 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyIndexUnion))
 	})
 
+	b.Run("in_hash_lookup", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE id IN (5000, 7500)"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("IN indexed query: %v", err)
+			}
+			if len(result.Rows) != 2 {
+				b.Fatalf("unexpected IN row count: got %d want 2", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyHashLookup))
+	})
+
+	b.Run("in_full_scan", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE payload IN ('payload-05000', 'payload-07500')"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("IN full-scan query: %v", err)
+			}
+			if len(result.Rows) != 2 {
+				b.Fatalf("unexpected IN full-scan row count: got %d want 2", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
+	})
+
 	b.Run("or_full_scan", func(b *testing.B) {
 		query := "SELECT id, status FROM entries WHERE payload = 'payload-05000' OR payload = 'payload-07500'"
 		baselineCounts := engine.ScanStrategyCounts()
@@ -1082,6 +1116,40 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 			}
 			if len(result.Rows) != 100 {
 				b.Fatalf("unexpected NOT full-scan row count: got %d want 100", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
+	})
+
+	b.Run("not_in_index_complement", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE status NOT IN ('common')"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("NOT IN indexed query: %v", err)
+			}
+			if len(result.Rows) != 100 {
+				b.Fatalf("unexpected NOT IN row count: got %d want 100", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyIndexNot))
+	})
+
+	b.Run("not_in_full_scan", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE bucket NOT IN ('common')"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("NOT IN full-scan query: %v", err)
+			}
+			if len(result.Rows) != 100 {
+				b.Fatalf("unexpected NOT IN full-scan row count: got %d want 100", len(result.Rows))
 			}
 		}
 		b.StopTimer()

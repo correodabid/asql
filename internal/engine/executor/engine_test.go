@@ -2877,6 +2877,30 @@ func TestChooseSingleTableScanStrategyUsesIndexedConjunct(t *testing.T) {
 	}
 }
 
+func TestChooseSingleTableScanStrategyUsesHashLookupForINList(t *testing.T) {
+	buckets := map[string][]int{"n:10": {0}, "n:11": {1}}
+	rows := make([][]ast.Literal, 100)
+
+	table := &tableState{
+		rows: rows,
+		indexes: map[string]*indexState{
+			"idx_components_id_hash": {name: "idx_components_id_hash", column: "id", kind: "hash", buckets: buckets},
+		},
+		indexedColumns: map[string]string{"id": "idx_components_id_hash"},
+	}
+
+	predicate := &ast.Predicate{
+		Column:   "id",
+		Operator: "IN",
+		InValues: []ast.Literal{{Kind: ast.LiteralNumber, NumberValue: 10}, {Kind: ast.LiteralNumber, NumberValue: 11}},
+	}
+
+	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
+	if strategy != scanStrategyHashLookup {
+		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyHashLookup)
+	}
+}
+
 func TestExplainAccessPlanUsesIndexForConjunctivePredicate(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "explain-conjunctive-access.wal")
@@ -3021,6 +3045,50 @@ func TestChooseSingleTableScanStrategyUsesIndexNotForNOT(t *testing.T) {
 	}
 }
 
+func TestChooseSingleTableScanStrategyUsesIndexNotForNOTINList(t *testing.T) {
+	buckets := map[string][]int{
+		"n:0": {0},
+		"n:1": {1},
+		"n:2": {2},
+		"n:3": {3},
+		"n:4": {4},
+		"n:5": {5},
+		"n:6": {6},
+		"n:7": {7},
+		"n:8": {8},
+	}
+	rows := make([][]ast.Literal, 10)
+
+	table := &tableState{
+		rows: rows,
+		indexes: map[string]*indexState{
+			"idx_components_id_hash": {name: "idx_components_id_hash", column: "id", kind: "hash", buckets: buckets},
+		},
+		indexedColumns: map[string]string{"id": "idx_components_id_hash"},
+	}
+
+	predicate := &ast.Predicate{
+		Column:   "id",
+		Operator: "NOT IN",
+		InValues: []ast.Literal{
+			{Kind: ast.LiteralNumber, NumberValue: 0},
+			{Kind: ast.LiteralNumber, NumberValue: 1},
+			{Kind: ast.LiteralNumber, NumberValue: 2},
+			{Kind: ast.LiteralNumber, NumberValue: 3},
+			{Kind: ast.LiteralNumber, NumberValue: 4},
+			{Kind: ast.LiteralNumber, NumberValue: 5},
+			{Kind: ast.LiteralNumber, NumberValue: 6},
+			{Kind: ast.LiteralNumber, NumberValue: 7},
+			{Kind: ast.LiteralNumber, NumberValue: 8},
+		},
+	}
+
+	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
+	if strategy != scanStrategyIndexNot {
+		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyIndexNot)
+	}
+}
+
 func TestExplainAccessPlanUsesIndexForORAndNOT(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "explain-or-not-access.wal")
@@ -3072,6 +3140,105 @@ func TestExplainAccessPlanUsesIndexForORAndNOT(t *testing.T) {
 	}
 }
 
+func TestExplainAccessPlanUsesIndexForINAndNOTIN(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "explain-in-not-in-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id INT PRIMARY KEY, status TEXT, name TEXT)")
+	mustExec("CREATE INDEX idx_block_components_status_hash ON block_components (status) USING HASH")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES (10, 'common', 'A')")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES (11, 'common', 'B')")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES (12, 'rare', 'C')")
+	mustExec("COMMIT")
+
+	inExplain, err := engine.Explain("SELECT * FROM block_components WHERE id IN (10, 11)", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain IN predicate: %v", err)
+	}
+	inPlan := inExplain.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(inPlan, `"strategy":"hash"`) || !strings.Contains(inPlan, `"index_column":"id"`) {
+		t.Fatalf("expected indexed IN plan, got: %s", inPlan)
+	}
+
+	notInExplain, err := engine.Explain("SELECT * FROM block_components WHERE id NOT IN (10, 11)", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain NOT IN predicate: %v", err)
+	}
+	notInPlan := notInExplain.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(notInPlan, `"strategy":"index-not"`) {
+		t.Fatalf("expected index-not strategy, got: %s", notInPlan)
+	}
+}
+
+func TestExplainUpdateDeleteUseIndexForINPredicate(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "explain-in-dml.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id INT PRIMARY KEY, name TEXT)")
+	mustExec("INSERT INTO block_components (id, name) VALUES (10, 'A')")
+	mustExec("INSERT INTO block_components (id, name) VALUES (11, 'B')")
+	mustExec("INSERT INTO block_components (id, name) VALUES (12, 'C')")
+	mustExec("COMMIT")
+
+	updateExplain, err := engine.Explain("UPDATE block_components SET name = 'BB' WHERE id IN (10, 11)", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain update IN predicate: %v", err)
+	}
+	updatePlan := updateExplain.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(updatePlan, `"strategy":"hash"`) || !strings.Contains(updatePlan, `"index_column":"id"`) {
+		t.Fatalf("expected indexed update IN plan, got: %s", updatePlan)
+	}
+
+	deleteExplain, err := engine.Explain("DELETE FROM block_components WHERE id IN (10, 11)", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain delete IN predicate: %v", err)
+	}
+	deletePlan := deleteExplain.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(deletePlan, `"strategy":"hash"`) || !strings.Contains(deletePlan, `"index_column":"id"`) {
+		t.Fatalf("expected indexed delete IN plan, got: %s", deletePlan)
+	}
+}
+
 func TestSelectUsesIndexedORAndNOTPredicates(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "select-or-not-access.wal")
@@ -3117,6 +3284,54 @@ func TestSelectUsesIndexedORAndNOTPredicates(t *testing.T) {
 	}
 	if len(notResult.Rows) != 1 {
 		t.Fatalf("unexpected NOT row count: got %d want 1", len(notResult.Rows))
+	}
+}
+
+func TestSelectUsesIndexedINAndNOTINPredicates(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "select-in-not-in-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id INT PRIMARY KEY, status TEXT, name TEXT)")
+	mustExec("CREATE INDEX idx_block_components_status_hash ON block_components (status) USING HASH")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES (10, 'common', 'A')")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES (11, 'common', 'B')")
+	mustExec("INSERT INTO block_components (id, status, name) VALUES (12, 'rare', 'C')")
+	mustExec("COMMIT")
+
+	inResult, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT * FROM block_components WHERE id IN (10, 11)", []string{"shop"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("IN select: %v", err)
+	}
+	if len(inResult.Rows) != 2 {
+		t.Fatalf("unexpected IN row count: got %d want 2", len(inResult.Rows))
+	}
+
+	notInResult, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT * FROM block_components WHERE id NOT IN (10, 11)", []string{"shop"}, store.LastLSN())
+	if err != nil {
+		t.Fatalf("NOT IN select: %v", err)
+	}
+	if len(notInResult.Rows) != 1 {
+		t.Fatalf("unexpected NOT IN row count: got %d want 1", len(notInResult.Rows))
 	}
 }
 
@@ -3227,6 +3442,35 @@ func TestMatchTablePredicateOnRowSupportsORAndNOT(t *testing.T) {
 	}
 	if !matchTablePredicateOnRow(table, row, notPredicate) {
 		t.Fatal("expected NOT predicate to match row")
+	}
+}
+
+func TestMatchTablePredicateOnRowSupportsINAndNOTIN(t *testing.T) {
+	table := &tableState{
+		columns:     []string{"id", "status"},
+		columnIndex: map[string]int{"id": 0, "status": 1},
+	}
+	row := []ast.Literal{
+		{Kind: ast.LiteralNumber, NumberValue: 42},
+		{Kind: ast.LiteralString, StringValue: "ready"},
+	}
+
+	inPredicate := &ast.Predicate{
+		Column:   "id",
+		Operator: "IN",
+		InValues: []ast.Literal{{Kind: ast.LiteralNumber, NumberValue: 41}, {Kind: ast.LiteralNumber, NumberValue: 42}},
+	}
+	if !matchTablePredicateOnRow(table, row, inPredicate) {
+		t.Fatal("expected IN predicate to match row")
+	}
+
+	notInPredicate := &ast.Predicate{
+		Column:   "status",
+		Operator: "NOT IN",
+		InValues: []ast.Literal{{Kind: ast.LiteralString, StringValue: "blocked"}},
+	}
+	if !matchTablePredicateOnRow(table, row, notInPredicate) {
+		t.Fatal("expected NOT IN predicate to match row")
 	}
 }
 

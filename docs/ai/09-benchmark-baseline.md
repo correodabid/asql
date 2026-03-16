@@ -261,10 +261,12 @@ Selective covered-vs-non-covered repeated sample on 2026-03-14:
 
 Boolean-predicate comparison on 2026-03-16 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngineReadIndexedBooleanPredicates' -benchtime=5x -count=1`:
 
-- `and_hash_lookup`: `86,042 ns/op` vs `and_full_scan`: `3,089,533 ns/op` (~`35.9x` faster with indexed conjunct selection)
-- `or_index_union`: `13,825 ns/op` vs `or_full_scan`: `3,013,692 ns/op` (~`218x` faster with indexed union planning)
-- `not_index_complement`: `562,317 ns/op` vs `not_full_scan`: `2,869,750 ns/op` (~`5.1x` faster with indexed complement planning)
-- Interpretation note: `OR` gets the largest win when both branches collapse to tiny indexed candidate sets; `NOT` still returns a large complement set so it remains materially more expensive than point lookups, but it is still meaningfully cheaper than scanning the whole table.
+- `and_hash_lookup`: `78,825 ns/op` vs `and_full_scan`: `4,067,042 ns/op` (~`51.6x` faster with indexed conjunct selection)
+- `or_index_union`: `17,250 ns/op` vs `or_full_scan`: `3,224,450 ns/op` (~`187x` faster with indexed union planning)
+- `in_hash_lookup`: `23,217 ns/op` vs `in_full_scan`: `3,004,567 ns/op` (~`129x` faster with indexed literal-list selection)
+- `not_index_complement`: `417,550 ns/op` vs `not_full_scan`: `2,639,475 ns/op` (~`6.3x` faster with indexed complement planning)
+- `not_in_index_complement`: `520,300 ns/op` vs `not_in_full_scan`: `2,633,033 ns/op` (~`5.1x` faster with indexed `NOT IN` complement planning)
+- Interpretation note: `OR` and `IN (...)` get the largest wins when the planner can collapse the predicate to a tiny union of indexed candidate sets. `NOT`/`NOT IN` remain materially more expensive because they still materialize a complement, but they are still meaningfully cheaper than a full table scan when the remaining set is selective enough.
 
 Composite-order repeated sample on 2026-03-14:
 

@@ -411,9 +411,37 @@ func matchTablePredicateOnRow(table *tableState, row []ast.Literal, predicate *a
 	switch operator {
 	case "IS NULL", "IS NOT NULL", "=", ">", "<", ">=", "<=":
 		return compareLiteralByOperator(value, operator, predicate.Value)
+	case "IN":
+		return matchLiteralInList(value, predicate.InValues, false)
+	case "NOT IN":
+		return matchLiteralInList(value, predicate.InValues, true)
 	default:
 		return false
 	}
+}
+
+func matchLiteralInList(value ast.Literal, inValues []ast.Literal, negate bool) bool {
+	if value.Kind == ast.LiteralNull {
+		return false
+	}
+
+	found := false
+	hasNull := false
+	for _, candidate := range inValues {
+		if candidate.Kind == ast.LiteralNull {
+			hasNull = true
+			continue
+		}
+		if compareLiteralByOperator(value, "=", candidate) {
+			found = true
+			break
+		}
+	}
+
+	if negate {
+		return !found && !hasNull
+	}
+	return found
 }
 
 func normalizeBasePredicateColumn(column string, aliasMap map[string]string, baseTableName string, basePrefix string, baseTable *tableState) (string, bool) {

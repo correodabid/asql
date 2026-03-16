@@ -72,16 +72,16 @@ func chooseSingleTableScanStrategy(table *tableState, predicate *ast.Predicate, 
 
 	if len(orderBy) == 1 {
 		if index, ok := indexForColumn(table, orderBy[0].Column); ok && index.kind == "btree" {
-			candidates = append(candidates, estimateBTreeOrderCost(index, bestPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
+			candidates = append(candidates, estimateBTreeOrderCost(index, bestOrderBoundPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
 		}
 	}
 
 	if len(orderBy) > 1 {
 		if _, _, ok := compositeBTreeIndexForOrder(table, orderBy); ok {
-			candidates = append(candidates, estimateCompositeBTreeOrderCost(table, bestPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
+			candidates = append(candidates, estimateCompositeBTreeOrderCost(table, bestOrderBoundPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
 		}
 		if index, ok := indexForColumn(table, orderBy[0].Column); ok && index.kind == "btree" {
-			candidates = append(candidates, estimateBTreePrefixCost(index, bestPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
+			candidates = append(candidates, estimateBTreePrefixCost(index, bestOrderBoundPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
 		}
 	}
 
@@ -165,6 +165,30 @@ func bestPredicateForColumn(table *tableState, predicates []*ast.Predicate, colu
 	return best
 }
 
+func bestOrderBoundPredicateForColumn(table *tableState, predicates []*ast.Predicate, column string) *ast.Predicate {
+	filtered := make([]*ast.Predicate, 0, len(predicates))
+	for _, predicate := range predicates {
+		if !supportsBTreeOrderBoundPredicate(predicate) {
+			continue
+		}
+		filtered = append(filtered, predicate)
+	}
+	return bestPredicateForColumn(table, filtered, column)
+}
+
+func supportsBTreeOrderBoundPredicate(predicate *ast.Predicate) bool {
+	if predicate == nil {
+		return false
+	}
+
+	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
+	case "=", ">", ">=", "<", "<=":
+		return predicate.Subquery == nil
+	default:
+		return false
+	}
+}
+
 func bestLookupPredicate(table *tableState, predicate *ast.Predicate, hasOrderBy bool) (*ast.Predicate, scanStrategy, bool) {
 	if table == nil || !supportsIndexSelection(predicate) {
 		return nil, scanStrategyFullScan, false
@@ -238,6 +262,20 @@ func candidateRowIDsForPredicate(table *tableState, predicate *ast.Predicate, ha
 			return nil, nil, scanStrategyFullScan, false
 		}
 		return complementRowIDs(len(table.rows), childIDs), nil, scanStrategyIndexNot, true
+	case "NOT IN":
+		if predicate.Subquery != nil || len(predicate.InValues) == 0 {
+			return nil, nil, scanStrategyFullScan, false
+		}
+		index, ok := indexForColumn(table, predicate.Column)
+		if !ok {
+			return nil, nil, scanStrategyFullScan, false
+		}
+		excludedRowIDs := rowIDsForPredicate(index, &ast.Predicate{
+			Column:   predicate.Column,
+			Operator: "IN",
+			InValues: predicate.InValues,
+		})
+		return complementRowIDs(len(table.rows), excludedRowIDs), nil, scanStrategyIndexNot, true
 	default:
 		lookupPredicate, strategy, ok := bestLookupPredicate(table, predicate, hasOrderBy)
 		if !ok {
@@ -459,14 +497,18 @@ func estimateRowsByIndexPredicate(index *indexState, predicate *ast.Predicate, t
 	operator := strings.ToUpper(strings.TrimSpace(predicate.Operator))
 	switch index.kind {
 	case "hash":
-		if operator != "=" && operator != "IS NULL" && operator != "IS NOT NULL" {
+		if operator != "=" && operator != "IN" && operator != "IS NULL" && operator != "IS NOT NULL" {
 			return 0, false
 		}
 	case "btree":
-		if operator != "=" && operator != ">" && operator != ">=" && operator != "<" && operator != "<=" && operator != "IS NULL" && operator != "IS NOT NULL" {
+		if operator != "=" && operator != "IN" && operator != ">" && operator != ">=" && operator != "<" && operator != "<=" && operator != "IS NULL" && operator != "IS NOT NULL" {
 			return 0, false
 		}
 	default:
+		return 0, false
+	}
+
+	if operator == "IN" && (predicate.Subquery != nil || len(predicate.InValues) == 0) {
 		return 0, false
 	}
 
@@ -1065,16 +1107,16 @@ func collectScanCandidates(table *tableState, predicate *ast.Predicate, orderBy 
 
 	if len(orderBy) == 1 {
 		if index, ok := indexForColumn(table, orderBy[0].Column); ok && index.kind == "btree" {
-			candidates = append(candidates, estimateBTreeOrderCost(index, bestPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
+			candidates = append(candidates, estimateBTreeOrderCost(index, bestOrderBoundPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
 		}
 	}
 
 	if len(orderBy) > 1 {
 		if _, _, ok := compositeBTreeIndexForOrder(table, orderBy); ok {
-			candidates = append(candidates, estimateCompositeBTreeOrderCost(table, bestPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
+			candidates = append(candidates, estimateCompositeBTreeOrderCost(table, bestOrderBoundPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
 		}
 		if index, ok := indexForColumn(table, orderBy[0].Column); ok && index.kind == "btree" {
-			candidates = append(candidates, estimateBTreePrefixCost(index, bestPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
+			candidates = append(candidates, estimateBTreePrefixCost(index, bestOrderBoundPredicateForColumn(table, predicateCandidates, orderBy[0].Column), totalRows))
 		}
 	}
 
