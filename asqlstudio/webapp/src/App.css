@@ -6190,6 +6190,23 @@ select.editor-input {
   word-break: break-all;
 }
 
+.explain-inline-highlight {
+  display: inline;
+  padding: 1px 3px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+
+.explain-inline-highlight.index {
+  background: rgba(52, 211, 153, 0.14);
+  color: #34d399;
+}
+
+.explain-inline-highlight.residual {
+  background: rgba(251, 146, 60, 0.14);
+  color: #fb923c;
+}
+
 .explain-detail-highlights {
   display: inline-flex;
   flex-wrap: wrap;

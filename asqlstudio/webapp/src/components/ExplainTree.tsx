@@ -462,8 +462,10 @@ function PlanNode({
   const opClass = operationClass(plan.operation)
   const filterValue = plan.filter ? formatPredicate(plan.filter) : null
   const filterHighlights = filterValue ? classifyPredicateHighlights(filterValue, indexedPredicates, residualPredicate) : []
+  const filterTerms = filterValue ? buildPredicateHighlightTerms(filterValue, indexedPredicates, residualPredicate) : []
   const havingValue = plan.having ? formatPredicate(plan.having) : null
   const havingHighlights = havingValue ? classifyPredicateHighlights(havingValue, indexedPredicates, residualPredicate) : []
+  const havingTerms = havingValue ? buildPredicateHighlightTerms(havingValue, indexedPredicates, residualPredicate) : []
 
   return (
     <div className="explain-node" style={{ marginLeft: depth * 20 }}>
@@ -484,7 +486,7 @@ function PlanNode({
       {expanded && hasDetails && (
         <div className="explain-node-detail">
           {plan.filter && (
-            <DetailRow label="Filter" value={filterValue ?? ''} highlights={filterHighlights} />
+            <DetailRow label="Filter" value={filterValue ?? ''} highlights={filterHighlights} highlightTerms={filterTerms} />
           )}
           {plan.join && (
             <DetailRow label="Join" value={formatJoin(plan.join)} />
@@ -493,7 +495,7 @@ function PlanNode({
             <DetailRow label="Group By" value={plan.group_by.join(', ')} />
           )}
           {plan.having && (
-            <DetailRow label="Having" value={havingValue ?? ''} highlights={havingHighlights} />
+            <DetailRow label="Having" value={havingValue ?? ''} highlights={havingHighlights} highlightTerms={havingTerms} />
           )}
           {plan.order_by && plan.order_by.length > 0 && (
             <DetailRow label="Order By" value={plan.order_by.map((o) => `${o.column} ${o.direction || 'ASC'}`).join(', ')} />
@@ -538,11 +540,28 @@ type DetailHighlight = {
   level: 'index' | 'residual' | 'mixed'
 }
 
-function DetailRow({ label, value, highlights = [] }: { label: string; value: string; highlights?: DetailHighlight[] }) {
+type PredicateHighlightTerm = {
+  text: string
+  level: 'index' | 'residual'
+}
+
+function DetailRow({
+  label,
+  value,
+  highlights = [],
+  highlightTerms = [],
+}: {
+  label: string
+  value: string
+  highlights?: DetailHighlight[]
+  highlightTerms?: PredicateHighlightTerm[]
+}) {
   return (
     <div className="explain-detail-row">
       <span className="explain-detail-label">{label}</span>
-      <span className="explain-detail-value mono">{value}</span>
+      <span className="explain-detail-value mono">
+        {highlightTerms.length > 0 ? renderHighlightedPredicate(value, highlightTerms) : value}
+      </span>
       {highlights.length > 0 && (
         <span className="explain-detail-highlights">
           {highlights.map((highlight) => (
@@ -576,6 +595,79 @@ function classifyPredicateHighlights(
     return [{ label: 'residual', level: 'residual' }]
   }
   return []
+}
+
+function buildPredicateHighlightTerms(
+  predicateText: string,
+  indexedPredicates: string[],
+  residualPredicate?: string,
+): PredicateHighlightTerm[] {
+  const terms: PredicateHighlightTerm[] = []
+
+  for (const predicate of indexedPredicates) {
+    if (predicate && predicateText.includes(predicate)) {
+      terms.push({ text: predicate, level: 'index' })
+    }
+  }
+
+  if (residualPredicate && predicateText.includes(residualPredicate)) {
+    terms.push({ text: residualPredicate, level: 'residual' })
+  }
+
+  terms.sort((a, b) => b.text.length - a.text.length)
+
+  const seen = new Set<string>()
+  return terms.filter((term) => {
+    const key = `${term.level}:${term.text}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function renderHighlightedPredicate(value: string, terms: PredicateHighlightTerm[]) {
+  const matches = collectPredicateMatches(value, terms)
+  if (matches.length === 0) {
+    return value
+  }
+
+  const parts: React.ReactNode[] = []
+  let cursor = 0
+  matches.forEach((match, index) => {
+    if (match.start > cursor) {
+      parts.push(value.slice(cursor, match.start))
+    }
+    parts.push(
+      <span key={`${match.start}-${match.end}-${index}`} className={`explain-inline-highlight ${match.level}`}>
+        {value.slice(match.start, match.end)}
+      </span>,
+    )
+    cursor = match.end
+  })
+  if (cursor < value.length) {
+    parts.push(value.slice(cursor))
+  }
+  return parts
+}
+
+function collectPredicateMatches(value: string, terms: PredicateHighlightTerm[]) {
+  const matches: Array<{ start: number; end: number; level: 'index' | 'residual' }> = []
+
+  for (const term of terms) {
+    let fromIndex = 0
+    while (fromIndex < value.length) {
+      const start = value.indexOf(term.text, fromIndex)
+      if (start < 0) break
+      const end = start + term.text.length
+      const overlaps = matches.some((match) => start < match.end && end > match.start)
+      if (!overlaps) {
+        matches.push({ start, end, level: term.level })
+      }
+      fromIndex = end
+    }
+  }
+
+  return matches.sort((a, b) => a.start - b.start)
 }
 
 function formatOperation(op: string): string {

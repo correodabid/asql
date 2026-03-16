@@ -22,4 +22,4 @@ Common workflows:
 UX note:
 
 - Studio opens on a guided `Start Here` overview so first-run users can move through domain selection, fixtures/schema, first query, and temporal exploration without having to infer the happy path from raw tabs alone.
-- Studio EXPLAIN workflows surface a planner verdict summary plus runtime access-plan detail, including indexed predicates, residual predicates, evaluated candidates, heuristic-pruned candidates, operator-facing plan suggestions, and plan-tree highlights that map indexed vs residual predicate work back onto the shape of the query.
+- Studio EXPLAIN workflows surface a planner verdict summary plus runtime access-plan detail, including indexed predicates, residual predicates, evaluated candidates, heuristic-pruned candidates, operator-facing plan suggestions, and plan-tree highlights that map indexed vs residual predicate work back onto the shape of the query, including inline subexpression highlighting for compound filters.
