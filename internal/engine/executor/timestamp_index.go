@@ -109,13 +109,13 @@ func (index *timestampLSNIndex) load() (bool, error) {
 		}
 		return false, fmt.Errorf("read timestamp index: %w", err)
 	}
-	entries, err := decodeTimestampIndex(data)
+	ranges, err := decodeCompressedTimestampIndex(data)
 	if err != nil {
 		return false, err
 	}
 
 	index.mu.Lock()
-	index.ranges = compressTimestampEntries(entries)
+	index.ranges = ranges
 	index.persistOK = true
 	index.mu.Unlock()
 	return true, nil
@@ -204,6 +204,32 @@ func decodeTimestampIndex(data []byte) ([]timestampLSNEntry, error) {
 		})
 	}
 	return entries, nil
+}
+
+func decodeCompressedTimestampIndex(data []byte) ([]timestampLSNRange, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	if len(data) < timestampIndexHeaderSz || string(data[:timestampIndexHeaderSz]) != timestampIndexMagic {
+		return nil, errTimestampIndexCorrupt
+	}
+	body := data[timestampIndexHeaderSz:]
+	if len(body)%timestampIndexEntrySz != 0 {
+		return nil, errTimestampIndexCorrupt
+	}
+	if len(body) == 0 {
+		return nil, nil
+	}
+
+	ranges := make([]timestampLSNRange, 0, len(body)/timestampIndexEntrySz)
+	for offset := 0; offset < len(body); offset += timestampIndexEntrySz {
+		entry := timestampLSNEntry{
+			timestamp: binary.LittleEndian.Uint64(body[offset : offset+8]),
+			lsn:       binary.LittleEndian.Uint64(body[offset+8 : offset+16]),
+		}
+		ranges = appendCompressedTimestampEntry(ranges, entry)
+	}
+	return ranges, nil
 }
 
 func writeTimestampIndexFile(path string, entries []timestampLSNEntry) error {

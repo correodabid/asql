@@ -623,6 +623,7 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 				} else {
 					slog.Info("periodic disk checkpoint written", "lsn", snap.lsn, "seq", seq, "full", isFull)
 					engine.writeMu.Lock()
+					engine.lastDiskSnapshotLSN = snap.lsn
 					engine.lastDiskSnapshotLogicalTS = snap.logicalTS
 					engine.lastDiskSnapshotMutationCount = mutationCount
 					if sizer, ok := engine.logStore.(ports.Sizer); ok {

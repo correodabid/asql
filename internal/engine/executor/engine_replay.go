@@ -105,6 +105,7 @@ func (engine *Engine) replayFromSnapshots(snapshots []engineSnapshot, records []
 	engine.mutationCount = 0
 	// Track the logical timestamp of the latest disk snapshot so that the first
 	// post-restart delta checkpoint uses the correct base for buildChangedDomains.
+	engine.lastDiskSnapshotLSN = latest.lsn
 	engine.lastDiskSnapshotLogicalTS = latest.logicalTS
 
 	// Load ALL intermediate snapshots into the in-memory store.

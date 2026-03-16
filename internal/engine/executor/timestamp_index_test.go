@@ -330,6 +330,37 @@ func TestTimestampIndexCompressesContiguousRanges(t *testing.T) {
 	}
 }
 
+func TestDecodeCompressedTimestampIndexMatchesDecodedCompression(t *testing.T) {
+	records := []ports.WALRecord{
+		{LSN: 10, Timestamp: 100},
+		{LSN: 11, Timestamp: 101},
+		{LSN: 12, Timestamp: 102},
+		{LSN: 20, Timestamp: 200},
+		{LSN: 21, Timestamp: 201},
+	}
+	entries := timestampEntriesFromRecords(records)
+	encoded := encodeTimestampIndex(entries)
+
+	decodedEntries, err := decodeTimestampIndex(encoded)
+	if err != nil {
+		t.Fatalf("decode timestamp entries: %v", err)
+	}
+	decodedRanges, err := decodeCompressedTimestampIndex(encoded)
+	if err != nil {
+		t.Fatalf("decode compressed timestamp index: %v", err)
+	}
+
+	want := compressTimestampEntries(decodedEntries)
+	if len(decodedRanges) != len(want) {
+		t.Fatalf("unexpected range count: got %d want %d", len(decodedRanges), len(want))
+	}
+	for i := range want {
+		if decodedRanges[i] != want[i] {
+			t.Fatalf("range %d mismatch: got %+v want %+v", i, decodedRanges[i], want[i])
+		}
+	}
+}
+
 func itoa(v int) string {
 	if v == 0 {
 		return "0"

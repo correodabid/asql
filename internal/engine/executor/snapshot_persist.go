@@ -638,6 +638,10 @@ func (engine *Engine) persistAllSnapshots() {
 	latest := engine.snapshots.snapshots[len(engine.snapshots.snapshots)-1]
 	engine.snapshots.mu.Unlock()
 
+	if latest.lsn == engine.lastDiskSnapshotLSN && latest.logicalTS == engine.lastDiskSnapshotLogicalTS {
+		return
+	}
+
 	// Write the latest snapshot as the single checkpoint file.
 	// Every fullSnapshotFrequency-th file (seq-1 divisible) is a full snapshot;
 	// the rest are delta snapshots (only tables mutated since the last checkpoint).
@@ -649,6 +653,7 @@ func (engine *Engine) persistAllSnapshots() {
 		engine.snapSeq-- // revert so next attempt retries the same seq
 		return
 	}
+	engine.lastDiskSnapshotLSN = latest.lsn
 	engine.lastDiskSnapshotLogicalTS = latest.logicalTS
 	engine.lastDiskSnapshotMutationCount = engine.mutationCount
 	slog.Info("snapshot: disk checkpoint written", "lsn", latest.lsn, "seq", engine.snapSeq, "full", isFull)

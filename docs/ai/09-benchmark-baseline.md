@@ -45,6 +45,15 @@ Repeated sample on 2026-03-14 using isolated fixtures and `go test ./internal/en
 - `BenchmarkEngineRestartReplayOnly-8`: `3,330,478–3,413,274 ns/op`, `2,303,626–2,303,673 B/op`, `15,573 allocs/op`
 - `BenchmarkEngineRestartFromPersistedSnapshot-8`: `3,910,771–3,918,000 ns/op`, `1,122,907–1,123,694 B/op`, `6,309 allocs/op`
 
+Status note (2026-03-16): snapshot restart now skips duplicate shutdown checkpoint writes when the latest `LSN` is already on disk, and timestamp-index load no longer decodes the on-disk file into a full entry slice before compressing it.
+
+Repeated sample on 2026-03-16 using `go test ./internal/engine/executor -run '^$' -bench '^(BenchmarkEngine(ReadPersistedSnapshotsFromDir|RestartReplayOnly|RestartFromPersistedSnapshot))$' -benchmem -benchtime=200ms -count=2`:
+
+- `BenchmarkEngineRestartReplayOnly-8`: `1,940,649–2,046,391 ns/op`, `1,718,720–1,718,802 B/op`, `12,809 allocs/op`
+- `BenchmarkEngineRestartFromPersistedSnapshot-8`: `2,224,551–2,476,452 ns/op`, `755,898–771,614 B/op`, `2,973–2,978 allocs/op`
+- `BenchmarkEngineReadPersistedSnapshotsFromDir-8`: `239,629–242,662 ns/op`, `353,609–360,022 B/op`, `1,175–1,177 allocs/op`
+- `BenchmarkEngineReplayFromPersistedSnapshots-8`: `452.1–456.5 ns/op`, `640 B/op`, `8 allocs/op`
+
 Scope note on 2026-03-14: the current `BenchmarkEngineRestartFromPersistedSnapshot` fixture calls `WaitPendingSnapshots()` before shutdown, so it benchmarks a head snapshot plus effectively `0` trailing WAL records rather than a snapshot plus a non-zero replay tail.
 
 Restart-tail/cadence spot checks on 2026-03-14 using `-benchtime=1x`:

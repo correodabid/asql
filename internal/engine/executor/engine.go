@@ -155,6 +155,7 @@ type Engine struct {
 	lastDiskSnapshotMutationCount uint64         // mutationCount at the last successful disk checkpoint
 	recentMutationWeights         [recentMutationWindowSize]uint8
 	lastCheckpointWALSize         uint64 // WAL TotalSize at last disk checkpoint, for size-based trigger
+	lastDiskSnapshotLSN           uint64 // headLSN of the last successfully written disk snapshot
 	lastDiskSnapshotLogicalTS     uint64 // logicalTS of the last successfully written disk snapshot
 	perf                          *perfStats
 	retainWAL                     bool                // when true, WAL is never truncated after snapshot persistence (audit/compliance)

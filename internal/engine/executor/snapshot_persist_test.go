@@ -110,12 +110,12 @@ func TestSnapshotPersistRoundTrip(t *testing.T) {
 		t.Errorf("expected %d rows, got %d", totalRows, len(result.Rows))
 	}
 
-	// Verify multiple snapshots loaded from disk files after restart.
+	// Verify persisted snapshots loaded from disk files after restart.
 	engine2.snapshots.mu.Lock()
 	snapCount := engine2.snapshots.count()
 	engine2.snapshots.mu.Unlock()
-	if snapCount < 2 {
-		t.Errorf("expected at least 2 snapshots after restart (loaded from disk files), got %d", snapCount)
+	if snapCount < 1 {
+		t.Errorf("expected at least 1 snapshot after restart (loaded from disk files), got %d", snapCount)
 	}
 }
 
@@ -190,6 +190,65 @@ func TestDeltaReplayDoesNotPersistCheckpoint(t *testing.T) {
 	}
 	if engine.snapSeq != baselineSeq {
 		t.Fatalf("expected snap sequence to remain %d during delta replay, got %d", baselineSeq, engine.snapSeq)
+	}
+}
+
+func TestPersistAllSnapshotsSkipsAlreadyPersistedHead(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	walPath := filepath.Join(dir, "engine.wal")
+	snapDir := filepath.Join(dir, "snap")
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		t.Fatalf("mkdir snap dir: %v", err)
+	}
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new log store: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+	}()
+
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	for _, sql := range []string{
+		"BEGIN DOMAIN replay",
+		"CREATE TABLE items (id INT, name TEXT)",
+		"INSERT INTO items (id, name) VALUES (1, 'one')",
+		"COMMIT",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
+		}
+	}
+
+	state := engine.readState.Load()
+	engine.snapshots.add(captureSnapshot(state, engine.catalog))
+	engine.persistAllSnapshots()
+
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		t.Fatalf("read snap dir: %v", err)
+	}
+	baselineFiles := len(entries)
+	baselineSeq := engine.snapSeq
+
+	engine.persistAllSnapshots()
+
+	entries, err = os.ReadDir(snapDir)
+	if err != nil {
+		t.Fatalf("read snap dir after duplicate persist: %v", err)
+	}
+	if len(entries) != baselineFiles {
+		t.Fatalf("expected duplicate persist to keep %d snapshot files, got %d", baselineFiles, len(entries))
+	}
+	if engine.snapSeq != baselineSeq {
+		t.Fatalf("expected duplicate persist to keep sequence %d, got %d", baselineSeq, engine.snapSeq)
 	}
 }
 
@@ -303,6 +362,7 @@ func resetPersistedCheckpointPolicyStateForTest(t *testing.T, engine *Engine) {
 	engine.recentMutationCount = 0
 	engine.recentMutationIndex = 0
 	engine.lastDiskSnapshotMutationCount = 0
+	engine.lastDiskSnapshotLSN = 0
 	engine.lastDiskSnapshotLogicalTS = 0
 	engine.recentMutationWeights = [recentMutationWindowSize]uint8{}
 	if sizer, ok := engine.logStore.(ports.Sizer); ok {
