@@ -3015,6 +3015,12 @@ func TestExplainAccessPlanUsesIndexIntersectionForIndexedConjunct(t *testing.T) 
 	if !strings.Contains(plan, `"strategy":"index-intersection"`) {
 		t.Fatalf("expected index-intersection strategy, got: %s", plan)
 	}
+	if !strings.Contains(plan, `"indexed_predicates":["id = 'comp-010'","status = 'ready'"]`) {
+		t.Fatalf("expected indexed predicate contribution details, got: %s", plan)
+	}
+	if strings.Contains(plan, `"residual_predicate"`) {
+		t.Fatalf("did not expect residual predicate for pure intersection, got: %s", plan)
+	}
 }
 
 func TestExplainUpdateDeleteUseIndexForConjunctivePredicate(t *testing.T) {
@@ -3340,6 +3346,12 @@ func TestExplainAccessPlanUsesPartialIndexUnionForHybridOR(t *testing.T) {
 	plan := result.Rows[0]["access_plan"].StringValue
 	if !strings.Contains(plan, `"strategy":"index-union-partial"`) {
 		t.Fatalf("expected partial index-union strategy, got: %s", plan)
+	}
+	if !strings.Contains(plan, `"indexed_predicates":["id = 'comp-010'"]`) {
+		t.Fatalf("expected indexed predicate contribution detail, got: %s", plan)
+	}
+	if !strings.Contains(plan, `"residual_predicate":"sequence_no \u003e 11"`) {
+		t.Fatalf("expected residual predicate detail, got: %s", plan)
 	}
 }
 

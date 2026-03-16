@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"strconv"
 	"sort"
 	"strings"
 
@@ -1210,6 +1211,8 @@ type accessPlanInfo struct {
 	IndexUsed     string          `json:"index_used,omitempty"`
 	IndexType     string          `json:"index_type,omitempty"`
 	IndexColumn   string          `json:"index_column,omitempty"`
+	IndexedPreds  []string        `json:"indexed_predicates,omitempty"`
+	ResidualPred  string          `json:"residual_predicate,omitempty"`
 	Candidates    []candidateInfo `json:"candidates,omitempty"`
 	Joins         []joinPlanInfo  `json:"joins,omitempty"`
 }
@@ -1248,6 +1251,7 @@ func (engine *Engine) buildAccessPlan(plan planner.Plan) accessPlanInfo {
 
 	if table != nil {
 		info.TableRows = len(table.rows)
+		info.IndexedPreds, info.ResidualPred = explainPredicateContributions(table, plan.Filter)
 	}
 
 	switch plan.Operation {
@@ -1308,6 +1312,180 @@ func (engine *Engine) buildAccessPlan(plan planner.Plan) accessPlanInfo {
 	}
 
 	return info
+}
+
+func explainPredicateContributions(table *tableState, predicate *ast.Predicate) ([]string, string) {
+	if table == nil || predicate == nil {
+		return nil, ""
+	}
+
+	indexed := collectExplainIndexedPredicates(table, predicate)
+	indexed = dedupeStrings(indexed)
+	residual := explainResidualPredicate(table, predicate)
+	return indexed, residual
+}
+
+func collectExplainIndexedPredicates(table *tableState, predicate *ast.Predicate) []string {
+	if table == nil || predicate == nil {
+		return nil
+	}
+
+	if rowIDs, _, strategy, ok := candidateRowIDsForPredicate(table, predicate, false); ok {
+		_ = rowIDs
+		switch strategy {
+		case scanStrategyHashLookup, scanStrategyBTreeLookup, scanStrategyIndexNot:
+			return []string{formatPredicateForExplain(predicate)}
+		case scanStrategyIndexUnion, scanStrategyIndexInter:
+			return flattenExplainIndexedLeaves(predicate)
+		}
+	}
+
+	if _, residual, ok := decomposeHybridORPredicate(table, predicate, false); ok {
+		allLeaves := flattenExplainIndexedLeaves(predicate)
+		residualLeaves := flattenExplainResidualLeaves(residual)
+		return subtractStrings(allLeaves, residualLeaves)
+	}
+
+	return nil
+}
+
+func explainResidualPredicate(table *tableState, predicate *ast.Predicate) string {
+	if table == nil || predicate == nil {
+		return ""
+	}
+
+	if _, residual, ok := decomposeHybridORPredicate(table, predicate, false); ok && residual != nil {
+		return formatPredicateForExplain(residual)
+	}
+
+	if rowIDs, lookupPredicate, strategy, ok := candidateRowIDsForPredicate(table, predicate, false); ok {
+		_ = rowIDs
+		switch strategy {
+		case scanStrategyHashLookup, scanStrategyBTreeLookup:
+			if strings.EqualFold(formatPredicateForExplain(predicate), formatPredicateForExplain(lookupPredicate)) {
+				return ""
+			}
+			return formatPredicateForExplain(predicate)
+		case scanStrategyIndexUnion, scanStrategyIndexInter, scanStrategyIndexNot:
+			return ""
+		}
+	}
+
+	return formatPredicateForExplain(predicate)
+}
+
+func flattenExplainIndexedLeaves(predicate *ast.Predicate) []string {
+	if predicate == nil {
+		return nil
+	}
+
+	operator := strings.ToUpper(strings.TrimSpace(predicate.Operator))
+	switch operator {
+	case "AND", "OR":
+		left := flattenExplainIndexedLeaves(predicate.Left)
+		right := flattenExplainIndexedLeaves(predicate.Right)
+		return append(left, right...)
+	default:
+		return []string{formatPredicateForExplain(predicate)}
+	}
+}
+
+func flattenExplainResidualLeaves(predicate *ast.Predicate) []string {
+	if predicate == nil {
+		return nil
+	}
+	operator := strings.ToUpper(strings.TrimSpace(predicate.Operator))
+	switch operator {
+	case "AND", "OR":
+		left := flattenExplainResidualLeaves(predicate.Left)
+		right := flattenExplainResidualLeaves(predicate.Right)
+		return append(left, right...)
+	default:
+		return []string{formatPredicateForExplain(predicate)}
+	}
+}
+
+func subtractStrings(values []string, excluded []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	excludedSet := make(map[string]int, len(excluded))
+	for _, value := range excluded {
+		excludedSet[value]++
+	}
+	filtered := make([]string, 0, len(values))
+	for _, value := range values {
+		if excludedSet[value] > 0 {
+			excludedSet[value]--
+			continue
+		}
+		filtered = append(filtered, value)
+	}
+	return filtered
+}
+
+func dedupeStrings(values []string) []string {
+	if len(values) <= 1 {
+		return values
+	}
+	seen := make(map[string]struct{}, len(values))
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		result = append(result, value)
+	}
+	return result
+}
+
+func formatPredicateForExplain(predicate *ast.Predicate) string {
+	if predicate == nil {
+		return ""
+	}
+
+	operator := strings.ToUpper(strings.TrimSpace(predicate.Operator))
+	switch operator {
+	case "AND", "OR":
+		return "(" + formatPredicateForExplain(predicate.Left) + " " + operator + " " + formatPredicateForExplain(predicate.Right) + ")"
+	case "NOT":
+		return "(NOT " + formatPredicateForExplain(predicate.Left) + ")"
+	case "IN", "NOT IN":
+		parts := make([]string, 0, len(predicate.InValues))
+		for _, value := range predicate.InValues {
+			parts = append(parts, formatLiteralForExplain(value))
+		}
+		return predicate.Column + " " + operator + " (" + strings.Join(parts, ", ") + ")"
+	case "IS NULL", "IS NOT NULL":
+		return predicate.Column + " " + operator
+	default:
+		return predicate.Column + " " + operator + " " + formatLiteralForExplain(predicate.Value)
+	}
+}
+
+func formatLiteralForExplain(value ast.Literal) string {
+	switch value.Kind {
+	case ast.LiteralString:
+		return "'" + value.StringValue + "'"
+	case ast.LiteralNumber:
+		return strconv.FormatInt(value.NumberValue, 10)
+	case ast.LiteralBoolean:
+		if value.BoolValue {
+			return "TRUE"
+		}
+		return "FALSE"
+	case ast.LiteralNull:
+		return "NULL"
+	default:
+		if value.StringValue != "" {
+			return "'" + value.StringValue + "'"
+		}
+		return ""
+	}
 }
 
 // collectScanCandidates runs the cost model and returns the chosen strategy
