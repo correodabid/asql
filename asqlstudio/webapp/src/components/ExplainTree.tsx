@@ -50,6 +50,7 @@ export function ExplainTree({ planShape, accessPlan, operation, domain, table }:
 
 function AccessPlanSection({ plan }: { plan: AccessPlan }) {
   const [showCandidates, setShowCandidates] = useState(false)
+  const [showPruned, setShowPruned] = useState(false)
   const selectivity = plan.table_rows > 0 && plan.estimated_rows !== undefined
     ? ((plan.estimated_rows / plan.table_rows) * 100)
     : null
@@ -100,6 +101,22 @@ function AccessPlanSection({ plan }: { plan: AccessPlan }) {
           </span>
         </div>
       )}
+      {plan.indexed_predicates && plan.indexed_predicates.length > 0 && (
+        <div className="explain-access-row explain-access-row-wrap">
+          <span className="explain-detail-label">Indexed</span>
+          <div className="explain-token-list">
+            {plan.indexed_predicates.map((predicate, i) => (
+              <span key={`${predicate}-${i}`} className="explain-token mono">{predicate}</span>
+            ))}
+          </div>
+        </div>
+      )}
+      {plan.residual_predicate && (
+        <div className="explain-access-row explain-access-row-wrap">
+          <span className="explain-detail-label">Residual</span>
+          <span className="explain-detail-value mono">{plan.residual_predicate}</span>
+        </div>
+      )}
       {plan.candidates && plan.candidates.length > 0 && (
         <>
           <div className="explain-access-row">
@@ -113,6 +130,23 @@ function AccessPlanSection({ plan }: { plan: AccessPlan }) {
           {showCandidates && (
             <div className="explain-candidates">
               {renderCandidatesWithBars(plan.candidates)}
+            </div>
+          )}
+        </>
+      )}
+      {plan.pruned_candidates && plan.pruned_candidates.length > 0 && (
+        <>
+          <div className="explain-access-row">
+            <span
+              className="explain-detail-label explain-toggle-label"
+              onClick={() => setShowPruned(!showPruned)}
+            >
+              Pruned {showPruned ? '\u25BC' : '\u25B6'}
+            </span>
+          </div>
+          {showPruned && (
+            <div className="explain-candidates explain-pruned-list">
+              {renderPrunedCandidates(plan.pruned_candidates)}
             </div>
           )}
         </>
@@ -138,22 +172,44 @@ function AccessPlanSection({ plan }: { plan: AccessPlan }) {
   )
 }
 
-function renderCandidatesWithBars(candidates: { strategy: string; cost: number; chosen?: boolean }[]) {
-  const maxCost = Math.max(...candidates.map(c => c.cost), 1)
+function renderCandidatesWithBars(candidates: NonNullable<AccessPlan['candidates']>) {
+  const maxCost = Math.max(...candidates.map(c => c.cost ?? 0), 1)
 
   return candidates.map((c, i) => (
-    <div key={i} className={`explain-candidate-row${c.chosen ? ' chosen' : ''}`}>
-      <span className="mono" style={{ minWidth: 90 }}>{c.strategy}</span>
-      <div className="explain-cost-bar-wrap" style={{ flex: 1 }}>
-        <div className="explain-cost-bar-track">
-          <div
-            className={`explain-cost-bar-fill ${c.chosen ? 'chosen' : 'candidate'}`}
-            style={{ width: `${(c.cost / maxCost) * 100}%` }}
-          />
+    <div key={i} className={`explain-candidate-card${c.chosen ? ' chosen' : ''}`}>
+      <div className={`explain-candidate-row${c.chosen ? ' chosen' : ''}`}>
+        <span className="mono" style={{ minWidth: 90 }}>{c.strategy}</span>
+        <div className="explain-cost-bar-wrap" style={{ flex: 1 }}>
+          <div className="explain-cost-bar-track">
+            <div
+              className={`explain-cost-bar-fill ${c.chosen ? 'chosen' : 'candidate'}`}
+              style={{ width: `${((c.cost ?? 0) / maxCost) * 100}%` }}
+            />
+          </div>
+          <span className="explain-cost-bar-label">{c.cost ?? 0}</span>
         </div>
-        <span className="explain-cost-bar-label">{c.cost}</span>
+        {c.chosen && <span className="explain-chosen-badge">chosen</span>}
       </div>
-      {c.chosen && <span className="explain-chosen-badge">chosen</span>}
+      {(c.detail || c.rejected_reason) && (
+        <div className="explain-candidate-meta">
+          {c.detail && <div className="explain-candidate-detail mono">{c.detail}</div>}
+          {c.rejected_reason && <div className="explain-candidate-reason">{c.rejected_reason}</div>}
+        </div>
+      )}
+    </div>
+  ))
+}
+
+function renderPrunedCandidates(candidates: NonNullable<AccessPlan['pruned_candidates']>) {
+  return candidates.map((candidate, i) => (
+    <div key={i} className="explain-pruned-card">
+      <div className="explain-pruned-header">
+        <span className={`explain-op-badge ${strategyClass(candidate.strategy)}`}>
+          {candidate.strategy.replace(/-/g, ' ').toUpperCase()}
+        </span>
+      </div>
+      {candidate.detail && <div className="explain-candidate-detail mono">{candidate.detail}</div>}
+      <div className="explain-candidate-reason">{candidate.reason}</div>
     </div>
   ))
 }

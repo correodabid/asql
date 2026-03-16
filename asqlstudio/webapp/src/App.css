@@ -6207,6 +6207,10 @@ select.editor-input {
   font-size: 12px;
 }
 
+.explain-access-row-wrap {
+  align-items: flex-start;
+}
+
 .explain-op-badge.index {
   background: rgba(52, 211, 153, 0.1);
   border-color: rgba(52, 211, 153, 0.25);
@@ -6242,6 +6246,38 @@ select.editor-input {
   border-radius: 4px;
 }
 
+.explain-pruned-list {
+  border-style: dashed;
+}
+
+.explain-token-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.explain-token {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.18);
+  color: var(--text-primary);
+}
+
+.explain-candidate-card,
+.explain-pruned-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+}
+
+.explain-candidate-card + .explain-candidate-card,
+.explain-pruned-card + .explain-pruned-card {
+  border-top: 1px solid var(--border);
+}
+
 .explain-candidate-row {
   display: flex;
   align-items: center;
@@ -6254,6 +6290,30 @@ select.editor-input {
 .explain-candidate-row.chosen {
   color: var(--text-primary);
   font-weight: 500;
+}
+
+.explain-candidate-meta {
+  margin-left: 102px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.explain-candidate-detail {
+  color: var(--text-primary);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.explain-candidate-reason {
+  color: var(--text-muted);
+  font-size: 11px;
+  word-break: break-word;
+}
+
+.explain-pruned-header {
+  display: flex;
+  align-items: center;
 }
 
 .explain-cost {

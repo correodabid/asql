@@ -30,6 +30,20 @@ export type ExplainPlan = {
   accessPlan?: AccessPlan
 }
 
+export type ExplainCandidate = {
+  strategy: string
+  cost?: number
+  detail?: string
+  chosen?: boolean
+  rejected_reason?: string
+}
+
+export type ExplainPrunedCandidate = {
+  strategy: string
+  detail?: string
+  reason: string
+}
+
 export type AccessPlan = {
   strategy: string
   table_rows: number
@@ -37,7 +51,10 @@ export type AccessPlan = {
   index_used?: string
   index_type?: string
   index_column?: string
-  candidates?: { strategy: string; cost: number; chosen?: boolean }[]
+  indexed_predicates?: string[]
+  residual_predicate?: string
+  candidates?: ExplainCandidate[]
+  pruned_candidates?: ExplainPrunedCandidate[]
   joins?: { table: string; join_type: string; strategy: string; table_rows: number; index_used?: string }[]
 }
 
