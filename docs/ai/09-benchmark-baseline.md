@@ -30,6 +30,16 @@ Repeated sample on 2026-03-15 using `go test ./internal/engine/executor -run '^$
 
 - `BenchmarkEngineReplayToLSN-8`: `2.130–2.179 ns/op`, `0 B/op`, `0 allocs/op`
 
+Commit-batching follow-up on 2026-03-16:
+
+- Baseline realistic concurrent benchmark before fixing the harness / queue coalescing (`go test ./internal/engine/executor -run '^$' -bench '^BenchmarkConcurrentCommit$' -benchmem -benchtime=1s -count=1`):
+	- `BenchmarkConcurrentCommit-8`: `415,394 ns/op`, `112,308 B/op`, `317 allocs/op`, `1.627 p50-ms`, `3.176 p95-ms`, `4.285 p99-ms`, `0 retries`
+	- Benchmark note: this run emitted snapshot checkpoint write failures because the benchmark passed the WAL file path as `snapDir`.
+- After fixing `BenchmarkConcurrentCommit` to use a real snapshot directory and adding lightweight commit-queue coalescing by scheduler yield:
+	- `BenchmarkConcurrentCommit-8`: `304,207 ns/op`, `130,729 B/op`, `318 allocs/op`, `0.979 p50-ms`, `2.401 p95-ms`, `3.515 p99-ms`, `0 retries`
+	- `BenchmarkEngineWriteCommitConcurrent-8`: `398,980 ns/op`, `16,698 B/op`, `45 allocs/op`
+	- Comparison note: the simpler synthetic concurrent commit benchmark stayed roughly flat versus the earlier ~`391,800 ns/op`, so the meaningful win here is on the more realistic 4-worker multi-table transaction shape rather than on the smallest synthetic path.
+
 ### WAL (`internal/storage/wal`)
 
 - `BenchmarkFileLogStoreAppend-8`: `24,561 ns/op`, `573 B/op`, `6 allocs/op`

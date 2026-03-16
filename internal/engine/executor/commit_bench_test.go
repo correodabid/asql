@@ -3,6 +3,8 @@ package executor
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -69,8 +71,12 @@ func BenchmarkConcurrentCommit(b *testing.B) {
 		b.Fatal(err)
 	}
 	defer store.Close()
+	snapDir := filepath.Join(dir, "bench-concurrent-snapshots")
+	if err := os.MkdirAll(snapDir, 0o755); err != nil {
+		b.Fatal(err)
+	}
 
-	engine, err := New(ctx, store, dir+"/bench-concurrent.wal")
+	engine, err := New(ctx, store, snapDir)
 	if err != nil {
 		b.Fatal(err)
 	}

@@ -551,6 +551,7 @@ Subline status:
 - A fresh end-to-end spot check after these snapshot-load changes still leaves `BenchmarkEngineRestartFromPersistedSnapshot` slightly slower than `BenchmarkEngineRestartReplayOnly` on the current short fixture (~`4.46 ms/op` vs ~`4.24 ms/op`), but with materially lower heap pressure (~`1.08 MB/op` and ~`5.2k allocs/op` vs ~`2.30 MB/op` and ~`15.6k allocs/op`), so the remaining work is now less about raw restore mechanics and more about the benchmarked full restart envelope around snapshot file handling.
 - A fresh representative spot check on the restart sweeps keeps the same broader story intact after the latest snapshot-load work: with a fixed 500-record snapshot anchor and a long 5k replay tail, `persisted_snapshot_tail_5000` still loses to replay-only (~`50.4 ms/op` vs ~`39.3 ms/op`), but on the more policy-relevant medium cadence case (`total_10500`, `tail_500`) the persisted path still wins clearly (~`61.3 ms/op`, ~`34.6 MB/op`, ~`196k allocs/op` vs ~`94.5 ms/op`, ~`62.1 MB/op`, ~`361k allocs/op`). That keeps the closure framing the same: head-snapshot and long-tail fixtures are still not closure-grade wins, while the realistic medium-tail cadence story remains strong.
 - The persisted-index/cache item is now narrower than it first appeared: a persisted timestamp→LSN side index already exists and is restart-validated, but there is still no evidence-backed need yet for general persisted table indexes or a broader cache layer.
+- Commit batching on realistic workloads now has direct evidence instead of only the synthetic concurrent INSERT loop. `BenchmarkConcurrentCommit` was corrected to use a real snapshot directory (so runtime checkpoints stop failing during the benchmark), and the commit queue now opportunistically coalesces immediately following jobs via scheduler yields instead of a fixed sleep. On the realistic 4-worker / 9-INSERT transaction benchmark this moved throughput from ~`415 µs/op` to ~`304 µs/op`, tightened p50 from ~`1.63 ms` to ~`0.98 ms`, p95 from ~`3.18 ms` to ~`2.40 ms`, and p99 from ~`4.29 ms` to ~`3.52 ms`, with zero retry regressions. The simpler `BenchmarkEngineWriteCommitConcurrent` stayed roughly flat (~`392 µs/op` -> ~`399 µs/op`), so the win appears workload-shaped rather than a blanket microbenchmark gain.
 - The parallel-scan item has now been evaluated to a defer decision: there is still no proven workload class that justifies intra-query parallel scan complexity over the current deterministic single-threaded indexed paths.
 - Entity-related join reads now have dedicated scaling coverage: `BenchmarkEngineReadEntityRelatedJoinScaling` and `BenchmarkEngineReadEntityRelatedJoinRightFilterScaling` show that root-table pruning, root-only `AND` conjunct extraction, and safe right-side filtering materially improved the user-reported “entity + related tables” slowdown as row counts grow, but the broader indexed-read/query-latency item remains open because other read shapes still need closure-level decisions.
 - Repeated historical reads now have dedicated scaling coverage via `BenchmarkEngineReadHistoricalAsOfLSNScaling`: exact-`LSN` repeat reads benefit materially from the new WAL-record cache and small historical-state cache, while invalidation on commit and WAL GC keeps correctness explicit.
@@ -571,7 +572,7 @@ Latest directional read evidence:
 - The same historical benchmark improves the larger `rows_10000` fixture from roughly ~`8.57 ms/op`, ~`12.09 MB/op`, ~`80k allocs/op` to ~`3.12 ms/op`, ~`3.79 MB/op`, ~`26.8k allocs/op`, which is strong enough to treat exact-target repeat history reads as a real fixed bottleneck rather than micro-tuning.
 - Current interpretation: index-only is strongly justified for simple covered ordered reads, remains strong with `OFFSET`, is justified on the selective covered shape after bounded-scan support, and is now also justified for the covered composite ordered-read shape. Further expansion should still be guided by measured query shapes rather than blanket rollout.
 
-- [ ] Benchmark and improve commit batching on realistic workloads.
+- [x] Benchmark and improve commit batching on realistic workloads.
 - [x] Benchmark and improve replay throughput.
 - [ ] Benchmark and improve snapshot load time.
 - [x] Benchmark and improve indexed read/query latency.
@@ -581,7 +582,7 @@ Latest directional read evidence:
 - [x] Evaluate parallel scans only for proven workload classes.
 
 Acceptance gates (must pass before closing Epic AB)
-- [ ] Performance work is benchmark-driven, not assumption-driven.
+- [x] Performance work is benchmark-driven, not assumption-driven.
 - [x] Benchmark suite includes failover and recovery scenarios, not only steady-state throughput.
 
 ## Epic AC — Adoption-friction closure from BankApp (Phase 7)

@@ -4,12 +4,18 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"runtime"
 	"sync"
 	"time"
 
 	"asql/internal/engine/parser/ast"
 	"asql/internal/engine/planner"
 	"asql/internal/engine/ports"
+)
+
+const (
+	commitQueueMaxBatchJobs      = 64
+	commitQueueCoalesceYieldSpins = 2
 )
 
 // commitJob represents a single commit request submitted to the commit queue.
@@ -98,9 +104,43 @@ func (cq *commitQueue) writerLoop() {
 		if jobs == nil {
 			return
 		}
+		jobs = cq.coalesce(jobs)
 
 		cq.engine.processCommitBatch(jobs)
 	}
+}
+
+func (cq *commitQueue) coalesce(jobs []*commitJob) []*commitJob {
+	jobs = cq.takePendingJobs(jobs, commitQueueMaxBatchJobs)
+	if len(jobs) != 1 || len(jobs) >= commitQueueMaxBatchJobs {
+		return jobs
+	}
+	for spin := 0; spin < commitQueueCoalesceYieldSpins && len(jobs) < commitQueueMaxBatchJobs; spin++ {
+		runtime.Gosched()
+		jobs = cq.takePendingJobs(jobs, commitQueueMaxBatchJobs)
+		if len(jobs) > 1 {
+			break
+		}
+	}
+	return jobs
+}
+
+func (cq *commitQueue) takePendingJobs(jobs []*commitJob, limit int) []*commitJob {
+	if len(jobs) >= limit {
+		return jobs
+	}
+	cq.mu.Lock()
+	defer cq.mu.Unlock()
+	if len(cq.jobs) == 0 {
+		return jobs
+	}
+	remaining := limit - len(jobs)
+	if remaining > len(cq.jobs) {
+		remaining = len(cq.jobs)
+	}
+	jobs = append(jobs, cq.jobs[:remaining]...)
+	cq.jobs = cq.jobs[remaining:]
+	return jobs
 }
 
 // stop shuts down the commit queue, processing any remaining pending jobs.
