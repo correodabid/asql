@@ -2845,6 +2845,135 @@ func TestChooseSingleTableScanStrategyPrefersBTreeLookupWhenSelective(t *testing
 	}
 }
 
+func TestChooseSingleTableScanStrategyUsesIndexedConjunct(t *testing.T) {
+	buckets := map[string][]int{"s:comp-010": {0}}
+	rows := make([][]ast.Literal, 100)
+
+	table := &tableState{
+		rows: rows,
+		indexes: map[string]*indexState{
+			"idx_components_id_hash": {name: "idx_components_id_hash", column: "id", kind: "hash", buckets: buckets},
+		},
+		indexedColumns: map[string]string{"id": "idx_components_id_hash"},
+	}
+
+	predicate := &ast.Predicate{
+		Operator: "AND",
+		Left: &ast.Predicate{
+			Column:   "id",
+			Operator: "=",
+			Value:    ast.Literal{Kind: ast.LiteralString, StringValue: "comp-010"},
+		},
+		Right: &ast.Predicate{
+			Column:   "sequence_no",
+			Operator: ">",
+			Value:    ast.Literal{Kind: ast.LiteralNumber, NumberValue: 10},
+		},
+	}
+
+	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
+	if strategy != scanStrategyHashLookup {
+		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyHashLookup)
+	}
+}
+
+func TestExplainAccessPlanUsesIndexForConjunctivePredicate(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "explain-conjunctive-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id TEXT PRIMARY KEY, sequence_no INT, name TEXT)")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-009', 9, 'A')")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-010', 11, 'B')")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-011', 12, 'C')")
+	mustExec("COMMIT")
+
+	result, err := engine.Explain("SELECT * FROM block_components WHERE id = 'comp-010' AND sequence_no > 10", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain conjunctive predicate: %v", err)
+	}
+
+	if len(result.Rows) != 1 {
+		t.Fatalf("expected 1 explain row, got %d", len(result.Rows))
+	}
+
+	plan := result.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(plan, `"strategy":"hash"`) {
+		t.Fatalf("expected hash strategy for indexed conjunctive predicate, got: %s", plan)
+	}
+	if !strings.Contains(plan, `"index_column":"id"`) {
+		t.Fatalf("expected id index column in explain plan, got: %s", plan)
+	}
+}
+
+func TestExplainUpdateDeleteUseIndexForConjunctivePredicate(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "explain-conjunctive-dml.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id TEXT PRIMARY KEY, sequence_no INT, name TEXT)")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-009', 9, 'A')")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-010', 11, 'B')")
+	mustExec("INSERT INTO block_components (id, sequence_no, name) VALUES ('comp-011', 12, 'C')")
+	mustExec("COMMIT")
+
+	updateExplain, err := engine.Explain("UPDATE block_components SET name = 'BB' WHERE id = 'comp-010' AND sequence_no > 10", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain update conjunctive predicate: %v", err)
+	}
+	updatePlan := updateExplain.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(updatePlan, `"strategy":"hash"`) || !strings.Contains(updatePlan, `"index_column":"id"`) {
+		t.Fatalf("expected indexed update plan, got: %s", updatePlan)
+	}
+
+	deleteExplain, err := engine.Explain("DELETE FROM block_components WHERE id = 'comp-010' AND sequence_no > 10", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain delete conjunctive predicate: %v", err)
+	}
+	deletePlan := deleteExplain.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(deletePlan, `"strategy":"hash"`) || !strings.Contains(deletePlan, `"index_column":"id"`) {
+		t.Fatalf("expected indexed delete plan, got: %s", deletePlan)
+	}
+}
+
 func TestBaseJoinPredicateUsesQualifiedRootAlias(t *testing.T) {
 	plan := planner.Plan{
 		TableName:  "orders",

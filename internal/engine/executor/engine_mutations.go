@@ -1626,7 +1626,19 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			newRow map[string]ast.Literal
 		}
 		updatedByRowID := make(map[int]rowUpdate)
-		for rowID := range table.rows {
+		candidateRowIDs, _, _, hasIndexedCandidates := candidateRowIDsForPredicate(table, plan.Filter, false)
+		rowIDsToCheck := make([]int, 0, len(table.rows))
+		if hasIndexedCandidates {
+			rowIDsToCheck = append(rowIDsToCheck, candidateRowIDs...)
+		} else {
+			for rowID := range table.rows {
+				rowIDsToCheck = append(rowIDsToCheck, rowID)
+			}
+		}
+		for _, rowID := range rowIDsToCheck {
+			if rowID < 0 || rowID >= len(table.rows) {
+				continue
+			}
 			rowSlice := table.rows[rowID]
 			row := rowToMap(table, rowSlice) // convert stored slice to map for predicate + update
 			if !matchPredicate(row, plan.Filter, state, engine) {
@@ -1719,12 +1731,33 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		remaining := make([][]ast.Literal, 0, len(table.rows))
 		var deletedRowData []map[string]ast.Literal
 		deletedRows := 0
-		for _, rowSlice := range table.rows {
-			rowMap := rowToMap(table, rowSlice)
-			if matchPredicate(rowMap, plan.Filter, state, engine) {
+		matchedDeleteRowIDs := make(map[int]struct{})
+		candidateRowIDs, _, _, hasIndexedCandidates := candidateRowIDsForPredicate(table, plan.Filter, false)
+		if hasIndexedCandidates {
+			for _, rowID := range candidateRowIDs {
+				if rowID < 0 || rowID >= len(table.rows) {
+					continue
+				}
+				rowMap := rowToMap(table, table.rows[rowID])
+				if !matchPredicate(rowMap, plan.Filter, state, engine) {
+					continue
+				}
+				matchedDeleteRowIDs[rowID] = struct{}{}
 				deletedRowData = append(deletedRowData, rowMap)
 				deletedRows++
+			}
+		}
+		for rowID, rowSlice := range table.rows {
+			if _, deleted := matchedDeleteRowIDs[rowID]; deleted {
 				continue
+			}
+			if !hasIndexedCandidates {
+				rowMap := rowToMap(table, rowSlice)
+				if matchPredicate(rowMap, plan.Filter, state, engine) {
+					deletedRowData = append(deletedRowData, rowMap)
+					deletedRows++
+					continue
+				}
 			}
 			remaining = append(remaining, rowSlice)
 		}
