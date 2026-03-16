@@ -261,14 +261,16 @@ Selective covered-vs-non-covered repeated sample on 2026-03-14:
 
 Boolean-predicate comparison on 2026-03-16 using `go test ./internal/engine/executor -run '^$' -bench 'BenchmarkEngineReadIndexedBooleanPredicates' -benchtime=5x -count=1`:
 
-- `and_hash_lookup`: `78,825 ns/op` vs `and_full_scan`: `4,067,042 ns/op` (~`51.6x` faster with indexed conjunct selection)
-- `or_index_union`: `17,250 ns/op` vs `or_full_scan`: `3,224,450 ns/op` (~`187x` faster with indexed union planning)
-- `in_hash_lookup`: `23,217 ns/op` vs `in_full_scan`: `3,004,567 ns/op` (~`129x` faster with indexed literal-list selection)
-- `not_index_complement`: `417,550 ns/op` vs `not_full_scan`: `2,639,475 ns/op` (~`6.3x` faster with indexed complement planning)
-- `not_in_index_complement`: `520,300 ns/op` vs `not_in_full_scan`: `2,633,033 ns/op` (~`5.1x` faster with indexed `NOT IN` complement planning)
-- `or_partial_index_union`: `6,335,067 ns/op` vs `or_partial_full_scan`: `7,722,108 ns/op` (~`1.22x` faster with hybrid OR planning when one branch is indexable and the residual branch only needs scanning on the uncovered tail)
-- Interpretation note: `OR` and `IN (...)` get the largest wins when the planner can collapse the predicate to a tiny union of indexed candidate sets. `NOT`/`NOT IN` remain materially more expensive because they still materialize a complement, but they are still meaningfully cheaper than a full table scan when the remaining set is selective enough.
-- Additional note: hybrid `OR` is a smaller win by design because it still needs a residual scan; the gain comes from skipping residual evaluation on rows already proven by the indexed branch.
+- `and_hash_lookup`: `81,458 ns/op` vs `and_full_scan`: `2,960,158 ns/op` (~`36.3x` faster with indexed conjunct selection)
+- `or_index_union`: `18,400 ns/op` vs `or_full_scan`: `3,318,658 ns/op` (~`180x` faster with indexed union planning)
+- `in_hash_lookup`: `13,550 ns/op` vs `in_full_scan`: `3,399,467 ns/op` (~`251x` faster with indexed literal-list selection)
+- `not_index_complement`: `472,092 ns/op` vs `not_full_scan`: `2,815,600 ns/op` (~`6.0x` faster with indexed complement planning)
+- `not_in_index_complement`: `651,542 ns/op` vs `not_in_full_scan`: `2,704,350 ns/op` (~`4.1x` faster with indexed `NOT IN` complement planning)
+- `or_partial_index_union`: `7,342,642 ns/op` vs `or_partial_full_scan`: `6,930,608 ns/op` (slightly slower in this broad-residual sample; hybrid OR remains workload-sensitive)
+- `not_broad_indexed_falls_back`: `6,704,533 ns/op` (`full-scan` chosen intentionally for broad indexed `NOT`)
+- `not_in_broad_indexed_falls_back`: `6,122,175 ns/op` (`full-scan` chosen intentionally for broad indexed `NOT IN`)
+- Interpretation note: `OR` and `IN (...)` get the largest wins when the planner can collapse the predicate to tiny indexed candidate sets. `NOT`/`NOT IN` still help when the complement is selective, but broad complements now deliberately fall back to `full-scan` instead of forcing a weak `index-not` plan.
+- Additional note: hybrid `OR` remains useful infrastructure, but the current broad-residual benchmark shows it is not universally cheaper than a full scan; the next refinement should tighten the crossover for residual-heavy hybrid plans just as we did for `NOT`/`NOT IN`.
 
 Composite-order repeated sample on 2026-03-14:
 

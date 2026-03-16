@@ -3069,6 +3069,29 @@ func TestChooseSingleTableScanStrategyUsesIndexNotForNOT(t *testing.T) {
 	}
 }
 
+func TestChooseSingleTableScanStrategyFallsBackForBroadNOTComplement(t *testing.T) {
+	buckets := map[string][]int{"n:42": {0}}
+	rows := make([][]ast.Literal, 10)
+
+	table := &tableState{
+		rows: rows,
+		indexes: map[string]*indexState{
+			"idx_components_id_hash": {name: "idx_components_id_hash", column: "id", kind: "hash", buckets: buckets},
+		},
+		indexedColumns: map[string]string{"id": "idx_components_id_hash"},
+	}
+
+	predicate := &ast.Predicate{
+		Operator: "NOT",
+		Left:     &ast.Predicate{Column: "id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralNumber, NumberValue: 42}},
+	}
+
+	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
+	if strategy != scanStrategyFullScan {
+		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyFullScan)
+	}
+}
+
 func TestChooseSingleTableScanStrategyUsesIndexNotForNOTINList(t *testing.T) {
 	buckets := map[string][]int{
 		"n:0": {0},
@@ -3110,6 +3133,30 @@ func TestChooseSingleTableScanStrategyUsesIndexNotForNOTINList(t *testing.T) {
 	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
 	if strategy != scanStrategyIndexNot {
 		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyIndexNot)
+	}
+}
+
+func TestChooseSingleTableScanStrategyFallsBackForBroadNOTINComplement(t *testing.T) {
+	buckets := map[string][]int{"n:42": {0}, "n:43": {1}}
+	rows := make([][]ast.Literal, 10)
+
+	table := &tableState{
+		rows: rows,
+		indexes: map[string]*indexState{
+			"idx_components_id_hash": {name: "idx_components_id_hash", column: "id", kind: "hash", buckets: buckets},
+		},
+		indexedColumns: map[string]string{"id": "idx_components_id_hash"},
+	}
+
+	predicate := &ast.Predicate{
+		Column:   "id",
+		Operator: "NOT IN",
+		InValues: []ast.Literal{{Kind: ast.LiteralNumber, NumberValue: 42}, {Kind: ast.LiteralNumber, NumberValue: 43}},
+	}
+
+	strategy := chooseSingleTableScanStrategy(table, predicate, nil)
+	if strategy != scanStrategyFullScan {
+		t.Fatalf("unexpected strategy: got %s want %s", strategy, scanStrategyFullScan)
 	}
 }
 
@@ -3251,6 +3298,55 @@ func TestExplainAccessPlanUsesIndexForINAndNOTIN(t *testing.T) {
 	notInPlan := notInExplain.Rows[0]["access_plan"].StringValue
 	if !strings.Contains(notInPlan, `"strategy":"index-not"`) {
 		t.Fatalf("expected index-not strategy, got: %s", notInPlan)
+	}
+}
+
+func TestExplainAccessPlanFallsBackForBroadNOTPredicates(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "explain-broad-not-access.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	mustExec := func(sql string) {
+		t.Helper()
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	mustExec("BEGIN DOMAIN shop")
+	mustExec("CREATE TABLE block_components (id INT PRIMARY KEY, name TEXT)")
+	for i := 0; i < 10; i++ {
+		mustExec(fmt.Sprintf("INSERT INTO block_components (id, name) VALUES (%d, 'n-%d')", i, i))
+	}
+	mustExec("COMMIT")
+
+	notExplain, err := engine.Explain("SELECT * FROM block_components WHERE NOT id = 5", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain broad NOT predicate: %v", err)
+	}
+	notPlan := notExplain.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(notPlan, `"strategy":"full-scan"`) {
+		t.Fatalf("expected full-scan strategy for broad NOT, got: %s", notPlan)
+	}
+
+	notInExplain, err := engine.Explain("SELECT * FROM block_components WHERE id NOT IN (5, 6)", []string{"shop"})
+	if err != nil {
+		t.Fatalf("explain broad NOT IN predicate: %v", err)
+	}
+	notInPlan := notInExplain.Rows[0]["access_plan"].StringValue
+	if !strings.Contains(notInPlan, `"strategy":"full-scan"`) {
+		t.Fatalf("expected full-scan strategy for broad NOT IN, got: %s", notInPlan)
 	}
 }
 

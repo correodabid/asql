@@ -1190,6 +1190,40 @@ func BenchmarkEngineReadIndexedBooleanPredicates(b *testing.B) {
 		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
 	})
 
+	b.Run("not_broad_indexed_falls_back", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE NOT id = 5000"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("broad NOT indexed query: %v", err)
+			}
+			if len(result.Rows) != 9999 {
+				b.Fatalf("unexpected broad NOT row count: got %d want 9999", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
+	})
+
+	b.Run("not_in_broad_indexed_falls_back", func(b *testing.B) {
+		query := "SELECT id, status FROM entries WHERE id NOT IN (5000, 7500)"
+		baselineCounts := engine.ScanStrategyCounts()
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"bench"}, targetLSN)
+			if err != nil {
+				b.Fatalf("broad NOT IN indexed query: %v", err)
+			}
+			if len(result.Rows) != 9998 {
+				b.Fatalf("unexpected broad NOT IN row count: got %d want 9998", len(result.Rows))
+			}
+		}
+		b.StopTimer()
+		reportScanStrategyDelta(b, engine, baselineCounts, string(scanStrategyFullScan))
+	})
+
 	engine.WaitPendingSnapshots()
 	_ = store.Close()
 }

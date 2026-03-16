@@ -307,6 +307,9 @@ func estimateCompoundIndexLookupCost(table *tableState, predicate *ast.Predicate
 	if !ok || (strategy != scanStrategyIndexUnion && strategy != scanStrategyIndexNot) {
 		return scanCostEstimate{}, false
 	}
+	if strategy == scanStrategyIndexNot {
+		return estimateIndexNotCost(table, predicate, totalRows, len(rowIDs), hasOrderBy)
+	}
 
 	estimatedRows := len(rowIDs)
 	cost := estimatedRows
@@ -321,6 +324,65 @@ func estimateCompoundIndexLookupCost(table *tableState, predicate *ast.Predicate
 		priority = scanPriorityIndexNot
 	}
 	return scanCostEstimate{strategy: strategy, cost: cost, priority: priority}, true
+}
+
+func estimateIndexNotCost(table *tableState, predicate *ast.Predicate, totalRows int, complementRows int, hasOrderBy bool) (scanCostEstimate, bool) {
+	if table == nil || predicate == nil {
+		return scanCostEstimate{}, false
+	}
+
+	excludedRows, ok := estimateExcludedRowsForNotPredicate(table, predicate)
+	if !ok {
+		return scanCostEstimate{}, false
+	}
+
+	cost := complementRows
+	if hasOrderBy {
+		cost += complementRows / sortCostFactor
+	}
+
+	if totalRows > 0 {
+		broadnessPct := complementRows * 100 / totalRows
+		switch {
+		case broadnessPct >= 85:
+			cost += totalRows / sortCostFactor
+		case broadnessPct >= 70:
+			cost += totalRows / hashOverheadDivisor
+		}
+
+		if excludedRows*5 <= totalRows {
+			cost += totalRows / btreeOverheadDivisor
+		}
+	}
+
+	return scanCostEstimate{strategy: scanStrategyIndexNot, cost: cost, priority: scanPriorityIndexNot}, true
+}
+
+func estimateExcludedRowsForNotPredicate(table *tableState, predicate *ast.Predicate) (int, bool) {
+	if table == nil || predicate == nil {
+		return 0, false
+	}
+
+	operator := strings.ToUpper(strings.TrimSpace(predicate.Operator))
+	switch operator {
+	case "NOT":
+		rowIDs, ok := exactCandidateRowIDsForPredicate(table, predicate.Left, false)
+		if !ok {
+			return 0, false
+		}
+		return len(rowIDs), true
+	case "NOT IN":
+		if predicate.Subquery != nil || len(predicate.InValues) == 0 {
+			return 0, false
+		}
+		index, ok := indexForColumn(table, predicate.Column)
+		if !ok {
+			return 0, false
+		}
+		return len(rowIDsForPredicate(index, &ast.Predicate{Column: predicate.Column, Operator: "IN", InValues: predicate.InValues})), true
+	default:
+		return 0, false
+	}
 }
 
 func exactCandidateRowIDsForPredicate(table *tableState, predicate *ast.Predicate, hasOrderBy bool) ([]int, bool) {
