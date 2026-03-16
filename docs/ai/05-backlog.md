@@ -506,12 +506,11 @@ Open gaps before closure:
 
 Current next-execution order:
 - 1. Finish the snapshot-load decision with repeated cadence/tail evidence, not just head-snapshot best-case samples.
-- 2. Finish the indexed-read/query-latency decision across the remaining important read shapes.
-- 3. Revisit persisted index/cache architecture only after the benchmark evidence above shows a durable IO bottleneck that current in-memory indexes cannot address cleanly.
+- 2. Revisit persisted index/cache architecture only after the benchmark evidence above shows a durable IO bottleneck that current in-memory indexes cannot address cleanly.
 
 Subline status:
 - The `Expand index-only scan coverage where benchmarks justify it` item is now evidence-backed for covered simple ordered reads, covered ordered reads with `OFFSET`, covered selective reads with bounded early-stop, and covered composite ordered reads.
-- The broader `Benchmark and improve indexed read/query latency` item remains open because not all indexed shapes have been benchmarked or optimized, and the closure decision still needs to be stated at the epic level.
+- The broader `Benchmark and improve indexed read/query latency` item is now treated as closed at the current scope: the benchmark set covers simple ordered range reads, covered ordered reads, covered ordered reads with `OFFSET`, selective covered and non-covered reads, composite covered and non-covered reads, and entity-related join shapes with and without the child FK index.
 - Repeated exact-target `ReplayToLSN` is now treated as closed on the current fixture: the replay path reuses cached decoded mutation plans, `ReplayToLSN` short-circuits when the engine is already materialized at the requested `LSN`, and the benchmark harness now warms that path before timing and excludes teardown from the timed region.
 - A fresh repeated sample on the current M1 using `go test ./internal/engine/executor -run '^$' -bench '^BenchmarkEngineReplayToLSN$' -benchmem -count=5` now lands at roughly ~`2.13–2.18 ns/op`, `0 B/op`, `0 allocs/op`, so the old repeated same-target replay bottleneck is no longer worth active optimization time.
 - The earlier bounded-replay cleanup still matters for the first rebuild to a target `LSN`: skipping snapshot capture/persistence/eviction during `ReplayToLSN` materially reduced replay allocation volume (roughly ~`2.69 MB/op` -> ~`1.41 MB/op`, ~`16.7k` -> ~`12.1k allocs/op`) before the exact-target fast path closed the repeated same-target case entirely.
@@ -557,8 +556,9 @@ Latest directional read evidence:
 - `BenchmarkEngineReadSelectiveNonCoveredBTree` now benefits from the same bounded scan window on the ordered btree path and repeated at ~`304–305 µs/op` instead of the earlier ~`406–407 µs/op`.
 - `BenchmarkEngineReadCompositeCoveredIndexOnlyBTree` now exercises `btree-index-only` at ~`33–34 µs/op`.
 - `BenchmarkEngineReadCompositeNonCoveredBTree` exercises `btree-order` at ~`76–78 µs/op`.
-- `BenchmarkEngineReadEntityRelatedJoinScaling` now shows the indexed related-read path staying in the ~`23–27 µs/op` range at `orders_10000`, while the optimized unindexed path lands around ~`1.8–1.9 ms/op` instead of continuing to pay the earlier broader join-materialization cost.
-- `BenchmarkEngineReadEntityRelatedJoinRightFilterScaling` now keeps the unindexed related-read + right-side filter shape around ~`1.87 ms/op` at `orders_10000`, which is directionally consistent with the new pruning/filtering improvements rather than a fresh regression cliff.
+- `BenchmarkEngineReadEntityRelatedJoinScaling` now shows the indexed related-read path staying in the ~`24–35 µs/op` range through `orders_25000`, while the optimized unindexed path lands around ~`1.81 ms/op` at `orders_10000` and ~`5.85 ms/op` at `orders_25000` instead of the earlier broader join-materialization cliff.
+- `BenchmarkEngineReadEntityRelatedJoinRightFilterScaling` keeps the indexed right-filter shape in the ~`20–22 µs/op` range through `orders_10000`, while the unindexed shape stays around ~`1.80 ms/op` at `orders_10000`, which is directionally consistent with the new pruning/filtering improvements rather than a fresh regression cliff.
+- Current closure interpretation: the important indexed read shapes are now benchmarked and no longer show an unexplained size-linked regression on the indexed path, so remaining AB effort should move to snapshot-load closure and only then to persisted index/cache architecture if IO evidence still justifies it.
 - `BenchmarkEngineReadHistoricalAsOfLSNScaling` now shows repeated exact-`LSN` historical reads improving from roughly ~`2.10 ms/op`, ~`1.19 MB/op`, ~`8.1k allocs/op` to ~`0.59 ms/op`, ~`373 KB/op`, ~`2.7k allocs/op` on the `rows_1000` fixture.
 - The same historical benchmark improves the larger `rows_10000` fixture from roughly ~`8.57 ms/op`, ~`12.09 MB/op`, ~`80k allocs/op` to ~`3.12 ms/op`, ~`3.79 MB/op`, ~`26.8k allocs/op`, which is strong enough to treat exact-target repeat history reads as a real fixed bottleneck rather than micro-tuning.
 - Current interpretation: index-only is strongly justified for simple covered ordered reads, remains strong with `OFFSET`, is justified on the selective covered shape after bounded-scan support, and is now also justified for the covered composite ordered-read shape. Further expansion should still be guided by measured query shapes rather than blanket rollout.
@@ -566,7 +566,7 @@ Latest directional read evidence:
 - [ ] Benchmark and improve commit batching on realistic workloads.
 - [x] Benchmark and improve replay throughput.
 - [ ] Benchmark and improve snapshot load time.
-- [ ] Benchmark and improve indexed read/query latency.
+- [x] Benchmark and improve indexed read/query latency.
 - [x] Benchmark and improve failover recovery time.
 - [ ] Evaluate persisted index/cache architecture from measured IO behavior.
 - [x] Expand index-only scan coverage where benchmarks justify it.
