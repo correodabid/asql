@@ -3506,6 +3506,15 @@ func TestExplainAccessPlanFallsBackForBroadNOTPredicates(t *testing.T) {
 	if !strings.Contains(notPlan, `"strategy":"full-scan"`) {
 		t.Fatalf("expected full-scan strategy for broad NOT, got: %s", notPlan)
 	}
+	if !strings.Contains(notPlan, `"pruned_candidates"`) {
+		t.Fatalf("expected pruned candidate list for broad NOT, got: %s", notPlan)
+	}
+	if !strings.Contains(notPlan, `"strategy":"index-not"`) {
+		t.Fatalf("expected pruned index-not strategy for broad NOT, got: %s", notPlan)
+	}
+	if !strings.Contains(notPlan, `"reason":"indexed NOT complement keeps 9/10 rows; crossover prefers full-scan"`) {
+		t.Fatalf("expected pruned broad NOT reason, got: %s", notPlan)
+	}
 
 	notInExplain, err := engine.Explain("SELECT * FROM block_components WHERE id NOT IN (5, 6)", []string{"shop"})
 	if err != nil {
@@ -3514,6 +3523,15 @@ func TestExplainAccessPlanFallsBackForBroadNOTPredicates(t *testing.T) {
 	notInPlan := notInExplain.Rows[0]["access_plan"].StringValue
 	if !strings.Contains(notInPlan, `"strategy":"full-scan"`) {
 		t.Fatalf("expected full-scan strategy for broad NOT IN, got: %s", notInPlan)
+	}
+	if !strings.Contains(notInPlan, `"pruned_candidates"`) {
+		t.Fatalf("expected pruned candidate list for broad NOT IN, got: %s", notInPlan)
+	}
+	if !strings.Contains(notInPlan, `"strategy":"index-not"`) {
+		t.Fatalf("expected pruned index-not strategy for broad NOT IN, got: %s", notInPlan)
+	}
+	if !strings.Contains(notInPlan, `"reason":"indexed NOT IN complement keeps 8/10 rows; crossover prefers full-scan"`) {
+		t.Fatalf("expected pruned broad NOT IN reason, got: %s", notInPlan)
 	}
 }
 

@@ -313,6 +313,9 @@ func estimateCompoundIndexLookupCost(table *tableState, predicate *ast.Predicate
 		return scanCostEstimate{}, false
 	}
 	if strategy == scanStrategyIndexNot {
+		if _, ok := prunedIndexNotCandidate(table, predicate, totalRows, hasOrderBy); ok {
+			return scanCostEstimate{}, false
+		}
 		return estimateIndexNotCost(table, predicate, totalRows, len(rowIDs), hasOrderBy)
 	}
 
@@ -1634,20 +1637,65 @@ func collectPrunedScanCandidates(table *tableState, predicate *ast.Predicate, or
 	if totalRows == 0 {
 		return nil
 	}
+	hasOrderBy := len(orderBy) > 0
+	pruned := make([]prunedCandidateInfo, 0, 2)
 
-	if candidateRowIDs, residual, ok := decomposeHybridORPredicate(table, predicate, len(orderBy) > 0); ok {
+	if candidate, ok := prunedIndexNotCandidate(table, predicate, totalRows, hasOrderBy); ok {
+		pruned = append(pruned, candidate)
+	}
+
+	if candidateRowIDs, residual, ok := decomposeHybridORPredicate(table, predicate, hasOrderBy); ok {
 		if len(candidateRowIDs)*100 >= totalRows*70 {
 			detail := formatHybridORCandidateDetail(table, predicate, residual)
 			reason := "indexed OR branch covers " + strconv.Itoa(len(candidateRowIDs)) + "/" + strconv.Itoa(totalRows) + " rows; crossover prefers full-scan"
-			return []prunedCandidateInfo{{
+			pruned = append(pruned, prunedCandidateInfo{
 				Strategy: string(scanStrategyIndexUnionP),
 				Detail:   detail,
 				Reason:   reason,
-			}}
+			})
 		}
 	}
 
-	return nil
+	if len(pruned) == 0 {
+		return nil
+	}
+
+	return pruned
+}
+
+func prunedIndexNotCandidate(table *tableState, predicate *ast.Predicate, totalRows int, hasOrderBy bool) (prunedCandidateInfo, bool) {
+	if table == nil || predicate == nil || totalRows <= 0 {
+		return prunedCandidateInfo{}, false
+	}
+
+	rowIDs, _, strategy, ok := candidateRowIDsForPredicate(table, predicate, hasOrderBy)
+	if !ok || strategy != scanStrategyIndexNot {
+		return prunedCandidateInfo{}, false
+	}
+
+	estimate, ok := estimateIndexNotCost(table, predicate, totalRows, len(rowIDs), hasOrderBy)
+	if !ok {
+		return prunedCandidateInfo{}, false
+	}
+
+	fullScanCost := totalRows
+	if hasOrderBy {
+		fullScanCost += totalRows / sortCostFactor
+	}
+	if estimate.cost <= fullScanCost {
+		return prunedCandidateInfo{}, false
+	}
+
+	label := "NOT"
+	if strings.EqualFold(strings.TrimSpace(predicate.Operator), "NOT IN") {
+		label = "NOT IN"
+	}
+
+	return prunedCandidateInfo{
+		Strategy: string(scanStrategyIndexNot),
+		Detail:   estimate.detail,
+		Reason:   "indexed " + label + " complement keeps " + strconv.Itoa(len(rowIDs)) + "/" + strconv.Itoa(totalRows) + " rows; crossover prefers full-scan",
+	}, true
 }
 
 // collectJoinPlans builds access info for each join in the plan.
