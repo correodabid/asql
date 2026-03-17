@@ -74,11 +74,21 @@ func TestSecurityMutationsPostJSON(t *testing.T) {
 				t.Fatalf("unexpected grant role payload: %+v", payload)
 			}
 			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: "analyst", Kind: "USER", Enabled: true}})
+		case "/api/v1/security/roles/revoke":
+			if payload["principal"] != "analyst" || payload["role"] != "history_readers" {
+				t.Fatalf("unexpected revoke role payload: %+v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: "analyst", Kind: "USER", Enabled: true}})
 		case "/api/v1/security/privileges/revoke":
 			if payload["principal"] != "history_readers" || payload["privilege"] != "SELECT_HISTORY" {
 				t.Fatalf("unexpected revoke privilege payload: %+v", payload)
 			}
 			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: "history_readers", Kind: "ROLE", Enabled: true}})
+		case "/api/v1/security/passwords/set":
+			if payload["principal"] != "analyst" || payload["password"] != "rotated-pass" {
+				t.Fatalf("unexpected set password payload: %+v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: "analyst", Kind: "USER", Enabled: true}})
 		case "/api/v1/security/principals/disable":
 			if payload["principal"] != "analyst" {
 				t.Fatalf("unexpected disable principal payload: %+v", payload)
@@ -106,8 +116,14 @@ func TestSecurityMutationsPostJSON(t *testing.T) {
 	if _, err := app.SecurityGrantRole("analyst", "history_readers"); err != nil {
 		t.Fatalf("SecurityGrantRole: %v", err)
 	}
+	if _, err := app.SecurityRevokeRole("analyst", "history_readers"); err != nil {
+		t.Fatalf("SecurityRevokeRole: %v", err)
+	}
 	if _, err := app.SecurityRevokePrivilege("history_readers", "SELECT_HISTORY"); err != nil {
 		t.Fatalf("SecurityRevokePrivilege: %v", err)
+	}
+	if _, err := app.SecuritySetPassword("analyst", "rotated-pass"); err != nil {
+		t.Fatalf("SecuritySetPassword: %v", err)
 	}
 	if _, err := app.SecurityDisablePrincipal("analyst"); err != nil {
 		t.Fatalf("SecurityDisablePrincipal: %v", err)

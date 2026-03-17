@@ -36,6 +36,7 @@ var (
 	errPrincipalAuthFailed          = errors.New("principal authentication failed")
 	errPrincipalCatalogBootstrapped = errors.New("principal catalog already initialized")
 	errRoleRequired                 = errors.New("role principal is required")
+	errUserRequired                 = errors.New("user principal is required")
 	errInvalidPrincipalName         = errors.New("principal name is required")
 	errPasswordRequired             = errors.New("password is required")
 	errPrincipalHistoryDenied       = errors.New("SELECT_HISTORY privilege required")
@@ -280,6 +281,39 @@ func (engine *Engine) GrantRole(ctx context.Context, principal, role string) err
 	})
 }
 
+// RevokeRole removes a direct role grant from a user or role.
+func (engine *Engine) RevokeRole(ctx context.Context, principal, role string) error {
+	principal = normalizePrincipalName(principal)
+	role = normalizePrincipalName(role)
+	payload := securityMutationPayload{
+		Action:    "role_revoke",
+		Principal: principal,
+		Role:      role,
+	}
+	return engine.appendSecurityMutation(ctx, payload, func(state *readableState) error {
+		return applySecurityMutation(state, payload)
+	})
+}
+
+// SetPrincipalPassword rotates the stored password for a durable database user.
+func (engine *Engine) SetPrincipalPassword(ctx context.Context, username, password string) error {
+	username = normalizePrincipalName(username)
+	if username == "" {
+		return errInvalidPrincipalName
+	}
+	if strings.TrimSpace(password) == "" {
+		return errPasswordRequired
+	}
+	payload := securityMutationPayload{
+		Action:       "principal_password_set",
+		Principal:    username,
+		PasswordHash: hashPrincipalPassword(password),
+	}
+	return engine.appendSecurityMutation(ctx, payload, func(state *readableState) error {
+		return applySecurityMutation(state, payload)
+	})
+}
+
 // AuthenticatePrincipal verifies stored credentials for a durable principal.
 func (engine *Engine) AuthenticatePrincipal(username, password string) (PrincipalInfo, error) {
 	principal, ok := engine.currentPrincipalState(username)
@@ -447,6 +481,23 @@ func applySecurityMutation(state *readableState, payload securityMutationPayload
 			principal.roles = make(map[string]struct{})
 		}
 		principal.roles[payload.Role] = struct{}{}
+		return nil
+	case "role_revoke":
+		principal, ok := state.principals[principalName]
+		if !ok {
+			return errPrincipalNotFound
+		}
+		delete(principal.roles, payload.Role)
+		return nil
+	case "principal_password_set":
+		principal, ok := state.principals[principalName]
+		if !ok {
+			return errPrincipalNotFound
+		}
+		if principal.kind != PrincipalKindUser {
+			return errUserRequired
+		}
+		principal.passwordHash = payload.PasswordHash
 		return nil
 	default:
 		return fmt.Errorf("unsupported security action %q", payload.Action)

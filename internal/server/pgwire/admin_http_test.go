@@ -369,6 +369,51 @@ func TestAdminHTTPSecurityPrincipalManagementFlow(t *testing.T) {
 		t.Fatal("expected analyst to lose SELECT_HISTORY after revoke")
 	}
 
+	var restorePrivilegeResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/privileges/grant", "write-secret", api.GrantPrivilegeRequest{
+		Principal: "history_readers",
+		Privilege: "SELECT_HISTORY",
+	}, &restorePrivilegeResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected restore privilege status: got %d want %d", status, http.StatusOK)
+	}
+
+	var restoreGrantRoleResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/roles/grant", "write-secret", api.GrantRoleRequest{
+		Principal: "analyst",
+		Role:      "history_readers",
+	}, &restoreGrantRoleResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected restore grant role status: got %d want %d", status, http.StatusOK)
+	}
+
+	var revokeRoleResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/roles/revoke", "write-secret", api.RevokeRoleRequest{
+		Principal: "analyst",
+		Role:      "history_readers",
+	}, &revokeRoleResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected revoke role status: got %d want %d", status, http.StatusOK)
+	}
+	if server.engine.HasPrincipalPrivilege("analyst", executor.PrincipalPrivilegeSelectHistory) {
+		t.Fatal("expected analyst to lose SELECT_HISTORY after role revoke")
+	}
+
+	var setPasswordResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/passwords/set", "write-secret", api.SetPasswordRequest{
+		Principal: "analyst",
+		Password:  "rotated-pass",
+	}, &setPasswordResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected set password status: got %d want %d", status, http.StatusOK)
+	}
+	if _, err := server.engine.AuthenticatePrincipal("analyst", "analyst-pass"); err == nil {
+		t.Fatal("expected old analyst password to fail after admin password rotation")
+	}
+	if _, err := server.engine.AuthenticatePrincipal("analyst", "rotated-pass"); err != nil {
+		t.Fatalf("expected rotated analyst password to authenticate: %v", err)
+	}
+
 	var disableResp api.SecurityMutationResponse
 	status = doJSON(http.MethodPost, "/api/v1/security/principals/disable", "write-secret", api.DisablePrincipalRequest{
 		Principal: "analyst",

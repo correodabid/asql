@@ -91,6 +91,10 @@ export async function api<T>(path: string, _method = 'GET', body?: unknown): Pro
       return App.SecurityRevokePrivilege(b.principal ?? '', b.privilege ?? '') as Promise<T>
     case '/api/security/roles/grant':
       return App.SecurityGrantRole(b.principal ?? '', b.role ?? '') as Promise<T>
+    case '/api/security/roles/revoke':
+      return App.SecurityRevokeRole(b.principal ?? '', b.role ?? '') as Promise<T>
+    case '/api/security/passwords/set':
+      return App.SecuritySetPassword(b.principal ?? '', b.password ?? '') as Promise<T>
     case '/api/security/principals/disable':
       return App.SecurityDisablePrincipal(b.principal ?? '') as Promise<T>
     // ── Recovery ───────────────────────────────────

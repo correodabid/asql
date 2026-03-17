@@ -44,8 +44,12 @@ export function SecurityPanel() {
   const [grantPrivilege, setGrantPrivilege] = useState<PrincipalPrivilege>('SELECT_HISTORY')
   const [grantRolePrincipal, setGrantRolePrincipal] = useState('')
   const [grantRole, setGrantRole] = useState('')
+  const [revokeRolePrincipal, setRevokeRolePrincipal] = useState('')
+  const [revokeRole, setRevokeRole] = useState('')
   const [revokePrincipal, setRevokePrincipal] = useState('')
   const [revokePrivilege, setRevokePrivilege] = useState<PrincipalPrivilege>('SELECT_HISTORY')
+  const [passwordPrincipal, setPasswordPrincipal] = useState('')
+  const [passwordValue, setPasswordValue] = useState('')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -131,12 +135,29 @@ export function SecurityPanel() {
     setMessage(`Granted role ${grantRole} to ${grantRolePrincipal}.`)
   })
 
+  const submitRevokeRole = () => run('revoke-role', async () => {
+    await api<SecurityMutationResponse>('/api/security/roles/revoke', 'POST', {
+      principal: revokeRolePrincipal,
+      role: revokeRole,
+    })
+    setMessage(`Revoked role ${revokeRole} from ${revokeRolePrincipal}.`)
+  })
+
   const submitRevokePrivilege = () => run('revoke-privilege', async () => {
     await api<SecurityMutationResponse>('/api/security/privileges/revoke', 'POST', {
       principal: revokePrincipal,
       privilege: revokePrivilege,
     })
     setMessage(`Revoked ${revokePrivilege} from ${revokePrincipal}.`)
+  })
+
+  const submitSetPassword = () => run('set-password', async () => {
+    await api<SecurityMutationResponse>('/api/security/passwords/set', 'POST', {
+      principal: passwordPrincipal,
+      password: passwordValue,
+    })
+    setPasswordValue('')
+    setMessage(`Updated password for ${passwordPrincipal}.`)
   })
 
   const submitDisablePrincipal = (principalName: string) => run(`disable-${principalName}`, async () => {
@@ -152,7 +173,7 @@ export function SecurityPanel() {
         <div>
           <h2 style={{ margin: '0 0 8px' }}>Security</h2>
           <p className="text-muted" style={{ margin: 0 }}>
-            Bootstrap principals, create durable users and roles, and grant temporal-read access from Studio.
+            Bootstrap principals, create durable users and roles, rotate passwords, and manage grants from Studio.
           </p>
         </div>
         <button className="toolbar-btn" disabled={busy !== ''} onClick={() => void refresh().catch((err) => setError(err instanceof Error ? err.message : String(err)))}>
@@ -261,6 +282,24 @@ export function SecurityPanel() {
         </ActionCard>
 
         <ActionCard
+          title="Revoke role"
+          description="Remove a direct role grant from a user or role."
+          actionLabel="Revoke role"
+          icon={<IconShield />}
+          disabled={busy !== '' || !revokeRolePrincipal.trim() || !revokeRole.trim()}
+          onAction={() => void submitRevokeRole()}
+        >
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Principal</span>
+            <input className="title-domain-select" list="security-principal-options" value={revokeRolePrincipal} onChange={(e) => setRevokeRolePrincipal(e.target.value)} placeholder="analyst" />
+          </label>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Role</span>
+            <input className="title-domain-select" list="security-role-options" value={revokeRole} onChange={(e) => setRevokeRole(e.target.value)} placeholder="history_readers" />
+          </label>
+        </ActionCard>
+
+        <ActionCard
           title="Revoke privilege"
           description="Remove a direct privilege grant from a user or role."
           actionLabel="Revoke privilege"
@@ -279,10 +318,31 @@ export function SecurityPanel() {
             </select>
           </label>
         </ActionCard>
+
+        <ActionCard
+          title="Set password"
+          description="Rotate the stored password for a durable user principal."
+          actionLabel="Set password"
+          icon={<IconKey />}
+          disabled={busy !== '' || !passwordPrincipal.trim() || !passwordValue.trim()}
+          onAction={() => void submitSetPassword()}
+        >
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>User principal</span>
+            <input className="title-domain-select" list="security-user-options" value={passwordPrincipal} onChange={(e) => setPasswordPrincipal(e.target.value)} placeholder="analyst" />
+          </label>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>New password</span>
+            <input className="title-domain-select" type="password" value={passwordValue} onChange={(e) => setPasswordValue(e.target.value)} placeholder="••••••••" />
+          </label>
+        </ActionCard>
       </div>
 
       <datalist id="security-principal-options">
         {principals.map((principal) => <option key={principal.name} value={principal.name} />)}
+      </datalist>
+      <datalist id="security-user-options">
+        {userPrincipals.map((userName) => <option key={userName} value={userName} />)}
       </datalist>
       <datalist id="security-role-options">
         {rolePrincipals.map((roleName) => <option key={roleName} value={roleName} />)}

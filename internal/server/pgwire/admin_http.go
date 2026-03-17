@@ -140,6 +140,8 @@ func (server *Server) startAdminHTTP() error {
 	mux.HandleFunc("/api/v1/security/privileges/grant", server.withAdminAuth(adminScopeWrite, server.handleAdminGrantPrivilege))
 	mux.HandleFunc("/api/v1/security/privileges/revoke", server.withAdminAuth(adminScopeWrite, server.handleAdminRevokePrivilege))
 	mux.HandleFunc("/api/v1/security/roles/grant", server.withAdminAuth(adminScopeWrite, server.handleAdminGrantRole))
+	mux.HandleFunc("/api/v1/security/roles/revoke", server.withAdminAuth(adminScopeWrite, server.handleAdminRevokeRole))
+	mux.HandleFunc("/api/v1/security/passwords/set", server.withAdminAuth(adminScopeWrite, server.handleAdminSetPrincipalPassword))
 	mux.HandleFunc("/api/v1/security/principals/disable", server.withAdminAuth(adminScopeWrite, server.handleAdminDisablePrincipal))
 	mux.HandleFunc("/api/v1/recovery/backup-create", server.withAdminAuth(adminScopeWrite, server.handleAdminRecoveryCreateBackup))
 	mux.HandleFunc("/api/v1/recovery/backup-manifest", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryBackupManifest))
@@ -441,6 +443,46 @@ func (server *Server) handleAdminRevokePrivilege(w http.ResponseWriter, r *http.
 		return
 	}
 	if err := server.engine.RevokePrivilege(r.Context(), req.Principal, privilege); err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
+}
+
+func (server *Server) handleAdminRevokeRole(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.RevokeRoleRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	if err := server.engine.RevokeRole(r.Context(), req.Principal, req.Role); err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
+}
+
+func (server *Server) handleAdminSetPrincipalPassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.SetPasswordRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	if err := server.engine.SetPrincipalPassword(r.Context(), req.Principal, req.Password); err != nil {
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}

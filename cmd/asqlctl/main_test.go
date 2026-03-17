@@ -370,8 +370,18 @@ func TestRunAdminSecurityCommand(t *testing.T) {
 	}
 
 	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-revoke-role", "analyst", "", "history_readers", ""); err != nil {
+		t.Fatalf("revoke role command: %v", err)
+	}
+
+	output.Reset()
 	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-revoke-privilege", "history_readers", "", "", "SELECT_HISTORY"); err != nil {
 		t.Fatalf("revoke privilege command: %v", err)
+	}
+
+	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-set-password", "analyst", "rotated-pass", "", ""); err != nil {
+		t.Fatalf("set password command: %v", err)
 	}
 
 	output.Reset()

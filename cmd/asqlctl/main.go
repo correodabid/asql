@@ -46,7 +46,7 @@ func main() {
 	adminHTTPAddr := flag.String("admin-http", "", "ASQL admin HTTP endpoint for operational/security commands (for example 127.0.0.1:9090)")
 	authToken := flag.String("auth-token", "", "optional bearer token for authenticated APIs")
 	demo := flag.Bool("demo", false, "run end-to-end gRPC demo flow")
-	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-revoke-privilege|principal-grant-role|principal-disable")
+	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-revoke-privilege|principal-grant-role|principal-revoke-role|principal-set-password|principal-disable")
 	mode := flag.String("mode", "domain", "tx mode for begin: domain|cross")
 	domains := flag.String("domains", "", "comma-separated domains (required for begin and usually for time-travel)")
 	tableName := flag.String("table", "", "table filter for audit commands")
@@ -54,8 +54,8 @@ func main() {
 	txID := flag.String("tx-id", "", "transaction id for execute/commit/rollback")
 	sql := flag.String("sql", "", "sql for execute or time-travel")
 	principal := flag.String("principal", "", "principal name for security management commands")
-	password := flag.String("password", "", "principal password for bootstrap/create-user commands")
-	role := flag.String("role", "", "role principal for principal-grant-role")
+	password := flag.String("password", "", "principal password for bootstrap/create-user/principal-set-password commands")
+	role := flag.String("role", "", "role principal for principal-grant-role/principal-revoke-role")
 	privilege := flag.String("privilege", "", "privilege name for principal-grant-privilege (ADMIN|SELECT_HISTORY)")
 	rollbackSQL := flag.String("rollback-sql", "", "semicolon-separated rollback SQL for migration-preflight")
 	lsn := flag.Uint64("lsn", 0, "lsn for replay or time-travel")
@@ -360,7 +360,7 @@ func isLocalAuditCommand(command string) bool {
 
 func isAdminSecurityCommand(command string) bool {
 	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "principal-list", "principal-bootstrap-admin", "principal-create-user", "principal-create-role", "principal-grant-privilege", "principal-revoke-privilege", "principal-grant-role", "principal-disable":
+	case "principal-list", "principal-bootstrap-admin", "principal-create-user", "principal-create-role", "principal-grant-privilege", "principal-revoke-privilege", "principal-grant-role", "principal-revoke-role", "principal-set-password", "principal-disable":
 		return true
 	default:
 		return false
@@ -447,6 +447,30 @@ func runAdminSecurityCommand(ctx context.Context, out io.Writer, adminHTTPAddr, 
 		}
 		response := new(adminapi.SecurityMutationResponse)
 		if err := doAdminJSON(ctx, client, http.MethodPost, adminHTTPAddr, "/api/v1/security/roles/grant", authToken, adminapi.GrantRoleRequest{Principal: principal, Role: role}, response); err != nil {
+			return err
+		}
+		return printJSONTo(out, response)
+	case "principal-revoke-role":
+		if strings.TrimSpace(principal) == "" {
+			return errors.New("principal-revoke-role requires -principal")
+		}
+		if strings.TrimSpace(role) == "" {
+			return errors.New("principal-revoke-role requires -role")
+		}
+		response := new(adminapi.SecurityMutationResponse)
+		if err := doAdminJSON(ctx, client, http.MethodPost, adminHTTPAddr, "/api/v1/security/roles/revoke", authToken, adminapi.RevokeRoleRequest{Principal: principal, Role: role}, response); err != nil {
+			return err
+		}
+		return printJSONTo(out, response)
+	case "principal-set-password":
+		if strings.TrimSpace(principal) == "" {
+			return errors.New("principal-set-password requires -principal")
+		}
+		if strings.TrimSpace(password) == "" {
+			return errors.New("principal-set-password requires -password")
+		}
+		response := new(adminapi.SecurityMutationResponse)
+		if err := doAdminJSON(ctx, client, http.MethodPost, adminHTTPAddr, "/api/v1/security/passwords/set", authToken, adminapi.SetPasswordRequest{Principal: principal, Password: password}, response); err != nil {
 			return err
 		}
 		return printJSONTo(out, response)

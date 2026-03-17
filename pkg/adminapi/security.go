@@ -44,6 +44,16 @@ type GrantRoleRequest struct {
 	Role      string `json:"role"`
 }
 
+type RevokeRoleRequest struct {
+	Principal string `json:"principal"`
+	Role      string `json:"role"`
+}
+
+type SetPasswordRequest struct {
+	Principal string `json:"principal"`
+	Password  string `json:"password"`
+}
+
 type DisablePrincipalRequest struct {
 	Principal string `json:"principal"`
 }

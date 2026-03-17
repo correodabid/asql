@@ -206,6 +206,14 @@ export function SecurityRevokePrivilege(arg1, arg2) {
   return window['go']['studioapp']['App']['SecurityRevokePrivilege'](arg1, arg2);
 }
 
+export function SecurityRevokeRole(arg1, arg2) {
+  return window['go']['studioapp']['App']['SecurityRevokeRole'](arg1, arg2);
+}
+
+export function SecuritySetPassword(arg1, arg2) {
+  return window['go']['studioapp']['App']['SecuritySetPassword'](arg1, arg2);
+}
+
 export function TemporalLookup(arg1) {
   return window['go']['studioapp']['App']['TemporalLookup'](arg1);
 }

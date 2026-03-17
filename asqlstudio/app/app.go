@@ -1698,6 +1698,23 @@ func (a *App) SecurityGrantRole(principal, role string) (map[string]interface{},
 	return structToMap(resp)
 }
 
+func (a *App) SecurityRevokeRole(principal, role string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	if strings.TrimSpace(role) == "" {
+		return nil, fmt.Errorf("role is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/roles/revoke", api.RevokeRoleRequest{
+		Principal: principal,
+		Role:      role,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
 func (a *App) SecurityRevokePrivilege(principal, privilege string) (map[string]interface{}, error) {
 	if strings.TrimSpace(principal) == "" {
 		return nil, fmt.Errorf("principal is required")
@@ -1709,6 +1726,23 @@ func (a *App) SecurityRevokePrivilege(principal, privilege string) (map[string]i
 	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/privileges/revoke", api.RevokePrivilegeRequest{
 		Principal: principal,
 		Privilege: privilege,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
+func (a *App) SecuritySetPassword(principal, password string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	if strings.TrimSpace(password) == "" {
+		return nil, fmt.Errorf("password is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/passwords/set", api.SetPasswordRequest{
+		Principal: principal,
+		Password:  password,
 	}, &resp); err != nil {
 		return nil, err
 	}

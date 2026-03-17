@@ -1225,6 +1225,72 @@ func TestPGWirePasswordAuthenticationWithDurablePrincipal(t *testing.T) {
 	}
 }
 
+func TestPGWirePasswordAuthenticationRespectsPasswordRotation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+	if err := server.engine.SetPrincipalPassword(ctx, "admin", "rotated-pass"); err != nil {
+		t.Fatalf("set principal password: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	addr := listener.Addr().String()
+	if _, err := pgx.Connect(ctx, "postgres://admin:secret-pass@"+addr+"/asql?sslmode=disable"); err == nil {
+		t.Fatal("expected connection with pre-rotation password to fail")
+	}
+
+	conn, err := pgx.Connect(ctx, "postgres://admin:rotated-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect pgx with rotated durable principal password: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+
+	var version string
+	if err := conn.QueryRow(ctx, "SHOW server_version").Scan(&version); err != nil {
+		t.Fatalf("show server_version after rotated auth: %v", err)
+	}
+	if version == "" {
+		t.Fatal("expected server_version after rotated-password authentication")
+	}
+}
+
 func TestPGWireHistoricalReadRequiresSelectHistoryPrivilege(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -105,6 +105,10 @@ export function SecurityListPrincipals():Promise<Record<string, any>>;
 
 export function SecurityRevokePrivilege(arg1:string,arg2:string):Promise<Record<string, any>>;
 
+export function SecurityRevokeRole(arg1:string,arg2:string):Promise<Record<string, any>>;
+
+export function SecuritySetPassword(arg1:string,arg2:string):Promise<Record<string, any>>;
+
 export function TemporalLookup(arg1:studioapp.temporalLookupRequest):Promise<Record<string, any>>;
 
 export function TimeTravel(arg1:studioapp.timeTravelRequest):Promise<Record<string, any>>;

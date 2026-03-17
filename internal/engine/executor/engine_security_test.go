@@ -118,3 +118,76 @@ func TestPrincipalSnapshotBinaryRoundTripPreservesCatalog(t *testing.T) {
 		t.Fatal("expected decoded reader principal to keep SELECT_HISTORY")
 	}
 }
+
+func TestPrincipalRoleRevocationAndPasswordRotationPersistAcrossRestart(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+	walPath := filepath.Join(baseDir, "security-mutations.wal")
+	snapDir := filepath.Join(baseDir, "snaps")
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if err := engine.BootstrapAdminPrincipal(ctx, "admin", "secret"); err != nil {
+		t.Fatalf("bootstrap admin: %v", err)
+	}
+	if err := engine.CreateRole(ctx, "history_readers"); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if err := engine.GrantPrivilege(ctx, "history_readers", PrincipalPrivilegeSelectHistory); err != nil {
+		t.Fatalf("grant privilege: %v", err)
+	}
+	if err := engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := engine.GrantRole(ctx, "analyst", "history_readers"); err != nil {
+		t.Fatalf("grant role: %v", err)
+	}
+	if !engine.HasPrincipalPrivilege("analyst", PrincipalPrivilegeSelectHistory) {
+		t.Fatal("expected analyst to inherit SELECT_HISTORY before revoke")
+	}
+	if err := engine.RevokeRole(ctx, "analyst", "history_readers"); err != nil {
+		t.Fatalf("revoke role: %v", err)
+	}
+	if engine.HasPrincipalPrivilege("analyst", PrincipalPrivilegeSelectHistory) {
+		t.Fatal("expected analyst to lose SELECT_HISTORY after revoke")
+	}
+	if err := engine.SetPrincipalPassword(ctx, "analyst", "rotated-pass"); err != nil {
+		t.Fatalf("set principal password: %v", err)
+	}
+	if _, err := engine.AuthenticatePrincipal("analyst", "analyst-pass"); err == nil {
+		t.Fatal("expected old password to stop working after rotation")
+	}
+	if _, err := engine.AuthenticatePrincipal("analyst", "rotated-pass"); err != nil {
+		t.Fatalf("authenticate with rotated password before restart: %v", err)
+	}
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+
+	reopenedStore, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer reopenedStore.Close()
+
+	replayed, err := New(ctx, reopenedStore, snapDir)
+	if err != nil {
+		t.Fatalf("new replayed engine: %v", err)
+	}
+	if replayed.HasPrincipalPrivilege("analyst", PrincipalPrivilegeSelectHistory) {
+		t.Fatal("expected replayed analyst to remain without SELECT_HISTORY after role revoke")
+	}
+	if _, err := replayed.AuthenticatePrincipal("analyst", "analyst-pass"); err == nil {
+		t.Fatal("expected old password to fail after restart")
+	}
+	if _, err := replayed.AuthenticatePrincipal("analyst", "rotated-pass"); err != nil {
+		t.Fatalf("authenticate with rotated password after restart: %v", err)
+	}
+}
