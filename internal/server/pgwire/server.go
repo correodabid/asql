@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -49,6 +50,43 @@ func stripExplainSQLPrefix(sql string) (string, bool) {
 		trimmed = strings.TrimSpace(trimmed[len("EXPLAIN"):])
 	}
 	return trimmed, found
+}
+
+func (server *Server) auditSuccess(operation string, attrs ...slog.Attr) {
+	if server == nil || server.config.Logger == nil {
+		return
+	}
+	args := make([]any, 0, 3+len(attrs))
+	args = append(args,
+		slog.String("event", "audit"),
+		slog.String("status", "success"),
+		slog.String("operation", operation),
+	)
+	for _, attr := range attrs {
+		args = append(args, attr)
+	}
+	server.config.Logger.Info("audit_event", args...)
+}
+
+func (server *Server) auditFailure(operation, reason string, attrs ...slog.Attr) {
+	if server == nil || server.config.Logger == nil {
+		return
+	}
+	args := make([]any, 0, 4+len(attrs))
+	args = append(args,
+		slog.String("event", "audit"),
+		slog.String("status", "failure"),
+		slog.String("operation", operation),
+		slog.String("reason", reason),
+	)
+	for _, attr := range attrs {
+		args = append(args, attr)
+	}
+	server.config.Logger.Warn("audit_event", args...)
+}
+
+func normalizeAuditPrincipal(user string) string {
+	return strings.ToLower(strings.TrimSpace(user))
 }
 
 // raftCommitterAdapter bridges *raft.RaftNode to the ports.RaftCommitter
@@ -607,6 +645,12 @@ func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn ne
 		case *pgproto3.StartupMessage:
 			user := typed.Parameters["user"]
 			requiresPassword := server.config.AuthToken != "" || server.engine.HasPrincipalCatalog()
+			authMethod := "none"
+			if server.engine.HasPrincipalCatalog() {
+				authMethod = "durable_principal"
+			} else if server.config.AuthToken != "" {
+				authMethod = "shared_token"
+			}
 			if requiresPassword {
 				backend.Send(&pgproto3.AuthenticationCleartextPassword{})
 				if err := backend.Flush(); err != nil {
@@ -619,6 +663,10 @@ func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn ne
 				}
 				passwordMessage, ok := message.(*pgproto3.PasswordMessage)
 				if !ok {
+					server.auditFailure("auth.login", "protocol_violation",
+						slog.String("principal", normalizeAuditPrincipal(user)),
+						slog.String("auth_method", authMethod),
+					)
 					return true, sendMessages(backend, &pgproto3.ErrorResponse{
 						Severity: "FATAL",
 						Code:     "08P01",
@@ -627,6 +675,10 @@ func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn ne
 				}
 				if server.engine.HasPrincipalCatalog() {
 					if _, err := server.engine.AuthenticatePrincipal(user, passwordMessage.Password); err != nil {
+						server.auditFailure("auth.login", "authentication_failed",
+							slog.String("principal", normalizeAuditPrincipal(user)),
+							slog.String("auth_method", authMethod),
+						)
 						return true, sendMessages(backend, &pgproto3.ErrorResponse{
 							Severity: "FATAL",
 							Code:     "28P01",
@@ -636,6 +688,10 @@ func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn ne
 					state.session.SetPrincipal(user)
 				} else {
 					if passwordMessage.Password != server.config.AuthToken {
+						server.auditFailure("auth.login", "authentication_failed",
+							slog.String("principal", normalizeAuditPrincipal(user)),
+							slog.String("auth_method", authMethod),
+						)
 						return true, sendMessages(backend, &pgproto3.ErrorResponse{
 							Severity: "FATAL",
 							Code:     "28P01",
@@ -647,6 +703,10 @@ func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn ne
 			} else {
 				state.session.SetPrincipal(user)
 			}
+			server.auditSuccess("auth.login",
+				slog.String("principal", normalizeAuditPrincipal(user)),
+				slog.String("auth_method", authMethod),
+			)
 
 			msgs := make([]pgproto3.BackendMessage, 0, 12)
 			msgs = append(msgs,
@@ -1063,6 +1123,31 @@ func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connSt
 	return backend.Flush()
 }
 
+func (server *Server) authorizeHistoricalRead(session *executor.Session, queryKind string) error {
+	principal := ""
+	if session != nil {
+		principal = session.Principal()
+	}
+	if err := server.engine.AuthorizeHistoricalRead(principal); err != nil {
+		if server.engine.HasPrincipalCatalog() {
+			server.auditFailure("authz.historical_read", "privilege_denied",
+				slog.String("principal", normalizeAuditPrincipal(principal)),
+				slog.String("query_kind", queryKind),
+				slog.String("privilege", string(executor.PrincipalPrivilegeSelectHistory)),
+			)
+		}
+		return err
+	}
+	if server.engine.HasPrincipalCatalog() {
+		server.auditSuccess("authz.historical_read",
+			slog.String("principal", normalizeAuditPrincipal(principal)),
+			slog.String("query_kind", queryKind),
+			slog.String("privilege", string(executor.PrincipalPrivilegeSelectHistory)),
+		)
+	}
+	return nil
+}
+
 // sendInterceptedResult serialises a catalog-intercepted result set as
 // RowDescription + DataRow* + CommandComplete + ReadyForQuery, exactly like
 // the normal simple-query path.  This avoids duplicating the marshal logic.
@@ -1150,21 +1235,21 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 			var result executor.Result
 			var err error
 			if selectStatement.ForHistory {
-				if err = server.engine.AuthorizeHistoricalRead(session.Principal()); err != nil {
+				if err = server.authorizeHistoricalRead(session, "for_history"); err != nil {
 					return executor.Result{}, nil, err
 				}
 				result, err = server.engine.RowHistory(ctx, stripped, domains)
 			} else {
 				switch asOfKind {
 				case "ts":
-					if err = server.engine.AuthorizeHistoricalRead(session.Principal()); err != nil {
+					if err = server.authorizeHistoricalRead(session, "as_of_timestamp"); err != nil {
 						return executor.Result{}, nil, err
 					}
 					result, err = server.engine.TimeTravelQueryAsOfTimestamp(ctx, stripped, domains, asOfValue)
 				default:
 					targetLSN := maxLSN
 					if asOfKind == "lsn" {
-						if err = server.engine.AuthorizeHistoricalRead(session.Principal()); err != nil {
+						if err = server.authorizeHistoricalRead(session, "as_of_lsn"); err != nil {
 							return executor.Result{}, nil, err
 						}
 						targetLSN = asOfValue

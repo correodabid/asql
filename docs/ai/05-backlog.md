@@ -649,7 +649,7 @@ AG-1 — bootstrap principal + historical-read baseline:
 - [ ] Add deterministic WAL record types for `principal_create`, `principal_alter`, `principal_disable`, `role_grant`, and `privilege_grant` / `privilege_revoke`.
 - [x] Add replay/state-rebuild support for principal catalog state so restart reproduces the same effective permission graph.
 - [x] Introduce one bootstrap path for the first admin principal that is allowed only when the durable principal catalog is empty.
-- [ ] Add stored-principal authentication in pgwire startup, including disabled-principal rejection and deterministic audit events.
+- [x] Add stored-principal authentication in pgwire startup, including disabled-principal rejection and deterministic audit events.
 - [x] Add one first-class privilege constant for temporal reads (`SELECT_HISTORY`) and enforce it on `AS OF LSN`, `AS OF TIMESTAMP`, and `FOR HISTORY` paths.
 - [x] Add a minimal admin API plus `asqlctl` commands for `create user`, `list users`, `grant SELECT_HISTORY`, and effective-permission inspection.
 - [x] Add regression coverage for bootstrap, restart/replay, successful historical read, denied historical read, and disabled principal login.

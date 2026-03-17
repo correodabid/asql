@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -2463,6 +2464,177 @@ func TestCatalogEmptyInterceptsExposeSchemaAcrossProtocols(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPGWireAuditEventsCoverLoginAndHistoricalReadAuthorization(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	handler := newPGWireAuditCaptureHandler()
+	logger := slog.New(handler)
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create analyst user: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "historian", "historian-pass"); err != nil {
+		t.Fatalf("create historian user: %v", err)
+	}
+	if err := server.engine.GrantPrivilege(ctx, "historian", executor.PrincipalPrivilegeSelectHistory); err != nil {
+		t.Fatalf("grant SELECT_HISTORY: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	addr := listener.Addr().String()
+	adminConn, err := pgx.Connect(ctx, "postgres://admin:secret-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	t.Cleanup(func() { _ = adminConn.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"COMMIT",
+	} {
+		if _, err := adminConn.Exec(ctx, sql); err != nil {
+			t.Fatalf("setup %q: %v", sql, err)
+		}
+	}
+
+	if _, err := pgx.Connect(ctx, "postgres://analyst:wrong-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol"); err == nil {
+		t.Fatal("expected failed login for wrong password")
+	}
+
+	analystConn, err := pgx.Connect(ctx, "postgres://analyst:analyst-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect analyst: %v", err)
+	}
+	t.Cleanup(func() { _ = analystConn.Close(ctx) })
+
+	targetLSN := server.walStore.LastLSN()
+	historySQL := fmt.Sprintf("SELECT id, email FROM accounts.users /* as-of-lsn: %d */", targetLSN)
+	if _, err := analystConn.Query(ctx, historySQL); err == nil || !strings.Contains(err.Error(), "SELECT_HISTORY") {
+		t.Fatalf("expected SELECT_HISTORY failure for analyst, got %v", err)
+	}
+
+	historianConn, err := pgx.Connect(ctx, "postgres://historian:historian-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect historian: %v", err)
+	}
+	t.Cleanup(func() { _ = historianConn.Close(ctx) })
+
+	rows, err := historianConn.Query(ctx, historySQL)
+	if err != nil {
+		t.Fatalf("historian history query: %v", err)
+	}
+	rows.Close()
+
+	if !handler.hasAuditOperation("auth.login", "success") {
+		t.Fatal("missing successful pgwire auth.login audit event")
+	}
+	if !handler.hasAuditOperation("auth.login", "failure") {
+		t.Fatal("missing failed pgwire auth.login audit event")
+	}
+	if !handler.hasAuditOperation("authz.historical_read", "failure") {
+		t.Fatal("missing failed historical-read audit event")
+	}
+	if !handler.hasAuditOperation("authz.historical_read", "success") {
+		t.Fatal("missing successful historical-read audit event")
+	}
+	if !handler.hasAuditOperationReason("authz.historical_read", "failure", "privilege_denied") {
+		t.Fatal("missing privilege_denied historical-read audit reason")
+	}
+}
+
+type pgwireAuditCaptureHandler struct {
+	mu      sync.Mutex
+	records []map[string]any
+}
+
+func newPGWireAuditCaptureHandler() *pgwireAuditCaptureHandler {
+	return &pgwireAuditCaptureHandler{records: make([]map[string]any, 0)}
+}
+
+func (handler *pgwireAuditCaptureHandler) Enabled(context.Context, slog.Level) bool {
+	return true
+}
+
+func (handler *pgwireAuditCaptureHandler) Handle(_ context.Context, record slog.Record) error {
+	entry := map[string]any{"message": record.Message}
+	record.Attrs(func(attr slog.Attr) bool {
+		entry[attr.Key] = attr.Value.Any()
+		return true
+	})
+	handler.mu.Lock()
+	handler.records = append(handler.records, entry)
+	handler.mu.Unlock()
+	return nil
+}
+
+func (handler *pgwireAuditCaptureHandler) WithAttrs(_ []slog.Attr) slog.Handler {
+	return handler
+}
+
+func (handler *pgwireAuditCaptureHandler) WithGroup(string) slog.Handler {
+	return handler
+}
+
+func (handler *pgwireAuditCaptureHandler) hasAuditOperation(operation, status string) bool {
+	return handler.hasAuditOperationReason(operation, status, "")
+}
+
+func (handler *pgwireAuditCaptureHandler) hasAuditOperationReason(operation, status, reason string) bool {
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	for _, entry := range handler.records {
+		event, _ := entry["event"].(string)
+		op, _ := entry["operation"].(string)
+		state, _ := entry["status"].(string)
+		entryReason, _ := entry["reason"].(string)
+		if event != "audit" || op != operation || state != status {
+			continue
+		}
+		if reason == "" || entryReason == reason {
+			return true
+		}
+	}
+	return false
 }
 
 func TestShowUnknownParamFallbackWorksOnExtendedProtocol(t *testing.T) {

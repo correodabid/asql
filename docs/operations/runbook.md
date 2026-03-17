@@ -94,11 +94,11 @@ curl -s http://127.0.0.1:9090/metrics | grep 'asql_engine_cross_domain_'
 
 ## 3.2) Audit events
 
-Admin and internal API paths emit structured audit logs with message `audit_event` and fields:
+Admin, pgwire, and internal API paths emit structured audit logs with message `audit_event` and fields:
 
 - `event=audit`
 - `status=success|failure`
-- `operation` (for example `tx.begin`, `tx.execute`, `tx.commit`, `admin.time_travel_query`, `admin.replay_to_lsn`, `admin.replication_stream`)
+- `operation` (for example `tx.begin`, `tx.execute`, `tx.commit`, `admin.time_travel_query`, `admin.replay_to_lsn`, `admin.replication_stream`, `auth.login`, `authz.historical_read`)
 - contextual fields such as `tx_id`, `lsn`, `domains`, and `reason` for failures
 
 For retained row-level audit evidence in the data directory, use `asqlctl` local commands:
