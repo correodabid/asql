@@ -632,6 +632,18 @@ Execution rule:
 - Preserve deterministic replay: security metadata changes must be represented in WAL/state recovery just like other durable catalog changes.
 - Keep transport/admin tokens as deployment/operator controls; do not confuse them with database principals.
 
+Recommended MVP execution order:
+1. Land a durable principal catalog with replay-safe WAL records and one bootstrap admin path.
+2. Enforce current-state authorization for normal reads/writes plus explicit temporal-read privilege.
+3. Expose the model first through `asqlctl` and admin APIs before broad SQL role-management syntax.
+4. Add Studio management and inspection flows only after the engine and CLI semantics are stable.
+
+First vertical slice to execute:
+- [ ] Add durable principal catalog state with one bootstrap admin principal and replay-safe WAL mutations.
+- [ ] Authenticate pgwire sessions against stored principals instead of the fixed shared logical user.
+- [ ] Add `SELECT_HISTORY` as a first explicit privilege checked against current grant state for historical queries.
+- [ ] Expose the slice through a minimal admin/CLI path before adding broader PostgreSQL-style role DDL.
+
 P0 — principal catalog and durability:
 - [ ] Define the ASQL principal model (`USER`, `ROLE`, membership, disabled/locked state, password-hash or secret-reference shape).
 - [ ] Persist principal and grant mutations in WAL with deterministic recovery/replay semantics.
@@ -665,6 +677,12 @@ Reference inputs:
 Execution rule:
 - Expose the minimum secure management surface only after Epic AG defines the engine truth.
 - Prefer guided admin workflows over thin wrappers around raw catalog mutations.
+
+Recommended rollout order:
+1. `asqlctl` create/list/show flows for principals.
+2. `asqlctl` grant/revoke flows including temporal access.
+3. Effective-permission inspection and audit views.
+4. Studio management screens after CLI semantics prove stable.
 
 P0 — `asqlctl` security administration:
 - [ ] Add `asqlctl` commands for user/role lifecycle (`create`, `alter`, `disable`, `list`, `show`).
