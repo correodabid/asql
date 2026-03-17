@@ -722,7 +722,7 @@ P1 — Studio security UX:
 - [x] Add a Studio security area for principals, roles, memberships, and grants.
 - [x] Add a guided grant flow that makes historical-read access an explicit choice, not an accidental byproduct.
 - [x] Add effective-permission inspection for a selected user/role, including inherited roles and temporal capabilities.
-- [ ] Add denial/audit visibility in Studio for failed authz checks and recent security-relevant changes.
+- [x] Add denial/audit visibility in Studio for failed authz checks and recent security-relevant changes.
 
 P2 — docs, examples, and operational guidance:
 - [ ] Document the database security model in getting-started/reference docs, including bootstrap and rotation flows.

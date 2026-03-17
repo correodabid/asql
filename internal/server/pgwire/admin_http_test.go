@@ -457,6 +457,28 @@ func TestAdminHTTPSecurityPrincipalManagementFlow(t *testing.T) {
 	if _, ok := server.engine.Principal("analyst"); ok {
 		t.Fatal("expected analyst principal to be deleted")
 	}
+
+	var auditResp api.SecurityAuditEventsResponse
+	status = doJSON(http.MethodGet, "/api/v1/security/audit?limit=12", "read-secret", nil, &auditResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected security audit status: got %d want %d", status, http.StatusOK)
+	}
+	if len(auditResp.Events) == 0 {
+		t.Fatal("expected recent security audit events")
+	}
+	var sawCreateUser bool
+	var sawDeletePrincipal bool
+	for _, event := range auditResp.Events {
+		switch event.Operation {
+		case "security.create_user":
+			sawCreateUser = true
+		case "security.delete_principal":
+			sawDeletePrincipal = true
+		}
+	}
+	if !sawCreateUser || !sawDeletePrincipal {
+		t.Fatalf("expected create/delete security audit events, got %+v", auditResp.Events)
+	}
 }
 
 func TestAdminReadyzAndLeadershipEndpoints(t *testing.T) {

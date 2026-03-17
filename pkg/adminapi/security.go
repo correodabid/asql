@@ -72,3 +72,15 @@ type SecurityMutationResponse struct {
 	Status    string           `json:"status"`
 	Principal *PrincipalRecord `json:"principal,omitempty"`
 }
+
+type SecurityAuditEvent struct {
+	TimestampUTC string         `json:"timestamp_utc"`
+	Operation    string         `json:"operation"`
+	Status       string         `json:"status"`
+	Reason       string         `json:"reason,omitempty"`
+	Attributes   map[string]any `json:"attributes,omitempty"`
+}
+
+type SecurityAuditEventsResponse struct {
+	Events []SecurityAuditEvent `json:"events"`
+}

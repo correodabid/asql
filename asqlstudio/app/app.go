@@ -1617,6 +1617,18 @@ func (a *App) SecurityListPrincipals() (map[string]interface{}, error) {
 	return structToMap(resp)
 }
 
+func (a *App) SecurityRecentAuditEvents(limit int) (map[string]interface{}, error) {
+	path := "/api/v1/security/audit"
+	if limit > 0 {
+		path = fmt.Sprintf("%s?limit=%d", path, limit)
+	}
+	var resp api.SecurityAuditEventsResponse
+	if err := a.callPrimaryAdmin(http.MethodGet, path, nil, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
 func (a *App) SecurityBootstrapAdmin(principal, password string) (map[string]interface{}, error) {
 	if strings.TrimSpace(principal) == "" {
 		return nil, fmt.Errorf("principal is required")

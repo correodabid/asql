@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"sort"
@@ -134,6 +135,7 @@ func (server *Server) startAdminHTTP() error {
 	mux.HandleFunc("/api/v1/snapshot-catalog", server.withAdminAuth(adminScopeRead, server.handleAdminSnapshotCatalog))
 	mux.HandleFunc("/api/v1/wal-retention", server.withAdminAuth(adminScopeRead, server.handleAdminWALRetention))
 	mux.HandleFunc("/api/v1/security/principals", server.withAdminAuth(adminScopeRead, server.handleAdminListPrincipals))
+	mux.HandleFunc("/api/v1/security/audit", server.withAdminAuth(adminScopeRead, server.handleAdminSecurityAudit))
 	mux.HandleFunc("/api/v1/security/bootstrap-admin", server.withAdminAuth(adminScopeWrite, server.handleAdminBootstrapPrincipal))
 	mux.HandleFunc("/api/v1/security/users", server.withAdminAuth(adminScopeWrite, server.handleAdminCreateUser))
 	mux.HandleFunc("/api/v1/security/roles", server.withAdminAuth(adminScopeWrite, server.handleAdminCreateRole))
@@ -321,6 +323,56 @@ func (server *Server) handleAdminListPrincipals(w http.ResponseWriter, r *http.R
 	writeAdminJSON(w, http.StatusOK, api.ListPrincipalsResponse{Principals: toAdminPrincipalRecords(server.engine.ListPrincipals())})
 }
 
+func (server *Server) handleAdminSecurityAudit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	limit := 20
+	if raw := strings.TrimSpace(r.URL.Query().Get("limit")); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "limit must be a positive integer"})
+			return
+		}
+		if parsed > maxRecentSecurityAuditEvents {
+			parsed = maxRecentSecurityAuditEvents
+		}
+		limit = parsed
+	}
+	writeAdminJSON(w, http.StatusOK, api.SecurityAuditEventsResponse{Events: server.RecentSecurityAuditEvents(limit)})
+}
+
+func (server *Server) auditAdminSecurityMutationSuccess(operation string, attrs ...any) {
+	if server == nil {
+		return
+	}
+	slogAttrs := make([]slog.Attr, 0, len(attrs)/2)
+	for i := 0; i+1 < len(attrs); i += 2 {
+		key, ok := attrs[i].(string)
+		if !ok || strings.TrimSpace(key) == "" {
+			continue
+		}
+		slogAttrs = append(slogAttrs, slog.Any(key, attrs[i+1]))
+	}
+	server.auditSuccess(operation, slogAttrs...)
+}
+
+func (server *Server) auditAdminSecurityMutationFailure(operation, reason string, attrs ...any) {
+	if server == nil {
+		return
+	}
+	slogAttrs := make([]slog.Attr, 0, len(attrs)/2)
+	for i := 0; i+1 < len(attrs); i += 2 {
+		key, ok := attrs[i].(string)
+		if !ok || strings.TrimSpace(key) == "" {
+			continue
+		}
+		slogAttrs = append(slogAttrs, slog.Any(key, attrs[i+1]))
+	}
+	server.auditFailure(operation, reason, slogAttrs...)
+}
+
 func (server *Server) handleAdminBootstrapPrincipal(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
@@ -335,9 +387,11 @@ func (server *Server) handleAdminBootstrapPrincipal(w http.ResponseWriter, r *ht
 		return
 	}
 	if err := server.engine.BootstrapAdminPrincipal(r.Context(), req.Principal, req.Password); err != nil {
+		server.auditAdminSecurityMutationFailure("security.bootstrap_admin", "mutation_failed", "principal", strings.TrimSpace(req.Principal), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.bootstrap_admin", "principal", strings.TrimSpace(req.Principal), "kind", "USER")
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
 }
 
@@ -355,9 +409,11 @@ func (server *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := server.engine.CreateUser(r.Context(), req.Principal, req.Password); err != nil {
+		server.auditAdminSecurityMutationFailure("security.create_user", "mutation_failed", "principal", strings.TrimSpace(req.Principal), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.create_user", "principal", strings.TrimSpace(req.Principal), "kind", "USER")
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
 }
 
@@ -375,9 +431,11 @@ func (server *Server) handleAdminCreateRole(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := server.engine.CreateRole(r.Context(), req.Principal); err != nil {
+		server.auditAdminSecurityMutationFailure("security.create_role", "mutation_failed", "principal", strings.TrimSpace(req.Principal), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.create_role", "principal", strings.TrimSpace(req.Principal), "kind", "ROLE")
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
 }
 
@@ -396,13 +454,16 @@ func (server *Server) handleAdminGrantPrivilege(w http.ResponseWriter, r *http.R
 	}
 	privilege, err := executor.ParsePrincipalPrivilege(req.Privilege)
 	if err != nil {
+		server.auditAdminSecurityMutationFailure("security.grant_privilege", "invalid_privilege", "principal", strings.TrimSpace(req.Principal), "privilege", strings.TrimSpace(req.Privilege), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := server.engine.GrantPrivilege(r.Context(), req.Principal, privilege); err != nil {
+		server.auditAdminSecurityMutationFailure("security.grant_privilege", "mutation_failed", "principal", strings.TrimSpace(req.Principal), "privilege", string(privilege), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.grant_privilege", "principal", strings.TrimSpace(req.Principal), "privilege", string(privilege))
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
 }
 
@@ -420,9 +481,11 @@ func (server *Server) handleAdminGrantRole(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	if err := server.engine.GrantRole(r.Context(), req.Principal, req.Role); err != nil {
+		server.auditAdminSecurityMutationFailure("security.grant_role", "mutation_failed", "principal", strings.TrimSpace(req.Principal), "role", strings.TrimSpace(req.Role), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.grant_role", "principal", strings.TrimSpace(req.Principal), "role", strings.TrimSpace(req.Role))
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
 }
 
@@ -441,13 +504,16 @@ func (server *Server) handleAdminRevokePrivilege(w http.ResponseWriter, r *http.
 	}
 	privilege, err := executor.ParsePrincipalPrivilege(req.Privilege)
 	if err != nil {
+		server.auditAdminSecurityMutationFailure("security.revoke_privilege", "invalid_privilege", "principal", strings.TrimSpace(req.Principal), "privilege", strings.TrimSpace(req.Privilege), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 	if err := server.engine.RevokePrivilege(r.Context(), req.Principal, privilege); err != nil {
+		server.auditAdminSecurityMutationFailure("security.revoke_privilege", "mutation_failed", "principal", strings.TrimSpace(req.Principal), "privilege", string(privilege), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.revoke_privilege", "principal", strings.TrimSpace(req.Principal), "privilege", string(privilege))
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
 }
 
@@ -465,9 +531,11 @@ func (server *Server) handleAdminRevokeRole(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if err := server.engine.RevokeRole(r.Context(), req.Principal, req.Role); err != nil {
+		server.auditAdminSecurityMutationFailure("security.revoke_role", "mutation_failed", "principal", strings.TrimSpace(req.Principal), "role", strings.TrimSpace(req.Role), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.revoke_role", "principal", strings.TrimSpace(req.Principal), "role", strings.TrimSpace(req.Role))
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
 }
 
@@ -485,9 +553,11 @@ func (server *Server) handleAdminSetPrincipalPassword(w http.ResponseWriter, r *
 		return
 	}
 	if err := server.engine.SetPrincipalPassword(r.Context(), req.Principal, req.Password); err != nil {
+		server.auditAdminSecurityMutationFailure("security.set_password", "mutation_failed", "principal", strings.TrimSpace(req.Principal), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.set_password", "principal", strings.TrimSpace(req.Principal))
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
 }
 
@@ -505,9 +575,11 @@ func (server *Server) handleAdminDisablePrincipal(w http.ResponseWriter, r *http
 		return
 	}
 	if err := server.engine.DisablePrincipal(r.Context(), req.Principal); err != nil {
+		server.auditAdminSecurityMutationFailure("security.disable_principal", "mutation_failed", "principal", strings.TrimSpace(req.Principal), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.disable_principal", "principal", strings.TrimSpace(req.Principal))
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
 }
 
@@ -525,9 +597,11 @@ func (server *Server) handleAdminEnablePrincipal(w http.ResponseWriter, r *http.
 		return
 	}
 	if err := server.engine.EnablePrincipal(r.Context(), req.Principal); err != nil {
+		server.auditAdminSecurityMutationFailure("security.enable_principal", "mutation_failed", "principal", strings.TrimSpace(req.Principal), "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.enable_principal", "principal", strings.TrimSpace(req.Principal))
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
 }
 
@@ -547,13 +621,16 @@ func (server *Server) handleAdminDeletePrincipal(w http.ResponseWriter, r *http.
 	principalName := strings.TrimSpace(req.Principal)
 	info, ok := server.engine.Principal(principalName)
 	if !ok {
+		server.auditAdminSecurityMutationFailure("security.delete_principal", "principal_not_found", "principal", principalName)
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "principal not found"})
 		return
 	}
 	if err := server.engine.DeletePrincipal(r.Context(), req.Principal); err != nil {
+		server.auditAdminSecurityMutationFailure("security.delete_principal", "mutation_failed", "principal", principalName, "error", err.Error())
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	server.auditAdminSecurityMutationSuccess("security.delete_principal", "principal", principalName)
 	writeAdminJSON(w, http.StatusOK, api.SecurityMutationResponse{
 		Status:    "ok",
 		Principal: toAdminPrincipalRecord(info),

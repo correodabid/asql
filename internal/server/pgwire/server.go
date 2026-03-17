@@ -28,11 +28,14 @@ import (
 	grpcserver "asql/internal/server/grpc"
 	"asql/internal/storage/audit"
 	"asql/internal/storage/wal"
+	api "asql/pkg/adminapi"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
 
 const maxLSN uint64 = ^uint64(0)
+
+const maxRecentSecurityAuditEvents = 128
 
 var explainResultColumns = []string{"operation", "domain", "table", "plan_shape", "access_plan"}
 
@@ -56,6 +59,7 @@ func (server *Server) auditSuccess(operation string, attrs ...slog.Attr) {
 	if server == nil || server.config.Logger == nil {
 		return
 	}
+	server.appendSecurityAuditEvent(operation, "success", "", attrs...)
 	args := make([]any, 0, 3+len(attrs))
 	args = append(args,
 		slog.String("event", "audit"),
@@ -72,6 +76,7 @@ func (server *Server) auditFailure(operation, reason string, attrs ...slog.Attr)
 	if server == nil || server.config.Logger == nil {
 		return
 	}
+	server.appendSecurityAuditEvent(operation, "failure", reason, attrs...)
 	args := make([]any, 0, 4+len(attrs))
 	args = append(args,
 		slog.String("event", "audit"),
@@ -213,16 +218,97 @@ type Server struct {
 	streamReplicator *grpcserver.PersistentStreamReplicator
 	clusterCancel    context.CancelFunc // cancels heartbeat + replicator goroutines
 
-	listener      net.Listener
-	adminListener net.Listener
-	adminServer   *http.Server
-	metrics       *runtimeMetrics
-	closeCh       chan struct{}
-	closeMux      sync.Once
-	waitConn      sync.WaitGroup
-	cancelMu      sync.Mutex
-	cancelTargets map[backendCancelKey]*connState
-	nextBackendID uint32
+	listener            net.Listener
+	adminListener       net.Listener
+	adminServer         *http.Server
+	metrics             *runtimeMetrics
+	securityAuditMu     sync.Mutex
+	securityAuditEvents []api.SecurityAuditEvent
+	closeCh             chan struct{}
+	closeMux            sync.Once
+	waitConn            sync.WaitGroup
+	cancelMu            sync.Mutex
+	cancelTargets       map[backendCancelKey]*connState
+	nextBackendID       uint32
+}
+
+func slogValueToAny(value slog.Value) any {
+	value = value.Resolve()
+	switch value.Kind() {
+	case slog.KindString:
+		return value.String()
+	case slog.KindInt64:
+		return value.Int64()
+	case slog.KindUint64:
+		return value.Uint64()
+	case slog.KindFloat64:
+		return value.Float64()
+	case slog.KindBool:
+		return value.Bool()
+	case slog.KindDuration:
+		return value.Duration().String()
+	case slog.KindTime:
+		return value.Time().UTC().Format(time.RFC3339Nano)
+	case slog.KindGroup:
+		group := value.Group()
+		if len(group) == 0 {
+			return map[string]any{}
+		}
+		result := make(map[string]any, len(group))
+		for _, attr := range group {
+			result[attr.Key] = slogValueToAny(attr.Value)
+		}
+		return result
+	case slog.KindAny:
+		return value.Any()
+	default:
+		return value.Any()
+	}
+}
+
+func (server *Server) appendSecurityAuditEvent(operation, status, reason string, attrs ...slog.Attr) {
+	if server == nil {
+		return
+	}
+	event := api.SecurityAuditEvent{
+		TimestampUTC: time.Now().UTC().Format(time.RFC3339Nano),
+		Operation:    operation,
+		Status:       status,
+		Reason:       reason,
+	}
+	if len(attrs) > 0 {
+		event.Attributes = make(map[string]any, len(attrs))
+		for _, attr := range attrs {
+			event.Attributes[attr.Key] = slogValueToAny(attr.Value)
+		}
+	}
+	server.securityAuditMu.Lock()
+	defer server.securityAuditMu.Unlock()
+	server.securityAuditEvents = append(server.securityAuditEvents, event)
+	if len(server.securityAuditEvents) > maxRecentSecurityAuditEvents {
+		server.securityAuditEvents = append([]api.SecurityAuditEvent(nil), server.securityAuditEvents[len(server.securityAuditEvents)-maxRecentSecurityAuditEvents:]...)
+	}
+}
+
+func (server *Server) RecentSecurityAuditEvents(limit int) []api.SecurityAuditEvent {
+	if server == nil {
+		return nil
+	}
+	server.securityAuditMu.Lock()
+	defer server.securityAuditMu.Unlock()
+	if len(server.securityAuditEvents) == 0 {
+		return nil
+	}
+	if limit <= 0 || limit > len(server.securityAuditEvents) {
+		limit = len(server.securityAuditEvents)
+	}
+	start := len(server.securityAuditEvents) - limit
+	result := make([]api.SecurityAuditEvent, limit)
+	copy(result, server.securityAuditEvents[start:])
+	for i, j := 0, len(result)-1; i < j; i, j = i+1, j-1 {
+		result[i], result[j] = result[j], result[i]
+	}
+	return result
 }
 
 func New(config Config) (*Server, error) {

@@ -40,6 +40,43 @@ func TestSecurityListPrincipalsUsesAdminAuthToken(t *testing.T) {
 	}
 }
 
+func TestSecurityRecentAuditEventsUsesAdminAuthToken(t *testing.T) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/security/audit" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer studio-secret" {
+			t.Fatalf("unexpected authorization header: %q", got)
+		}
+		if got := r.URL.Query().Get("limit"); got != "7" {
+			t.Fatalf("unexpected limit: %q", got)
+		}
+		_ = json.NewEncoder(w).Encode(api.SecurityAuditEventsResponse{
+			Events: []api.SecurityAuditEvent{{
+				TimestampUTC: "2026-03-17T12:00:00Z",
+				Operation:    "authz.historical_read",
+				Status:       "failure",
+				Reason:       "privilege_denied",
+				Attributes: map[string]any{
+					"principal": "analyst",
+				},
+			}},
+		})
+	}))
+	defer server.Close()
+
+	app := &App{adminEndpoints: []string{server.URL}, adminToken: "studio-secret"}
+	resp, err := app.SecurityRecentAuditEvents(7)
+	if err != nil {
+		t.Fatalf("SecurityRecentAuditEvents: %v", err)
+	}
+	entries, ok := resp["events"].([]interface{})
+	if !ok || len(entries) != 1 {
+		t.Fatalf("unexpected events payload: %+v", resp)
+	}
+}
+
 func TestSecurityMutationsPostJSON(t *testing.T) {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
