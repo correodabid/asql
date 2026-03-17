@@ -12,6 +12,7 @@ import (
 
 	pgwireserver "asql/internal/server/pgwire"
 	api "asql/pkg/adminapi"
+
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
