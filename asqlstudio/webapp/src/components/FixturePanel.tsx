@@ -1,10 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
+import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
-import { IconCheck, IconDownload, IconRefresh, IconUpload } from './Icons'
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconCheckCircle,
+  IconDatabase,
+  IconDownload,
+  IconLayers,
+  IconRefresh,
+  IconSearch,
+  IconUpload,
+} from './Icons'
 
-type Props = {
-  domain: string
-}
+/* ── Types ────────────────────────────────────────────────── */
+
+type Props = { domain: string }
 
 type FixtureResponse = {
   status?: string
@@ -12,6 +22,11 @@ type FixtureResponse = {
   name?: string
   steps?: number
 }
+
+type Toast = { id: number; message: string; kind: 'success' | 'error' }
+let toastSeq = 0
+
+/* ── Main Panel ───────────────────────────────────────────── */
 
 export function FixturePanel({ domain }: Props) {
   const [availableDomains, setAvailableDomains] = useState<string[]>([])
@@ -21,9 +36,14 @@ export function FixturePanel({ domain }: Props) {
   const [exportName, setExportName] = useState('')
   const [exportDescription, setExportDescription] = useState('')
   const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
   const [lastResult, setLastResult] = useState<FixtureResponse | null>(null)
+  const [toasts, setToasts] = useState<Toast[]>([])
+
+  const toast = (message: string, kind: 'success' | 'error') => {
+    const id = ++toastSeq
+    setToasts((t) => [...t, { id, message, kind }])
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200)
+  }
 
   useEffect(() => {
     let active = true
@@ -36,11 +56,9 @@ export function FixturePanel({ domain }: Props) {
       }
     }).catch((err) => {
       if (!active) return
-      setError(err instanceof Error ? err.message : String(err))
+      toast(err instanceof Error ? err.message : String(err), 'error')
     })
-    return () => {
-      active = false
-    }
+    return () => { active = false }
   }, [domain])
 
   const normalizedExportName = useMemo(() => {
@@ -52,14 +70,13 @@ export function FixturePanel({ domain }: Props) {
 
   const run = async (label: string, fn: () => Promise<FixtureResponse>) => {
     setBusy(label)
-    setError('')
-    setMessage('')
     try {
       const response = await fn()
       setLastResult(response)
-      setMessage(`${response.status || 'OK'} · ${response.name || ''} ${response.steps ? `(${response.steps} steps)` : ''}`.trim())
+      const msg = `${response.status || 'OK'} · ${response.name || ''} ${response.steps ? `(${response.steps} steps)` : ''}`.trim()
+      toast(msg, 'success')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast(err instanceof Error ? err.message : String(err), 'error')
     } finally {
       setBusy('')
     }
@@ -67,181 +84,272 @@ export function FixturePanel({ domain }: Props) {
 
   const toggleDomain = (name: string) => {
     setSelectedDomains((current) => current.includes(name)
-      ? current.filter((candidate) => candidate !== name)
+      ? current.filter((c) => c !== name)
       : [...current, name].sort())
   }
 
   return (
-    <div className="panel" style={{ margin: 16, padding: 16, display: 'grid', gap: 16 }}>
-      <div>
-        <h2 style={{ margin: '0 0 8px' }}>Fixtures</h2>
-        <p className="text-muted" style={{ margin: 0 }}>
-          Validate, load, and export deterministic fixture packs directly from Studio.
-        </p>
-      </div>
-
-      <div className="panel" style={{ padding: 12, border: '1px solid var(--border)', background: 'var(--panel-2)' }}>
-        <h3 style={{ marginTop: 0 }}>Validate / Load</h3>
-        <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr auto' }}>
-          <input
-            className="title-domain-select"
-            value={fixturePath}
-            onChange={(e) => setFixturePath(e.target.value)}
-            placeholder="/path/to/fixture.json"
-          />
-          <button
-            className="toolbar-btn"
-            disabled={busy !== ''}
-            onClick={() => {
-              void api<string>('/api/fixtures/pick-file', 'GET').then((path) => {
-                if (path) setFixturePath(path)
-              }).catch((err) => setError(err instanceof Error ? err.message : String(err)))
-            }}
-          >
-            Browse…
-          </button>
-        </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 12 }}>
-          <button
-            className="toolbar-btn"
-            disabled={busy !== '' || !fixturePath.trim()}
-            onClick={() => run('validate', () => api<FixtureResponse>('/api/fixtures/validate', 'POST', { file_path: fixturePath }))}
-          >
-            <IconCheck /> Validate fixture
-          </button>
-          <button
-            className="toolbar-btn"
-            disabled={busy !== '' || !fixturePath.trim()}
-            onClick={() => run('load', () => api<FixtureResponse>('/api/fixtures/load', 'POST', { file_path: fixturePath }))}
-          >
-            <IconUpload /> Load fixture
-          </button>
+    <div className="sec-page">
+      {/* ── Header ──────────────────────────────────────── */}
+      <div className="sec-header">
+        <div className="sec-header-text">
+          <h2 className="sec-title">Fixtures</h2>
+          <p className="sec-subtitle">
+            Validate, load, and export deterministic fixture packs. Uses stable primary keys and explicit domain dependency ordering.
+          </p>
         </div>
       </div>
 
-      <div className="panel" style={{ padding: 12, border: '1px solid var(--border)', background: 'var(--panel-2)' }}>
-        <h3 style={{ marginTop: 0 }}>Export</h3>
-        <div style={{ display: 'grid', gap: 12 }}>
-          <div>
-            <div className="text-muted" style={{ fontSize: 12, marginBottom: 8 }}>Domains</div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      {/* ── KPI row ─────────────────────────────────────── */}
+      <div className="sec-kpi-row">
+        <FixKPI icon={<IconDatabase />} label="Domains" value={availableDomains.length} color="var(--accent)" delay={0} />
+        <FixKPI icon={<IconLayers />} label="Selected" value={selectedDomains.length} color="var(--text-safe)" delay={60} />
+        <FixKPI icon={<IconCheckCircle />} label="Steps" value={lastResult?.steps ?? 0} color="var(--text-warning)" delay={120} />
+      </div>
+
+      {/* ── Validate / Load ─────────────────────────────── */}
+      <div className="glass-section" style={{ animationDelay: '60ms' }}>
+        <div className="glass-section-header">
+          <span className="glass-section-title">Validate &amp; Load</span>
+        </div>
+        <div className="glass-section-body">
+          <div className="fix-file-row">
+            <label className="sec-field" style={{ flex: 1 }}>
+              <span className="sec-field-label">Fixture file</span>
+              <input
+                className="sec-input"
+                value={fixturePath}
+                onChange={(e) => setFixturePath(e.target.value)}
+                placeholder="/path/to/fixture.json"
+              />
+            </label>
+            <button
+              className="sec-action-chip"
+              style={{ alignSelf: 'flex-end' }}
+              disabled={busy !== ''}
+              onClick={() => {
+                void api<string>('/api/fixtures/pick-file', 'GET').then((path) => {
+                  if (path) setFixturePath(path)
+                }).catch((err) => toast(err instanceof Error ? err.message : String(err), 'error'))
+              }}
+            >
+              <IconSearch /> <span>Browse…</span>
+            </button>
+          </div>
+
+          <div className="sec-actions-strip" style={{ marginTop: 12 }}>
+            <ActionChip
+              icon={<IconCheckCircle />}
+              label="Validate"
+              loading={busy === 'validate'}
+              onClick={() => run('validate', () => api<FixtureResponse>('/api/fixtures/validate', 'POST', { file_path: fixturePath }))}
+              disabled={busy !== '' || !fixturePath.trim()}
+            />
+            <ActionChip
+              icon={<IconUpload />}
+              label="Load fixture"
+              loading={busy === 'load'}
+              onClick={() => run('load', () => api<FixtureResponse>('/api/fixtures/load', 'POST', { file_path: fixturePath }))}
+              disabled={busy !== '' || !fixturePath.trim()}
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Export ──────────────────────────────────────── */}
+      <div className="glass-section" style={{ animationDelay: '120ms' }}>
+        <div className="glass-section-header">
+          <span className="glass-section-title">Export</span>
+        </div>
+        <div className="glass-section-body">
+          {/* Domain chips */}
+          <div style={{ marginBottom: 12 }}>
+            <span className="sec-field-label" style={{ display: 'block', marginBottom: 8 }}>Domains</span>
+            <div className="fix-domain-chips">
+              {availableDomains.length === 0 && (
+                <span className="text-muted" style={{ fontSize: 12 }}>No domains available.</span>
+              )}
               {availableDomains.map((name) => (
-                <label
+                <button
                   key={name}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '6px 10px',
-                    border: '1px solid var(--border)',
-                    borderRadius: 999,
-                    background: selectedDomains.includes(name) ? 'var(--accent-subtle)' : 'var(--bg-elevated)',
-                    cursor: 'pointer',
-                    fontSize: 12,
-                  }}
+                  className={`fix-domain-chip ${selectedDomains.includes(name) ? 'selected' : ''}`}
+                  onClick={() => toggleDomain(name)}
                 >
-                  <input
-                    type="checkbox"
-                    checked={selectedDomains.includes(name)}
-                    onChange={() => toggleDomain(name)}
-                  />
+                  {selectedDomains.includes(name) && <IconCheck />}
                   {name}
-                </label>
+                </button>
               ))}
             </div>
           </div>
 
-          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: '1fr auto' }}>
-            <input
-              className="title-domain-select"
-              value={exportPath}
-              onChange={(e) => setExportPath(e.target.value)}
-              placeholder="/path/to/exported-fixture.json"
-            />
+          {/* Export file path */}
+          <div className="fix-file-row">
+            <label className="sec-field" style={{ flex: 1 }}>
+              <span className="sec-field-label">Export file path</span>
+              <input
+                className="sec-input"
+                value={exportPath}
+                onChange={(e) => setExportPath(e.target.value)}
+                placeholder="/path/to/exported-fixture.json"
+              />
+            </label>
             <button
-              className="toolbar-btn"
+              className="sec-action-chip"
+              style={{ alignSelf: 'flex-end' }}
               disabled={busy !== ''}
               onClick={() => {
                 void api<string>('/api/fixtures/pick-export-file', 'POST', {
                   suggested_name: `${normalizedExportName}.json`,
                 }).then((path) => {
                   if (path) setExportPath(path)
-                }).catch((err) => setError(err instanceof Error ? err.message : String(err)))
+                }).catch((err) => toast(err instanceof Error ? err.message : String(err), 'error'))
               }}
             >
-              Save as…
+              <IconSearch /> <span>Save as…</span>
             </button>
           </div>
 
-          <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))' }}>
-            <input
-              className="title-domain-select"
-              value={exportName}
-              onChange={(e) => setExportName(e.target.value)}
-              placeholder="Fixture name (optional)"
-            />
-            <input
-              className="title-domain-select"
-              value={exportDescription}
-              onChange={(e) => setExportDescription(e.target.value)}
-              placeholder="Description (optional)"
-            />
+          {/* Name + description */}
+          <div className="rec-dir-grid" style={{ marginTop: 12 }}>
+            <label className="sec-field">
+              <span className="sec-field-label">Fixture name</span>
+              <input className="sec-input" value={exportName} onChange={(e) => setExportName(e.target.value)} placeholder="Optional name" />
+            </label>
+            <label className="sec-field">
+              <span className="sec-field-label">Description</span>
+              <input className="sec-input" value={exportDescription} onChange={(e) => setExportDescription(e.target.value)} placeholder="Optional description" />
+            </label>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button
-              className="toolbar-btn"
-              disabled={busy !== '' || !exportPath.trim() || selectedDomains.length === 0}
+          <div className="sec-actions-strip" style={{ marginTop: 12 }}>
+            <ActionChip
+              icon={<IconDownload />}
+              label="Export fixture"
+              loading={busy === 'export'}
               onClick={() => run('export', () => api<FixtureResponse>('/api/fixtures/export', 'POST', {
                 file_path: exportPath,
                 domains: selectedDomains,
                 name: exportName,
                 description: exportDescription,
               }))}
-            >
-              <IconDownload /> Export fixture
-            </button>
-            <button
-              className="toolbar-btn"
-              disabled={busy !== ''}
+              disabled={busy !== '' || !exportPath.trim() || selectedDomains.length === 0}
+            />
+            <ActionChip
+              icon={<IconRefresh />}
+              label="Reset"
               onClick={() => {
-                setError('')
-                setMessage('')
                 setLastResult(null)
                 setExportDescription('')
                 setExportName('')
+                setExportPath('')
               }}
-            >
-              <IconRefresh /> Reset
-            </button>
+              disabled={busy !== ''}
+            />
           </div>
 
-          <div className="text-muted" style={{ fontSize: 12 }}>
+          <p className="fix-note">
             Export is intentionally strict: selected domains must include dependency domains, and exported tables must have stable primary keys.
-          </div>
+          </p>
         </div>
       </div>
 
-      {message && (
-        <div className="console-status-bar success-bar">
-          <IconCheck />
-          <span>{message}</span>
+      {/* ── Last result ─────────────────────────────────── */}
+      <div className="glass-section" style={{ animationDelay: '180ms' }}>
+        <div className="glass-section-header">
+          <span className="glass-section-title">Last Result</span>
+          {lastResult?.status && (
+            <span className="sec-catalog-count">{lastResult.status}</span>
+          )}
         </div>
-      )}
-
-      {error && (
-        <div className="console-status-bar error-bar">
-          <span className="error-icon">!</span>
-          <span>{error}</span>
+        <div className="glass-section-body">
+          {lastResult ? (
+            <div className="fix-result-grid">
+              <ResultRow label="Status" value={lastResult.status ?? '—'} />
+              <ResultRow label="File" value={lastResult.file ?? '—'} mono />
+              <ResultRow label="Name" value={lastResult.name ?? '—'} />
+              <ResultRow label="Steps" value={String(lastResult.steps ?? 0)} />
+            </div>
+          ) : (
+            <div className="rec-empty-diag">
+              <IconLayers />
+              <span>Run a validate, load, or export operation to see results.</span>
+            </div>
+          )}
         </div>
-      )}
-
-      <div className="panel" style={{ padding: 12, border: '1px solid var(--border)', background: 'var(--panel-2)' }}>
-        <h3 style={{ marginTop: 0 }}>Last result</h3>
-        <pre style={{ margin: 0, whiteSpace: 'pre-wrap', overflowX: 'auto' }}>
-          {lastResult ? JSON.stringify(lastResult, null, 2) : 'No fixture operation run yet.'}
-        </pre>
       </div>
+
+      {/* ── Toast rail ──────────────────────────────────── */}
+      {toasts.length > 0 && (
+        <div className="sec-toast-rail">
+          {toasts.map((t) => (
+            <div key={t.id} className={`sec-toast sec-toast-${t.kind}`}>
+              {t.kind === 'success' ? <IconCheck /> : <IconAlertTriangle />}
+              <span>{t.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ── Sub-components ───────────────────────────────────────── */
+
+function FixKPI({
+  icon,
+  label,
+  value,
+  color,
+  delay = 0,
+}: {
+  icon: ReactNode
+  label: string
+  value: number
+  color: string
+  delay?: number
+}) {
+  return (
+    <div className="kpi-card" style={{ '--kpi-accent': color, animationDelay: `${delay}ms` } as React.CSSProperties}>
+      <div className="kpi-card-glow" />
+      <div className="kpi-icon-wrap" style={{ color }}>{icon}</div>
+      <div className="kpi-content">
+        <span className="kpi-label">{label}</span>
+        <div className="kpi-value">{value}</div>
+      </div>
+    </div>
+  )
+}
+
+function ActionChip({
+  icon,
+  label,
+  loading,
+  onClick,
+  disabled,
+}: {
+  icon: ReactNode
+  label: string
+  loading?: boolean
+  onClick: () => void
+  disabled: boolean
+}) {
+  return (
+    <button
+      className={`sec-action-chip ${loading ? 'loading' : ''}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {icon}
+      <span>{label}</span>
+    </button>
+  )
+}
+
+function ResultRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="fix-result-row">
+      <span className="fix-result-label">{label}</span>
+      <span className={`fix-result-value ${mono ? 'mono' : ''}`}>{value}</span>
     </div>
   )
 }
