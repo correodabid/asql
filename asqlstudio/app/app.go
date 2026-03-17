@@ -37,6 +37,7 @@ type App struct {
 	routingStats   *readRoutingStats
 	clusterGroups  []string
 	adminEndpoints []string
+	adminToken     string
 	dataDir        string
 }
 
@@ -44,7 +45,7 @@ type App struct {
 // peers is the full list of cluster pgwire endpoints (may include the leader).
 // When peers is non-empty, ClusterNodeStatus probes all of them; otherwise it
 // falls back to {engine, followerEngine} for single/two-node backward compat.
-func newApp(engine *engineClient, follower *engineClient, peers []*engineClient, groups []string, adminEndpoints []string, dataDir string, logger *slog.Logger) *App {
+func newApp(engine *engineClient, follower *engineClient, peers []*engineClient, groups []string, adminEndpoints []string, adminToken string, dataDir string, logger *slog.Logger) *App {
 	return &App{
 		logger:         logger,
 		engine:         engine,
@@ -53,6 +54,7 @@ func newApp(engine *engineClient, follower *engineClient, peers []*engineClient,
 		routingStats:   newReadRoutingStats(),
 		clusterGroups:  groups,
 		adminEndpoints: adminEndpoints,
+		adminToken:     strings.TrimSpace(adminToken),
 		dataDir:        strings.TrimSpace(dataDir),
 	}
 }
@@ -1526,6 +1528,13 @@ func (a *App) fetchClusterAdminJSONWithMethod(ctx context.Context, endpoint, met
 	if payload != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
+	if token := strings.TrimSpace(a.adminToken); token != "" {
+		if strings.HasPrefix(strings.ToLower(token), "bearer ") {
+			req.Header.Set("Authorization", token)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return err
@@ -1558,11 +1567,15 @@ func (a *App) primaryAdminEndpoint() (string, error) {
 }
 
 func (a *App) callRecoveryAdmin(path string, request any, target any) error {
+	return a.callPrimaryAdmin(http.MethodPost, path, request, target)
+}
+
+func (a *App) callPrimaryAdmin(method, path string, request any, target any) error {
 	endpoint, err := a.primaryAdminEndpoint()
 	if err != nil {
 		return err
 	}
-	return a.fetchClusterAdminJSONWithMethod(a.reqCtx0(), endpoint, http.MethodPost, path, request, target)
+	return a.fetchClusterAdminJSONWithMethod(a.reqCtx0(), endpoint, method, path, request, target)
 }
 
 func (a *App) reqCtx0() context.Context {
@@ -1594,6 +1607,95 @@ func structToMap(v interface{}) (map[string]interface{}, error) {
 
 func (a *App) RecoveryDefaults() (map[string]interface{}, error) {
 	return map[string]interface{}{"data_dir": a.dataDir}, nil
+}
+
+func (a *App) SecurityListPrincipals() (map[string]interface{}, error) {
+	var resp api.ListPrincipalsResponse
+	if err := a.callPrimaryAdmin(http.MethodGet, "/api/v1/security/principals", nil, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
+func (a *App) SecurityBootstrapAdmin(principal, password string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	if strings.TrimSpace(password) == "" {
+		return nil, fmt.Errorf("password is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/bootstrap-admin", api.BootstrapAdminPrincipalRequest{
+		Principal: principal,
+		Password:  password,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
+func (a *App) SecurityCreateUser(principal, password string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	if strings.TrimSpace(password) == "" {
+		return nil, fmt.Errorf("password is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/users", api.CreateUserRequest{
+		Principal: principal,
+		Password:  password,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
+func (a *App) SecurityCreateRole(principal string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/roles", api.CreateRoleRequest{
+		Principal: principal,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
+func (a *App) SecurityGrantPrivilege(principal, privilege string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	if strings.TrimSpace(privilege) == "" {
+		return nil, fmt.Errorf("privilege is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/privileges/grant", api.GrantPrivilegeRequest{
+		Principal: principal,
+		Privilege: privilege,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
+func (a *App) SecurityGrantRole(principal, role string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	if strings.TrimSpace(role) == "" {
+		return nil, fmt.Errorf("role is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/roles/grant", api.GrantRoleRequest{
+		Principal: principal,
+		Role:      role,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
 }
 
 func (a *App) RecoveryCreateBackup(dataDir, backupDir string) (map[string]interface{}, error) {

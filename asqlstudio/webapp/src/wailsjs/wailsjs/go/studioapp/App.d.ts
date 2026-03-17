@@ -89,6 +89,18 @@ export function SchemaLoadBaseline(arg1:studioapp.schemaLoadBaselineRequest):Pro
 
 export function SchemaTables(arg1:string):Promise<Record<string, any>>;
 
+export function SecurityBootstrapAdmin(arg1:string,arg2:string):Promise<Record<string, any>>;
+
+export function SecurityCreateRole(arg1:string):Promise<Record<string, any>>;
+
+export function SecurityCreateUser(arg1:string,arg2:string):Promise<Record<string, any>>;
+
+export function SecurityGrantPrivilege(arg1:string,arg2:string):Promise<Record<string, any>>;
+
+export function SecurityGrantRole(arg1:string,arg2:string):Promise<Record<string, any>>;
+
+export function SecurityListPrincipals():Promise<Record<string, any>>;
+
 export function TemporalLookup(arg1:studioapp.temporalLookupRequest):Promise<Record<string, any>>;
 
 export function TimeTravel(arg1:studioapp.timeTravelRequest):Promise<Record<string, any>>;

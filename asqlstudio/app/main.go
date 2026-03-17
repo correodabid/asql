@@ -34,6 +34,7 @@ func Main() {
 	peerEndpointsFlag := flag.String("peer-endpoints", os.Getenv("ASQL_PEER_ENDPOINTS"), "comma-separated pgwire endpoints for all cluster nodes (enables full multi-node status)")
 	adminEndpointsFlag := flag.String("admin-endpoints", os.Getenv("ASQL_ADMIN_ENDPOINTS"), "comma-separated admin HTTP endpoints for cluster metrics/health (for example 127.0.0.1:9091,127.0.0.1:9092)")
 	authToken := flag.String("auth-token", os.Getenv("ASQL_AUTH_TOKEN"), "optional password for pgwire auth")
+	adminAuthToken := flag.String("admin-auth-token", envOr("ASQL_ADMIN_AUTH_TOKEN", os.Getenv("ASQL_AUTH_TOKEN")), "optional bearer token for admin HTTP endpoints; falls back to -auth-token")
 	dataDir := flag.String("data-dir", envOr("ASQL_DATA_DIR", ".asql"), "local ASQL data directory for recovery workflows")
 	clusterGroups := flag.String("groups", os.Getenv("ASQL_GROUPS"), "comma-separated domain groups for cluster HA panel")
 	// Legacy flag aliases kept for backwards compatibility.
@@ -86,7 +87,7 @@ func Main() {
 		}
 	}
 
-	app := newApp(engine, follower, peerEngines, groups, adminEndpoints, *dataDir, logger)
+	app := newApp(engine, follower, peerEngines, groups, adminEndpoints, *adminAuthToken, *dataDir, logger)
 
 	webContent, _ := fs.Sub(assets, "web")
 	if err := wails.Run(&options.App{

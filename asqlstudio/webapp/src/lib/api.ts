@@ -76,6 +76,19 @@ export async function api<T>(path: string, _method = 'GET', body?: unknown): Pro
       return App.ClusterStatus(params.get('groups') ?? '') as Promise<T>
     case '/api/cluster/diagnostics':
       return App.ClusterDiagnostics() as Promise<T>
+    // ── Security ───────────────────────────────────
+    case '/api/security/principals':
+      return App.SecurityListPrincipals() as Promise<T>
+    case '/api/security/bootstrap-admin':
+      return App.SecurityBootstrapAdmin(b.principal ?? '', b.password ?? '') as Promise<T>
+    case '/api/security/users':
+      return App.SecurityCreateUser(b.principal ?? '', b.password ?? '') as Promise<T>
+    case '/api/security/roles':
+      return App.SecurityCreateRole(b.principal ?? '') as Promise<T>
+    case '/api/security/privileges/grant':
+      return App.SecurityGrantPrivilege(b.principal ?? '', b.privilege ?? '') as Promise<T>
+    case '/api/security/roles/grant':
+      return App.SecurityGrantRole(b.principal ?? '', b.role ?? '') as Promise<T>
     // ── Recovery ───────────────────────────────────
     case '/api/recovery/defaults':
       return App.RecoveryDefaults() as Promise<T>

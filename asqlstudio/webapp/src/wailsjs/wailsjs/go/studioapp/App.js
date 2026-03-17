@@ -174,6 +174,30 @@ export function SchemaTables(arg1) {
   return window['go']['studioapp']['App']['SchemaTables'](arg1);
 }
 
+export function SecurityBootstrapAdmin(arg1, arg2) {
+  return window['go']['studioapp']['App']['SecurityBootstrapAdmin'](arg1, arg2);
+}
+
+export function SecurityCreateRole(arg1) {
+  return window['go']['studioapp']['App']['SecurityCreateRole'](arg1);
+}
+
+export function SecurityCreateUser(arg1, arg2) {
+  return window['go']['studioapp']['App']['SecurityCreateUser'](arg1, arg2);
+}
+
+export function SecurityGrantPrivilege(arg1, arg2) {
+  return window['go']['studioapp']['App']['SecurityGrantPrivilege'](arg1, arg2);
+}
+
+export function SecurityGrantRole(arg1, arg2) {
+  return window['go']['studioapp']['App']['SecurityGrantRole'](arg1, arg2);
+}
+
+export function SecurityListPrincipals() {
+  return window['go']['studioapp']['App']['SecurityListPrincipals']();
+}
+
 export function TemporalLookup(arg1) {
   return window['go']['studioapp']['App']['TemporalLookup'](arg1);
 }

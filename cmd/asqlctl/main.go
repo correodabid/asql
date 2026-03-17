@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	adminapi "asql/pkg/adminapi"
 	"asql/internal/engine/executor"
 	api "asql/internal/server/grpc"
+	adminapi "asql/pkg/adminapi"
 	"asql/pkg/fixtures"
 
 	"github.com/jackc/pgx/v5"

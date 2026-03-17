@@ -7,6 +7,7 @@ import {
   IconDiff,
   IconDownload,
   IconGrid,
+  IconKey,
   IconRefresh,
   IconSchema,
   IconShield,
@@ -95,6 +96,7 @@ export function StartHerePanel({
     { id: 'fixtures',      icon: <IconDownload />, label: 'Fixtures',      hint: 'Sample data',           action: () => onNavigate('fixtures'),     featured: false },
     { id: 'dashboard',     icon: <IconGrid />,     label: 'Dashboard',     hint: 'Engine metrics',        action: () => onNavigate('dashboard'),    featured: false },
     { id: 'cluster',       icon: <IconShield />,   label: 'Cluster',       hint: 'Replication & routing', action: () => onNavigate('cluster'),      featured: false },
+    { id: 'security',      icon: <IconKey />,      label: 'Security',      hint: 'Users, roles, grants',  action: () => onNavigate('security'),     featured: false },
     { id: 'recovery',      icon: <IconRefresh />,  label: 'Recovery',      hint: 'WAL replay',            action: () => onNavigate('recovery'),     featured: false },
   ]
 

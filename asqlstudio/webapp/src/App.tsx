@@ -6,9 +6,10 @@ import { EntityExplorer } from './components/EntityExplorer'
 import { DesignerWorkbench } from './components/DesignerWorkbench'
 import { ERDiagram } from './components/ERDiagram'
 import { FixturePanel } from './components/FixturePanel'
-import { IconDatabase, IconDownload, IconGrid, IconLayers, IconMoon, IconRefresh, IconSchema, IconShield, IconSQLDoc, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
+import { IconDatabase, IconDownload, IconGrid, IconKey, IconLayers, IconMoon, IconRefresh, IconSchema, IconShield, IconSQLDoc, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { RecoveryPanel } from './components/RecoveryPanel'
+import { SecurityPanel } from './components/SecurityPanel'
 import { SchemaPanel } from './components/SchemaPanel'
 import { StartHerePanel } from './components/StartHerePanel'
 import { StatusBar } from './components/StatusBar'
@@ -48,6 +49,7 @@ const GROUPS: GroupDef[] = [
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: <IconGrid /> },
       { id: 'cluster',   label: 'Cluster',   icon: <IconShield /> },
+      { id: 'security',  label: 'Security',  icon: <IconKey /> },
       { id: 'recovery',  label: 'Recovery',  icon: <IconRefresh /> },
       { id: 'fixtures',  label: 'Fixtures',  icon: <IconDownload /> },
     ],
@@ -178,7 +180,7 @@ function App() {
 
       // Cmd+1/2/3/4 — main tab switching (works even in inputs)
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey) {
-        const tabMap: Record<string, TabId> = { '1': 'home', '2': 'workspace', '3': 'designer', '4': 'dashboard', '5': 'cluster', '6': 'time-explorer', '7': 'fixtures', '8': 'recovery' }
+        const tabMap: Record<string, TabId> = { '1': 'home', '2': 'workspace', '3': 'designer', '4': 'dashboard', '5': 'cluster', '6': 'time-explorer', '7': 'fixtures', '8': 'recovery', '9': 'security' }
         const tab = tabMap[e.key]
         if (tab) {
           e.preventDefault()
@@ -432,6 +434,8 @@ function App() {
             )}
 
             {activeTab === 'cluster' && <ClusterPanel />}
+
+            {activeTab === 'security' && <SecurityPanel />}
 
             {activeTab === 'time-explorer' && (
               <TimeExplorer domain={model.domain || 'default'} />
