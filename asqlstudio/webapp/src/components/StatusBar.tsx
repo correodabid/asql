@@ -6,11 +6,13 @@ type Props = {
   designerStatus: string
   tableCount: number
   domain: string
+  endpoint?: string
   heartbeat?: HeartbeatStatus
   heartbeatLatency?: number | null
+  onOpenConnection?: () => void
 }
 
-export function StatusBar({ health, designerStatus, tableCount, domain, heartbeat, heartbeatLatency }: Props) {
+export function StatusBar({ health, designerStatus, tableCount, domain, endpoint, heartbeat, heartbeatLatency, onOpenConnection }: Props) {
   const dotColor = heartbeat === 'connected'
     ? 'var(--text-safe)'
     : heartbeat === 'disconnected'
@@ -40,6 +42,18 @@ export function StatusBar({ health, designerStatus, tableCount, domain, heartbea
         <span className="status-item">{designerStatus}</span>
       </div>
       <div className="status-right">
+        {endpoint && (
+          <>
+            <span className="status-item status-hint">Endpoint: {endpoint}</span>
+            <span className="status-separator" />
+          </>
+        )}
+        {onOpenConnection && (
+          <>
+            <button className="status-link-btn" onClick={onOpenConnection}>Connection</button>
+            <span className="status-separator" />
+          </>
+        )}
         <span className="status-item status-hint">Cmd+K commands</span>
         <span className="status-separator" />
         <span className="status-item status-hint">? shortcuts</span>

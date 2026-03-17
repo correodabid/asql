@@ -18,6 +18,7 @@ import {
 type Props = {
   heartbeatStatus: HeartbeatStatus
   heartbeatLatency: number | null
+  connectionEndpoint: string
   currentDomain: string
   isAllDomains: boolean
   domainCount: number
@@ -25,6 +26,7 @@ type Props = {
   diffCount: number
   queryHistoryCount: number
   onNavigate: (tab: TabId) => void
+  onOpenConnection: () => void
   onOpenDesignerCanvas: () => void
   onOpenDesignerDDL: () => void
 }
@@ -32,6 +34,7 @@ type Props = {
 export function StartHerePanel({
   heartbeatStatus,
   heartbeatLatency,
+  connectionEndpoint,
   currentDomain,
   isAllDomains,
   domainCount,
@@ -39,6 +42,7 @@ export function StartHerePanel({
   diffCount,
   queryHistoryCount,
   onNavigate,
+  onOpenConnection,
   onOpenDesignerCanvas,
   onOpenDesignerDDL,
 }: Props) {
@@ -53,11 +57,11 @@ export function StartHerePanel({
       id: 'engine',
       title: 'Connect engine',
       desc: connected
-        ? `Connected${heartbeatLatency != null ? ` · ${heartbeatLatency}ms` : ''}`
-        : 'Engine not reachable — check the endpoint.',
+        ? `${connectionEndpoint || 'Connected'}${heartbeatLatency != null ? ` · ${heartbeatLatency}ms` : ''}`
+        : `Engine not reachable${connectionEndpoint ? ` at ${connectionEndpoint}` : ''} — check the connection settings.`,
       done: connected,
-      cta: 'Dashboard',
-      action: () => onNavigate('dashboard'),
+      cta: connected ? 'Dashboard' : 'Connection',
+      action: connected ? () => onNavigate('dashboard') : onOpenConnection,
     },
     {
       id: 'domain',
@@ -133,6 +137,7 @@ export function StartHerePanel({
         </div>
 
         <div className="sh-status-right">
+          <button className="toolbar-btn" onClick={onOpenConnection}>Connection</button>
           <button className="toolbar-btn primary" onClick={primaryAction}>{primaryLabel}</button>
         </div>
       </div>

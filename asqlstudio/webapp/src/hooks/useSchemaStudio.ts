@@ -26,7 +26,7 @@ type AllBaselinesResponse = {
 
 export const ALL_DOMAINS_KEY = '__all__'
 
-export function useSchemaStudio() {
+export function useSchemaStudio(reloadKey = 0) {
   const {
     value: model,
     setValue: setModel,
@@ -171,10 +171,24 @@ export function useSchemaStudio() {
   }
 
   // Auto-load baseline from engine on first mount
-  const didAutoLoad = useRef(false)
+  const didAutoLoad = useRef<number | null>(null)
   useEffect(() => {
-    if (didAutoLoad.current) return
-    didAutoLoad.current = true
+    didAutoLoad.current = reloadKey
+    resetModel(clone(DEFAULT_MODEL))
+    setBaseline(clone(DEFAULT_MODEL))
+    setAllDomainsModel(null)
+    setSelectedTable(0)
+    setSelectedColumn(0)
+    setSelectedIndex(0)
+    setDesignerStatus('Ready')
+    setDdl('-- Build your model and click "Generate DDL"')
+    setDdlStatements([])
+    setDiffSummary('No diff preview yet.')
+    setDiffSafe(null)
+    setDiffOperations([])
+    setDiffWarnings([])
+    setStatementStates([])
+
     api<{ domains: string[] }>('/api/domains', 'GET')
       .then((resp) => {
         const available = resp.domains || []
@@ -186,7 +200,7 @@ export function useSchemaStudio() {
       })
       .catch(() => onLoadBaseline())
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [reloadKey])
 
   const onSetBaseline = () => {
     setBaseline(designerPayload())

@@ -15,6 +15,10 @@ export async function api<T>(path: string, _method = 'GET', body?: unknown): Pro
     // ── Lifecycle ──────────────────────────────────
     case '/api/health':
       return App.Health() as Promise<T>
+    case '/api/connection':
+      return App.ConnectionInfo() as Promise<T>
+    case '/api/connection/switch':
+      return App.SwitchConnection(b) as Promise<T>
     // ── Domains ────────────────────────────────────
     case '/api/domains':
       return App.Domains() as Promise<T>

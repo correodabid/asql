@@ -37,6 +37,30 @@ export namespace studioapp {
 	        this.domains = source["domains"];
 	    }
 	}
+	export class connectionSwitchRequest {
+	    pgwire_endpoint: string;
+	    follower_endpoint?: string;
+	    peer_endpoints?: string[];
+	    admin_endpoints?: string[];
+	    auth_token?: string;
+	    admin_auth_token?: string;
+	    data_dir?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new connectionSwitchRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.pgwire_endpoint = source["pgwire_endpoint"];
+	        this.follower_endpoint = source["follower_endpoint"];
+	        this.peer_endpoints = source["peer_endpoints"];
+	        this.admin_endpoints = source["admin_endpoints"];
+	        this.auth_token = source["auth_token"];
+	        this.admin_auth_token = source["admin_auth_token"];
+	        this.data_dir = source["data_dir"];
+	    }
+	}
 	export class entityVersionHistoryRequest {
 	    domain: string;
 	    entity_name: string;

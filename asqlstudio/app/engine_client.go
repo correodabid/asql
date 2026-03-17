@@ -87,6 +87,29 @@ func (c *engineClient) acquireConn(ctx context.Context) (*pgxpool.Conn, error) {
 	return c.pool.Acquire(ctx)
 }
 
+func (c *engineClient) Ping(ctx context.Context) error {
+	conn, err := c.acquireConn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Release()
+	return conn.Conn().Ping(ctx)
+}
+
+func (c *engineClient) Close() {
+	c.mu.Lock()
+	for txID, conn := range c.txConns {
+		if conn != nil {
+			conn.Release()
+		}
+		delete(c.txConns, txID)
+	}
+	c.mu.Unlock()
+	if c.pool != nil {
+		c.pool.Close()
+	}
+}
+
 func (c *engineClient) storeTxConn(txID string, conn *pgxpool.Conn) {
 	c.mu.Lock()
 	c.txConns[txID] = conn

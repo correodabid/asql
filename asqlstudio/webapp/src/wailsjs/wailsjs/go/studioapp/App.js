@@ -26,6 +26,10 @@ export function Commit(arg1) {
   return window['go']['studioapp']['App']['Commit'](arg1);
 }
 
+export function ConnectionInfo() {
+  return window['go']['studioapp']['App']['ConnectionInfo']();
+}
+
 export function Domains() {
   return window['go']['studioapp']['App']['Domains']();
 }
@@ -228,6 +232,10 @@ export function SecurityRevokeRole(arg1, arg2) {
 
 export function SecuritySetPassword(arg1, arg2) {
   return window['go']['studioapp']['App']['SecuritySetPassword'](arg1, arg2);
+}
+
+export function SwitchConnection(arg1) {
+  return window['go']['studioapp']['App']['SwitchConnection'](arg1);
 }
 
 export function TemporalLookup(arg1) {

@@ -23,6 +23,11 @@ Start it with:
 go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
 ```
 
+If you need to point Studio at a different ASQL node later, use the runtime
+connection manager from the title bar or status bar instead of relaunching the
+desktop app. That flow can swap pgwire/admin endpoints and reuse the currently
+stored tokens unless you enter replacements explicitly.
+
 After launch, the most useful first-run surfaces are usually:
 
 - `Workspace` for pgwire SQL and explicit transaction controls,

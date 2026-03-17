@@ -1,6 +1,7 @@
 import { Component, type ErrorInfo, useEffect, useState } from 'react'
 import { ClusterPanel } from './components/ClusterPanel'
 import { CommandPalette } from './components/CommandPalette'
+import { ConnectionDialog, type ConnectionConfig, type ConnectionSwitchRequest } from './components/ConnectionDialog'
 import { Dashboard } from './components/Dashboard'
 import { EntityExplorer } from './components/EntityExplorer'
 import { DesignerWorkbench } from './components/DesignerWorkbench'
@@ -114,6 +115,11 @@ class DashboardBoundary extends Component<DashboardBoundaryProps, DashboardBound
 
 function App() {
   const [activeTab, setActiveTab] = useState<TabId>('home')
+  const [connectionEpoch, setConnectionEpoch] = useState(0)
+  const [connectionInfo, setConnectionInfo] = useState<ConnectionConfig | null>(null)
+  const [showConnectionDialog, setShowConnectionDialog] = useState(false)
+  const [connectionBusy, setConnectionBusy] = useState(false)
+  const [connectionError, setConnectionError] = useState('')
   const [showShortcuts, setShowShortcuts] = useState(false)
   const [designerTableCounts, setDesignerTableCounts] = useState<Record<string, number>>({})
   const [queryHistoryCount, setQueryHistoryCount] = useState(() => readQueryHistoryCount())
@@ -163,10 +169,21 @@ function App() {
     onExecuteStatement,
     onExecuteAll,
     onApplySelectedDiff,
-  } = useSchemaStudio()
+  } = useSchemaStudio(connectionEpoch)
 
-  const { domains, refresh: refreshDomains } = useDomains()
+  const { domains, refresh: refreshDomains } = useDomains(connectionEpoch)
   const cmdPalette = useCommandPalette()
+
+  useEffect(() => {
+    api<ConnectionConfig>('/api/connection', 'GET')
+      .then((resp) => {
+        setConnectionInfo(resp)
+        setConnectionError('')
+      })
+      .catch((error) => {
+        setConnectionError(error instanceof Error ? error.message : String(error))
+      })
+  }, [connectionEpoch])
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -287,6 +304,30 @@ function App() {
     setActiveTab('schema-ddl')
   }
 
+  const openConnectionDialog = () => {
+    setConnectionError('')
+    setShowConnectionDialog(true)
+  }
+
+  const handleConnectionSwitch = async (request: ConnectionSwitchRequest) => {
+    setConnectionBusy(true)
+    setConnectionError('')
+    try {
+      const response = await api<{ status: string; connection: ConnectionConfig }>('/api/connection/switch', 'POST', request)
+      setConnectionInfo(response.connection)
+      setShowConnectionDialog(false)
+      setActiveTab('home')
+      setConnectionEpoch((value) => value + 1)
+      await heartbeat.check()
+      void refreshDomains()
+    } catch (error) {
+      setConnectionError(error instanceof Error ? error.message : String(error))
+      throw error
+    } finally {
+      setConnectionBusy(false)
+    }
+  }
+
   return (
     <div className="app-shell">
       {/* Title bar */}
@@ -318,6 +359,10 @@ function App() {
           <button className="title-cmd-k" onClick={cmdPalette.toggle} title="Command Palette (Cmd+K)">
             <span className="mono">Cmd+K</span>
           </button>
+          <button className="title-connection-btn" onClick={openConnectionDialog} title="Switch Studio connection">
+            <IconDatabase />
+            <span>{connectionInfo?.pgwire_endpoint || 'Connection'}</span>
+          </button>
           <button className="title-theme-toggle" onClick={toggleTheme} title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}>
             {theme === 'dark' ? <IconSun /> : <IconMoon />}
           </button>
@@ -330,11 +375,12 @@ function App() {
         <div className="main-area">
           <TabBar groups={groups} active={activeTab} onChange={setActiveTab} />
 
-          <div className="main-content">
+          <div className="main-content" key={connectionEpoch}>
             {activeTab === 'home' && (
               <StartHerePanel
                 heartbeatStatus={heartbeat.status}
                 heartbeatLatency={heartbeat.latency}
+                connectionEndpoint={connectionInfo?.pgwire_endpoint ?? ''}
                 currentDomain={isAllDomains ? 'All Domains' : (model.domain || 'default')}
                 isAllDomains={isAllDomains}
                 domainCount={domains.length}
@@ -342,6 +388,7 @@ function App() {
                 diffCount={diffOperations.length}
                 queryHistoryCount={queryHistoryCount}
                 onNavigate={setActiveTab}
+                onOpenConnection={openConnectionDialog}
                 onOpenDesignerCanvas={openDesignerCanvas}
                 onOpenDesignerDDL={openDesignerDDL}
               />
@@ -457,7 +504,20 @@ function App() {
         domain={isAllDomains ? 'All Domains' : model.domain}
         heartbeat={heartbeat.status}
         heartbeatLatency={heartbeat.latency}
+        endpoint={connectionInfo?.pgwire_endpoint ?? ''}
+        onOpenConnection={openConnectionDialog}
       />
+
+      {showConnectionDialog && (
+        <ConnectionDialog
+          key={connectionInfo?.pgwire_endpoint || 'connection'}
+          current={connectionInfo}
+          busy={connectionBusy}
+          error={connectionError}
+          onClose={() => setShowConnectionDialog(false)}
+          onSubmit={handleConnectionSwitch}
+        />
+      )}
 
       {/* Command Palette */}
       {cmdPalette.open && (

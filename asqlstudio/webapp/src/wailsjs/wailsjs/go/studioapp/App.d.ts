@@ -15,6 +15,8 @@ export function ClusterStatus(arg1:string):Promise<Record<string, any>>;
 
 export function Commit(arg1:studioapp.txRequest):Promise<Record<string, any>>;
 
+export function ConnectionInfo():Promise<Record<string, any>>;
+
 export function Domains():Promise<Record<string, any>>;
 
 export function EngineStats():Promise<Record<string, any>>;
@@ -116,6 +118,8 @@ export function SecurityRevokePrivilege(arg1:string,arg2:string):Promise<Record<
 export function SecurityRevokeRole(arg1:string,arg2:string):Promise<Record<string, any>>;
 
 export function SecuritySetPassword(arg1:string,arg2:string):Promise<Record<string, any>>;
+
+export function SwitchConnection(arg1:studioapp.connectionSwitchRequest):Promise<Record<string, any>>;
 
 export function TemporalLookup(arg1:studioapp.temporalLookupRequest):Promise<Record<string, any>>;
 

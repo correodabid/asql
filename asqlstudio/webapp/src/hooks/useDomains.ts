@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api } from '../lib/api'
 
-export function useDomains() {
+export function useDomains(reloadKey = 0) {
   const [domains, setDomains] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -19,7 +19,7 @@ export function useDomains() {
 
   useEffect(() => {
     refresh()
-  }, [refresh])
+  }, [refresh, reloadKey])
 
   return { domains, loading, refresh }
 }

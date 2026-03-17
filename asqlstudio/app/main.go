@@ -87,7 +87,7 @@ func Main() {
 		}
 	}
 
-	app := newApp(engine, follower, peerEngines, groups, adminEndpoints, *adminAuthToken, *dataDir, logger)
+	app := newApp(engine, *pgwireEndpoint, follower, *followerEndpoint, peerEngines, peerEndpointsFromClients(peerEngines), groups, adminEndpoints, *adminAuthToken, *dataDir, logger)
 
 	webContent, _ := fs.Sub(assets, "web")
 	if err := wails.Run(&options.App{
@@ -111,4 +111,20 @@ func Main() {
 		logger.Error("studio terminated", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+}
+
+func peerEndpointsFromClients(peers []*engineClient) []string {
+	if len(peers) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(peers))
+	for _, peer := range peers {
+		if peer == nil {
+			continue
+		}
+		if trimmed := strings.TrimSpace(peer.addr); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }

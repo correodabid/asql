@@ -115,6 +115,31 @@ type clusterNodeStatusResponse struct {
 	Nodes []clusterNodeInfo `json:"nodes"`
 }
 
+type connectionConfigResponse struct {
+	PgwireEndpoint           string   `json:"pgwire_endpoint"`
+	FollowerEndpoint         string   `json:"follower_endpoint,omitempty"`
+	PeerEndpoints            []string `json:"peer_endpoints,omitempty"`
+	AdminEndpoints           []string `json:"admin_endpoints,omitempty"`
+	AuthTokenConfigured      bool     `json:"auth_token_configured"`
+	AdminAuthTokenConfigured bool     `json:"admin_auth_token_configured"`
+	DataDir                  string   `json:"data_dir,omitempty"`
+}
+
+type connectionSwitchRequest struct {
+	PgwireEndpoint   string   `json:"pgwire_endpoint"`
+	FollowerEndpoint string   `json:"follower_endpoint,omitempty"`
+	PeerEndpoints    []string `json:"peer_endpoints,omitempty"`
+	AdminEndpoints   []string `json:"admin_endpoints,omitempty"`
+	AuthToken        string   `json:"auth_token,omitempty"`
+	AdminAuthToken   string   `json:"admin_auth_token,omitempty"`
+	DataDir          string   `json:"data_dir,omitempty"`
+}
+
+type connectionSwitchResponse struct {
+	Status     string                   `json:"status"`
+	Connection connectionConfigResponse `json:"connection"`
+}
+
 type schemaTableInfo struct {
 	Name      string   `json:"name"`
 	PKColumns []string `json:"pk_columns"`

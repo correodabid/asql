@@ -26,36 +26,42 @@ import (
 // App is the Wails application struct. All exported methods become IPC endpoints
 // callable from the frontend via window.go.main.App.<MethodName>(args).
 type App struct {
-	ctx            context.Context
-	logger         *slog.Logger
-	engine         *engineClient
-	schemaInvoker  engineInvoker
-	followerEngine *engineClient
-	peersMu        sync.RWMutex
-	peerEngines    []*engineClient // all cluster nodes for status probing; grows as new nodes join
-	leaderClient   *engineClient   // current active leader; nil means use a.engine
-	routingStats   *readRoutingStats
-	clusterGroups  []string
-	adminEndpoints []string
-	adminToken     string
-	dataDir        string
+	ctx              context.Context
+	logger           *slog.Logger
+	engine           *engineClient
+	pgwireEndpoint   string
+	schemaInvoker    engineInvoker
+	followerEngine   *engineClient
+	followerEndpoint string
+	peersMu          sync.RWMutex
+	peerEngines      []*engineClient // all cluster nodes for status probing; grows as new nodes join
+	peerEndpoints    []string
+	leaderClient     *engineClient // current active leader; nil means use a.engine
+	routingStats     *readRoutingStats
+	clusterGroups    []string
+	adminEndpoints   []string
+	adminToken       string
+	dataDir          string
 }
 
 // newApp constructs an App ready for wails.Run.
 // peers is the full list of cluster pgwire endpoints (may include the leader).
 // When peers is non-empty, ClusterNodeStatus probes all of them; otherwise it
 // falls back to {engine, followerEngine} for single/two-node backward compat.
-func newApp(engine *engineClient, follower *engineClient, peers []*engineClient, groups []string, adminEndpoints []string, adminToken string, dataDir string, logger *slog.Logger) *App {
+func newApp(engine *engineClient, pgwireEndpoint string, follower *engineClient, followerEndpoint string, peers []*engineClient, peerEndpoints []string, groups []string, adminEndpoints []string, adminToken string, dataDir string, logger *slog.Logger) *App {
 	return &App{
-		logger:         logger,
-		engine:         engine,
-		followerEngine: follower,
-		peerEngines:    peers,
-		routingStats:   newReadRoutingStats(),
-		clusterGroups:  groups,
-		adminEndpoints: adminEndpoints,
-		adminToken:     strings.TrimSpace(adminToken),
-		dataDir:        strings.TrimSpace(dataDir),
+		logger:           logger,
+		engine:           engine,
+		pgwireEndpoint:   strings.TrimSpace(pgwireEndpoint),
+		followerEngine:   follower,
+		followerEndpoint: strings.TrimSpace(followerEndpoint),
+		peerEngines:      peers,
+		peerEndpoints:    append([]string(nil), peerEndpoints...),
+		routingStats:     newReadRoutingStats(),
+		clusterGroups:    groups,
+		adminEndpoints:   adminEndpoints,
+		adminToken:       strings.TrimSpace(adminToken),
+		dataDir:          strings.TrimSpace(dataDir),
 	}
 }
 
@@ -572,6 +578,113 @@ func (a *App) reqCtx() (context.Context, context.CancelFunc) {
 // Health returns a simple liveness indicator.
 func (a *App) Health() (map[string]interface{}, error) {
 	return map[string]interface{}{"status": "ok"}, nil
+}
+
+// ConnectionInfo returns the current Studio connection configuration without
+// echoing secret material back to the frontend.
+func (a *App) ConnectionInfo() (map[string]interface{}, error) {
+	a.peersMu.RLock()
+	defer a.peersMu.RUnlock()
+
+	resp := connectionConfigResponse{
+		PgwireEndpoint:           strings.TrimSpace(a.pgwireEndpoint),
+		FollowerEndpoint:         strings.TrimSpace(a.followerEndpoint),
+		PeerEndpoints:            append([]string(nil), a.peerEndpoints...),
+		AdminEndpoints:           append([]string(nil), a.adminEndpoints...),
+		AuthTokenConfigured:      a.engine != nil && strings.TrimSpace(a.engine.password) != "",
+		AdminAuthTokenConfigured: strings.TrimSpace(a.adminToken) != "",
+		DataDir:                  strings.TrimSpace(a.dataDir),
+	}
+	return structToMap(resp)
+}
+
+// SwitchConnection swaps Studio over to a new runtime pgwire/admin connection
+// target without requiring the desktop application to be relaunched.
+func (a *App) SwitchConnection(req connectionSwitchRequest) (map[string]interface{}, error) {
+	pgwireEndpoint := strings.TrimSpace(req.PgwireEndpoint)
+	if pgwireEndpoint == "" {
+		return nil, fmt.Errorf("pgwire endpoint is required")
+	}
+
+	a.peersMu.RLock()
+	existingAuthToken := ""
+	if a.engine != nil {
+		existingAuthToken = strings.TrimSpace(a.engine.password)
+	}
+	existingAdminToken := strings.TrimSpace(a.adminToken)
+	currentDataDir := strings.TrimSpace(a.dataDir)
+	a.peersMu.RUnlock()
+
+	authToken := strings.TrimSpace(req.AuthToken)
+	if authToken == "" {
+		authToken = existingAuthToken
+	}
+	adminToken := strings.TrimSpace(req.AdminAuthToken)
+	if adminToken == "" {
+		adminToken = existingAdminToken
+	}
+	dataDir := strings.TrimSpace(req.DataDir)
+	if dataDir == "" {
+		dataDir = currentDataDir
+	}
+
+	primary := newEngineClient(pgwireEndpoint, authToken)
+	ctx, cancel := context.WithTimeout(a.reqCtx0(), 5*time.Second)
+	defer cancel()
+	if _, err := primary.SchemaSnapshot(ctx, &api.SchemaSnapshotRequest{}); err != nil {
+		primary.Close()
+		return nil, fmt.Errorf("connect pgwire %s: %w", pgwireEndpoint, err)
+	}
+
+	followerEndpoint := strings.TrimSpace(req.FollowerEndpoint)
+	var follower *engineClient
+	if followerEndpoint != "" {
+		follower = newEngineClient(followerEndpoint, authToken)
+		if _, err := follower.SchemaSnapshot(ctx, &api.SchemaSnapshotRequest{}); err != nil {
+			primary.Close()
+			follower.Close()
+			return nil, fmt.Errorf("connect follower %s: %w", followerEndpoint, err)
+		}
+	}
+
+	peerEndpoints := normalizeEndpointList(req.PeerEndpoints)
+	peers := buildPeerClients(primary, follower, peerEndpoints, authToken)
+	adminEndpoints := normalizeEndpointList(req.AdminEndpoints)
+
+	a.peersMu.Lock()
+	oldPrimary := a.engine
+	oldFollower := a.followerEngine
+	oldPeers := append([]*engineClient(nil), a.peerEngines...)
+
+	a.engine = primary
+	a.pgwireEndpoint = primary.addr
+	a.followerEngine = follower
+	a.followerEndpoint = endpointAddr(follower)
+	a.peerEngines = peers
+	a.peerEndpoints = peerEndpoints
+	a.leaderClient = nil
+	a.schemaInvoker = nil
+	a.routingStats = newReadRoutingStats()
+	a.adminEndpoints = adminEndpoints
+	a.adminToken = adminToken
+	a.dataDir = dataDir
+	a.peersMu.Unlock()
+
+	closeEngineClients(append([]*engineClient{oldPrimary, oldFollower}, oldPeers...)...)
+
+	resp := connectionSwitchResponse{
+		Status: "ok",
+		Connection: connectionConfigResponse{
+			PgwireEndpoint:           primary.addr,
+			FollowerEndpoint:         endpointAddr(follower),
+			PeerEndpoints:            peerEndpoints,
+			AdminEndpoints:           adminEndpoints,
+			AuthTokenConfigured:      strings.TrimSpace(authToken) != "",
+			AdminAuthTokenConfigured: strings.TrimSpace(adminToken) != "",
+			DataDir:                  dataDir,
+		},
+	}
+	return structToMap(resp)
 }
 
 // ── Domains ───────────────────────────────────────────────────────────────────
@@ -1583,6 +1696,72 @@ func (a *App) reqCtx0() context.Context {
 		return a.ctx
 	}
 	return context.Background()
+}
+
+func normalizeEndpointList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func buildPeerClients(primary *engineClient, follower *engineClient, peerEndpoints []string, authToken string) []*engineClient {
+	if len(peerEndpoints) == 0 {
+		return nil
+	}
+	peers := make([]*engineClient, 0, len(peerEndpoints))
+	seenPrimary := false
+	seenFollower := false
+	for _, endpoint := range peerEndpoints {
+		switch {
+		case primary != nil && endpoint == primary.addr && !seenPrimary:
+			peers = append(peers, primary)
+			seenPrimary = true
+		case follower != nil && endpoint == follower.addr && !seenFollower:
+			peers = append(peers, follower)
+			seenFollower = true
+		default:
+			peers = append(peers, newEngineClient(endpoint, authToken))
+		}
+	}
+	return peers
+}
+
+func endpointAddr(client *engineClient) string {
+	if client == nil {
+		return ""
+	}
+	return strings.TrimSpace(client.addr)
+}
+
+func closeEngineClients(clients ...*engineClient) {
+	seen := make(map[*engineClient]struct{}, len(clients))
+	for _, client := range clients {
+		if client == nil {
+			continue
+		}
+		if _, ok := seen[client]; ok {
+			continue
+		}
+		seen[client] = struct{}{}
+		client.Close()
+	}
 }
 
 func (a *App) recoveryDataDir(requested string) string {

@@ -3231,6 +3231,19 @@ select.editor-input {
   background: rgba(255, 255, 255, 0.2);
 }
 
+.status-link-btn {
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.95);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+}
+
+.status-link-btn:hover {
+  text-decoration: underline;
+}
+
 /* ── Responsive ──────────────────────────────────────────── */
 
 @media (max-width: 1024px) {
@@ -8099,6 +8112,34 @@ select.editor-input {
   color: var(--text-accent);
 }
 
+.title-connection-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 3px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: all var(--transition);
+  -webkit-app-region: no-drag;
+}
+
+.title-connection-btn span {
+  max-width: 210px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.title-connection-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-accent);
+}
+
 .title-theme-toggle {
   display: inline-flex;
   align-items: center;
@@ -8116,6 +8157,157 @@ select.editor-input {
 .title-theme-toggle:hover {
   border-color: var(--accent);
   color: var(--text-accent);
+}
+
+/* ── Connection Dialog ─────────────────────────────────── */
+
+.conn-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(3, 7, 18, 0.6);
+  backdrop-filter: blur(10px);
+}
+
+.conn-modal {
+  width: min(760px, 100%);
+  max-height: min(90vh, 760px);
+  overflow: auto;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.98), rgba(15, 23, 42, 0.94));
+  box-shadow: 0 28px 80px rgba(15, 23, 42, 0.45);
+}
+
+.conn-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 22px 12px;
+}
+
+.conn-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.conn-subtitle {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.conn-close {
+  flex: 0 0 auto;
+}
+
+.conn-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  padding: 8px 22px 0;
+}
+
+.conn-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.conn-field-wide {
+  grid-column: 1 / -1;
+}
+
+.conn-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.conn-input {
+  width: 100%;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-size: 13px;
+  outline: none;
+}
+
+.conn-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft, rgba(99, 102, 241, 0.35));
+}
+
+.conn-textarea {
+  min-height: 82px;
+  resize: vertical;
+}
+
+.conn-token-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 2px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.conn-token-indicator.configured {
+  color: var(--text-safe);
+}
+
+.conn-token-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+}
+
+.conn-note {
+  margin: 16px 22px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(99, 102, 241, 0.24);
+  background: rgba(99, 102, 241, 0.08);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.conn-error {
+  margin: 14px 22px 0;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  background: rgba(127, 29, 29, 0.22);
+  color: #fecaca;
+  font-size: 12px;
+}
+
+.conn-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 18px 22px 22px;
+}
+
+@media (max-width: 900px) {
+  .conn-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* ── TX Badge ──────────────────────────────────────────── */
