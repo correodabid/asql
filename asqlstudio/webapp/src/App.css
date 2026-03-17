@@ -8287,6 +8287,39 @@ select.editor-input {
   line-height: 1.5;
 }
 
+.conn-profile-save-row {
+  display: flex;
+  gap: 10px;
+}
+
+.conn-profile-save-row .conn-input {
+  flex: 1;
+}
+
+.conn-profile-list {
+  margin-top: 10px;
+}
+
+.conn-profile-card {
+  background: rgba(99, 102, 241, 0.08);
+}
+
+.conn-profile-endpoint {
+  margin-top: 4px;
+  color: var(--text-accent);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.conn-empty-state {
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px dashed var(--border);
+  color: var(--text-secondary);
+  font-size: 12px;
+  background: rgba(148, 163, 184, 0.04);
+}
+
 .conn-recent-list {
   display: flex;
   flex-direction: column;
@@ -8384,6 +8417,10 @@ select.editor-input {
 @media (max-width: 900px) {
   .conn-grid {
     grid-template-columns: 1fr;
+  }
+
+  .conn-profile-save-row {
+    flex-direction: column;
   }
 }
 

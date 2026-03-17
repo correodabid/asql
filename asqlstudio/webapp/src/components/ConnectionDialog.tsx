@@ -1,5 +1,13 @@
 import { useState } from 'react'
-import { deleteRecentConnection, readRecentConnections, type RecentConnection } from '../lib/connectionHistory'
+import {
+  deleteRecentConnection,
+  deleteSavedConnectionProfile,
+  readRecentConnections,
+  readSavedConnectionProfiles,
+  saveConnectionProfile,
+  type RecentConnection,
+  type SavedConnectionProfile,
+} from '../lib/connectionHistory'
 import { IconDatabase, IconLink, IconRefresh, IconServer, IconShield, IconX } from './Icons'
 
 export type ConnectionConfig = {
@@ -62,6 +70,8 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
   const [adminAuthToken, setAdminAuthToken] = useState('')
   const [dataDir, setDataDir] = useState(() => current?.data_dir ?? '')
   const [recentConnections, setRecentConnections] = useState<RecentConnection[]>(() => readRecentConnections())
+  const [savedProfiles, setSavedProfiles] = useState<SavedConnectionProfile[]>(() => readSavedConnectionProfiles())
+  const [profileName, setProfileName] = useState('')
 
   const applyConnection = (config: ConnectionConfig) => {
     setPgwireEndpoint(config.pgwire_endpoint ?? '')
@@ -80,6 +90,29 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
 
   const handleReconnectRecent = async (config: RecentConnection) => {
     await onSubmit(buildSwitchRequest(config))
+  }
+
+  const handleDeleteProfile = (id: string) => {
+    deleteSavedConnectionProfile(id)
+    setSavedProfiles((entries) => entries.filter((entry) => entry.id !== id))
+  }
+
+  const handleReconnectProfile = async (config: SavedConnectionProfile) => {
+    await onSubmit(buildSwitchRequest(config))
+  }
+
+  const handleSaveProfile = () => {
+    const trimmedName = profileName.trim()
+    const config: ConnectionConfig = {
+      pgwire_endpoint: pgwireEndpoint,
+      follower_endpoint: followerEndpoint,
+      peer_endpoints: parseEndpoints(peerEndpoints),
+      admin_endpoints: parseEndpoints(adminEndpoints),
+      data_dir: dataDir,
+    }
+    saveConnectionProfile(trimmedName, config)
+    setSavedProfiles(readSavedConnectionProfiles())
+    setProfileName(trimmedName)
   }
 
   const handleSubmit = async () => {
@@ -106,6 +139,61 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
         </div>
 
         <div className="conn-grid">
+          <div className="conn-field conn-field-wide">
+            <span className="conn-label"><IconDatabase /> Saved profiles</span>
+            <div className="conn-profile-save-row">
+              <input
+                className="conn-input"
+                value={profileName}
+                onChange={(event) => setProfileName(event.target.value)}
+                placeholder="e.g. local dev, demo cluster"
+                disabled={busy}
+              />
+              <button className="toolbar-btn" onClick={handleSaveProfile} disabled={busy || !profileName.trim() || !pgwireEndpoint.trim()}>
+                Save profile
+              </button>
+            </div>
+            {savedProfiles.length > 0 ? (
+              <div className="conn-recent-list conn-profile-list">
+                {savedProfiles.map((entry) => {
+                  const isCurrent = current?.pgwire_endpoint?.trim() === entry.pgwire_endpoint.trim()
+                  return (
+                    <div key={entry.id} className={`conn-recent-card conn-profile-card${isCurrent ? ' current' : ''}`}>
+                      <div className="conn-recent-main">
+                        <div className="conn-recent-title-row">
+                          <div className="conn-recent-title">{entry.name}</div>
+                          {isCurrent && <span className="conn-recent-badge">Current</span>}
+                        </div>
+                        <div className="conn-profile-endpoint">{entry.pgwire_endpoint}</div>
+                        <div className="conn-recent-meta">
+                          {entry.follower_endpoint ? <span>Follower: {entry.follower_endpoint}</span> : <span>No follower</span>}
+                          <span>Admin: {(entry.admin_endpoints ?? []).length || 0}</span>
+                          <span>Peers: {(entry.peer_endpoints ?? []).length || 0}</span>
+                          {entry.data_dir ? <span>Data dir: {entry.data_dir}</span> : null}
+                        </div>
+                        <div className="conn-recent-time">Updated {formatRecentTime(entry.updated_at)}</div>
+                      </div>
+                      <div className="conn-recent-actions">
+                        <button className="toolbar-btn primary" onClick={() => void handleReconnectProfile(entry)} disabled={busy || isCurrent}>
+                          <IconRefresh /> {isCurrent ? 'Connected' : 'Reconnect'}
+                        </button>
+                        <button className="toolbar-btn" onClick={() => {
+                          setProfileName(entry.name)
+                          applyConnection(entry)
+                        }} disabled={busy}>Use</button>
+                        <button className="icon-btn" onClick={() => handleDeleteProfile(entry.id)} disabled={busy} aria-label={`Delete saved profile ${entry.name}`}>
+                          <IconX />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="conn-empty-state">Save the current endpoints as a named profile for fast switching later.</div>
+            )}
+          </div>
+
           {recentConnections.length > 0 && (
             <div className="conn-field conn-field-wide">
               <span className="conn-label"><IconDatabase /> Recent connections</span>
