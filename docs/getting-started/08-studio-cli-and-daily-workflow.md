@@ -27,7 +27,8 @@ If you need to point Studio at a different ASQL node later, use the runtime
 connection manager from the title bar or status bar instead of relaunching the
 desktop app. That flow can swap pgwire/admin endpoints and reuse the currently
 stored tokens unless you enter replacements explicitly, and it keeps recent
-connection targets so you can jump back to earlier nodes quickly.
+connection targets so you can jump back to earlier nodes quickly, including a
+one-click reconnect path for previously used endpoints.
 
 After launch, the most useful first-run surfaces are usually:
 

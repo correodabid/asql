@@ -41,6 +41,18 @@ function parseEndpoints(value: string) {
     .filter(Boolean)
 }
 
+function buildSwitchRequest(config: ConnectionConfig, authToken = '', adminAuthToken = ''): ConnectionSwitchRequest {
+  return {
+    pgwire_endpoint: (config.pgwire_endpoint ?? '').trim(),
+    follower_endpoint: (config.follower_endpoint ?? '').trim(),
+    peer_endpoints: config.peer_endpoints ?? [],
+    admin_endpoints: config.admin_endpoints ?? [],
+    auth_token: authToken,
+    admin_auth_token: adminAuthToken,
+    data_dir: (config.data_dir ?? '').trim(),
+  }
+}
+
 export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Props) {
   const [pgwireEndpoint, setPgwireEndpoint] = useState(() => current?.pgwire_endpoint ?? '')
   const [followerEndpoint, setFollowerEndpoint] = useState(() => current?.follower_endpoint ?? '')
@@ -66,16 +78,18 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
     setRecentConnections((entries) => entries.filter((entry) => entry.id !== id))
   }
 
+  const handleReconnectRecent = async (config: RecentConnection) => {
+    await onSubmit(buildSwitchRequest(config))
+  }
+
   const handleSubmit = async () => {
-    await onSubmit({
-      pgwire_endpoint: pgwireEndpoint.trim(),
-      follower_endpoint: followerEndpoint.trim(),
+    await onSubmit(buildSwitchRequest({
+      pgwire_endpoint: pgwireEndpoint,
+      follower_endpoint: followerEndpoint,
       peer_endpoints: parseEndpoints(peerEndpoints),
       admin_endpoints: parseEndpoints(adminEndpoints),
-      auth_token: authToken,
-      admin_auth_token: adminAuthToken,
-      data_dir: dataDir.trim(),
-    })
+      data_dir: dataDir,
+    }, authToken, adminAuthToken))
   }
 
   return (
@@ -114,6 +128,9 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
                         <div className="conn-recent-time">Used {formatRecentTime(entry.last_used_at)}</div>
                       </div>
                       <div className="conn-recent-actions">
+                        <button className="toolbar-btn primary" onClick={() => void handleReconnectRecent(entry)} disabled={busy || isCurrent}>
+                          <IconRefresh /> {isCurrent ? 'Connected' : 'Reconnect'}
+                        </button>
                         <button className="toolbar-btn" onClick={() => applyConnection(entry)} disabled={busy}>Use</button>
                         <button className="icon-btn" onClick={() => handleDeleteRecent(entry.id)} disabled={busy} aria-label={`Remove ${entry.pgwire_endpoint} from recent connections`}>
                           <IconX />
@@ -207,7 +224,7 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
         </div>
 
         <div className="conn-note">
-          Token fields are optional. If left blank, Studio keeps using the currently configured secret for that surface.
+          Token fields are optional. If left blank, Studio keeps using the currently configured secret for that surface. Recent entries can also reconnect directly with one click using the currently stored tokens.
         </div>
 
         {error && <div className="conn-error">{error}</div>}
