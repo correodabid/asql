@@ -1,6 +1,22 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
-import { IconAlertTriangle, IconCheck, IconKey, IconPlus, IconRefresh, IconShield } from './Icons'
+import {
+  IconAlertTriangle,
+  IconCheck,
+  IconChevronDown,
+  IconKey,
+  IconPlus,
+  IconRefresh,
+  IconShield,
+  IconToggleLeft,
+  IconToggleRight,
+  IconTrash,
+  IconUsers,
+  IconUserPlus,
+  IconLock,
+} from './Icons'
+
+/* ── Types ────────────────────────────────────────────────── */
 
 type PrincipalKind = 'USER' | 'ROLE'
 type PrincipalPrivilege = 'ADMIN' | 'SELECT_HISTORY'
@@ -27,489 +43,756 @@ type SecurityMutationResponse = {
 
 const privilegeOptions: PrincipalPrivilege[] = ['SELECT_HISTORY', 'ADMIN']
 
-function sortedValues(values?: string[]) {
+/* ── Helpers ──────────────────────────────────────────────── */
+
+function sorted(values?: string[]) {
   return [...(values ?? [])].sort((a, b) => a.localeCompare(b))
 }
 
-function sortedPrivileges(values?: PrincipalPrivilege[]) {
-  return [...(values ?? [])].sort((a, b) => a.localeCompare(b))
+function canDeletePrincipal(p: PrincipalRecord) {
+  return (
+    !p.enabled &&
+    (p.roles?.length ?? 0) === 0 &&
+    (p.privileges?.length ?? 0) === 0 &&
+    (p.referenced_by?.length ?? 0) === 0
+  )
 }
 
-function canDeletePrincipal(principal: PrincipalRecord) {
-  return !principal.enabled
-    && (principal.roles?.length ?? 0) === 0
-    && (principal.privileges?.length ?? 0) === 0
-    && (principal.referenced_by?.length ?? 0) === 0
-}
+/* ── Toast types ──────────────────────────────────────────── */
+
+type Toast = { id: number; message: string; kind: 'success' | 'error' }
+let toastSeq = 0
+
+/* ── Action drawer IDs ────────────────────────────────────── */
+
+type DrawerId =
+  | 'create-user'
+  | 'create-role'
+  | 'grant-privilege'
+  | 'revoke-privilege'
+  | 'grant-role'
+  | 'revoke-role'
+  | 'set-password'
+  | null
+
+/* ── Main Panel ───────────────────────────────────────────── */
 
 export function SecurityPanel() {
   const [principals, setPrincipals] = useState<PrincipalRecord[]>([])
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [activeDrawer, setActiveDrawer] = useState<DrawerId>(null)
+  const [toasts, setToasts] = useState<Toast[]>([])
+  const [busy, setBusy] = useState('')
+
+  /* bootstrap form */
   const [bootstrapPrincipal, setBootstrapPrincipal] = useState('admin')
   const [bootstrapPassword, setBootstrapPassword] = useState('')
+
+  /* create user form */
   const [newUser, setNewUser] = useState('')
   const [newUserPassword, setNewUserPassword] = useState('')
+
+  /* create role form */
   const [newRole, setNewRole] = useState('')
+
+  /* grant/revoke privilege */
   const [grantPrincipal, setGrantPrincipal] = useState('')
   const [grantPrivilege, setGrantPrivilege] = useState<PrincipalPrivilege>('SELECT_HISTORY')
+  const [revokePrincipal, setRevokePrincipal] = useState('')
+  const [revokePrivilege, setRevokePrivilege] = useState<PrincipalPrivilege>('SELECT_HISTORY')
+
+  /* grant/revoke role */
   const [grantRolePrincipal, setGrantRolePrincipal] = useState('')
   const [grantRole, setGrantRole] = useState('')
   const [revokeRolePrincipal, setRevokeRolePrincipal] = useState('')
   const [revokeRole, setRevokeRole] = useState('')
-  const [revokePrincipal, setRevokePrincipal] = useState('')
-  const [revokePrivilege, setRevokePrivilege] = useState<PrincipalPrivilege>('SELECT_HISTORY')
+
+  /* set password */
   const [passwordPrincipal, setPasswordPrincipal] = useState('')
   const [passwordValue, setPasswordValue] = useState('')
-  const [busy, setBusy] = useState('')
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
 
+  /* derived */
   const hasCatalog = principals.length > 0
-  const userPrincipals = useMemo(
-    () => principals.filter((principal) => principal.kind === 'USER').map((principal) => principal.name),
+  const users = useMemo(() => principals.filter((p) => p.kind === 'USER'), [principals])
+  const roles = useMemo(() => principals.filter((p) => p.kind === 'ROLE'), [principals])
+  const admins = useMemo(() => principals.filter((p) => (p.effective_privileges ?? []).includes('ADMIN')), [principals])
+  const historyReaders = useMemo(
+    () => principals.filter((p) => (p.effective_privileges ?? []).includes('SELECT_HISTORY')),
     [principals],
   )
-  const rolePrincipals = useMemo(
-    () => principals.filter((principal) => principal.kind === 'ROLE').map((principal) => principal.name),
-    [principals],
-  )
+  const disabledCount = useMemo(() => principals.filter((p) => !p.enabled).length, [principals])
 
+  /* toast helper */
+  const toast = (message: string, kind: 'success' | 'error') => {
+    const id = ++toastSeq
+    setToasts((t) => [...t, { id, message, kind }])
+    setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 3200)
+  }
+
+  /* data fetch */
   const refresh = async () => {
-    setError('')
     const resp = await api<ListPrincipalsResponse>('/api/security/principals', 'GET')
     setPrincipals((resp.principals ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)))
   }
 
   useEffect(() => {
-    void refresh().catch((err) => setError(err instanceof Error ? err.message : String(err)))
+    void refresh().catch((err) => toast(err instanceof Error ? err.message : String(err), 'error'))
   }, [])
 
-  const run = async (label: string, fn: () => Promise<void>) => {
+  /* mutation runner */
+  const run = async (label: string, fn: () => Promise<string>) => {
     setBusy(label)
-    setError('')
-    setMessage('')
     try {
-      await fn()
+      const msg = await fn()
       await refresh()
+      toast(msg, 'success')
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      toast(err instanceof Error ? err.message : String(err), 'error')
     } finally {
       setBusy('')
     }
   }
 
-  const submitBootstrap = () => run('bootstrap', async () => {
-    const resp = await api<SecurityMutationResponse>('/api/security/bootstrap-admin', 'POST', {
-      principal: bootstrapPrincipal,
-      password: bootstrapPassword,
+  /* mutations */
+  const submitBootstrap = () =>
+    run('bootstrap', async () => {
+      const resp = await api<SecurityMutationResponse>('/api/security/bootstrap-admin', 'POST', {
+        principal: bootstrapPrincipal,
+        password: bootstrapPassword,
+      })
+      setBootstrapPassword('')
+      return `Admin principal "${resp.principal?.name ?? bootstrapPrincipal}" bootstrapped.`
     })
-    setBootstrapPassword('')
-    setGrantPrincipal(resp.principal?.name ?? bootstrapPrincipal)
-    setMessage(`Bootstrapped admin principal ${resp.principal?.name ?? bootstrapPrincipal}.`)
-  })
 
-  const submitCreateUser = () => run('create-user', async () => {
-    const resp = await api<SecurityMutationResponse>('/api/security/users', 'POST', {
-      principal: newUser,
-      password: newUserPassword,
+  const submitCreateUser = () =>
+    run('create-user', async () => {
+      const resp = await api<SecurityMutationResponse>('/api/security/users', 'POST', {
+        principal: newUser,
+        password: newUserPassword,
+      })
+      setNewUser('')
+      setNewUserPassword('')
+      setActiveDrawer(null)
+      return `User "${resp.principal?.name ?? newUser}" created.`
     })
-    setGrantPrincipal(resp.principal?.name ?? newUser)
-    setGrantRolePrincipal(resp.principal?.name ?? newUser)
-    setNewUser('')
-    setNewUserPassword('')
-    setMessage(`Created user ${resp.principal?.name ?? newUser}.`)
-  })
 
-  const submitCreateRole = () => run('create-role', async () => {
-    const resp = await api<SecurityMutationResponse>('/api/security/roles', 'POST', {
-      principal: newRole,
+  const submitCreateRole = () =>
+    run('create-role', async () => {
+      const resp = await api<SecurityMutationResponse>('/api/security/roles', 'POST', {
+        principal: newRole,
+      })
+      setNewRole('')
+      setActiveDrawer(null)
+      return `Role "${resp.principal?.name ?? newRole}" created.`
     })
-    setGrantRole(resp.principal?.name ?? newRole)
-    setNewRole('')
-    setMessage(`Created role ${resp.principal?.name ?? newRole}.`)
-  })
 
-  const submitGrantPrivilege = () => run('grant-privilege', async () => {
-    await api<SecurityMutationResponse>('/api/security/privileges/grant', 'POST', {
-      principal: grantPrincipal,
-      privilege: grantPrivilege,
+  const submitGrantPrivilege = () =>
+    run('grant-privilege', async () => {
+      await api<SecurityMutationResponse>('/api/security/privileges/grant', 'POST', {
+        principal: grantPrincipal,
+        privilege: grantPrivilege,
+      })
+      setActiveDrawer(null)
+      return `Granted ${grantPrivilege} to ${grantPrincipal}.`
     })
-    setMessage(`Granted ${grantPrivilege} to ${grantPrincipal}.`)
-  })
 
-  const submitGrantRole = () => run('grant-role', async () => {
-    await api<SecurityMutationResponse>('/api/security/roles/grant', 'POST', {
-      principal: grantRolePrincipal,
-      role: grantRole,
+  const submitRevokePrivilege = () =>
+    run('revoke-privilege', async () => {
+      await api<SecurityMutationResponse>('/api/security/privileges/revoke', 'POST', {
+        principal: revokePrincipal,
+        privilege: revokePrivilege,
+      })
+      setActiveDrawer(null)
+      return `Revoked ${revokePrivilege} from ${revokePrincipal}.`
     })
-    setMessage(`Granted role ${grantRole} to ${grantRolePrincipal}.`)
-  })
 
-  const submitRevokeRole = () => run('revoke-role', async () => {
-    await api<SecurityMutationResponse>('/api/security/roles/revoke', 'POST', {
-      principal: revokeRolePrincipal,
-      role: revokeRole,
+  const submitGrantRole = () =>
+    run('grant-role', async () => {
+      await api<SecurityMutationResponse>('/api/security/roles/grant', 'POST', {
+        principal: grantRolePrincipal,
+        role: grantRole,
+      })
+      setActiveDrawer(null)
+      return `Granted role ${grantRole} to ${grantRolePrincipal}.`
     })
-    setMessage(`Revoked role ${revokeRole} from ${revokeRolePrincipal}.`)
-  })
 
-  const submitRevokePrivilege = () => run('revoke-privilege', async () => {
-    await api<SecurityMutationResponse>('/api/security/privileges/revoke', 'POST', {
-      principal: revokePrincipal,
-      privilege: revokePrivilege,
+  const submitRevokeRole = () =>
+    run('revoke-role', async () => {
+      await api<SecurityMutationResponse>('/api/security/roles/revoke', 'POST', {
+        principal: revokeRolePrincipal,
+        role: revokeRole,
+      })
+      setActiveDrawer(null)
+      return `Revoked role ${revokeRole} from ${revokeRolePrincipal}.`
     })
-    setMessage(`Revoked ${revokePrivilege} from ${revokePrincipal}.`)
-  })
 
-  const submitSetPassword = () => run('set-password', async () => {
-    await api<SecurityMutationResponse>('/api/security/passwords/set', 'POST', {
-      principal: passwordPrincipal,
-      password: passwordValue,
+  const submitSetPassword = () =>
+    run('set-password', async () => {
+      await api<SecurityMutationResponse>('/api/security/passwords/set', 'POST', {
+        principal: passwordPrincipal,
+        password: passwordValue,
+      })
+      setPasswordValue('')
+      setActiveDrawer(null)
+      return `Password updated for ${passwordPrincipal}.`
     })
-    setPasswordValue('')
-    setMessage(`Updated password for ${passwordPrincipal}.`)
-  })
 
-  const submitDisablePrincipal = (principalName: string) => run(`disable-${principalName}`, async () => {
-    await api<SecurityMutationResponse>('/api/security/principals/disable', 'POST', {
-      principal: principalName,
+  const submitToggle = (p: PrincipalRecord) =>
+    run(`toggle-${p.name}`, async () => {
+      const endpoint = p.enabled ? '/api/security/principals/disable' : '/api/security/principals/enable'
+      await api<SecurityMutationResponse>(endpoint, 'POST', { principal: p.name })
+      return `${p.name} ${p.enabled ? 'disabled' : 'enabled'}.`
     })
-    setMessage(`Disabled principal ${principalName}.`)
-  })
 
-  const submitEnablePrincipal = (principalName: string) => run(`enable-${principalName}`, async () => {
-    await api<SecurityMutationResponse>('/api/security/principals/enable', 'POST', {
-      principal: principalName,
+  const submitDelete = (name: string) =>
+    run(`delete-${name}`, async () => {
+      await api<SecurityMutationResponse>('/api/security/principals/delete', 'POST', { principal: name })
+      setExpanded((prev) => (prev === name ? null : prev))
+      return `Principal "${name}" deleted.`
     })
-    setMessage(`Enabled principal ${principalName}.`)
-  })
 
-  const submitDeletePrincipal = (principalName: string) => run(`delete-${principalName}`, async () => {
-    await api<SecurityMutationResponse>('/api/security/principals/delete', 'POST', {
-      principal: principalName,
-    })
-    setMessage(`Deleted principal ${principalName}.`)
-  })
+  const toggleDrawer = (id: DrawerId) => setActiveDrawer((prev) => (prev === id ? null : id))
+
+  /* datalists for autocomplete */
+  const principalNames = principals.map((p) => p.name)
+  const roleNames = roles.map((p) => p.name)
+  const userNames = users.map((p) => p.name)
 
   return (
-    <div className="panel" style={{ margin: 16, padding: 16, display: 'grid', gap: 16 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <div>
-          <h2 style={{ margin: '0 0 8px' }}>Security</h2>
-          <p className="text-muted" style={{ margin: 0 }}>
-            Bootstrap principals, create durable users and roles, rotate passwords, manage grants, and safely remove empty disabled principals from Studio.
+    <div className="sec-page">
+      {/* ── Header ──────────────────────────────────────── */}
+      <div className="sec-header">
+        <div className="sec-header-text">
+          <h2 className="sec-title">Security</h2>
+          <p className="sec-subtitle">
+            Manage principals, privileges, and roles for pgwire authentication and temporal authorization.
           </p>
         </div>
-        <button className="toolbar-btn" disabled={busy !== ''} onClick={() => void refresh().catch((err) => setError(err instanceof Error ? err.message : String(err)))}>
+        <button
+          className="toolbar-btn"
+          disabled={busy !== ''}
+          onClick={() => void refresh().catch((err) => toast(err instanceof Error ? err.message : String(err), 'error'))}
+        >
           <IconRefresh /> Refresh
         </button>
       </div>
 
-      <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-        <MetricCard label="Principals" value={String(principals.length)} />
-        <MetricCard label="Users" value={String(userPrincipals.length)} />
-        <MetricCard label="Roles" value={String(rolePrincipals.length)} />
-        <MetricCard label="Temporal readers" value={String(principals.filter((p) => (p.effective_privileges ?? []).includes('SELECT_HISTORY')).length)} />
+      {/* ── KPI row ─────────────────────────────────────── */}
+      <div className="sec-kpi-row">
+        <SecKPI icon={<IconShield />} label="Principals" value={principals.length} color="var(--accent)" delay={0} />
+        <SecKPI icon={<IconUsers />} label="Users" value={users.length} color="var(--text-safe)" delay={60} />
+        <SecKPI icon={<IconKey />} label="Roles" value={roles.length} color="var(--text-warning)" delay={120} />
+        <SecKPI icon={<IconLock />} label="Admins" value={admins.length} color="#ec4899" delay={180} />
+        <SecKPI icon={<IconKey />} label="History readers" value={historyReaders.length} color="#06b6d4" delay={240} />
       </div>
 
+      {/* ── Bootstrap (first-run) ───────────────────────── */}
       {!hasCatalog && (
-        <div className="panel" style={{ padding: 12, border: '1px solid var(--border)', background: 'var(--panel-2)' }}>
-          <h3 style={{ marginTop: 0 }}>Bootstrap admin</h3>
-          <p className="text-muted" style={{ marginTop: 0 }}>
-            No durable principal catalog was found. Create the first admin principal before adding more users and roles.
-          </p>
-          <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'minmax(180px, 1fr) minmax(180px, 1fr) auto', alignItems: 'end' }}>
-            <label style={{ display: 'grid', gap: 6 }}>
-              <span>Admin principal</span>
-              <input className="title-domain-select" value={bootstrapPrincipal} onChange={(e) => setBootstrapPrincipal(e.target.value)} />
-            </label>
-            <label style={{ display: 'grid', gap: 6 }}>
-              <span>Password</span>
-              <input className="title-domain-select" type="password" value={bootstrapPassword} onChange={(e) => setBootstrapPassword(e.target.value)} />
-            </label>
-            <button className="toolbar-btn primary" disabled={busy !== '' || !bootstrapPrincipal.trim() || !bootstrapPassword.trim()} onClick={() => void submitBootstrap()}>
-              <IconShield /> Bootstrap
-            </button>
+        <div className="sec-bootstrap glass-section" style={{ animationDelay: '80ms' }}>
+          <div className="sec-bootstrap-icon">
+            <IconShield />
+          </div>
+          <div className="sec-bootstrap-body">
+            <h3 className="sec-bootstrap-title">Initialize Security</h3>
+            <p className="sec-bootstrap-desc">
+              No durable principal catalog found. Create the first admin principal to enable pgwire authentication and protect your data.
+            </p>
+            <div className="sec-bootstrap-form">
+              <label className="sec-field">
+                <span className="sec-field-label">Admin name</span>
+                <input
+                  className="sec-input"
+                  value={bootstrapPrincipal}
+                  onChange={(e) => setBootstrapPrincipal(e.target.value)}
+                  placeholder="admin"
+                />
+              </label>
+              <label className="sec-field">
+                <span className="sec-field-label">Password</span>
+                <input
+                  className="sec-input"
+                  type="password"
+                  value={bootstrapPassword}
+                  onChange={(e) => setBootstrapPassword(e.target.value)}
+                  placeholder="••••••••"
+                />
+              </label>
+              <button
+                className="toolbar-btn primary"
+                disabled={busy !== '' || !bootstrapPrincipal.trim() || !bootstrapPassword.trim()}
+                onClick={() => void submitBootstrap()}
+              >
+                <IconShield /> Bootstrap admin
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      <div style={{ display: 'grid', gap: 16, gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))' }}>
-        <ActionCard
-          title="Create user"
-          description="Add a durable login principal for pgwire and historical authorization."
-          actionLabel="Create user"
-          icon={<IconPlus />}
-          disabled={busy !== '' || !newUser.trim() || !newUserPassword.trim()}
-          onAction={() => void submitCreateUser()}
-        >
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>User name</span>
-            <input className="title-domain-select" value={newUser} onChange={(e) => setNewUser(e.target.value)} placeholder="analyst" />
-          </label>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Password</span>
-            <input className="title-domain-select" type="password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} placeholder="••••••••" />
-          </label>
-        </ActionCard>
-
-        <ActionCard
-          title="Create role"
-          description="Create a reusable role for privilege bundles such as historical access."
-          actionLabel="Create role"
-          icon={<IconShield />}
-          disabled={busy !== '' || !newRole.trim()}
-          onAction={() => void submitCreateRole()}
-        >
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Role name</span>
-            <input className="title-domain-select" value={newRole} onChange={(e) => setNewRole(e.target.value)} placeholder="history_readers" />
-          </label>
-        </ActionCard>
-
-        <ActionCard
-          title="Grant privilege"
-          description="Grant an explicit privilege directly to a user or role."
-          actionLabel="Grant privilege"
-          icon={<IconKey />}
-          disabled={busy !== '' || !grantPrincipal.trim()}
-          onAction={() => void submitGrantPrivilege()}
-        >
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Principal</span>
-            <input className="title-domain-select" list="security-principal-options" value={grantPrincipal} onChange={(e) => setGrantPrincipal(e.target.value)} placeholder="history_readers" />
-          </label>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Privilege</span>
-            <select className="title-domain-select" value={grantPrivilege} onChange={(e) => setGrantPrivilege(e.target.value as PrincipalPrivilege)}>
-              {privilegeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </label>
-        </ActionCard>
-
-        <ActionCard
-          title="Grant role"
-          description="Grant an existing role to a user or another role."
-          actionLabel="Grant role"
-          icon={<IconShield />}
-          disabled={busy !== '' || !grantRolePrincipal.trim() || !grantRole.trim()}
-          onAction={() => void submitGrantRole()}
-        >
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Principal</span>
-            <input className="title-domain-select" list="security-principal-options" value={grantRolePrincipal} onChange={(e) => setGrantRolePrincipal(e.target.value)} placeholder="analyst" />
-          </label>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Role</span>
-            <input className="title-domain-select" list="security-role-options" value={grantRole} onChange={(e) => setGrantRole(e.target.value)} placeholder="history_readers" />
-          </label>
-        </ActionCard>
-
-        <ActionCard
-          title="Revoke role"
-          description="Remove a direct role grant from a user or role."
-          actionLabel="Revoke role"
-          icon={<IconShield />}
-          disabled={busy !== '' || !revokeRolePrincipal.trim() || !revokeRole.trim()}
-          onAction={() => void submitRevokeRole()}
-        >
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Principal</span>
-            <input className="title-domain-select" list="security-principal-options" value={revokeRolePrincipal} onChange={(e) => setRevokeRolePrincipal(e.target.value)} placeholder="analyst" />
-          </label>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Role</span>
-            <input className="title-domain-select" list="security-role-options" value={revokeRole} onChange={(e) => setRevokeRole(e.target.value)} placeholder="history_readers" />
-          </label>
-        </ActionCard>
-
-        <ActionCard
-          title="Revoke privilege"
-          description="Remove a direct privilege grant from a user or role."
-          actionLabel="Revoke privilege"
-          icon={<IconKey />}
-          disabled={busy !== '' || !revokePrincipal.trim()}
-          onAction={() => void submitRevokePrivilege()}
-        >
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Principal</span>
-            <input className="title-domain-select" list="security-principal-options" value={revokePrincipal} onChange={(e) => setRevokePrincipal(e.target.value)} placeholder="history_readers" />
-          </label>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>Privilege</span>
-            <select className="title-domain-select" value={revokePrivilege} onChange={(e) => setRevokePrivilege(e.target.value as PrincipalPrivilege)}>
-              {privilegeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
-            </select>
-          </label>
-        </ActionCard>
-
-        <ActionCard
-          title="Set password"
-          description="Rotate the stored password for a durable user principal."
-          actionLabel="Set password"
-          icon={<IconKey />}
-          disabled={busy !== '' || !passwordPrincipal.trim() || !passwordValue.trim()}
-          onAction={() => void submitSetPassword()}
-        >
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>User principal</span>
-            <input className="title-domain-select" list="security-user-options" value={passwordPrincipal} onChange={(e) => setPasswordPrincipal(e.target.value)} placeholder="analyst" />
-          </label>
-          <label style={{ display: 'grid', gap: 6 }}>
-            <span>New password</span>
-            <input className="title-domain-select" type="password" value={passwordValue} onChange={(e) => setPasswordValue(e.target.value)} placeholder="••••••••" />
-          </label>
-        </ActionCard>
-      </div>
-
-      <datalist id="security-principal-options">
-        {principals.map((principal) => <option key={principal.name} value={principal.name} />)}
-      </datalist>
-      <datalist id="security-user-options">
-        {userPrincipals.map((userName) => <option key={userName} value={userName} />)}
-      </datalist>
-      <datalist id="security-role-options">
-        {rolePrincipals.map((roleName) => <option key={roleName} value={roleName} />)}
-      </datalist>
-
-      {message && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', color: 'var(--success, #10b981)' }}>
-          <IconCheck />
-          <span>{message}</span>
-        </div>
-      )}
-
-      {error && (
-        <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', color: 'var(--danger, #ef4444)' }}>
-          <IconAlertTriangle />
-          <span>{error}</span>
-        </div>
-      )}
-
-      <div className="panel" style={{ padding: 12, border: '1px solid var(--border)', background: 'var(--panel-2)' }}>
-        <h3 style={{ marginTop: 0 }}>Principal catalog</h3>
-        {principals.length === 0 ? (
-          <div className="text-muted">No principals registered yet.</div>
-        ) : (
-          <div style={{ display: 'grid', gap: 10 }}>
-            {principals.map((principal) => (
-              <div key={principal.name} style={{ display: 'grid', gap: 8, padding: 12, border: '1px solid var(--border)', borderRadius: 12, background: 'var(--bg-elevated, rgba(255,255,255,0.02))' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                    <strong>{principal.name}</strong>
-                    <span className="toolbar-badge">{principal.kind}</span>
-                    <span className={`toolbar-badge ${principal.enabled ? '' : 'warn'}`}>{principal.enabled ? 'ENABLED' : 'DISABLED'}</span>
-                  </div>
-                  <div className="text-muted" style={{ fontSize: 12 }}>
-                    {(principal.roles?.length ?? 0)} role{(principal.roles?.length ?? 0) === 1 ? '' : 's'} · {(principal.privileges?.length ?? 0)} privilege{(principal.privileges?.length ?? 0) === 1 ? '' : 's'}
-                  </div>
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {principal.enabled ? (
-                      <button
-                        className="toolbar-btn"
-                        disabled={busy !== ''}
-                        onClick={() => void submitDisablePrincipal(principal.name)}
-                      >
-                        Disable
-                      </button>
-                    ) : (
-                      <button
-                        className="toolbar-btn"
-                        disabled={busy !== ''}
-                        onClick={() => void submitEnablePrincipal(principal.name)}
-                      >
-                        Enable
-                      </button>
-                    )}
-                    {canDeletePrincipal(principal) ? (
-                      <button
-                        className="toolbar-btn"
-                        disabled={busy !== ''}
-                        onClick={() => void submitDeletePrincipal(principal.name)}
-                      >
-                        Delete
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-                <div style={{ display: 'grid', gap: 6 }}>
-                  <div>
-                    <span className="text-muted" style={{ marginRight: 8 }}>Roles</span>
-                    {sortedValues(principal.roles).length > 0 ? sortedValues(principal.roles).map((roleName) => (
-                      <span key={roleName} className="toolbar-badge" style={{ marginRight: 6 }}>{roleName}</span>
-                    )) : <span className="text-muted">—</span>}
-                  </div>
-                  <div>
-                    <span className="text-muted" style={{ marginRight: 8 }}>Effective roles</span>
-                    {sortedValues(principal.effective_roles).length > 0 ? sortedValues(principal.effective_roles).map((roleName) => (
-                      <span key={roleName} className="toolbar-badge" style={{ marginRight: 6 }}>{roleName}</span>
-                    )) : <span className="text-muted">—</span>}
-                  </div>
-                  <div>
-                    <span className="text-muted" style={{ marginRight: 8 }}>Referenced by</span>
-                    {sortedValues(principal.referenced_by).length > 0 ? sortedValues(principal.referenced_by).map((principalName) => (
-                      <span key={principalName} className="toolbar-badge" style={{ marginRight: 6 }}>{principalName}</span>
-                    )) : <span className="text-muted">—</span>}
-                  </div>
-                  <div>
-                    <span className="text-muted" style={{ marginRight: 8 }}>Privileges</span>
-                    {sortedPrivileges(principal.privileges).length > 0 ? sortedPrivileges(principal.privileges).map((value) => (
-                      <span key={value} className="toolbar-badge" style={{ marginRight: 6 }}>{value}</span>
-                    )) : <span className="text-muted">—</span>}
-                  </div>
-                  <div>
-                    <span className="text-muted" style={{ marginRight: 8 }}>Effective</span>
-                    {sortedPrivileges(principal.effective_privileges).length > 0 ? sortedPrivileges(principal.effective_privileges).map((value) => (
-                      <span key={value} className="toolbar-badge" style={{ marginRight: 6 }}>{value}</span>
-                    )) : <span className="text-muted">—</span>}
-                  </div>
-                </div>
-              </div>
-            ))}
+      {/* ── Quick actions strip ─────────────────────────── */}
+      {hasCatalog && (
+        <div className="glass-section" style={{ animationDelay: '100ms' }}>
+          <div className="glass-section-header">
+            <span className="glass-section-title">Quick Actions</span>
           </div>
-        )}
-      </div>
+          <div className="glass-section-body">
+            <div className="sec-actions-strip">
+              <ActionChip
+                icon={<IconUserPlus />}
+                label="Create user"
+                active={activeDrawer === 'create-user'}
+                onClick={() => toggleDrawer('create-user')}
+              />
+              <ActionChip
+                icon={<IconShield />}
+                label="Create role"
+                active={activeDrawer === 'create-role'}
+                onClick={() => toggleDrawer('create-role')}
+              />
+              <ActionChip
+                icon={<IconKey />}
+                label="Grant privilege"
+                active={activeDrawer === 'grant-privilege'}
+                onClick={() => toggleDrawer('grant-privilege')}
+              />
+              <ActionChip
+                icon={<IconKey />}
+                label="Revoke privilege"
+                active={activeDrawer === 'revoke-privilege'}
+                onClick={() => toggleDrawer('revoke-privilege')}
+              />
+              <ActionChip
+                icon={<IconShield />}
+                label="Grant role"
+                active={activeDrawer === 'grant-role'}
+                onClick={() => toggleDrawer('grant-role')}
+              />
+              <ActionChip
+                icon={<IconShield />}
+                label="Revoke role"
+                active={activeDrawer === 'revoke-role'}
+                onClick={() => toggleDrawer('revoke-role')}
+              />
+              <ActionChip
+                icon={<IconLock />}
+                label="Set password"
+                active={activeDrawer === 'set-password'}
+                onClick={() => toggleDrawer('set-password')}
+              />
+            </div>
+
+            {/* ── Slide-down drawers ────────────────────── */}
+            {activeDrawer === 'create-user' && (
+              <DrawerForm
+                title="Create user"
+                description="Add a durable login principal for pgwire and authorization."
+                actionLabel="Create user"
+                disabled={busy !== '' || !newUser.trim() || !newUserPassword.trim()}
+                onSubmit={() => void submitCreateUser()}
+                onClose={() => setActiveDrawer(null)}
+              >
+                <label className="sec-field">
+                  <span className="sec-field-label">User name</span>
+                  <input className="sec-input" value={newUser} onChange={(e) => setNewUser(e.target.value)} placeholder="analyst" />
+                </label>
+                <label className="sec-field">
+                  <span className="sec-field-label">Password</span>
+                  <input className="sec-input" type="password" value={newUserPassword} onChange={(e) => setNewUserPassword(e.target.value)} placeholder="••••••••" />
+                </label>
+              </DrawerForm>
+            )}
+
+            {activeDrawer === 'create-role' && (
+              <DrawerForm
+                title="Create role"
+                description="Create a reusable role for privilege bundles."
+                actionLabel="Create role"
+                disabled={busy !== '' || !newRole.trim()}
+                onSubmit={() => void submitCreateRole()}
+                onClose={() => setActiveDrawer(null)}
+              >
+                <label className="sec-field">
+                  <span className="sec-field-label">Role name</span>
+                  <input className="sec-input" value={newRole} onChange={(e) => setNewRole(e.target.value)} placeholder="history_readers" />
+                </label>
+              </DrawerForm>
+            )}
+
+            {activeDrawer === 'grant-privilege' && (
+              <DrawerForm
+                title="Grant privilege"
+                description="Grant an explicit privilege directly to a user or role."
+                actionLabel="Grant"
+                disabled={busy !== '' || !grantPrincipal.trim()}
+                onSubmit={() => void submitGrantPrivilege()}
+                onClose={() => setActiveDrawer(null)}
+              >
+                <label className="sec-field">
+                  <span className="sec-field-label">Principal</span>
+                  <input className="sec-input" list="sec-dl-principals" value={grantPrincipal} onChange={(e) => setGrantPrincipal(e.target.value)} placeholder="analyst" />
+                </label>
+                <label className="sec-field">
+                  <span className="sec-field-label">Privilege</span>
+                  <select className="sec-input" value={grantPrivilege} onChange={(e) => setGrantPrivilege(e.target.value as PrincipalPrivilege)}>
+                    {privilegeOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </label>
+              </DrawerForm>
+            )}
+
+            {activeDrawer === 'revoke-privilege' && (
+              <DrawerForm
+                title="Revoke privilege"
+                description="Remove a direct privilege grant from a principal."
+                actionLabel="Revoke"
+                disabled={busy !== '' || !revokePrincipal.trim()}
+                onSubmit={() => void submitRevokePrivilege()}
+                onClose={() => setActiveDrawer(null)}
+              >
+                <label className="sec-field">
+                  <span className="sec-field-label">Principal</span>
+                  <input className="sec-input" list="sec-dl-principals" value={revokePrincipal} onChange={(e) => setRevokePrincipal(e.target.value)} placeholder="analyst" />
+                </label>
+                <label className="sec-field">
+                  <span className="sec-field-label">Privilege</span>
+                  <select className="sec-input" value={revokePrivilege} onChange={(e) => setRevokePrivilege(e.target.value as PrincipalPrivilege)}>
+                    {privilegeOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                  </select>
+                </label>
+              </DrawerForm>
+            )}
+
+            {activeDrawer === 'grant-role' && (
+              <DrawerForm
+                title="Grant role"
+                description="Grant an existing role to a user or another role."
+                actionLabel="Grant"
+                disabled={busy !== '' || !grantRolePrincipal.trim() || !grantRole.trim()}
+                onSubmit={() => void submitGrantRole()}
+                onClose={() => setActiveDrawer(null)}
+              >
+                <label className="sec-field">
+                  <span className="sec-field-label">Principal</span>
+                  <input className="sec-input" list="sec-dl-principals" value={grantRolePrincipal} onChange={(e) => setGrantRolePrincipal(e.target.value)} placeholder="analyst" />
+                </label>
+                <label className="sec-field">
+                  <span className="sec-field-label">Role</span>
+                  <input className="sec-input" list="sec-dl-roles" value={grantRole} onChange={(e) => setGrantRole(e.target.value)} placeholder="history_readers" />
+                </label>
+              </DrawerForm>
+            )}
+
+            {activeDrawer === 'revoke-role' && (
+              <DrawerForm
+                title="Revoke role"
+                description="Remove a direct role grant from a principal."
+                actionLabel="Revoke"
+                disabled={busy !== '' || !revokeRolePrincipal.trim() || !revokeRole.trim()}
+                onSubmit={() => void submitRevokeRole()}
+                onClose={() => setActiveDrawer(null)}
+              >
+                <label className="sec-field">
+                  <span className="sec-field-label">Principal</span>
+                  <input className="sec-input" list="sec-dl-principals" value={revokeRolePrincipal} onChange={(e) => setRevokeRolePrincipal(e.target.value)} placeholder="analyst" />
+                </label>
+                <label className="sec-field">
+                  <span className="sec-field-label">Role</span>
+                  <input className="sec-input" list="sec-dl-roles" value={revokeRole} onChange={(e) => setRevokeRole(e.target.value)} placeholder="history_readers" />
+                </label>
+              </DrawerForm>
+            )}
+
+            {activeDrawer === 'set-password' && (
+              <DrawerForm
+                title="Set password"
+                description="Rotate the stored password for a user principal."
+                actionLabel="Update password"
+                disabled={busy !== '' || !passwordPrincipal.trim() || !passwordValue.trim()}
+                onSubmit={() => void submitSetPassword()}
+                onClose={() => setActiveDrawer(null)}
+              >
+                <label className="sec-field">
+                  <span className="sec-field-label">User</span>
+                  <input className="sec-input" list="sec-dl-users" value={passwordPrincipal} onChange={(e) => setPasswordPrincipal(e.target.value)} placeholder="analyst" />
+                </label>
+                <label className="sec-field">
+                  <span className="sec-field-label">New password</span>
+                  <input className="sec-input" type="password" value={passwordValue} onChange={(e) => setPasswordValue(e.target.value)} placeholder="••••••••" />
+                </label>
+              </DrawerForm>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Principal catalog ───────────────────────────── */}
+      {hasCatalog && (
+        <div className="glass-section" style={{ animationDelay: '160ms' }}>
+          <div className="glass-section-header">
+            <span className="glass-section-title">Principal Catalog</span>
+            <span className="sec-catalog-count">{principals.length} principal{principals.length !== 1 ? 's' : ''}{disabledCount > 0 ? ` · ${disabledCount} disabled` : ''}</span>
+          </div>
+          <div className="glass-section-body">
+            <div className="sec-catalog">
+              {principals.map((p, i) => (
+                <PrincipalCard
+                  key={p.name}
+                  principal={p}
+                  expanded={expanded === p.name}
+                  onToggleExpand={() => setExpanded((prev) => (prev === p.name ? null : p.name))}
+                  onToggleEnabled={() => void submitToggle(p)}
+                  onDelete={() => void submitDelete(p.name)}
+                  busy={busy}
+                  delay={i * 40}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Empty state ─────────────────────────────────── */}
+      {!hasCatalog && (
+        <div className="sec-empty">
+          <div className="sec-empty-icon"><IconShield /></div>
+          <p className="sec-empty-label">No principals registered yet</p>
+          <p className="sec-empty-hint">Bootstrap an admin principal above to get started.</p>
+        </div>
+      )}
+
+      {/* ── Datalists ───────────────────────────────────── */}
+      <datalist id="sec-dl-principals">
+        {principalNames.map((n) => <option key={n} value={n} />)}
+      </datalist>
+      <datalist id="sec-dl-users">
+        {userNames.map((n) => <option key={n} value={n} />)}
+      </datalist>
+      <datalist id="sec-dl-roles">
+        {roleNames.map((n) => <option key={n} value={n} />)}
+      </datalist>
+
+      {/* ── Toast rail ──────────────────────────────────── */}
+      {toasts.length > 0 && (
+        <div className="sec-toast-rail">
+          {toasts.map((t) => (
+            <div key={t.id} className={`sec-toast sec-toast-${t.kind}`}>
+              {t.kind === 'success' ? <IconCheck /> : <IconAlertTriangle />}
+              <span>{t.message}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
 
-function MetricCard({ label, value }: { label: string; value: string }) {
+/* ── Sub-components ───────────────────────────────────────── */
+
+function SecKPI({
+  icon,
+  label,
+  value,
+  color,
+  delay = 0,
+}: {
+  icon: ReactNode
+  label: string
+  value: number
+  color: string
+  delay?: number
+}) {
   return (
-    <div className="panel" style={{ padding: 12, border: '1px solid var(--border)', background: 'var(--panel-2)' }}>
-      <div className="text-muted" style={{ fontSize: 12, marginBottom: 4 }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 700 }}>{value}</div>
+    <div
+      className="kpi-card"
+      style={{ '--kpi-accent': color, animationDelay: `${delay}ms` } as React.CSSProperties}
+    >
+      <div className="kpi-card-glow" />
+      <div className="kpi-icon-wrap" style={{ color }}>
+        {icon}
+      </div>
+      <div className="kpi-content">
+        <span className="kpi-label">{label}</span>
+        <div className="kpi-value">{value}</div>
+      </div>
     </div>
   )
 }
 
-function ActionCard({
+function ActionChip({
+  icon,
+  label,
+  active,
+  onClick,
+}: {
+  icon: ReactNode
+  label: string
+  active: boolean
+  onClick: () => void
+}) {
+  return (
+    <button className={`sec-action-chip ${active ? 'active' : ''}`} onClick={onClick}>
+      {icon}
+      <span>{label}</span>
+    </button>
+  )
+}
+
+function DrawerForm({
   title,
   description,
   actionLabel,
   disabled,
-  onAction,
-  icon,
+  onSubmit,
+  onClose,
   children,
 }: {
   title: string
   description: string
   actionLabel: string
   disabled: boolean
-  onAction: () => void
-  icon: ReactNode
+  onSubmit: () => void
+  onClose: () => void
   children: ReactNode
 }) {
   return (
-    <div className="panel" style={{ padding: 12, border: '1px solid var(--border)', background: 'var(--panel-2)', display: 'grid', gap: 12 }}>
-      <div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6 }}>
-          {icon}
-          <strong>{title}</strong>
+    <div className="sec-drawer">
+      <div className="sec-drawer-header">
+        <div>
+          <div className="sec-drawer-title">{title}</div>
+          <div className="sec-drawer-desc">{description}</div>
         </div>
-        <div className="text-muted" style={{ fontSize: 13 }}>{description}</div>
+        <button className="icon-btn" onClick={onClose} title="Close">
+          <IconPlus /> {/* rotated 45° via CSS */}
+        </button>
       </div>
-      <div style={{ display: 'grid', gap: 10 }}>{children}</div>
-      <div>
-        <button className="toolbar-btn" disabled={disabled} onClick={onAction}>{icon} {actionLabel}</button>
+      <div className="sec-drawer-fields">{children}</div>
+      <div className="sec-drawer-footer">
+        <button className="toolbar-btn primary" disabled={disabled} onClick={onSubmit}>
+          {actionLabel}
+        </button>
+        <button className="toolbar-btn" onClick={onClose}>Cancel</button>
+      </div>
+    </div>
+  )
+}
+
+function PrincipalCard({
+  principal: p,
+  expanded,
+  onToggleExpand,
+  onToggleEnabled,
+  onDelete,
+  busy,
+  delay = 0,
+}: {
+  principal: PrincipalRecord
+  expanded: boolean
+  onToggleExpand: () => void
+  onToggleEnabled: () => void
+  onDelete: () => void
+  busy: string
+  delay?: number
+}) {
+  const directRoles = sorted(p.roles)
+  const effectiveRoles = sorted(p.effective_roles)
+  const inheritedRoles = effectiveRoles.filter((r) => !directRoles.includes(r))
+  const directPrivileges = sorted(p.privileges as string[])
+  const effectivePrivileges = sorted(p.effective_privileges as string[])
+  const inheritedPrivileges = effectivePrivileges.filter((pr) => !directPrivileges.includes(pr))
+  const refs = sorted(p.referenced_by)
+
+  return (
+    <div
+      className={`sec-principal ${p.enabled ? '' : 'disabled'} ${expanded ? 'expanded' : ''}`}
+      style={{ animationDelay: `${delay}ms` }}
+    >
+      {/* ── Summary row ─────────────────────────────────── */}
+      <button className="sec-principal-header" onClick={onToggleExpand}>
+        <div className="sec-principal-identity">
+          <span className={`sec-status-dot ${p.enabled ? 'dot-ok' : 'dot-off'}`} />
+          <span className="sec-principal-name">{p.name}</span>
+          <span className={`sec-badge sec-badge-${p.kind.toLowerCase()}`}>{p.kind}</span>
+          {!p.enabled && <span className="sec-badge sec-badge-disabled">DISABLED</span>}
+          {(p.effective_privileges ?? []).includes('ADMIN') && (
+            <span className="sec-badge sec-badge-admin">ADMIN</span>
+          )}
+        </div>
+        <div className="sec-principal-meta">
+          <span className="sec-meta-stat">{directRoles.length} role{directRoles.length !== 1 ? 's' : ''}</span>
+          <span className="sec-meta-sep">&middot;</span>
+          <span className="sec-meta-stat">{directPrivileges.length} privilege{directPrivileges.length !== 1 ? 's' : ''}</span>
+          <span className={`sec-chevron ${expanded ? 'open' : ''}`}>
+            <IconChevronDown />
+          </span>
+        </div>
+      </button>
+
+      {/* ── Expanded detail ─────────────────────────────── */}
+      {expanded && (
+        <div className="sec-principal-detail">
+          {/* Actions row */}
+          <div className="sec-principal-actions">
+            <button
+              className={`sec-toggle-btn ${p.enabled ? 'enabled' : 'off'}`}
+              disabled={busy !== ''}
+              onClick={onToggleEnabled}
+              title={p.enabled ? 'Disable this principal' : 'Enable this principal'}
+            >
+              {p.enabled ? <IconToggleRight /> : <IconToggleLeft />}
+              {p.enabled ? 'Enabled' : 'Disabled'}
+            </button>
+            {canDeletePrincipal(p) && (
+              <button
+                className="sec-delete-btn"
+                disabled={busy !== ''}
+                onClick={onDelete}
+              >
+                <IconTrash />
+                Delete
+              </button>
+            )}
+          </div>
+
+          {/* Attributes grid */}
+          <div className="sec-attr-grid">
+            <AttrRow label="Direct roles" items={directRoles} variant="role" />
+            {inheritedRoles.length > 0 && (
+              <AttrRow label="Inherited roles" items={inheritedRoles} variant="inherited" />
+            )}
+            <AttrRow label="Direct privileges" items={directPrivileges} variant="privilege" />
+            {inheritedPrivileges.length > 0 && (
+              <AttrRow label="Inherited privileges" items={inheritedPrivileges} variant="inherited" />
+            )}
+            {refs.length > 0 && <AttrRow label="Referenced by" items={refs} variant="ref" />}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AttrRow({
+  label,
+  items,
+  variant,
+}: {
+  label: string
+  items: string[]
+  variant: 'role' | 'privilege' | 'inherited' | 'ref'
+}) {
+  return (
+    <div className="sec-attr-row">
+      <span className="sec-attr-label">{label}</span>
+      <div className="sec-attr-values">
+        {items.length > 0 ? (
+          items.map((v) => (
+            <span key={v} className={`sec-chip sec-chip-${variant}`}>
+              {v}
+            </span>
+          ))
+        ) : (
+          <span className="sec-attr-empty">&mdash;</span>
+        )}
       </div>
     </div>
   )

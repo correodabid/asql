@@ -266,6 +266,18 @@ export const IconToggleRight = () => (
   <svg {...sz}><rect x="1" y="5" width="22" height="14" rx="7" /><circle cx="16" cy="12" r="3" /></svg>
 )
 
+export const IconUsers = () => (
+  <svg {...sz}><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 00-3-3.87M16 3.13a4 4 0 010 7.75" /></svg>
+)
+
+export const IconUserPlus = () => (
+  <svg {...sz}><path d="M16 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2" /><circle cx="8.5" cy="7" r="4" /><line x1="20" y1="8" x2="20" y2="14" /><line x1="23" y1="11" x2="17" y2="11" /></svg>
+)
+
+export const IconLock = () => (
+  <svg {...sz}><rect x="3" y="11" width="18" height="11" rx="2" /><path d="M7 11V7a5 5 0 0110 0v4" /></svg>
+)
+
 export const IconGitMerge = () => (
   <svg {...sz}><circle cx="18" cy="18" r="3" /><circle cx="6" cy="6" r="3" /><path d="M6 21V9a9 9 0 009 9" /></svg>
 )
