@@ -797,7 +797,8 @@ Epic AI P1 slice note (2026-03-17):
 - updated compatibility/docs guidance to treat the current `pgAdmin` startup/catalog subset as validated
 - published a narrow ORM-lite translation contract in `docs/reference/orm-lite-adoption-lane-v1.md`
 - added regression coverage for the explicit ORM-lite happy path plus `START TRANSACTION` guidance in `internal/server/pgwire/server_test.go`
-- [ ] Extend compatibility docs with exact supported caveats, required connection settings, and known unsupported edges for one BI-lite datasource path.
+- published a narrow BI-lite translation contract in `docs/reference/bi-lite-adoption-lane-v1.md`
+- added regression coverage for the explicit BI-lite read-only path in `internal/server/pgwire/server_test.go`
 
 P2 — app-facing migration wedge:
 - [ ] Add support or explicit translation guidance for the next high-return SQL shapes seen in real app evaluation friction.

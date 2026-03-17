@@ -43,6 +43,7 @@ Status meanings:
 | `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` over pgwire | `internal/server/pgwire/server_test.go`: `TestPGWireCreateIfNotExistsRegression` | Direct | Confirms duplicate create fails without the guard and succeeds with `IF NOT EXISTS`. |
 | `pgx` client roundtrip and metadata stability | `internal/server/pgwire/history_regression_test.go`: `TestPGWireForHistoryRegressionStableMetadataAndRows` | Direct | Covers stable column names and OIDs for a pgwire `FOR HISTORY` workflow. |
 | Narrow ORM-lite translated pgwire app path | `internal/server/pgwire/server_test.go`: `TestPGWireORMLiteTranslatedHappyPath`, `TestPGWireCompatibilityUnsupportedPatternGuidance` | Direct | Covers the currently documented explicit-translation lane: `simple_protocol`, ASQL-native transaction open, `INSERT ... RETURNING`, parameterized reads, `UPDATE`/`DELETE`, and actionable guardrail errors for unsupported PostgreSQL transaction syntax and `ANY(...)`. |
+| Narrow BI-lite read-only datasource path | `internal/server/pgwire/server_test.go`: `TestPGWireBILiteReadOnlyPath` | Direct | Covers the current explicit BI-lite lane: `simple_protocol`, `current_database()`, `information_schema.tables`, `information_schema.columns`, parameterized filtered reads, and grouped aggregate reads over current-state data. |
 
 ## Common SQL subset evidence
 

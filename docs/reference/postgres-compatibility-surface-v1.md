@@ -86,6 +86,7 @@ and current privilege semantics, see
   - `pgx/v5` roundtrip is validated in integration-like tests
   - `pgAdmin` startup and schema-browse basics are validated for the documented catalog/session subset (`current_database()`, `current_schema()`, privilege probes, `pg_namespace`, `pg_class`, `information_schema.tables`)
   - a narrow ORM-lite app path is validated as an explicitly translated pgwire flow, not as broad ORM compatibility (`simple_protocol`, explicit ASQL transaction primitives, `INSERT ... RETURNING`, parameterized `SELECT`, `UPDATE`, `DELETE`)
+  - a narrow BI-lite read-only path is validated for explicit custom-SQL dashboards over the documented metadata/query subset (`current_database()`, `information_schema.tables`, `information_schema.columns`, filtered `SELECT`, grouped aggregate reads)
   - raw pgwire conformance-style tests cover portal resume, parameter inference, and extended-protocol error recovery
 
 ## Common app workflow SQL matrix
@@ -107,6 +108,7 @@ and current privilege semantics, see
 | Extended protocol with scalar bind parameters | Supported | Session-scoped prepared statements/portals. |
 | Parameterized predicates like `WHERE id >= $1` | Supported | Covered through pgwire regression tests. |
 | Narrow ORM-lite service flow over pgwire | Supported with explicit translation | Use `simple_protocol`, explicit `BEGIN DOMAIN ...` / `BEGIN CROSS DOMAIN ...`, inspect emitted SQL, and treat broader ORM metadata or PostgreSQL parity assumptions as out of scope for this claim. |
+| Narrow BI-lite read-only datasource flow over pgwire | Supported with explicit translation | Use explicit custom SQL, read-only current-state queries, and the documented `information_schema` subset; builder-mode, macro, and broad time-series claims remain out of scope. |
 | Cross-domain transactions via `BEGIN CROSS DOMAIN ...` | Supported | ASQL-native transaction model. |
 | Temporal helpers like `current_lsn()` / `row_lsn(...)` | Supported | ASQL-native surface over SQL/pgwire. |
 | `AS OF LSN` / `AS OF TIMESTAMP` / `FOR HISTORY` with durable-principal authz | Supported | Requires explicit `SELECT_HISTORY`; authorization is evaluated against the current principal/grant state, not a historical grant snapshot. |

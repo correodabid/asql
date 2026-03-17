@@ -111,6 +111,18 @@ Usually one of these is true:
 Start by proving the same workflow with literal SQL over pgwire and the exact connection settings from [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md).
 If the literal-SQL path works, the remaining issue is usually in the abstraction layer rather than the engine semantics.
 
+## BI or dashboard datasource works partially
+
+Usually one of these is true:
+
+- the tool is using builder-mode metadata queries beyond the documented shim subset,
+- it expects macro expansion or time-series-specific PostgreSQL behavior not currently claimed,
+- it assumes broader type or catalog parity than ASQL documents,
+- or it is trying to autocomplete tables/columns through tool-specific PostgreSQL helper functions.
+
+Start with one explicit read-only custom-SQL panel and the connection settings in [../reference/bi-lite-adoption-lane-v1.md](../reference/bi-lite-adoption-lane-v1.md).
+If that works, treat any remaining builder/autocomplete issue as tool-surface validation work rather than as an engine regression.
+
 ## where to look next
 
 - [README.md](../../README.md)

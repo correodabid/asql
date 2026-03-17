@@ -745,6 +745,158 @@ func TestPGWireORMLiteTranslatedHappyPath(t *testing.T) {
 	}
 }
 
+func TestPGWireBILiteReadOnlyPath(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "bi-lite-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN analytics",
+		"CREATE TABLE dashboard_events (id INT PRIMARY KEY, service TEXT, severity TEXT)",
+		"INSERT INTO dashboard_events (id, service, severity) VALUES (1, 'api', 'warn')",
+		"INSERT INTO dashboard_events (id, service, severity) VALUES (2, 'api', 'info')",
+		"INSERT INTO dashboard_events (id, service, severity) VALUES (3, 'worker', 'warn')",
+		"COMMIT",
+	} {
+		if _, err := conn.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	var currentDB string
+	if err := conn.QueryRow(ctx, "SELECT current_database()").Scan(&currentDB); err != nil {
+		t.Fatalf("current_database(): %v", err)
+	}
+	if currentDB != "asql" {
+		t.Fatalf("current_database() = %q, want %q", currentDB, "asql")
+	}
+
+	tableRows, err := conn.Query(ctx, "SELECT * FROM information_schema.tables")
+	if err != nil {
+		t.Fatalf("information_schema.tables: %v", err)
+	}
+	tableCount := 0
+	for tableRows.Next() {
+		tableCount++
+	}
+	if err := tableRows.Err(); err != nil {
+		t.Fatalf("iterate information_schema.tables: %v", err)
+	}
+	tableRows.Close()
+	if tableCount == 0 {
+		t.Fatal("information_schema.tables returned 0 rows")
+	}
+
+	columnRows, err := conn.Query(ctx, "SELECT * FROM information_schema.columns")
+	if err != nil {
+		t.Fatalf("information_schema.columns: %v", err)
+	}
+	columnCount := 0
+	for columnRows.Next() {
+		columnCount++
+	}
+	if err := columnRows.Err(); err != nil {
+		t.Fatalf("iterate information_schema.columns: %v", err)
+	}
+	columnRows.Close()
+	if columnCount == 0 {
+		t.Fatal("information_schema.columns returned 0 rows")
+	}
+
+	filteredRows, err := conn.Query(ctx, "SELECT service FROM analytics.dashboard_events WHERE severity = $1 ORDER BY service ASC LIMIT 5", "warn")
+	if err != nil {
+		t.Fatalf("filtered dashboard query: %v", err)
+	}
+	defer filteredRows.Close()
+
+	var services []string
+	for filteredRows.Next() {
+		var service string
+		if err := filteredRows.Scan(&service); err != nil {
+			t.Fatalf("scan filtered dashboard row: %v", err)
+		}
+		services = append(services, service)
+	}
+	if err := filteredRows.Err(); err != nil {
+		t.Fatalf("iterate filtered dashboard rows: %v", err)
+	}
+	if len(services) != 2 || services[0] != "api" || services[1] != "worker" {
+		t.Fatalf("unexpected filtered services: %v", services)
+	}
+
+	aggRows, err := conn.Query(ctx, "SELECT service, COUNT(*) FROM analytics.dashboard_events GROUP BY service ORDER BY service ASC LIMIT 5")
+	if err != nil {
+		t.Fatalf("aggregate dashboard query: %v", err)
+	}
+	defer aggRows.Close()
+
+	type aggregateRow struct {
+		service string
+		total   string
+	}
+	var aggregates []aggregateRow
+	for aggRows.Next() {
+		var service string
+		var total string
+		if err := aggRows.Scan(&service, &total); err != nil {
+			t.Fatalf("scan aggregate dashboard row: %v", err)
+		}
+		aggregates = append(aggregates, aggregateRow{service: service, total: total})
+	}
+	if err := aggRows.Err(); err != nil {
+		t.Fatalf("iterate aggregate dashboard rows: %v", err)
+	}
+	if len(aggregates) != 2 {
+		t.Fatalf("unexpected aggregate row count: %v", aggregates)
+	}
+	if aggregates[0].service != "api" || aggregates[0].total != "2" {
+		t.Fatalf("unexpected first aggregate row: %+v", aggregates[0])
+	}
+	if aggregates[1].service != "worker" || aggregates[1].total != "1" {
+		t.Fatalf("unexpected second aggregate row: %+v", aggregates[1])
+	}
+}
+
 func TestPGWireCompatibilityUnsupportedPatternGuidance(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

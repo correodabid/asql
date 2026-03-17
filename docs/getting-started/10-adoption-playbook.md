@@ -176,6 +176,8 @@ When in doubt, start with pgwire plus `pgx`, then validate additional tooling in
 
 For the practical driver/query-mode recommendations, see [../reference/pgwire-driver-guidance-v1.md](../reference/pgwire-driver-guidance-v1.md).
 
+For read-only dashboards, prefer one explicit custom-SQL panel first rather than builder-mode assumptions. Use [../reference/bi-lite-adoption-lane-v1.md](../reference/bi-lite-adoption-lane-v1.md) as the narrow contract for that path.
+
 ## Where adoption friction usually appears
 
 - first domain split,

@@ -7,6 +7,7 @@ Use it together with:
 - [sql-pgwire-compatibility-policy-v1.md](sql-pgwire-compatibility-policy-v1.md)
 - [postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md)
 - [orm-lite-adoption-lane-v1.md](orm-lite-adoption-lane-v1.md)
+- [bi-lite-adoption-lane-v1.md](bi-lite-adoption-lane-v1.md)
 - [../operations/pgwire-compatibility-test-pack-v1.md](../operations/pgwire-compatibility-test-pack-v1.md)
 
 ## Short version
@@ -32,6 +33,7 @@ The recommendation below is about adoption risk, not only protocol capability.
 | `pgx` extended query protocol | Supported, but validate intentionally | Safe within the documented subset; still not the first path to debug onboarding surprises. |
 | PostgreSQL GUI tools (`psql`, `DBeaver`, `DataGrip`, `pgAdmin`) | Supported for documented startup/schema-browse workflows | Good for interactive work, but not a reason to assume full PostgreSQL parity. |
 | ORM-lite or query-builder-lite service path with inspectable SQL | Supported when intentionally constrained | Use the explicit translation rules in [orm-lite-adoption-lane-v1.md](orm-lite-adoption-lane-v1.md); this is not a broad ORM-parity claim. |
+| BI-lite read-only datasource path with explicit custom SQL | Supported when intentionally constrained | Use [bi-lite-adoption-lane-v1.md](bi-lite-adoption-lane-v1.md); treat builder-mode, macro, and broad metadata assumptions as separate validation work. |
 | ORMs or query builders that emit broad PostgreSQL syntax | Known-risk path | They often assume broader PostgreSQL semantics than ASQL promises. |
 | Drivers or tools that require TLS-only startup (`sslmode=require`) | Unsupported today | ASQL currently responds to `SSLRequest` with `N`. |
 
@@ -44,6 +46,7 @@ and metadata flows already exercised in regression tests:
 - DBeaver/DataGrip-style startup queries (`SET`, `set_config`, `version`, `current_schema`, `pg_settings`, `information_schema.schemata`, privilege probes),
 - `pgAdmin` startup and schema-browse basics (`current_database`, `current_schema`, `has_database_privilege`, `obj_description`, `pg_namespace`, `pg_class`, `information_schema.tables`),
 - a narrow ORM-lite service flow using `simple_protocol`, explicit `BEGIN DOMAIN ...`, `INSERT ... RETURNING`, parameterized `SELECT`, `UPDATE`, and `DELETE`,
+- a narrow BI-lite read-only path using explicit SQL, `information_schema.tables`, `information_schema.columns`, filtered `SELECT`, and grouped aggregate reads,
 - `pgx` connection setup plus end-to-end CRUD/query flows,
 - PostgreSQL `CancelRequest` handling for supported pgwire execution boundaries,
 - narrow `COPY FROM STDIN` / `COPY TO STDOUT` flows covered by conformance-style tests.
@@ -133,6 +136,23 @@ Use it when:
 Do not treat the lane as evidence that arbitrary ORM-generated SQL is safe.
 For the exact supported caveats and translation rules, see
 [orm-lite-adoption-lane-v1.md](orm-lite-adoption-lane-v1.md).
+
+## Narrow BI-lite adoption lane
+
+The recommended dashboard/data-visualization claim is a narrow read-only lane,
+not generic BI-tool parity.
+
+Use it when:
+
+- the datasource runs explicit custom SQL,
+- the team is validating table or grouped-summary panels,
+- metadata needs stay inside the documented `information_schema` subset,
+- and the dashboard path is read-only.
+
+Do not treat this lane as evidence that builder-mode, macro-heavy time-series,
+or broad autocomplete flows are safe.
+For the exact caveats and connection settings, see
+[bi-lite-adoption-lane-v1.md](bi-lite-adoption-lane-v1.md).
 
 ## Known-risk patterns
 
