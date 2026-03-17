@@ -511,15 +511,6 @@ func (server *Server) serve(listener net.Listener) error {
 func (server *Server) handleConnection(conn net.Conn) error {
 	backend := pgproto3.NewBackend(bufio.NewReader(conn), conn)
 	backendKey := server.allocateBackendKey()
-
-	handled, err := server.performStartupHandshake(backend, conn, backendKey)
-	if err != nil {
-		return err
-	}
-	if handled {
-		return nil
-	}
-
 	state := &connState{
 		session:   server.engine.NewSession(),
 		prepared:  make(map[string]preparedStmt),
@@ -528,6 +519,15 @@ func (server *Server) handleConnection(conn net.Conn) error {
 		processID: backendKey.processID,
 		secretKey: backendKey.secretKey,
 	}
+
+	handled, err := server.performStartupHandshake(backend, conn, backendKey, state)
+	if err != nil {
+		return err
+	}
+	if handled {
+		return nil
+	}
+
 	server.registerCancelableConnection(backendKey, state)
 	defer server.unregisterCancelableConnection(backendKey)
 	for {
@@ -588,7 +588,7 @@ func (server *Server) handleConnection(conn net.Conn) error {
 // sends initial ParameterStatus messages including cluster topology information
 // (leader address, peer list, this node's role) so SDK clients can route
 // writes to the leader without any extra round-trip.
-func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn net.Conn, backendKey backendCancelKey) (bool, error) {
+func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn net.Conn, backendKey backendCancelKey, state *connState) (bool, error) {
 	for {
 		startupMessage, err := backend.ReceiveStartupMessage()
 		if err != nil {
@@ -605,7 +605,9 @@ func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn ne
 			server.cancelRequest(uint32(typed.ProcessID), uint32(typed.SecretKey))
 			return true, nil
 		case *pgproto3.StartupMessage:
-			if server.config.AuthToken != "" {
+			user := typed.Parameters["user"]
+			requiresPassword := server.config.AuthToken != "" || server.engine.HasPrincipalCatalog()
+			if requiresPassword {
 				backend.Send(&pgproto3.AuthenticationCleartextPassword{})
 				if err := backend.Flush(); err != nil {
 					return true, fmt.Errorf("send password challenge: %w", err)
@@ -623,13 +625,27 @@ func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn ne
 						Message:  fmt.Sprintf("expected password message, got %T", message),
 					})
 				}
-				if passwordMessage.Password != server.config.AuthToken {
-					return true, sendMessages(backend, &pgproto3.ErrorResponse{
-						Severity: "FATAL",
-						Code:     "28P01",
-						Message:  fmt.Sprintf("password authentication failed for user %q", typed.Parameters["user"]),
-					})
+				if server.engine.HasPrincipalCatalog() {
+					if _, err := server.engine.AuthenticatePrincipal(user, passwordMessage.Password); err != nil {
+						return true, sendMessages(backend, &pgproto3.ErrorResponse{
+							Severity: "FATAL",
+							Code:     "28P01",
+							Message:  fmt.Sprintf("password authentication failed for user %q", user),
+						})
+					}
+					state.session.SetPrincipal(user)
+				} else {
+					if passwordMessage.Password != server.config.AuthToken {
+						return true, sendMessages(backend, &pgproto3.ErrorResponse{
+							Severity: "FATAL",
+							Code:     "28P01",
+							Message:  fmt.Sprintf("password authentication failed for user %q", user),
+						})
+					}
+					state.session.SetPrincipal(user)
 				}
+			} else {
+				state.session.SetPrincipal(user)
 			}
 
 			msgs := make([]pgproto3.BackendMessage, 0, 12)
@@ -1125,14 +1141,23 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 			var result executor.Result
 			var err error
 			if selectStatement.ForHistory {
+				if err = server.engine.AuthorizeHistoricalRead(session.Principal()); err != nil {
+					return executor.Result{}, nil, err
+				}
 				result, err = server.engine.RowHistory(ctx, stripped, domains)
 			} else {
 				switch asOfKind {
 				case "ts":
+					if err = server.engine.AuthorizeHistoricalRead(session.Principal()); err != nil {
+						return executor.Result{}, nil, err
+					}
 					result, err = server.engine.TimeTravelQueryAsOfTimestamp(ctx, stripped, domains, asOfValue)
 				default:
 					targetLSN := maxLSN
 					if asOfKind == "lsn" {
+						if err = server.engine.AuthorizeHistoricalRead(session.Principal()); err != nil {
+							return executor.Result{}, nil, err
+						}
 						targetLSN = asOfValue
 					}
 					result, err = server.engine.TimeTravelQueryAsOfLSN(ctx, stripped, domains, targetLSN)

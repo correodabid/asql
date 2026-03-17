@@ -15,7 +15,7 @@ import (
 	"asql/internal/engine/parser/ast"
 )
 
-// Binary snapshot format (version 10).
+// Binary snapshot format (version 12).
 //
 // All multi-byte integers are big-endian. The file is zstd-compressed on disk.
 //
@@ -44,11 +44,19 @@ import (
 //   [8B] LogicalTS
 //   [1B] IsFull flag
 //   [catalog]
+//   [principals]
 //   [domains]
 //
 // Catalog:
 //   [2B] num_domains
 //   For each: [2B name_len][name...][2B num_tables][for each: [2B name_len][name...]]
+//
+// Principals (v12):
+//   [2B] num_principals
+//   For each:
+//     [name][kind][password_hash][1B enabled]
+//     [2B num_roles][role...]
+//     [2B num_privileges][privilege...]
 //
 // Domains:
 //   [2B] num_domains
@@ -84,7 +92,7 @@ import (
 
 var (
 	snapMagic   = [4]byte{'A', 'S', 'N', 'P'}
-	snapVersion = byte(11)
+	snapVersion = byte(12)
 
 	// snapCRC32C is the CRC32C (Castagnoli) table, hardware-accelerated on x86 (SSE4.2) and ARM.
 	snapCRC32C = crc32.MakeTable(crc32.Castagnoli)
@@ -894,6 +902,41 @@ func (r *binReader) readCatalogState() *domains.Catalog {
 	return cat
 }
 
+func (r *binReader) readPrincipals() []persistedPrincipal {
+	if r.version < 12 {
+		return nil
+	}
+	numPrincipals := int(r.u16())
+	if numPrincipals == 0 {
+		return nil
+	}
+	principals := make([]persistedPrincipal, numPrincipals)
+	for i := 0; i < numPrincipals; i++ {
+		principal := persistedPrincipal{
+			Name:         r.str(),
+			Kind:         r.str(),
+			PasswordHash: r.str(),
+			Enabled:      r.boolean(),
+		}
+		numRoles := int(r.u16())
+		if numRoles > 0 {
+			principal.Roles = make([]string, numRoles)
+			for j := 0; j < numRoles; j++ {
+				principal.Roles[j] = r.str()
+			}
+		}
+		numPrivileges := int(r.u16())
+		if numPrivileges > 0 {
+			principal.Privileges = make([]string, numPrivileges)
+			for j := 0; j < numPrivileges; j++ {
+				principal.Privileges[j] = r.str()
+			}
+		}
+		principals[i] = principal
+	}
+	return principals
+}
+
 func (r *binReader) readEntityDefsState() map[string]*entityDefinition {
 	n := int(r.u16())
 	if n == 0 {
@@ -1337,11 +1380,52 @@ func (w *binWriter) catalog(snap *engineSnapshot) {
 	}
 }
 
+func (w *binWriter) principals(principals map[string]*principalState) {
+	w.u16(uint16(len(principals)))
+	if len(principals) == 0 {
+		return
+	}
+	names := make([]string, 0, len(principals))
+	for name := range principals {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		principal := principals[name]
+		if principal == nil {
+			continue
+		}
+		w.str(principal.name)
+		w.str(string(principal.kind))
+		w.str(principal.passwordHash)
+		w.boolean(principal.enabled)
+		roles := make([]string, 0, len(principal.roles))
+		for role := range principal.roles {
+			roles = append(roles, role)
+		}
+		sort.Strings(roles)
+		w.u16(uint16(len(roles)))
+		for _, role := range roles {
+			w.str(role)
+		}
+		privileges := make([]string, 0, len(principal.privileges))
+		for privilege := range principal.privileges {
+			privileges = append(privileges, string(privilege))
+		}
+		sort.Strings(privileges)
+		w.u16(uint16(len(privileges)))
+		for _, privilege := range privileges {
+			w.str(privilege)
+		}
+	}
+}
+
 func (w *binWriter) snapshot(snap *engineSnapshot, isFull bool, prevLogicalTS uint64) {
 	w.u64(snap.lsn)
 	w.u64(snap.logicalTS)
 	w.boolean(isFull)
 	w.catalog(snap)
+	w.principals(snap.state.principals)
 
 	if isFull {
 		// All domains/tables.
@@ -1412,11 +1496,12 @@ func encodeSnapshotFileBinary(snap *engineSnapshot, isFull bool, prevLogicalTS u
 // rawSnapshotFileEntry is the unresolved decoded content of a single disk file.
 // isFull=false means domains contains only the changed tables (delta file).
 type rawSnapshotFileEntry struct {
-	lsn       uint64
-	logicalTS uint64
-	isFull    bool
-	catalog   persistedCatalog
-	domains   map[string]*persistedDomain
+	lsn        uint64
+	logicalTS  uint64
+	isFull     bool
+	catalog    persistedCatalog
+	principals []persistedPrincipal
+	domains    map[string]*persistedDomain
 }
 
 // decodeSnapshotFileBinaryRaw decodes a binary snapshot file and returns the raw
@@ -1441,8 +1526,8 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 	r.off = 4
 
 	version := r.u8()
-	if version != snapVersion {
-		return nil, fmt.Errorf("snapshot binary: unsupported version %d (expected %d)", version, snapVersion)
+	if version != 11 && version != snapVersion {
+		return nil, fmt.Errorf("snapshot binary: unsupported version %d (expected 11 or %d)", version, snapVersion)
 	}
 	r.version = version
 
@@ -1468,16 +1553,18 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 		logicalTS := r.u64()
 		isFull := r.boolean()
 		catalog := r.readCatalog()
+		principals := r.readPrincipals()
 		domains := r.readDomains()
 		if r.err != nil {
 			return nil, r.err
 		}
 		entries = append(entries, rawSnapshotFileEntry{
-			lsn:       lsn,
-			logicalTS: logicalTS,
-			isFull:    isFull,
-			catalog:   catalog,
-			domains:   domains,
+			lsn:        lsn,
+			logicalTS:  logicalTS,
+			isFull:     isFull,
+			catalog:    catalog,
+			principals: principals,
+			domains:    domains,
 		})
 	}
 	return entries, nil
@@ -1603,8 +1690,8 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 	r.off = 4 // skip magic
 
 	version := r.u8()
-	if version != snapVersion {
-		return nil, fmt.Errorf("snapshot binary: unsupported version %d (expected %d)", version, snapVersion)
+	if version != 11 && version != snapVersion {
+		return nil, fmt.Errorf("snapshot binary: unsupported version %d (expected 11 or %d)", version, snapVersion)
 	}
 	r.version = version
 
@@ -1637,6 +1724,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 		logicalTS := r.u64()
 		isFull := r.boolean()
 		catalog := r.readCatalog()
+		principals := r.readPrincipals()
 		domains := r.readDomains()
 
 		if r.err != nil {
@@ -1650,10 +1738,11 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 		}
 
 		full := persistedSnapshot{
-			LSN:       lsn,
-			LogicalTS: logicalTS,
-			Catalog:   catalog,
-			Domains:   accumulated,
+			LSN:        lsn,
+			LogicalTS:  logicalTS,
+			Catalog:    catalog,
+			Principals: principals,
+			Domains:    accumulated,
 		}
 
 		result[i] = marshalableToSnapshot(full)
@@ -1680,8 +1769,8 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 	r := &binReader{data: data[:payloadEnd]}
 	r.off = 4
 	version := r.u8()
-	if version != snapVersion {
-		return nil, false, fmt.Errorf("snapshot binary: unsupported version %d (expected %d)", version, snapVersion)
+	if version != 11 && version != snapVersion {
+		return nil, false, fmt.Errorf("snapshot binary: unsupported version %d (expected 11 or %d)", version, snapVersion)
 	}
 	r.version = version
 
@@ -1710,6 +1799,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 		return nil, false, nil
 	}
 	snap.catalog = r.readCatalogState()
+	snap.state.principals = principalsStateFromPersisted(r.readPrincipals())
 
 	numDomains := int(r.u16())
 	snap.state.domains = make(map[string]*domainState, numDomains)

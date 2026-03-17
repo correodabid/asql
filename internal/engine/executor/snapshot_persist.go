@@ -30,15 +30,89 @@ func snapshotFileName(walPath string) string {
 // ---------- on-disk structures (exported fields for JSON) ----------
 
 type persistedSnapshot struct {
-	LSN       uint64
-	LogicalTS uint64
-	Catalog   persistedCatalog
-	Domains   map[string]*persistedDomain
+	LSN        uint64
+	LogicalTS  uint64
+	Catalog    persistedCatalog
+	Principals []persistedPrincipal
+	Domains    map[string]*persistedDomain
 }
 
 type persistedCatalog struct {
 	// map[domainName] → set of table names
 	Domains map[string][]string
+}
+
+type persistedPrincipal struct {
+	Name         string
+	Kind         string
+	PasswordHash string
+	Enabled      bool
+	Roles        []string
+	Privileges   []string
+}
+
+func principalsStateFromPersisted(principals []persistedPrincipal) map[string]*principalState {
+	if len(principals) == 0 {
+		return nil
+	}
+	result := make(map[string]*principalState, len(principals))
+	for _, principal := range principals {
+		name := normalizePrincipalName(principal.Name)
+		roles := make(map[string]struct{}, len(principal.Roles))
+		for _, role := range principal.Roles {
+			roles[normalizePrincipalName(role)] = struct{}{}
+		}
+		privileges := make(map[PrincipalPrivilege]struct{}, len(principal.Privileges))
+		for _, privilege := range principal.Privileges {
+			privileges[PrincipalPrivilege(privilege)] = struct{}{}
+		}
+		result[name] = &principalState{
+			name:         name,
+			kind:         PrincipalKind(principal.Kind),
+			passwordHash: principal.PasswordHash,
+			enabled:      principal.Enabled,
+			roles:        roles,
+			privileges:   privileges,
+		}
+	}
+	return result
+}
+
+func persistedPrincipalsFromState(principals map[string]*principalState) []persistedPrincipal {
+	if len(principals) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(principals))
+	for name := range principals {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	result := make([]persistedPrincipal, 0, len(names))
+	for _, name := range names {
+		principal := principals[name]
+		if principal == nil {
+			continue
+		}
+		roles := make([]string, 0, len(principal.roles))
+		for role := range principal.roles {
+			roles = append(roles, role)
+		}
+		sort.Strings(roles)
+		privileges := make([]string, 0, len(principal.privileges))
+		for privilege := range principal.privileges {
+			privileges = append(privileges, string(privilege))
+		}
+		sort.Strings(privileges)
+		result = append(result, persistedPrincipal{
+			Name:         principal.name,
+			Kind:         string(principal.kind),
+			PasswordHash: principal.passwordHash,
+			Enabled:      principal.enabled,
+			Roles:        roles,
+			Privileges:   privileges,
+		})
+	}
+	return result
 }
 
 type persistedDomain struct {
@@ -324,7 +398,7 @@ func marshalableToSnapshot(ps persistedSnapshot) engineSnapshot {
 	snap := engineSnapshot{
 		lsn:       ps.LSN,
 		logicalTS: ps.LogicalTS,
-		state:     engineState{domains: make(map[string]*domainState, len(ps.Domains))},
+		state:     engineState{domains: make(map[string]*domainState, len(ps.Domains)), principals: make(map[string]*principalState, len(ps.Principals))},
 	}
 
 	// Catalog
@@ -336,6 +410,8 @@ func marshalableToSnapshot(ps persistedSnapshot) engineSnapshot {
 		}
 	}
 	snap.catalog = cat
+
+	snap.state.principals = principalsStateFromPersisted(ps.Principals)
 
 	// State
 	for domainName, pd := range ps.Domains {
@@ -955,9 +1031,10 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 			}
 
 			full := persistedSnapshot{
-				LSN:       entry.lsn,
-				LogicalTS: entry.logicalTS,
-				Catalog:   entry.catalog,
+				LSN:        entry.lsn,
+				LogicalTS:  entry.logicalTS,
+				Catalog:    entry.catalog,
+				Principals: entry.principals,
 				// `marshalableToSnapshot` below materializes a fresh engine state,
 				// so duplicating the accumulated persisted-domain tree first only
 				// adds restart-time copy cost without providing extra isolation.

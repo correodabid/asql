@@ -626,6 +626,7 @@ Acceptance gates (must pass before closing Epic AC)
 Reference inputs:
 - `docs/reference/postgres-compatibility-surface-v1.md`
 - `docs/adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md`
+- `docs/adr/0004-durable-database-principals-and-historical-authorization.md`
 
 Execution rule:
 - Treat users, roles, memberships, and grants as engine-owned metadata, not only process configuration.

@@ -23,6 +23,7 @@ const (
 	walTypeBegin    = "BEGIN"
 	walTypeMutation = "MUTATION"
 	walTypeCommit   = "COMMIT"
+	walTypeSecurity = "SECURITY"
 )
 
 var (

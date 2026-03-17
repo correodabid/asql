@@ -322,6 +322,17 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 			continue
 		}
 
+		if record.Type == walTypeSecurity {
+			payload, err := decodeSecurityMutationPayload(record.Payload)
+			if err != nil {
+				return fmt.Errorf("decode security payload lsn=%d: %w", record.LSN, err)
+			}
+			if err := applySecurityMutation(newState, payload); err != nil {
+				return fmt.Errorf("apply security mutation lsn=%d: %w", record.LSN, err)
+			}
+			continue
+		}
+
 		if record.Type != walTypeMutation {
 			continue
 		}
@@ -448,6 +459,17 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 				delete(txEntityCollectors, record.TxID)
 			}
 			delete(txClonedTables, record.TxID)
+			continue
+		}
+
+		if record.Type == walTypeSecurity {
+			payload, err := decodeSecurityMutationPayload(record.Payload)
+			if err != nil {
+				return fmt.Errorf("decode security payload lsn=%d: %w", record.LSN, err)
+			}
+			if err := applySecurityMutation(newState, payload); err != nil {
+				return fmt.Errorf("apply security mutation lsn=%d: %w", record.LSN, err)
+			}
 			continue
 		}
 
@@ -666,6 +688,17 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 				delete(txEntityCollectors, record.TxID)
 			}
 			delete(txClonedTables, record.TxID)
+			continue
+		}
+
+		if record.Type == walTypeSecurity {
+			payload, err := decodeSecurityMutationPayload(record.Payload)
+			if err != nil {
+				return fmt.Errorf("decode security payload lsn=%d: %w", record.LSN, err)
+			}
+			if err := applySecurityMutation(newState, payload); err != nil {
+				return fmt.Errorf("apply security mutation lsn=%d: %w", record.LSN, err)
+			}
 			continue
 		}
 

@@ -1159,6 +1159,184 @@ func TestPGWirePasswordAuthenticationWithAuthToken(t *testing.T) {
 	}
 }
 
+func TestPGWirePasswordAuthenticationWithDurablePrincipal(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	addr := listener.Addr().String()
+	if _, err := pgx.Connect(ctx, "postgres://admin@"+addr+"/asql?sslmode=disable"); err == nil {
+		t.Fatal("expected connection without password to fail")
+	}
+	if _, err := pgx.Connect(ctx, "postgres://admin:wrong@"+addr+"/asql?sslmode=disable"); err == nil {
+		t.Fatal("expected connection with wrong durable principal password to fail")
+	}
+
+	conn, err := pgx.Connect(ctx, "postgres://admin:secret-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect pgx with durable principal auth: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+
+	var version string
+	if err := conn.QueryRow(ctx, "SHOW server_version").Scan(&version); err != nil {
+		t.Fatalf("show server_version after durable auth: %v", err)
+	}
+	if version == "" {
+		t.Fatal("expected server_version after authenticated durable principal connection")
+	}
+}
+
+func TestPGWireHistoricalReadRequiresSelectHistoryPrivilege(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create analyst user: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "historian", "historian-pass"); err != nil {
+		t.Fatalf("create historian user: %v", err)
+	}
+	if err := server.engine.GrantPrivilege(ctx, "historian", executor.PrincipalPrivilegeSelectHistory); err != nil {
+		t.Fatalf("grant SELECT_HISTORY: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	addr := listener.Addr().String()
+	adminConn, err := pgx.Connect(ctx, "postgres://admin:secret-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	t.Cleanup(func() { _ = adminConn.Close(ctx) })
+
+	setup := []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"COMMIT",
+	}
+	for _, sql := range setup {
+		if _, err := adminConn.Exec(ctx, sql); err != nil {
+			t.Fatalf("setup %q: %v", sql, err)
+		}
+	}
+
+	targetLSN := server.walStore.LastLSN()
+	historySQL := fmt.Sprintf("SELECT id, email FROM accounts.users /* as-of-lsn: %d */", targetLSN)
+
+	analystConn, err := pgx.Connect(ctx, "postgres://analyst:analyst-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect analyst: %v", err)
+	}
+	t.Cleanup(func() { _ = analystConn.Close(ctx) })
+
+	if _, err := analystConn.Query(ctx, historySQL); err == nil || !strings.Contains(err.Error(), "SELECT_HISTORY") {
+		t.Fatalf("expected SELECT_HISTORY failure for analyst, got %v", err)
+	}
+
+	historianConn, err := pgx.Connect(ctx, "postgres://historian:historian-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect historian: %v", err)
+	}
+	t.Cleanup(func() { _ = historianConn.Close(ctx) })
+
+	rows, err := historianConn.Query(ctx, historySQL)
+	if err != nil {
+		t.Fatalf("historian history query: %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("expected historical row")
+	}
+	var id int64
+	var email string
+	if err := rows.Scan(&id, &email); err != nil {
+		t.Fatalf("scan historian row: %v", err)
+	}
+	if id != 1 || email != "one@asql.dev" {
+		t.Fatalf("unexpected historian row: id=%d email=%q", id, email)
+	}
+	if rows.Err() != nil {
+		t.Fatalf("iterate historian rows: %v", rows.Err())
+	}
+}
+
 func TestIsWriteStatement(t *testing.T) {
 	writes := []string{
 		"INSERT INTO orders VALUES (1)",

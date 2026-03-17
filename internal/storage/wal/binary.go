@@ -51,6 +51,7 @@ const (
 	typeEnumMutation byte = 0x02
 	typeEnumCommit   byte = 0x03
 	typeEnumAudit    byte = 0x04 // persistent audit log entry (payload-only, no wall time)
+	typeEnumSecurity byte = 0x05 // durable principal/authorization catalog mutation
 )
 
 // typeStringToEnum converts a WAL type string to its 1-byte enum.
@@ -64,6 +65,8 @@ func typeStringToEnum(typ string) (byte, error) {
 		return typeEnumCommit, nil
 	case "AUDIT":
 		return typeEnumAudit, nil
+	case "SECURITY":
+		return typeEnumSecurity, nil
 	default:
 		return 0, fmt.Errorf("unknown wal type: %q", typ)
 	}
@@ -80,6 +83,8 @@ func typeEnumToString(b byte) (string, error) {
 		return "COMMIT", nil
 	case typeEnumAudit:
 		return "AUDIT", nil
+	case typeEnumSecurity:
+		return "SECURITY", nil
 	default:
 		return "", fmt.Errorf("unknown wal type enum: 0x%02x", b)
 	}

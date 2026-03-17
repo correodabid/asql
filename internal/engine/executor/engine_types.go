@@ -15,7 +15,24 @@ type Result struct {
 }
 
 type Session struct {
-	activeTx *transaction
+	activeTx  *transaction
+	principal string
+}
+
+// SetPrincipal binds the authenticated database principal to the session.
+func (session *Session) SetPrincipal(name string) {
+	if session == nil {
+		return
+	}
+	session.principal = normalizePrincipalName(name)
+}
+
+// Principal returns the authenticated database principal for the session.
+func (session *Session) Principal() string {
+	if session == nil {
+		return ""
+	}
+	return session.principal
 }
 
 // InTransaction reports whether the session currently has an active transaction.
@@ -49,15 +66,17 @@ type savepointMarker struct {
 }
 
 type engineState struct {
-	domains map[string]*domainState
+	domains    map[string]*domainState
+	principals map[string]*principalState
 }
 
 // readableState is the immutable state snapshot visible to lock-free readers.
 // Writers create a COW clone, apply mutations, then atomically swap the pointer.
 type readableState struct {
-	domains   map[string]*domainState
-	headLSN   uint64
-	logicalTS uint64
+	domains    map[string]*domainState
+	principals map[string]*principalState
+	headLSN    uint64
+	logicalTS  uint64
 }
 
 // cloneForMutation creates a shallow copy suitable for mutation.
@@ -73,9 +92,10 @@ func (s *readableState) cloneForMutation(affectedDomains map[string]struct{}) *r
 		}
 	}
 	return &readableState{
-		domains:   newDomains,
-		headLSN:   s.headLSN,
-		logicalTS: s.logicalTS,
+		domains:    newDomains,
+		principals: clonePrincipals(s.principals),
+		headLSN:    s.headLSN,
+		logicalTS:  s.logicalTS,
 	}
 }
 
@@ -99,7 +119,36 @@ func (d *domainState) shallowClone() *domainState {
 // toEngineState converts readableState to the legacy engineState type
 // used by snapshots (deep copy of domains).
 func (s *readableState) toEngineState() engineState {
-	return engineState{domains: cloneDomains(s.domains)}
+	return engineState{domains: cloneDomains(s.domains), principals: clonePrincipals(s.principals)}
+}
+
+func clonePrincipals(src map[string]*principalState) map[string]*principalState {
+	if src == nil {
+		return nil
+	}
+	cloned := make(map[string]*principalState, len(src))
+	for name, principal := range src {
+		if principal == nil {
+			continue
+		}
+		roles := make(map[string]struct{}, len(principal.roles))
+		for role := range principal.roles {
+			roles[role] = struct{}{}
+		}
+		privileges := make(map[PrincipalPrivilege]struct{}, len(principal.privileges))
+		for privilege := range principal.privileges {
+			privileges[privilege] = struct{}{}
+		}
+		cloned[name] = &principalState{
+			name:         principal.name,
+			kind:         principal.kind,
+			passwordHash: principal.passwordHash,
+			enabled:      principal.enabled,
+			roles:        roles,
+			privileges:   privileges,
+		}
+	}
+	return cloned
 }
 
 func cloneDomains(src map[string]*domainState) map[string]*domainState {

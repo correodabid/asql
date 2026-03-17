@@ -335,7 +335,7 @@ func captureSnapshotWithCatalog(state *readableState, catalog *domains.Catalog) 
 		lsn:       state.headLSN,
 		logicalTS: state.logicalTS,
 		catalog:   cloneCatalog(catalog),
-		state:     engineState{domains: domains},
+		state:     engineState{domains: domains, principals: clonePrincipals(state.principals)},
 	}
 }
 
@@ -349,9 +349,10 @@ func readableStateFromSnapshotShared(snap *engineSnapshot) *readableState {
 		return &readableState{domains: make(map[string]*domainState)}
 	}
 	return &readableState{
-		domains:   snap.state.domains,
-		logicalTS: snap.logicalTS,
-		headLSN:   snap.lsn,
+		domains:    snap.state.domains,
+		principals: snap.state.principals,
+		logicalTS:  snap.logicalTS,
+		headLSN:    snap.lsn,
 	}
 }
 

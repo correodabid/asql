@@ -1,0 +1,120 @@
+package executor
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"asql/internal/storage/wal"
+)
+
+func TestPrincipalCatalogReplayPersistsUsersAndPrivileges(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+	walPath := filepath.Join(baseDir, "security-replay.wal")
+	snapDir := filepath.Join(baseDir, "snaps")
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if err := engine.BootstrapAdminPrincipal(ctx, "admin", "secret"); err != nil {
+		t.Fatalf("bootstrap admin: %v", err)
+	}
+	if err := engine.CreateUser(ctx, "analyst", "analyst-secret"); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := engine.GrantPrivilege(ctx, "analyst", PrincipalPrivilegeSelectHistory); err != nil {
+		t.Fatalf("grant history privilege: %v", err)
+	}
+
+	if _, err := engine.AuthenticatePrincipal("admin", "secret"); err != nil {
+		t.Fatalf("authenticate admin before restart: %v", err)
+	}
+	if _, err := engine.AuthenticatePrincipal("analyst", "analyst-secret"); err != nil {
+		t.Fatalf("authenticate analyst before restart: %v", err)
+	}
+	if !engine.HasPrincipalPrivilege("analyst", PrincipalPrivilegeSelectHistory) {
+		t.Fatal("expected analyst to have SELECT_HISTORY before restart")
+	}
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+
+	reopenedStore, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer reopenedStore.Close()
+
+	replayed, err := New(ctx, reopenedStore, snapDir)
+	if err != nil {
+		t.Fatalf("new replayed engine: %v", err)
+	}
+
+	if _, err := replayed.AuthenticatePrincipal("admin", "secret"); err != nil {
+		t.Fatalf("authenticate admin after restart: %v", err)
+	}
+	if _, err := replayed.AuthenticatePrincipal("analyst", "analyst-secret"); err != nil {
+		t.Fatalf("authenticate analyst after restart: %v", err)
+	}
+	if !replayed.HasPrincipalPrivilege("analyst", PrincipalPrivilegeSelectHistory) {
+		t.Fatal("expected analyst to keep SELECT_HISTORY after restart")
+	}
+}
+
+func TestPrincipalSnapshotBinaryRoundTripPreservesCatalog(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+	walPath := filepath.Join(baseDir, "security-snapshot.wal")
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if err := engine.BootstrapAdminPrincipal(ctx, "admin", "secret"); err != nil {
+		t.Fatalf("bootstrap admin: %v", err)
+	}
+	if err := engine.CreateUser(ctx, "reader", "reader-secret"); err != nil {
+		t.Fatalf("create reader: %v", err)
+	}
+	if err := engine.GrantPrivilege(ctx, "reader", PrincipalPrivilegeSelectHistory); err != nil {
+		t.Fatalf("grant history privilege: %v", err)
+	}
+
+	snap := captureSnapshot(engine.readState.Load(), engine.catalog)
+	data, err := encodeSnapshotFileBinary(&snap, true, 0)
+	if err != nil {
+		t.Fatalf("encode snapshot: %v", err)
+	}
+	decoded, ok, err := decodeSingleFullSnapshotBinary(data)
+	if err != nil {
+		t.Fatalf("decode snapshot: %v", err)
+	}
+	if !ok || len(decoded) != 1 {
+		t.Fatalf("expected single full snapshot decode, ok=%v len=%d", ok, len(decoded))
+	}
+
+	principal, ok := decoded[0].state.principals["reader"]
+	if !ok || principal == nil {
+		t.Fatal("expected reader principal in decoded snapshot")
+	}
+	if !principal.enabled {
+		t.Fatal("expected decoded reader principal to be enabled")
+	}
+	if _, ok := principal.privileges[PrincipalPrivilegeSelectHistory]; !ok {
+		t.Fatal("expected decoded reader principal to keep SELECT_HISTORY")
+	}
+}
