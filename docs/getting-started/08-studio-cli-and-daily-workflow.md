@@ -31,7 +31,8 @@ connection targets so you can jump back to earlier nodes quickly, including a
 one-click reconnect path for previously used endpoints. You can also save the
 current target as a named profile when you want a stable shortcut for recurring
 environments such as local development, a demo cluster, or a shared staging
-node.
+node, and you can later rename that profile in place if the environment label
+needs to change without re-entering all endpoints.
 
 After launch, the most useful first-run surfaces are usually:
 

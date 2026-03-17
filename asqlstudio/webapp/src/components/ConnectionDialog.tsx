@@ -72,6 +72,7 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
   const [recentConnections, setRecentConnections] = useState<RecentConnection[]>(() => readRecentConnections())
   const [savedProfiles, setSavedProfiles] = useState<SavedConnectionProfile[]>(() => readSavedConnectionProfiles())
   const [profileName, setProfileName] = useState('')
+  const [editingProfileId, setEditingProfileId] = useState<string | null>(null)
 
   const applyConnection = (config: ConnectionConfig) => {
     setPgwireEndpoint(config.pgwire_endpoint ?? '')
@@ -95,6 +96,10 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
   const handleDeleteProfile = (id: string) => {
     deleteSavedConnectionProfile(id)
     setSavedProfiles((entries) => entries.filter((entry) => entry.id !== id))
+    if (editingProfileId === id) {
+      setEditingProfileId(null)
+      setProfileName('')
+    }
   }
 
   const handleReconnectProfile = async (config: SavedConnectionProfile) => {
@@ -110,9 +115,21 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
       admin_endpoints: parseEndpoints(adminEndpoints),
       data_dir: dataDir,
     }
-    saveConnectionProfile(trimmedName, config)
+    saveConnectionProfile(trimmedName, config, editingProfileId ?? undefined)
     setSavedProfiles(readSavedConnectionProfiles())
     setProfileName(trimmedName)
+    setEditingProfileId(null)
+  }
+
+  const handleRenameProfile = (profile: SavedConnectionProfile) => {
+    setEditingProfileId(profile.id)
+    setProfileName(profile.name)
+    applyConnection(profile)
+  }
+
+  const handleCancelProfileEdit = () => {
+    setEditingProfileId(null)
+    setProfileName('')
   }
 
   const handleSubmit = async () => {
@@ -141,6 +158,9 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
         <div className="conn-grid">
           <div className="conn-field conn-field-wide">
             <span className="conn-label"><IconDatabase /> Saved profiles</span>
+            {editingProfileId && (
+              <div className="conn-inline-note">Editing the selected profile name and endpoints. Saving will replace the existing profile.</div>
+            )}
             <div className="conn-profile-save-row">
               <input
                 className="conn-input"
@@ -150,19 +170,26 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
                 disabled={busy}
               />
               <button className="toolbar-btn" onClick={handleSaveProfile} disabled={busy || !profileName.trim() || !pgwireEndpoint.trim()}>
-                Save profile
+                {editingProfileId ? 'Save changes' : 'Save profile'}
               </button>
+              {editingProfileId && (
+                <button className="toolbar-btn" onClick={handleCancelProfileEdit} disabled={busy}>
+                  Cancel
+                </button>
+              )}
             </div>
             {savedProfiles.length > 0 ? (
               <div className="conn-recent-list conn-profile-list">
                 {savedProfiles.map((entry) => {
                   const isCurrent = current?.pgwire_endpoint?.trim() === entry.pgwire_endpoint.trim()
+                  const isEditing = editingProfileId === entry.id
                   return (
-                    <div key={entry.id} className={`conn-recent-card conn-profile-card${isCurrent ? ' current' : ''}`}>
+                    <div key={entry.id} className={`conn-recent-card conn-profile-card${isCurrent ? ' current' : ''}${isEditing ? ' editing' : ''}`}>
                       <div className="conn-recent-main">
                         <div className="conn-recent-title-row">
                           <div className="conn-recent-title">{entry.name}</div>
                           {isCurrent && <span className="conn-recent-badge">Current</span>}
+                          {isEditing && <span className="conn-recent-badge">Editing</span>}
                         </div>
                         <div className="conn-profile-endpoint">{entry.pgwire_endpoint}</div>
                         <div className="conn-recent-meta">
@@ -177,7 +204,9 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
                         <button className="toolbar-btn primary" onClick={() => void handleReconnectProfile(entry)} disabled={busy || isCurrent}>
                           <IconRefresh /> {isCurrent ? 'Connected' : 'Reconnect'}
                         </button>
+                        <button className="toolbar-btn" onClick={() => handleRenameProfile(entry)} disabled={busy}>Rename</button>
                         <button className="toolbar-btn" onClick={() => {
+                          setEditingProfileId(null)
                           setProfileName(entry.name)
                           applyConnection(entry)
                         }} disabled={busy}>Use</button>

@@ -132,7 +132,7 @@ function writeSavedConnectionProfiles(entries: SavedConnectionProfile[]) {
   window.localStorage.setItem(SAVED_CONNECTIONS_KEY, JSON.stringify(entries))
 }
 
-export function saveConnectionProfile(name: string, config: ConnectionConfig) {
+export function saveConnectionProfile(name: string, config: ConnectionConfig, previousId?: string) {
   const normalizedName = name.trim()
   const normalizedConfig = sanitize(config)
   if (!normalizedName || !normalizedConfig.pgwire_endpoint) {
@@ -145,7 +145,7 @@ export function saveConnectionProfile(name: string, config: ConnectionConfig) {
     name: normalizedName,
     updated_at: new Date().toISOString(),
   }
-  const entries = readSavedConnectionProfiles().filter((entry) => entry.id !== id)
+  const entries = readSavedConnectionProfiles().filter((entry) => entry.id !== id && entry.id !== previousId)
   writeSavedConnectionProfiles([...entries, next])
 }
 

@@ -8296,12 +8296,23 @@ select.editor-input {
   flex: 1;
 }
 
+.conn-inline-note {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
 .conn-profile-list {
   margin-top: 10px;
 }
 
 .conn-profile-card {
   background: rgba(99, 102, 241, 0.08);
+}
+
+.conn-profile-card.editing {
+  border-color: rgba(251, 191, 36, 0.32);
+  background: rgba(251, 191, 36, 0.08);
 }
 
 .conn-profile-endpoint {
