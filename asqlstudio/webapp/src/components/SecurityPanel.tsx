@@ -1,9 +1,11 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
 import {
+  IconActivity,
   IconAlertTriangle,
   IconCheck,
   IconChevronDown,
+  IconClock,
   IconKey,
   IconPlus,
   IconRefresh,
@@ -41,8 +43,21 @@ type SecurityMutationResponse = {
   principal?: PrincipalRecord
 }
 
+type SecurityAuditEvent = {
+  timestamp_utc: string
+  operation: string
+  status: string
+  reason?: string
+  attributes?: Record<string, unknown>
+}
+
+type SecurityAuditEventsResponse = {
+  events?: SecurityAuditEvent[]
+}
+
 const privilegeOptions: PrincipalPrivilege[] = ['SELECT_HISTORY', 'ADMIN']
 const guidedGrantPrivilegeOptions: PrincipalPrivilege[] = ['ADMIN']
+const recentAuditLimit = 12
 
 /* ── Helpers ──────────────────────────────────────────────── */
 
@@ -72,6 +87,37 @@ function capabilitySourceLabel(capability: PrincipalPrivilege, directPrivileges:
   return 'Effective grant'
 }
 
+function humanizeAuditOperation(operation: string) {
+  return operation
+    .split('.')
+    .map((part) => part.replace(/_/g, ' '))
+    .join(' · ')
+}
+
+function formatAuditTimestamp(value: string) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return value
+  }
+  return parsed.toLocaleString()
+}
+
+function auditTone(event: SecurityAuditEvent) {
+  if (event.status === 'failure') {
+    return 'error'
+  }
+  if (event.operation.startsWith('security.')) {
+    return 'accent'
+  }
+  return 'muted'
+}
+
+function auditAttributeEntries(attributes?: Record<string, unknown>) {
+  return Object.entries(attributes ?? {})
+    .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '')
+    .sort(([a], [b]) => a.localeCompare(b))
+}
+
 /* ── Toast types ──────────────────────────────────────────── */
 
 type Toast = { id: number; message: string; kind: 'success' | 'error' }
@@ -94,6 +140,7 @@ type DrawerId =
 
 export function SecurityPanel() {
   const [principals, setPrincipals] = useState<PrincipalRecord[]>([])
+  const [auditEvents, setAuditEvents] = useState<SecurityAuditEvent[]>([])
   const [expanded, setExpanded] = useState<string | null>(null)
   const [activeDrawer, setActiveDrawer] = useState<DrawerId>(null)
   const [toasts, setToasts] = useState<Toast[]>([])
@@ -139,6 +186,18 @@ export function SecurityPanel() {
     [principals],
   )
   const disabledCount = useMemo(() => principals.filter((p) => !p.enabled).length, [principals])
+  const authzFailures = useMemo(
+    () => auditEvents.filter((event) => event.status === 'failure' && event.operation.startsWith('authz.')).length,
+    [auditEvents],
+  )
+  const authFailures = useMemo(
+    () => auditEvents.filter((event) => event.status === 'failure' && event.operation === 'auth.login').length,
+    [auditEvents],
+  )
+  const recentSecurityChanges = useMemo(
+    () => auditEvents.filter((event) => event.operation.startsWith('security.')).length,
+    [auditEvents],
+  )
 
   /* toast helper */
   const toast = (message: string, kind: 'success' | 'error') => {
@@ -149,8 +208,12 @@ export function SecurityPanel() {
 
   /* data fetch */
   const refresh = async () => {
-    const resp = await api<ListPrincipalsResponse>('/api/security/principals', 'GET')
-    setPrincipals((resp.principals ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)))
+    const [principalResp, auditResp] = await Promise.all([
+      api<ListPrincipalsResponse>('/api/security/principals', 'GET'),
+      api<SecurityAuditEventsResponse>(`/api/security/audit?limit=${recentAuditLimit}`, 'GET'),
+    ])
+    setPrincipals((principalResp.principals ?? []).slice().sort((a, b) => a.name.localeCompare(b.name)))
+    setAuditEvents(auditResp.events ?? [])
   }
 
   useEffect(() => {
@@ -590,6 +653,58 @@ export function SecurityPanel() {
         </div>
       )}
 
+      {hasCatalog && (
+        <div className="glass-section" style={{ animationDelay: '130ms' }}>
+          <div className="glass-section-header">
+            <span className="glass-section-title">Recent security activity</span>
+            <span className="sec-catalog-count">Latest {auditEvents.length} event{auditEvents.length === 1 ? '' : 's'}</span>
+          </div>
+          <div className="glass-section-body sec-audit-body">
+            <div className="sec-audit-summary-grid">
+              <AuditSummaryCard
+                icon={<IconAlertTriangle />}
+                label="Failed authz checks"
+                value={authzFailures}
+                tone={authzFailures > 0 ? 'error' : 'ok'}
+                detail={authzFailures > 0 ? 'Recent denials are visible here with the recorded reason.' : 'No denied historical/current checks in the recent feed.'}
+              />
+              <AuditSummaryCard
+                icon={<IconShield />}
+                label="Security changes"
+                value={recentSecurityChanges}
+                tone={recentSecurityChanges > 0 ? 'accent' : 'muted'}
+                detail="Principal, grant, membership, and password changes appear in the same recent audit stream."
+              />
+              <AuditSummaryCard
+                icon={<IconKey />}
+                label="Failed logins"
+                value={authFailures}
+                tone={authFailures > 0 ? 'error' : 'muted'}
+                detail="Authentication failures stay visible alongside authorization denials for operator triage."
+              />
+            </div>
+
+            {auditEvents.length === 0 ? (
+              <div className="sec-audit-empty">
+                <IconActivity />
+                <div>
+                  <div className="sec-audit-empty-title">No recent security events</div>
+                  <div className="sec-audit-empty-detail">
+                    New login attempts, denied reads, and security mutations will appear here.
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="sec-audit-list">
+                {auditEvents.map((event, index) => (
+                  <AuditEventRow key={`${event.timestamp_utc}-${event.operation}-${index}`} event={event} />
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Principal catalog ───────────────────────────── */}
       {hasCatalog && (
         <div className="glass-section" style={{ animationDelay: '160ms' }}>
@@ -644,6 +759,65 @@ export function SecurityPanel() {
               {t.kind === 'success' ? <IconCheck /> : <IconAlertTriangle />}
               <span>{t.message}</span>
             </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function AuditSummaryCard({
+  icon,
+  label,
+  value,
+  tone,
+  detail,
+}: {
+  icon: ReactNode
+  label: string
+  value: number
+  tone: 'ok' | 'error' | 'accent' | 'muted'
+  detail: string
+}) {
+  return (
+    <div className={`sec-audit-summary sec-audit-summary-${tone}`}>
+      <div className="sec-audit-summary-head">
+        <span className="sec-audit-summary-icon">{icon}</span>
+        <span className="sec-audit-summary-label">{label}</span>
+      </div>
+      <div className="sec-audit-summary-value">{value}</div>
+      <div className="sec-audit-summary-detail">{detail}</div>
+    </div>
+  )
+}
+
+function AuditEventRow({ event }: { event: SecurityAuditEvent }) {
+  const attrs = auditAttributeEntries(event.attributes)
+  const tone = auditTone(event)
+
+  return (
+    <div className={`sec-audit-event sec-audit-event-${tone}`}>
+      <div className="sec-audit-event-top">
+        <div className="sec-audit-event-title-wrap">
+          <div className="sec-audit-event-title">{humanizeAuditOperation(event.operation)}</div>
+          <div className="sec-audit-event-meta">
+            <span className={`sec-audit-badge sec-audit-badge-${event.status === 'failure' ? 'failure' : 'success'}`}>
+              {event.status === 'failure' ? 'Failure' : 'Success'}
+            </span>
+            {event.reason && <span className="sec-audit-reason">{event.reason}</span>}
+          </div>
+        </div>
+        <div className="sec-audit-time">
+          <IconClock />
+          <span>{formatAuditTimestamp(event.timestamp_utc)}</span>
+        </div>
+      </div>
+      {attrs.length > 0 && (
+        <div className="sec-audit-attrs">
+          {attrs.map(([key, value]) => (
+            <span key={`${event.timestamp_utc}-${key}`} className="sec-chip sec-chip-inherited">
+              <strong>{key}:</strong>&nbsp;{String(value)}
+            </span>
           ))}
         </div>
       )}

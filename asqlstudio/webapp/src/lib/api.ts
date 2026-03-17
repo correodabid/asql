@@ -79,6 +79,8 @@ export async function api<T>(path: string, _method = 'GET', body?: unknown): Pro
     // ── Security ───────────────────────────────────
     case '/api/security/principals':
       return App.SecurityListPrincipals() as Promise<T>
+    case '/api/security/audit':
+      return App.SecurityRecentAuditEvents(Number(params.get('limit') ?? 0)) as Promise<T>
     case '/api/security/bootstrap-admin':
       return App.SecurityBootstrapAdmin(b.principal ?? '', b.password ?? '') as Promise<T>
     case '/api/security/users':

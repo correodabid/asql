@@ -109,6 +109,8 @@ export function SecurityGrantRole(arg1:string,arg2:string):Promise<Record<string
 
 export function SecurityListPrincipals():Promise<Record<string, any>>;
 
+export function SecurityRecentAuditEvents(arg1:number):Promise<Record<string, any>>;
+
 export function SecurityRevokePrivilege(arg1:string,arg2:string):Promise<Record<string, any>>;
 
 export function SecurityRevokeRole(arg1:string,arg2:string):Promise<Record<string, any>>;

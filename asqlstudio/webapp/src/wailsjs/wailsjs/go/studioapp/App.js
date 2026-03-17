@@ -214,6 +214,10 @@ export function SecurityListPrincipals() {
   return window['go']['studioapp']['App']['SecurityListPrincipals']();
 }
 
+export function SecurityRecentAuditEvents(arg1) {
+  return window['go']['studioapp']['App']['SecurityRecentAuditEvents'](arg1);
+}
+
 export function SecurityRevokePrivilege(arg1, arg2) {
   return window['go']['studioapp']['App']['SecurityRevokePrivilege'](arg1, arg2);
 }
