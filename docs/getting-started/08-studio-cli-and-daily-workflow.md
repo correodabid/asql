@@ -103,6 +103,8 @@ operator token rotation as a substitute for user/password rotation.
 
 For the full security model, privilege semantics, and audit rules, see
 [../reference/database-security-model-v1.md](../reference/database-security-model-v1.md).
+That reference also includes copy/pasteable create/grant/revoke/denied-path
+examples for the current durable-principal workflow.
 
 Example: validate and load a fixture from the CLI.
 

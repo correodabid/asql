@@ -139,6 +139,135 @@ printf 'rotated-pass\n' | go run ./cmd/asqlctl \
 The same operation is also available through the Studio `Security` area and the
 admin API password-set path.
 
+## Worked security workflows
+
+The examples below show the current intended operator flow:
+
+1. bootstrap the first admin principal,
+2. create a normal reader principal,
+3. verify that current reads work but historical reads are denied,
+4. grant explicit historical access,
+5. verify that historical reads now work,
+6. revoke historical access,
+7. verify that the denied path returns.
+
+For the examples below, assume the server was started with one shared operator
+token for simplicity:
+
+```bash
+go run ./cmd/asqld \
+	-addr :5433 \
+	-admin-addr :9090 \
+	-data-dir .asql \
+	-auth-token admin-secret
+```
+
+### Example 1: bootstrap the first admin principal
+
+```bash
+printf 'admin-pass\n' | go run ./cmd/asqlctl \
+	-admin-http 127.0.0.1:9090 \
+	-auth-token admin-secret \
+	-password-stdin \
+	-command principal-bootstrap-admin \
+	-principal admin
+```
+
+After this step, steady-state principal management should happen through the
+durable-principal model rather than by changing the operator token.
+
+### Example 2: create a reader principal
+
+```bash
+printf 'reader-pass\n' | go run ./cmd/asqlctl \
+	-admin-http 127.0.0.1:9090 \
+	-auth-token admin-secret \
+	-password-stdin \
+	security user create reader
+```
+
+Inspect the resulting principal:
+
+```bash
+go run ./cmd/asqlctl \
+	-admin-http 127.0.0.1:9090 \
+	-auth-token admin-secret \
+	security user show reader
+```
+
+At this point, `reader` is a normal authenticated principal without explicit
+historical access.
+
+### Example 3: verify the denied historical path before grant
+
+Current-state reads should work:
+
+```bash
+PGPASSWORD='reader-pass' psql "postgres://reader@127.0.0.1:5433/asql?sslmode=disable" \
+	-c "SELECT id, email FROM app.users ORDER BY id ASC LIMIT 1;"
+```
+
+Historical reads should still be denied because `reader` does not yet have
+`SELECT_HISTORY`:
+
+```bash
+PGPASSWORD='reader-pass' psql "postgres://reader@127.0.0.1:5433/asql?sslmode=disable" \
+	-c "SELECT * FROM app.users FOR HISTORY WHERE id = 1;"
+```
+
+That denied path is expected and is part of the current security model.
+
+### Example 4: grant explicit historical access
+
+```bash
+go run ./cmd/asqlctl \
+	-admin-http 127.0.0.1:9090 \
+	-auth-token admin-secret \
+	security grant history reader
+```
+
+Inspect effective historical access:
+
+```bash
+go run ./cmd/asqlctl \
+	-admin-http 127.0.0.1:9090 \
+	-auth-token admin-secret \
+	security who-can history
+```
+
+After the grant, the same reader can run historical queries even if the target
+rows were committed before the reader principal existed. The authorization
+decision is based on the reader's **current** grant state.
+
+### Example 5: verify the allowed historical path after grant
+
+```bash
+PGPASSWORD='reader-pass' psql "postgres://reader@127.0.0.1:5433/asql?sslmode=disable" \
+	-c "SELECT * FROM app.users FOR HISTORY WHERE id = 1;"
+```
+
+You can also use `AS OF LSN` or `AS OF TIMESTAMP`; the same explicit
+`SELECT_HISTORY` rule applies.
+
+### Example 6: revoke historical access
+
+```bash
+go run ./cmd/asqlctl \
+	-admin-http 127.0.0.1:9090 \
+	-auth-token admin-secret \
+	security revoke history reader
+```
+
+### Example 7: verify the denied path again after revoke
+
+```bash
+PGPASSWORD='reader-pass' psql "postgres://reader@127.0.0.1:5433/asql?sslmode=disable" \
+	-c "SELECT * FROM app.users FOR HISTORY WHERE id = 1;"
+```
+
+After revoke, the historical read should be denied again while ordinary current
+reads can still succeed.
+
 ## Management surfaces
 
 Current supported management surfaces are:
