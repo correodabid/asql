@@ -8292,6 +8292,16 @@ select.editor-input {
   gap: 10px;
 }
 
+.conn-profile-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.conn-hidden-input {
+  display: none;
+}
+
 .conn-profile-save-row .conn-input {
   flex: 1;
 }
@@ -8329,6 +8339,26 @@ select.editor-input {
   color: var(--text-secondary);
   font-size: 12px;
   background: rgba(148, 163, 184, 0.04);
+}
+
+.conn-inline-success,
+.conn-inline-error {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.conn-inline-success {
+  border: 1px solid rgba(74, 222, 128, 0.28);
+  background: rgba(21, 128, 61, 0.14);
+  color: #bbf7d0;
+}
+
+.conn-inline-error {
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  background: rgba(127, 29, 29, 0.18);
+  color: #fecaca;
 }
 
 .conn-recent-list {

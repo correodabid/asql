@@ -11,6 +11,12 @@ export type SavedConnectionProfile = ConnectionConfig & {
   updated_at: string
 }
 
+type SavedConnectionProfilesDocument = {
+  version: 1
+  exported_at: string
+  profiles: SavedConnectionProfile[]
+}
+
 const RECENT_CONNECTIONS_KEY = 'asql_recent_connections_v1'
 const SAVED_CONNECTIONS_KEY = 'asql_saved_connections_v1'
 const MAX_RECENT_CONNECTIONS = 6
@@ -151,4 +157,55 @@ export function saveConnectionProfile(name: string, config: ConnectionConfig, pr
 
 export function deleteSavedConnectionProfile(id: string) {
   writeSavedConnectionProfiles(readSavedConnectionProfiles().filter((entry) => entry.id !== id))
+}
+
+export function exportSavedConnectionProfiles(): string {
+  const document: SavedConnectionProfilesDocument = {
+    version: 1,
+    exported_at: new Date().toISOString(),
+    profiles: readSavedConnectionProfiles(),
+  }
+  return JSON.stringify(document, null, 2)
+}
+
+export function importSavedConnectionProfiles(raw: string): { imported: number } {
+  const parsed = JSON.parse(raw)
+  const source: unknown[] | null = Array.isArray(parsed)
+    ? parsed
+    : parsed && typeof parsed === 'object' && Array.isArray((parsed as { profiles?: unknown[] }).profiles)
+      ? (parsed as { profiles: unknown[] }).profiles
+      : null
+  if (!source) {
+    throw new Error('Invalid profile document')
+  }
+
+  const importedProfiles = source
+    .filter((entry: unknown): entry is Partial<SavedConnectionProfile> => !!entry && typeof entry === 'object')
+    .map((entry: Partial<SavedConnectionProfile>) => {
+      const name = typeof entry.name === 'string' ? entry.name.trim() : ''
+      const config = sanitize({
+        pgwire_endpoint: typeof entry.pgwire_endpoint === 'string' ? entry.pgwire_endpoint : '',
+        follower_endpoint: typeof entry.follower_endpoint === 'string' ? entry.follower_endpoint : '',
+        peer_endpoints: Array.isArray(entry.peer_endpoints) ? entry.peer_endpoints.filter((value: unknown): value is string => typeof value === 'string') : [],
+        admin_endpoints: Array.isArray(entry.admin_endpoints) ? entry.admin_endpoints.filter((value: unknown): value is string => typeof value === 'string') : [],
+        data_dir: typeof entry.data_dir === 'string' ? entry.data_dir : '',
+      })
+      if (!name || !config.pgwire_endpoint) {
+        return null
+      }
+      return {
+        ...config,
+        id: name.toLowerCase(),
+        name,
+        updated_at: typeof entry.updated_at === 'string' ? entry.updated_at : new Date().toISOString(),
+      } satisfies SavedConnectionProfile
+    })
+    .filter((entry: SavedConnectionProfile | null): entry is SavedConnectionProfile => entry !== null)
+
+  const merged = new Map(readSavedConnectionProfiles().map((entry) => [entry.id, entry]))
+  for (const entry of importedProfiles) {
+    merged.set(entry.id, entry)
+  }
+  writeSavedConnectionProfiles(Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name)))
+  return { imported: importedProfiles.length }
 }

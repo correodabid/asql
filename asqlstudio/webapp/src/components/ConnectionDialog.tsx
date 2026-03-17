@@ -1,14 +1,16 @@
-import { useState } from 'react'
+import { useRef, useState, type ChangeEvent } from 'react'
 import {
   deleteRecentConnection,
   deleteSavedConnectionProfile,
+  exportSavedConnectionProfiles,
+  importSavedConnectionProfiles,
   readRecentConnections,
   readSavedConnectionProfiles,
   saveConnectionProfile,
   type RecentConnection,
   type SavedConnectionProfile,
 } from '../lib/connectionHistory'
-import { IconDatabase, IconLink, IconRefresh, IconServer, IconShield, IconX } from './Icons'
+import { IconDatabase, IconDownload, IconLink, IconRefresh, IconServer, IconShield, IconX } from './Icons'
 
 export type ConnectionConfig = {
   pgwire_endpoint: string
@@ -73,6 +75,9 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
   const [savedProfiles, setSavedProfiles] = useState<SavedConnectionProfile[]>(() => readSavedConnectionProfiles())
   const [profileName, setProfileName] = useState('')
   const [editingProfileId, setEditingProfileId] = useState<string | null>(null)
+  const [profileMessage, setProfileMessage] = useState('')
+  const [profileError, setProfileError] = useState('')
+  const importInputRef = useRef<HTMLInputElement | null>(null)
 
   const applyConnection = (config: ConnectionConfig) => {
     setPgwireEndpoint(config.pgwire_endpoint ?? '')
@@ -119,6 +124,8 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
     setSavedProfiles(readSavedConnectionProfiles())
     setProfileName(trimmedName)
     setEditingProfileId(null)
+    setProfileError('')
+    setProfileMessage(editingProfileId ? `Profile “${trimmedName}” updated.` : `Profile “${trimmedName}” saved.`)
   }
 
   const handleRenameProfile = (profile: SavedConnectionProfile) => {
@@ -130,6 +137,40 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
   const handleCancelProfileEdit = () => {
     setEditingProfileId(null)
     setProfileName('')
+    setProfileError('')
+    setProfileMessage('')
+  }
+
+  const handleExportProfiles = () => {
+    const payload = exportSavedConnectionProfiles()
+    const blob = new Blob([payload], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'asqlstudio-connection-profiles.json'
+    link.click()
+    URL.revokeObjectURL(url)
+    setProfileError('')
+    setProfileMessage(`Exported ${savedProfiles.length} saved profile${savedProfiles.length === 1 ? '' : 's'}.`)
+  }
+
+  const handleImportProfiles = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (!file) {
+      return
+    }
+    try {
+      const contents = await file.text()
+      const result = importSavedConnectionProfiles(contents)
+      setSavedProfiles(readSavedConnectionProfiles())
+      setProfileError('')
+      setProfileMessage(`Imported ${result.imported} profile${result.imported === 1 ? '' : 's'} from ${file.name}.`)
+    } catch (importError) {
+      setProfileMessage('')
+      setProfileError(importError instanceof Error ? importError.message : 'Failed to import profiles')
+    } finally {
+      event.target.value = ''
+    }
   }
 
   const handleSubmit = async () => {
@@ -158,6 +199,22 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
         <div className="conn-grid">
           <div className="conn-field conn-field-wide">
             <span className="conn-label"><IconDatabase /> Saved profiles</span>
+            <div className="conn-profile-toolbar">
+              <button className="toolbar-btn" onClick={handleExportProfiles} disabled={busy || savedProfiles.length === 0}>
+                <IconDownload /> Export
+              </button>
+              <button className="toolbar-btn" onClick={() => importInputRef.current?.click()} disabled={busy}>
+                Import
+              </button>
+              <input
+                ref={importInputRef}
+                className="conn-hidden-input"
+                type="file"
+                accept="application/json,.json"
+                onChange={(event) => void handleImportProfiles(event)}
+                disabled={busy}
+              />
+            </div>
             {editingProfileId && (
               <div className="conn-inline-note">Editing the selected profile name and endpoints. Saving will replace the existing profile.</div>
             )}
@@ -221,6 +278,8 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
             ) : (
               <div className="conn-empty-state">Save the current endpoints as a named profile for fast switching later.</div>
             )}
+            {profileMessage && <div className="conn-inline-success">{profileMessage}</div>}
+            {profileError && <div className="conn-inline-error">{profileError}</div>}
           </div>
 
           {recentConnections.length > 0 && (

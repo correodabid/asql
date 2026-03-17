@@ -32,7 +32,9 @@ one-click reconnect path for previously used endpoints. You can also save the
 current target as a named profile when you want a stable shortcut for recurring
 environments such as local development, a demo cluster, or a shared staging
 node, and you can later rename that profile in place if the environment label
-needs to change without re-entering all endpoints.
+needs to change without re-entering all endpoints. Saved profiles can also be
+exported to a JSON document and imported on another Studio install when you
+want to share a stable set of non-secret connection targets across machines.
 
 After launch, the most useful first-run surfaces are usually:
 
