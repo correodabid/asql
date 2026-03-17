@@ -1010,6 +1010,36 @@ func TestParseDerivedTableRequiresAlias(t *testing.T) {
 	}
 }
 
+func TestParseRejectsLateralDerivedTable(t *testing.T) {
+	_, err := Parse("SELECT * FROM users u JOIN LATERAL (SELECT id FROM orders) o ON u.id = o.id")
+	if err == nil {
+		t.Fatal("expected LATERAL derived table to fail")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "lateral derived tables are not supported") {
+		t.Fatalf("expected lateral unsupported error, got %v", err)
+	}
+}
+
+func TestParseRejectsCorrelatedDerivedTable(t *testing.T) {
+	_, err := Parse("SELECT * FROM users u JOIN (SELECT u.id AS outer_user_id FROM orders) o ON u.id = o.outer_user_id")
+	if err == nil {
+		t.Fatal("expected correlated derived table to fail")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "correlated derived tables in from are not supported") {
+		t.Fatalf("expected correlated derived table error, got %v", err)
+	}
+}
+
+func TestParseRejectsCorrelatedDerivedTableInWindowClause(t *testing.T) {
+	_, err := Parse("SELECT * FROM users u JOIN (SELECT ROW_NUMBER() OVER (PARTITION BY u.id ORDER BY id) AS rn FROM orders) o ON u.id = o.rn")
+	if err == nil {
+		t.Fatal("expected correlated derived table via window clause to fail")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "correlated derived tables in from are not supported") {
+		t.Fatalf("expected correlated derived table error, got %v", err)
+	}
+}
+
 func TestParseCTEWithWhere(t *testing.T) {
 	stmt, err := Parse("WITH big AS (SELECT id, amount FROM orders WHERE amount > 100) SELECT * FROM big WHERE id = 1")
 	if err != nil {

@@ -1367,10 +1367,13 @@ func parseTableRef(raw string) (table, alias string) {
 	return table, alias
 }
 
-func parseFromSource(raw string) (table, alias string, derived *ast.CTE, err error) {
+func parseFromSource(raw string, visiblePrefixes map[string]struct{}) (table, alias string, derived *ast.CTE, err error) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return "", "", nil, fmt.Errorf("%w: table name required", errInvalidSQL)
+	}
+	if hasPrefixFold(trimmed, "LATERAL ") {
+		return "", "", nil, fmt.Errorf("%w: LATERAL derived tables are not supported", errUnsupportedSQL)
 	}
 
 	if trimmed[0] != '(' {
@@ -1406,9 +1409,126 @@ func parseFromSource(raw string) (table, alias string, derived *ast.CTE, err err
 	if err != nil {
 		return "", "", nil, err
 	}
+	if hasCorrelatedDerivedTableReference(sel, visiblePrefixes) {
+		return "", "", nil, fmt.Errorf("%w: correlated derived tables in FROM are not supported", errUnsupportedSQL)
+	}
 
 	derived = &ast.CTE{Name: alias, Statement: sel}
 	return alias, "", derived, nil
+}
+
+func registerVisibleSource(prefixes map[string]struct{}, tableName, alias string) {
+	if prefixes == nil {
+		return
+	}
+	if canonical := strings.ToLower(strings.TrimSpace(alias)); canonical != "" {
+		prefixes[canonical] = struct{}{}
+	}
+	canonicalTable := strings.ToLower(strings.TrimSpace(tableName))
+	if canonicalTable == "" {
+		return
+	}
+	prefixes[canonicalTable] = struct{}{}
+	if dot := strings.LastIndex(canonicalTable, "."); dot != -1 && dot+1 < len(canonicalTable) {
+		prefixes[canonicalTable[dot+1:]] = struct{}{}
+	}
+}
+
+func hasCorrelatedDerivedTableReference(sel ast.SelectStatement, visiblePrefixes map[string]struct{}) bool {
+	if len(visiblePrefixes) == 0 {
+		return false
+	}
+	for _, cte := range sel.CTEs {
+		if hasCorrelatedDerivedTableReference(cte.Statement, visiblePrefixes) {
+			return true
+		}
+	}
+	for _, column := range sel.Columns {
+		if expressionReferencesVisiblePrefix(column, visiblePrefixes) {
+			return true
+		}
+	}
+	for _, ja := range sel.JsonAccessColumns {
+		if expressionReferencesVisiblePrefix(ja.Column, visiblePrefixes) {
+			return true
+		}
+	}
+	for _, cw := range sel.CaseWhenColumns {
+		for _, branch := range cw.Branches {
+			if expressionReferencesVisiblePrefix(branch.Condition, visiblePrefixes) || expressionReferencesVisiblePrefix(branch.Result, visiblePrefixes) {
+				return true
+			}
+		}
+		if expressionReferencesVisiblePrefix(cw.ElseResult, visiblePrefixes) {
+			return true
+		}
+	}
+	for _, wf := range sel.WindowFunctions {
+		for _, arg := range wf.Args {
+			if expressionReferencesVisiblePrefix(arg, visiblePrefixes) {
+				return true
+			}
+		}
+		for _, partition := range wf.Partition {
+			if expressionReferencesVisiblePrefix(partition, visiblePrefixes) {
+				return true
+			}
+		}
+		for _, order := range wf.OrderBy {
+			if expressionReferencesVisiblePrefix(order.Column, visiblePrefixes) {
+				return true
+			}
+		}
+	}
+	if predicateReferencesVisiblePrefix(sel.Where, visiblePrefixes) || predicateReferencesVisiblePrefix(sel.Having, visiblePrefixes) {
+		return true
+	}
+	for _, column := range sel.GroupBy {
+		if expressionReferencesVisiblePrefix(column, visiblePrefixes) {
+			return true
+		}
+	}
+	for _, order := range sel.OrderBy {
+		if expressionReferencesVisiblePrefix(order.Column, visiblePrefixes) {
+			return true
+		}
+	}
+	for _, join := range sel.Joins {
+		if expressionReferencesVisiblePrefix(join.LeftColumn, visiblePrefixes) || expressionReferencesVisiblePrefix(join.RightColumn, visiblePrefixes) {
+			return true
+		}
+	}
+	return false
+}
+
+func predicateReferencesVisiblePrefix(predicate *ast.Predicate, visiblePrefixes map[string]struct{}) bool {
+	if predicate == nil {
+		return false
+	}
+	if expressionReferencesVisiblePrefix(predicate.Column, visiblePrefixes) {
+		return true
+	}
+	if predicate.JsonAccess != nil && expressionReferencesVisiblePrefix(predicate.JsonAccess.Column, visiblePrefixes) {
+		return true
+	}
+	if predicate.Subquery != nil && hasCorrelatedDerivedTableReference(predicate.Subquery.Statement, visiblePrefixes) {
+		return true
+	}
+	return predicateReferencesVisiblePrefix(predicate.Left, visiblePrefixes) || predicateReferencesVisiblePrefix(predicate.Right, visiblePrefixes)
+}
+
+func expressionReferencesVisiblePrefix(expression string, visiblePrefixes map[string]struct{}) bool {
+	canonical := strings.ToLower(strings.TrimSpace(expression))
+	if canonical == "" {
+		return false
+	}
+	for prefix := range visiblePrefixes {
+		needle := prefix + "."
+		if strings.Contains(canonical, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 // joinKeywords defines the recognised JOIN prefixes in specificity order.
@@ -1490,26 +1610,29 @@ func findTopLevelFold(s, needle string) int {
 func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, []ast.CTE, error) {
 	joinIndex, matchedKeyword, matchedType, found := findFirstJoin(spec)
 	ctes := make([]ast.CTE, 0)
+	visiblePrefixes := make(map[string]struct{})
 
 	if !found {
-		table, alias, derived, err := parseFromSource(spec)
+		table, alias, derived, err := parseFromSource(spec, nil)
 		if err != nil {
 			return "", "", nil, nil, err
 		}
 		if derived != nil {
 			ctes = append(ctes, *derived)
 		}
+		registerVisibleSource(visiblePrefixes, table, alias)
 		return table, alias, nil, ctes, nil
 	}
 
 	leftRaw := strings.TrimSpace(spec[:joinIndex])
-	leftTable, leftAlias, leftDerived, err := parseFromSource(leftRaw)
+	leftTable, leftAlias, leftDerived, err := parseFromSource(leftRaw, nil)
 	if err != nil {
-		return "", "", nil, nil, fmt.Errorf("%w: left table name required", errInvalidSQL)
+		return "", "", nil, nil, err
 	}
 	if leftDerived != nil {
 		ctes = append(ctes, *leftDerived)
 	}
+	registerVisibleSource(visiblePrefixes, leftTable, leftAlias)
 
 	// Iteratively parse each JOIN clause from the remainder.
 	var joins []ast.JoinClause
@@ -1528,9 +1651,9 @@ func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, []ast.CTE,
 				tableRaw = strings.TrimSpace(rest[:nextIdx])
 				rest = strings.TrimSpace(rest[nextIdx+len(nextKW):])
 			}
-			rightTable, rightAlias, rightDerived, err := parseFromSource(tableRaw)
+			rightTable, rightAlias, rightDerived, err := parseFromSource(tableRaw, visiblePrefixes)
 			if err != nil {
-				return "", "", nil, nil, fmt.Errorf("%w: right table name required", errInvalidSQL)
+				return "", "", nil, nil, err
 			}
 			if rightDerived != nil {
 				ctes = append(ctes, *rightDerived)
@@ -1543,6 +1666,7 @@ func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, []ast.CTE,
 			if !nextFound {
 				break
 			}
+			registerVisibleSource(visiblePrefixes, rightTable, rightAlias)
 			currentType = nextType
 			continue
 		}
@@ -1554,9 +1678,9 @@ func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, []ast.CTE,
 		}
 
 		tableRaw := strings.TrimSpace(rest[:onIndex])
-		rightTable, rightAlias, rightDerived, err := parseFromSource(tableRaw)
+		rightTable, rightAlias, rightDerived, err := parseFromSource(tableRaw, visiblePrefixes)
 		if err != nil {
-			return "", "", nil, nil, fmt.Errorf("%w: right table name required", errInvalidSQL)
+			return "", "", nil, nil, err
 		}
 		if rightDerived != nil {
 			ctes = append(ctes, *rightDerived)
@@ -1591,6 +1715,7 @@ func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, []ast.CTE,
 		if !nextFound {
 			break
 		}
+		registerVisibleSource(visiblePrefixes, rightTable, rightAlias)
 		currentType = nextType
 	}
 

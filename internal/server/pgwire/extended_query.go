@@ -1313,8 +1313,8 @@ func (server *Server) resolveDescribedSource(tableName string, cteMap map[string
 		return describedSource{}
 	}
 	sortColumns(cols)
-		oids := server.resolveColumnOIDs(resolved, cols)
-		return describedSource{Columns: cols, OIDs: oids}
+	oids := server.resolveColumnOIDs(resolved, cols)
+	return describedSource{Columns: cols, OIDs: oids}
 }
 
 func parseQualifiedStarName(column string) (string, bool) {
