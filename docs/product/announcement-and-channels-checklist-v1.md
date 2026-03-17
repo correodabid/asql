@@ -50,17 +50,17 @@ Before publishing anything, verify that all public materials say consistently:
 - [x] links to getting-started, compatibility docs, and release/production docs are visible
 
 ### 2. Docs portal
-- [ ] README is aligned with launch messaging
-- [ ] getting-started path is the primary onboarding route
-- [ ] examples are grouped by adoption moment
+- [x] README is aligned with launch messaging
+- [x] getting-started path is the primary onboarding route
+- [x] examples are grouped by adoption moment
 - [x] compatibility and release docs are visible from the docs site
 - [x] benchmark and production docs are visible for evaluators
 
 ### 3. Technical post
-- [ ] final long-form technical launch post chosen from the draft
-- [ ] examples and claims reviewed against current product state
-- [ ] clear "what ASQL is / is not" section included
-- [ ] evaluation path included (`asqld` + pgwire + docs/examples)
+- [x] final long-form technical launch post chosen from the draft
+- [x] examples and claims reviewed against current product state
+- [x] clear "what ASQL is / is not" section included
+- [x] evaluation path included (`asqld` + pgwire + docs/examples)
 
 ### 4. Demo / video
 - [ ] one short walkthrough script exists

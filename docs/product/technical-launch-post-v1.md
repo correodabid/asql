@@ -1,19 +1,14 @@
-# ASQL Technical Launch Post Draft v1
+# ASQL Technical Launch Post v1
 
-Date: 2026-03-15
-Status: historical draft superseded by `technical-launch-post-v1.md`
+Date: 2026-03-17
+Status: selected long-form launch post for `v1.0.0-rc1` through GA.
 Audience: engineering readers, early adopters, and technical evaluators.
 
-Superseded-by:
-- [technical-launch-post-v1.md](technical-launch-post-v1.md)
+## Title
 
-## Working title options
+ASQL: a deterministic SQL engine for systems you need to explain
 
-- ASQL: a deterministic SQL engine for systems you need to explain
-- Why we built ASQL: explicit boundaries, replay-safe history, and practical pgwire
-- ASQL: SQL with deterministic replay and explicit domain boundaries
-
-## Draft post
+## Post
 
 Most databases make you choose one or two of the following:
 - easy local deployment,
@@ -167,22 +162,25 @@ That means:
 
 In other words: ASQL should launch as a system that is understandable and credible, not just interesting.
 
-## Try ASQL the intended way
+## Evaluate ASQL the intended way
 
-The shortest path is:
+The shortest safe evaluation path is:
 
-1. start the canonical server runtime,
+1. start the canonical server runtime with `cmd/asqld`,
 2. connect through pgwire,
 3. model one explicit domain,
 4. try historical reads and fixtures early,
-5. then move into the deeper examples and operator workflows.
+5. inspect compatibility, benchmark, and production docs before widening claims,
+6. then move into the deeper examples and operator workflows.
 
 The product surfaces for that path are already organized around:
 - getting started,
 - pgwire-first integration,
 - fixture-first adoption,
 - deeper reference apps,
-- and explicit compatibility and release docs.
+- compatibility docs,
+- benchmark evidence,
+- and release/production guidance.
 
 ## Closing
 
