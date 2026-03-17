@@ -620,3 +620,70 @@ Acceptance gates (must pass before closing Epic AC)
 - [x] Teams have one reference path for domain-scoped transaction helpers and temporal query composition.
 - [x] Fixture-first onboarding is practical and documented from the main getting-started path.
 - [x] Common compatibility and expectation mismatches are documented before teams hit them by trial and error.
+
+## Epic AG — Database principals and deterministic authorization
+
+Reference inputs:
+- `docs/reference/postgres-compatibility-surface-v1.md`
+- `docs/adr/0001-engine-surface-dx-and-versioned-reference-ergonomics.md`
+
+Execution rule:
+- Treat users, roles, memberships, and grants as engine-owned metadata, not only process configuration.
+- Preserve deterministic replay: security metadata changes must be represented in WAL/state recovery just like other durable catalog changes.
+- Keep transport/admin tokens as deployment/operator controls; do not confuse them with database principals.
+
+P0 — principal catalog and durability:
+- [ ] Define the ASQL principal model (`USER`, `ROLE`, membership, disabled/locked state, password-hash or secret-reference shape).
+- [ ] Persist principal and grant mutations in WAL with deterministic recovery/replay semantics.
+- [ ] Add engine/catalog APIs for principal lookup, role expansion, and grant resolution without relying on process-global mutable state.
+- [ ] Define bootstrap semantics for the first admin principal without making steady-state identity management config-only.
+
+P1 — authorization model and historical semantics:
+- [ ] Define the first privilege surface for database/domain/schema/table operations and operator-sensitive capabilities.
+- [ ] Add explicit privilege semantics for temporal access (`SELECT_HISTORY` / equivalent) instead of treating historical reads as implicit `SELECT`.
+- [ ] Define and document the rule for historical authorization: by default, authorization is evaluated against the current principal/grant state, while the queried data snapshot may target an older `LSN`/timestamp.
+- [ ] Record enough audit information to prove both the target historical point and the grant state under which access was allowed.
+
+P2 — pgwire and execution enforcement:
+- [ ] Replace the fixed shared-user pgwire posture with real database-principal authentication while preserving documented compatibility for supported clients.
+- [ ] Enforce authorization checks in planner/executor for read/write/schema/admin flows, including temporal queries and replay-sensitive operations.
+- [ ] Replace compatibility-shim privilege probes that currently always succeed with grant-aware behavior where claims are made public.
+- [ ] Add deterministic regression coverage for authn/authz, replay recovery of principal state, and denied historical-access paths.
+
+Acceptance gates (must pass before closing Epic AG)
+- [ ] Creating or changing a user/role/grant survives restart and replay because it is represented in durable engine state.
+- [ ] Historical reads have an explicit, documented authorization rule and dedicated regression coverage.
+- [ ] A newly created principal can be granted historical-read capability without backdating its existence or weakening auditability.
+- [ ] Public compatibility docs clearly distinguish transport tokens from database principals and role-based permissions.
+
+## Epic AH — Security management surfaces (CLI + Studio)
+
+Reference inputs:
+- `cmd/asqlctl/`
+- `asqlstudio/`
+
+Execution rule:
+- Expose the minimum secure management surface only after Epic AG defines the engine truth.
+- Prefer guided admin workflows over thin wrappers around raw catalog mutations.
+
+P0 — `asqlctl` security administration:
+- [ ] Add `asqlctl` commands for user/role lifecycle (`create`, `alter`, `disable`, `list`, `show`).
+- [ ] Add `asqlctl` commands for membership and grants/revokes, including temporal-access privileges.
+- [ ] Add `asqlctl` output/views that make effective permissions and inherited role membership explicit.
+- [ ] Add audit-oriented CLI flows to inspect who can access historical data and why.
+
+P1 — Studio security UX:
+- [ ] Add a Studio security area for principals, roles, memberships, and grants.
+- [ ] Add a guided grant flow that makes historical-read access an explicit choice, not an accidental byproduct.
+- [ ] Add effective-permission inspection for a selected user/role, including inherited roles and temporal capabilities.
+- [ ] Add denial/audit visibility in Studio for failed authz checks and recent security-relevant changes.
+
+P2 — docs, examples, and operational guidance:
+- [ ] Document the database security model in getting-started/reference docs, including bootstrap and rotation flows.
+- [ ] Add examples covering: create admin, create reader, grant historical access, revoke historical access, and verify denied paths.
+- [ ] Update compatibility docs so unsupported PostgreSQL role-management statements are either implemented, explicitly translated, or still documented as unsupported.
+
+Acceptance gates (must pass before closing Epic AH)
+- [ ] A production operator can create a user, grant historical-read access, inspect effective permissions, and revoke access from CLI without internal knowledge.
+- [ ] The same core workflows are available from Studio with explicit auditability and low surprise.
+- [ ] User-facing docs explain how historical access works for newly created principals and how that interacts with replay/time-travel.
