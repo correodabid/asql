@@ -59,6 +59,19 @@ function canDeletePrincipal(p: PrincipalRecord) {
   )
 }
 
+function capabilitySourceLabel(capability: PrincipalPrivilege, directPrivileges: string[], effectivePrivileges: string[], effectiveRoles: string[]) {
+  if (!effectivePrivileges.includes(capability)) {
+    return 'Not granted'
+  }
+  if (directPrivileges.includes(capability)) {
+    return 'Direct grant'
+  }
+  if (effectiveRoles.length > 0) {
+    return `Inherited via ${effectiveRoles.length} role${effectiveRoles.length === 1 ? '' : 's'}`
+  }
+  return 'Effective grant'
+}
+
 /* ── Toast types ──────────────────────────────────────────── */
 
 type Toast = { id: number; message: string; kind: 'success' | 'error' }
@@ -752,6 +765,11 @@ function PrincipalCard({
   const effectivePrivileges = sorted(p.effective_privileges as string[])
   const inheritedPrivileges = effectivePrivileges.filter((pr) => !directPrivileges.includes(pr))
   const refs = sorted(p.referenced_by)
+  const canAuthenticate = p.kind === 'USER' && p.enabled
+  const hasAdmin = effectivePrivileges.includes('ADMIN')
+  const hasHistoricalAccess = effectivePrivileges.includes('SELECT_HISTORY')
+  const adminSource = capabilitySourceLabel('ADMIN', directPrivileges, effectivePrivileges, effectiveRoles)
+  const historicalSource = capabilitySourceLabel('SELECT_HISTORY', directPrivileges, effectivePrivileges, effectiveRoles)
 
   return (
     <div
@@ -805,6 +823,56 @@ function PrincipalCard({
             )}
           </div>
 
+          <div className="sec-inspector-grid">
+            <InspectorCard
+              title="Login posture"
+              status={canAuthenticate ? 'Can authenticate' : p.kind === 'ROLE' ? 'Role only' : 'Blocked'}
+              tone={canAuthenticate ? 'ok' : p.kind === 'ROLE' ? 'info' : 'muted'}
+              detail={
+                p.kind === 'ROLE'
+                  ? 'Roles do not log in directly; they bundle permissions for users or other roles.'
+                  : p.enabled
+                    ? 'Enabled users can authenticate and perform baseline current reads.'
+                    : 'Disabled users cannot authenticate until re-enabled.'
+              }
+            />
+            <InspectorCard
+              title="Historical access"
+              status={hasHistoricalAccess ? 'SELECT_HISTORY active' : 'No historical access'}
+              tone={hasHistoricalAccess ? 'history' : 'muted'}
+              detail={
+                hasHistoricalAccess
+                  ? `${historicalSource}. Allows AS OF LSN, AS OF TIMESTAMP, and FOR HISTORY queries under current grant state.`
+                  : 'Grant SELECT_HISTORY explicitly to allow temporal reads and history helpers.'
+              }
+              chips={hasHistoricalAccess ? ['SELECT_HISTORY'] : []}
+            />
+            <InspectorCard
+              title="Admin/operator access"
+              status={hasAdmin ? 'ADMIN active' : 'No admin access'}
+              tone={hasAdmin ? 'admin' : 'muted'}
+              detail={
+                hasAdmin
+                  ? `${adminSource}. Allows administrative mutations and operator-sensitive helpers.`
+                  : 'Without ADMIN, current DDL/DML and operator helpers stay blocked.'
+              }
+              chips={hasAdmin ? ['ADMIN'] : []}
+            />
+            <InspectorCard
+              title="Role inheritance"
+              status={effectiveRoles.length > 0 ? `${effectiveRoles.length} effective role${effectiveRoles.length === 1 ? '' : 's'}` : 'No effective roles'}
+              tone={effectiveRoles.length > 0 ? 'info' : 'muted'}
+              detail={
+                inheritedRoles.length > 0
+                  ? `Includes inherited role chain beyond direct membership: ${inheritedRoles.join(', ')}.`
+                  : directRoles.length > 0
+                    ? 'All current effective roles come from direct membership.'
+                    : 'No role inheritance currently contributes to effective permissions.'
+              }
+              chips={effectiveRoles}
+            />
+          </div>
+
           {/* Attributes grid */}
           <div className="sec-attr-grid">
             <AttrRow label="Direct roles" items={directRoles} variant="role" />
@@ -817,6 +885,37 @@ function PrincipalCard({
             )}
             {refs.length > 0 && <AttrRow label="Referenced by" items={refs} variant="ref" />}
           </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function InspectorCard({
+  title,
+  status,
+  detail,
+  tone,
+  chips = [],
+}: {
+  title: string
+  status: string
+  detail: string
+  tone: 'ok' | 'history' | 'admin' | 'info' | 'muted'
+  chips?: string[]
+}) {
+  return (
+    <div className={`sec-inspector-card sec-inspector-card-${tone}`}>
+      <div className="sec-inspector-title">{title}</div>
+      <div className="sec-inspector-status">{status}</div>
+      <div className="sec-inspector-detail">{detail}</div>
+      {chips.length > 0 && (
+        <div className="sec-inspector-chips">
+          {chips.map((chip) => (
+            <span key={chip} className="sec-chip sec-chip-inherited">
+              {chip}
+            </span>
+          ))}
         </div>
       )}
     </div>

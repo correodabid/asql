@@ -721,7 +721,7 @@ AH-1 — CLI-first management slice:
 P1 — Studio security UX:
 - [x] Add a Studio security area for principals, roles, memberships, and grants.
 - [x] Add a guided grant flow that makes historical-read access an explicit choice, not an accidental byproduct.
-- [ ] Add effective-permission inspection for a selected user/role, including inherited roles and temporal capabilities.
+- [x] Add effective-permission inspection for a selected user/role, including inherited roles and temporal capabilities.
 - [ ] Add denial/audit visibility in Studio for failed authz checks and recent security-relevant changes.
 
 P2 — docs, examples, and operational guidance:
