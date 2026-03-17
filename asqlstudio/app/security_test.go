@@ -33,6 +33,10 @@ func TestSecurityListPrincipalsUsesAdminAuthToken(t *testing.T) {
 	if !ok || len(principals) != 1 {
 		t.Fatalf("unexpected principals payload: %+v", resp)
 	}
+	first, ok := principals[0].(map[string]interface{})
+	if !ok || first["effective_roles"] == nil {
+		t.Fatalf("expected effective roles in principals payload: %+v", resp)
+	}
 }
 
 func TestSecurityMutationsPostJSON(t *testing.T) {
