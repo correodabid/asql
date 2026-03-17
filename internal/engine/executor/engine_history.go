@@ -158,6 +158,19 @@ func (engine *Engine) TimeTravelQueryAsOfLSN(ctx context.Context, sql string, tx
 	return Result{Status: "OK", Rows: rows}, nil
 }
 
+// TimeTravelQueryAsOfLSNAsPrincipal evaluates a SELECT query at targetLSN only
+// when the authenticated durable principal is allowed current read access and
+// explicit temporal-read access.
+func (engine *Engine) TimeTravelQueryAsOfLSNAsPrincipal(ctx context.Context, sql string, txDomains []string, targetLSN uint64, principal string) (Result, error) {
+	if _, err := engine.AuthorizeSQL(principal, sql, txDomains); err != nil {
+		return Result{}, err
+	}
+	if err := engine.AuthorizeHistoricalRead(principal); err != nil {
+		return Result{}, err
+	}
+	return engine.TimeTravelQueryAsOfLSN(ctx, sql, txDomains, targetLSN)
+}
+
 // RowHistory returns the full change history of rows matching a FOR HISTORY query.
 // It reads from the in-memory changeLog on the table — O(changeLog) linear scan.
 func (engine *Engine) RowHistory(ctx context.Context, sql string, txDomains []string) (Result, error) {
@@ -229,6 +242,18 @@ func (engine *Engine) RowHistory(ctx context.Context, sql string, txDomains []st
 	return Result{Status: "OK", Rows: historyRows}, nil
 }
 
+// RowHistoryAsPrincipal returns row history only when the authenticated durable
+// principal holds the explicit temporal-read privilege.
+func (engine *Engine) RowHistoryAsPrincipal(ctx context.Context, sql string, txDomains []string, principal string) (Result, error) {
+	if _, err := engine.AuthorizeSQL(principal, sql, txDomains); err != nil {
+		return Result{}, err
+	}
+	if err := engine.AuthorizeHistoricalRead(principal); err != nil {
+		return Result{}, err
+	}
+	return engine.RowHistory(ctx, sql, txDomains)
+}
+
 // EntityVersionHistory returns the version history for an entity aggregate.
 // If rootPK is non-empty, returns versions for that specific root PK.
 // If rootPK is empty, returns all versions across all root PKs sorted by commitLSN.
@@ -283,6 +308,15 @@ func (engine *Engine) EntityVersionHistory(ctx context.Context, domain string, e
 		sort.Slice(result, func(i, j int) bool { return result[i].CommitLSN < result[j].CommitLSN })
 	}
 	return result, nil
+}
+
+// EntityVersionHistoryAsPrincipal returns entity-version history only when the
+// authenticated durable principal holds the explicit temporal-read privilege.
+func (engine *Engine) EntityVersionHistoryAsPrincipal(ctx context.Context, domain string, entityName string, rootPK string, principal string) ([]EntityVersionHistoryEntry, error) {
+	if err := engine.AuthorizeHistoricalRead(principal); err != nil {
+		return nil, err
+	}
+	return engine.EntityVersionHistory(ctx, domain, entityName, rootPK)
 }
 
 func (engine *Engine) recordScanStrategy(strategy scanStrategy) {
@@ -350,6 +384,19 @@ func (engine *Engine) TimeTravelQueryAsOfTimestamp(ctx context.Context, sql stri
 	}
 
 	return engine.TimeTravelQueryAsOfLSN(ctx, sql, txDomains, resolvedLSN)
+}
+
+// TimeTravelQueryAsOfTimestampAsPrincipal evaluates a timestamp-boundary query
+// only when the authenticated durable principal is allowed current read access
+// and explicit temporal-read access.
+func (engine *Engine) TimeTravelQueryAsOfTimestampAsPrincipal(ctx context.Context, sql string, txDomains []string, logicalTimestamp uint64, principal string) (Result, error) {
+	if _, err := engine.AuthorizeSQL(principal, sql, txDomains); err != nil {
+		return Result{}, err
+	}
+	if err := engine.AuthorizeHistoricalRead(principal); err != nil {
+		return Result{}, err
+	}
+	return engine.TimeTravelQueryAsOfTimestamp(ctx, sql, txDomains, logicalTimestamp)
 }
 
 // rowHistoryFromAuditStore serves a FOR HISTORY query from the persistent audit

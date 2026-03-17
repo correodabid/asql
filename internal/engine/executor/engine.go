@@ -585,6 +585,15 @@ func (engine *Engine) Query(ctx context.Context, sql string, domains []string) (
 	return engine.TimeTravelQueryAsOfLSN(ctx, sql, domains, math.MaxUint64)
 }
 
+// QueryAsPrincipal executes a current-state read only when the authenticated
+// durable principal is allowed to inspect the statement.
+func (engine *Engine) QueryAsPrincipal(ctx context.Context, sql string, domains []string, principal string) (Result, error) {
+	if _, err := engine.AuthorizeSQL(principal, sql, domains); err != nil {
+		return Result{}, err
+	}
+	return engine.Query(ctx, sql, domains)
+}
+
 // Explain returns deterministic plan diagnostics for a supported SQL statement.
 func (engine *Engine) Explain(sql string, txDomains []string) (Result, error) {
 	return engine.explain(sql, txDomains, "", false)

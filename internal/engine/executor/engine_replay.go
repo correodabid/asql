@@ -136,6 +136,16 @@ func (engine *Engine) ReplayToLSN(ctx context.Context, targetLSN uint64) error {
 	return engine.rebuildFromRecordsWithReplayPlans(records, replayPlans, targetLSN, true)
 }
 
+// ReplayToLSNAsPrincipal replays WAL mutations only when the authenticated
+// durable principal holds the explicit admin privilege for replay-sensitive
+// operations.
+func (engine *Engine) ReplayToLSNAsPrincipal(ctx context.Context, targetLSN uint64, principal string) error {
+	if err := engine.AuthorizePrincipalPrivilege(principal, PrincipalPrivilegeAdmin, "replay_to_lsn"); err != nil {
+		return err
+	}
+	return engine.ReplayToLSN(ctx, targetLSN)
+}
+
 func (engine *Engine) readAllReplayRecords(ctx context.Context) ([]ports.WALRecord, []replayPlanCacheEntry, error) {
 	records, err := engine.readAllRecords(ctx)
 	if err != nil {
