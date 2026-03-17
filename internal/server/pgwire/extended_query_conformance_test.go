@@ -620,6 +620,100 @@ func TestExtendedQueryInsertReturningUsesSchemaAwareRowDescription(t *testing.T)
 	}
 }
 
+func TestExtendedQueryQualifiedStarUsesSchemaAwareRowDescription(t *testing.T) {
+	addr, cleanup := startConformanceServer(t)
+	defer cleanup()
+
+	client := newRawProtoClient(t, addr)
+	defer client.close()
+
+	client.simpleQuery("BEGIN DOMAIN accounts")
+	client.simpleQuery("CREATE TABLE users (id INT PRIMARY KEY, email TEXT)")
+	client.simpleQuery("COMMIT")
+
+	client.send(
+		&pgproto3.Parse{Name: "sel_star_alias", Query: "SELECT u.* FROM accounts.users u ORDER BY u.id ASC"},
+		&pgproto3.Describe{ObjectType: 'S', Name: "sel_star_alias"},
+		&pgproto3.Bind{DestinationPortal: "sel_star_alias_portal", PreparedStatement: "sel_star_alias"},
+		&pgproto3.Describe{ObjectType: 'P', Name: "sel_star_alias_portal"},
+		&pgproto3.Sync{},
+	)
+	messages := client.receiveUntilReady()
+
+	var rowDescs []*pgproto3.RowDescription
+	for _, raw := range messages {
+		if msg, ok := raw.(*pgproto3.RowDescription); ok {
+			rowDescs = append(rowDescs, msg)
+		}
+	}
+	if len(rowDescs) != 2 {
+		t.Fatalf("unexpected row description count: got %d want 2", len(rowDescs))
+	}
+	for i, desc := range rowDescs {
+		if len(desc.Fields) != 3 {
+			t.Fatalf("row description %d field count: got %d want 3", i, len(desc.Fields))
+		}
+		if got := string(desc.Fields[0].Name); got != "_lsn" || desc.Fields[0].DataTypeOID != 20 {
+			t.Fatalf("row description %d field 0 = (%q,%d), want (_lsn,20)", i, got, desc.Fields[0].DataTypeOID)
+		}
+		if got := string(desc.Fields[1].Name); got != "id" || desc.Fields[1].DataTypeOID != 20 {
+			t.Fatalf("row description %d field 1 = (%q,%d), want (id,20)", i, got, desc.Fields[1].DataTypeOID)
+		}
+		if got := string(desc.Fields[2].Name); got != "email" || desc.Fields[2].DataTypeOID != 25 {
+			t.Fatalf("row description %d field 2 = (%q,%d), want (email,25)", i, got, desc.Fields[2].DataTypeOID)
+		}
+	}
+}
+
+func TestExtendedQueryDerivedTableRowDescriptionFollowsExpandedColumns(t *testing.T) {
+	addr, cleanup := startConformanceServer(t)
+	defer cleanup()
+
+	client := newRawProtoClient(t, addr)
+	defer client.close()
+
+	client.simpleQuery("BEGIN DOMAIN accounts")
+	client.simpleQuery("CREATE TABLE users (id INT PRIMARY KEY, email TEXT)")
+	client.simpleQuery("COMMIT")
+
+	query := "SELECT * FROM (SELECT u.*, ROW_NUMBER() OVER (ORDER BY u.id ASC) AS rn FROM accounts.users u) s WHERE s.rn = 1 ORDER BY s.id ASC"
+	client.send(
+		&pgproto3.Parse{Name: "derived_star", Query: query},
+		&pgproto3.Describe{ObjectType: 'S', Name: "derived_star"},
+		&pgproto3.Bind{DestinationPortal: "derived_star_portal", PreparedStatement: "derived_star"},
+		&pgproto3.Describe{ObjectType: 'P', Name: "derived_star_portal"},
+		&pgproto3.Sync{},
+	)
+	messages := client.receiveUntilReady()
+
+	var rowDescs []*pgproto3.RowDescription
+	for _, raw := range messages {
+		if msg, ok := raw.(*pgproto3.RowDescription); ok {
+			rowDescs = append(rowDescs, msg)
+		}
+	}
+	if len(rowDescs) != 2 {
+		t.Fatalf("unexpected row description count: got %d want 2", len(rowDescs))
+	}
+	for i, desc := range rowDescs {
+		if len(desc.Fields) != 4 {
+			t.Fatalf("row description %d field count: got %d want 4", i, len(desc.Fields))
+		}
+		if got := string(desc.Fields[0].Name); got != "_lsn" || desc.Fields[0].DataTypeOID != 20 {
+			t.Fatalf("row description %d field 0 = (%q,%d), want (_lsn,20)", i, got, desc.Fields[0].DataTypeOID)
+		}
+		if got := string(desc.Fields[1].Name); got != "id" || desc.Fields[1].DataTypeOID != 20 {
+			t.Fatalf("row description %d field 1 = (%q,%d), want (id,20)", i, got, desc.Fields[1].DataTypeOID)
+		}
+		if got := string(desc.Fields[2].Name); got != "email" || desc.Fields[2].DataTypeOID != 25 {
+			t.Fatalf("row description %d field 2 = (%q,%d), want (email,25)", i, got, desc.Fields[2].DataTypeOID)
+		}
+		if got := string(desc.Fields[3].Name); got != "rn" || desc.Fields[3].DataTypeOID != 20 {
+			t.Fatalf("row description %d field 3 = (%q,%d), want (rn,20)", i, got, desc.Fields[3].DataTypeOID)
+		}
+	}
+}
+
 func TestExtendedQueryBinaryBindSupportsInt4Int8AndBool(t *testing.T) {
 	addr, cleanup := startConformanceServer(t)
 	defer cleanup()

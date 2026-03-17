@@ -1114,33 +1114,12 @@ func (server *Server) describeFields(sql string, activeDomains []string) []pgpro
 		return nil
 	}
 
-	// Explicit column list from AST.
-	cols := make([]string, 0, len(sel.Columns))
-	for _, c := range sel.Columns {
-		canonical := strings.TrimSpace(strings.ToLower(c))
-		if canonical == "" || canonical == "*" {
-			continue
-		}
-		cols = append(cols, canonical)
-	}
-
-	// If SELECT * — try schema lookup to enumerate the table's actual columns.
-	// When the table name is an IMPORT alias, resolve it to the real
-	// domain.table so the schema snapshot lookup succeeds.
-	if len(cols) == 0 && len(sel.Columns) > 0 {
-		lookupSel := sel
-		if importedTables != nil {
-			if resolved, ok := importedTables[strings.ToLower(sel.TableName)]; ok {
-				lookupSel.TableName = resolved
-			}
-		}
-		cols = server.resolveStarColumns(lookupSel)
-		// FOR HISTORY adds canonical metadata columns to every result row; include
-		// them in the RowDescription so the column count matches the DataRows.
-		if sel.ForHistory && len(cols) > 0 {
-			cols = append(cols, executor.HistoryOperationColumnName, executor.HistoryCommitLSNColumnName)
-			sortColumns(cols)
-		}
+	described := server.describeSelectColumns(sel, importedTables)
+	cols := make([]string, len(described))
+	colOIDs := make(map[string]uint32, len(described))
+	for i, desc := range described {
+		cols[i] = desc.Name
+		colOIDs[desc.Name] = desc.OID
 	}
 
 	if len(cols) == 0 {
@@ -1176,15 +1155,6 @@ func (server *Server) describeFields(sql string, activeDomains []string) []pgpro
 	}
 
 	fields := make([]pgproto3.FieldDescription, len(cols))
-	// Try schema-aware type OIDs; fall back to text (25) for unknowns.
-	// Resolve import aliases to the real domain.table for OID lookup.
-	resolvedTableName := sel.TableName
-	if importedTables != nil {
-		if resolved, ok := importedTables[strings.ToLower(sel.TableName)]; ok {
-			resolvedTableName = resolved
-		}
-	}
-	colOIDs := server.resolveColumnOIDs(resolvedTableName, cols)
 	for i, c := range cols {
 		fields[i] = pgproto3.FieldDescription{
 			Name:                 []byte(c),
@@ -1195,6 +1165,208 @@ func (server *Server) describeFields(sql string, activeDomains []string) []pgpro
 		}
 	}
 	return fields
+}
+
+type describedSelectColumn struct {
+	Name string
+	OID  uint32
+}
+
+type describedSource struct {
+	Columns []string
+	OIDs    map[string]uint32
+}
+
+func (server *Server) describeSelectColumns(sel ast.SelectStatement, importedTables map[string]string) []describedSelectColumn {
+	cteMap := make(map[string]ast.SelectStatement, len(sel.CTEs))
+	for _, cte := range sel.CTEs {
+		cteMap[strings.ToLower(cte.Name)] = cte.Statement
+	}
+
+	visiting := make(map[string]bool)
+	sources, baseKey := server.describeSelectSources(sel, cteMap, importedTables, visiting)
+	windowAliases := make(map[string]ast.WindowFunction, len(sel.WindowFunctions))
+	for _, wf := range sel.WindowFunctions {
+		windowAliases[strings.ToLower(wf.Alias)] = wf
+	}
+	jsonAliases := make(map[string]ast.JsonAccess, len(sel.JsonAccessColumns))
+	for _, ja := range sel.JsonAccessColumns {
+		jsonAliases[strings.ToLower(ja.Alias)] = ja
+	}
+	caseAliases := make(map[string]struct{}, len(sel.CaseWhenColumns))
+	for _, cw := range sel.CaseWhenColumns {
+		caseAliases[strings.ToLower(cw.Alias)] = struct{}{}
+	}
+
+	result := make([]describedSelectColumn, 0, len(sel.Columns)+2)
+	for _, raw := range sel.Columns {
+		column := strings.TrimSpace(strings.ToLower(raw))
+		if column == "" {
+			continue
+		}
+		if column == "*" {
+			if source, ok := sources[baseKey]; ok {
+				for _, name := range source.Columns {
+					result = append(result, describedSelectColumn{Name: name, OID: source.OIDs[name]})
+				}
+			}
+			continue
+		}
+		if prefix, ok := parseQualifiedStarName(column); ok {
+			if source, found := sources[prefix]; found {
+				for _, name := range source.Columns {
+					result = append(result, describedSelectColumn{Name: name, OID: source.OIDs[name]})
+				}
+			}
+			continue
+		}
+
+		oid := uint32(25)
+		if wf, ok := windowAliases[column]; ok {
+			oid = inferWindowFunctionOID(wf, sources, baseKey)
+		} else if ja, ok := jsonAliases[column]; ok {
+			if ja.TextMode {
+				oid = 25
+			} else {
+				oid = 114
+			}
+		} else if _, ok := caseAliases[column]; ok {
+			oid = 25
+		} else if resolvedOID, ok := resolveDescribedColumnOID(column, sources, baseKey); ok {
+			oid = resolvedOID
+		}
+		result = append(result, describedSelectColumn{Name: column, OID: oid})
+	}
+
+	if sel.ForHistory && len(result) > 0 {
+		result = append(result,
+			describedSelectColumn{Name: executor.HistoryOperationColumnName, OID: 25},
+			describedSelectColumn{Name: executor.HistoryCommitLSNColumnName, OID: 20},
+		)
+	}
+
+	return result
+}
+
+func (server *Server) describeSelectSources(sel ast.SelectStatement, cteMap map[string]ast.SelectStatement, importedTables map[string]string, visiting map[string]bool) (map[string]describedSource, string) {
+	sources := make(map[string]describedSource)
+	baseKey := strings.ToLower(displaySourceKey(sel.TableName, sel.TableAlias))
+	server.addDescribedSource(sources, sel.TableName, sel.TableAlias, cteMap, importedTables, visiting)
+	for _, join := range sel.Joins {
+		server.addDescribedSource(sources, join.TableName, join.Alias, cteMap, importedTables, visiting)
+	}
+	return sources, baseKey
+}
+
+func displaySourceKey(tableName, alias string) string {
+	if strings.TrimSpace(alias) != "" {
+		return strings.ToLower(strings.TrimSpace(alias))
+	}
+	return strings.ToLower(strings.TrimSpace(tableName))
+}
+
+func (server *Server) addDescribedSource(target map[string]describedSource, tableName, alias string, cteMap map[string]ast.SelectStatement, importedTables map[string]string, visiting map[string]bool) {
+	source := server.resolveDescribedSource(tableName, cteMap, importedTables, visiting)
+	if len(source.Columns) == 0 {
+		return
+	}
+	key := displaySourceKey(tableName, alias)
+	if key != "" {
+		target[key] = source
+	}
+	tableKey := strings.ToLower(strings.TrimSpace(tableName))
+	if tableKey != "" {
+		target[tableKey] = source
+	}
+}
+
+func (server *Server) resolveDescribedSource(tableName string, cteMap map[string]ast.SelectStatement, importedTables map[string]string, visiting map[string]bool) describedSource {
+	canonical := strings.ToLower(strings.TrimSpace(tableName))
+	if canonical == "" {
+		return describedSource{}
+	}
+	if stmt, ok := cteMap[canonical]; ok {
+		if visiting[canonical] {
+			return describedSource{}
+		}
+		visiting[canonical] = true
+		defer delete(visiting, canonical)
+		cols := server.describeSelectColumns(stmt, importedTables)
+		columnNames := make([]string, 0, len(cols))
+		oids := make(map[string]uint32, len(cols))
+		for _, col := range cols {
+			columnNames = append(columnNames, col.Name)
+			oids[col.Name] = col.OID
+		}
+		sortColumns(columnNames)
+		return describedSource{Columns: columnNames, OIDs: oids}
+	}
+
+	resolved := canonical
+	if importedTables != nil {
+		if physical, ok := importedTables[canonical]; ok {
+			resolved = physical
+		}
+	}
+	cols := server.resolveTableColumns(resolved)
+	if len(cols) == 0 {
+		return describedSource{}
+	}
+	sortColumns(cols)
+		oids := server.resolveColumnOIDs(resolved, cols)
+		return describedSource{Columns: cols, OIDs: oids}
+}
+
+func parseQualifiedStarName(column string) (string, bool) {
+	if len(column) <= 2 || !strings.HasSuffix(column, ".*") {
+		return "", false
+	}
+	prefix := strings.TrimSpace(strings.TrimSuffix(column, ".*"))
+	if prefix == "" {
+		return "", false
+	}
+	return strings.ToLower(prefix), true
+}
+
+func resolveDescribedColumnOID(column string, sources map[string]describedSource, baseKey string) (uint32, bool) {
+	if parts := strings.SplitN(column, ".", 2); len(parts) == 2 {
+		if source, ok := sources[parts[0]]; ok {
+			oid, found := source.OIDs[parts[1]]
+			return oid, found
+		}
+		return 25, false
+	}
+	if source, ok := sources[baseKey]; ok {
+		if oid, found := source.OIDs[column]; found {
+			return oid, true
+		}
+	}
+	var resolved uint32
+	var found bool
+	for _, source := range sources {
+		if oid, ok := source.OIDs[column]; ok {
+			if found {
+				return 25, false
+			}
+			resolved = oid
+			found = true
+		}
+	}
+	return resolved, found
+}
+
+func inferWindowFunctionOID(wf ast.WindowFunction, sources map[string]describedSource, baseKey string) uint32 {
+	switch strings.ToUpper(strings.TrimSpace(wf.Function)) {
+	case "ROW_NUMBER", "RANK":
+		return 20
+	case "LAG", "LEAD":
+		if len(wf.Args) > 0 {
+			if oid, ok := resolveDescribedColumnOID(strings.ToLower(strings.TrimSpace(wf.Args[0])), sources, baseKey); ok {
+				return oid
+			}
+		}
+	}
+	return 25
 }
 
 // resolveColumnOIDs returns a map of lowercase column name → postgres OID by
@@ -1235,6 +1407,10 @@ func (server *Server) resolveColumnOIDs(tableName string, cols []string) map[str
 			}
 			for _, col := range t.Columns {
 				colLower := strings.ToLower(col.Name)
+				if colLower == "_lsn" {
+					result[colLower] = 20
+					continue
+				}
 				if _, wanted := result[colLower]; wanted {
 					result[colLower] = uint32(schemaTypeToOID(col.Type)) //nolint:gosec
 				}
