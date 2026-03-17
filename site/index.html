@@ -53,7 +53,7 @@
       </p>
       <div class="hero-actions">
         <a href="#quickstart" class="btn btn-primary">Get Started</a>
-        <a href="docs.html#production" class="btn btn-ghost">Why ASQL →</a>
+        <a href="docs.html" class="btn btn-ghost">Evaluate Safely →</a>
         <a href="https://github.com/davidrjonas/asql" class="btn btn-ghost" target="_blank" rel="noopener">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           View on GitHub
@@ -718,17 +718,46 @@ docker run -p 5433:5433 \
     </div>
   </section>
 
+  <!-- ═══════════════════════════ EVALUATION PATH ══════════════════════════ -->
+  <section class="section" id="evaluation-path">
+    <div class="container">
+      <div class="section-header">
+        <h2>Evaluate ASQL with the canonical path</h2>
+        <p class="section-sub">Start with <code>asqld</code> over pgwire, then verify compatibility, benchmarks, and production expectations from the documented surfaces.</p>
+      </div>
+      <div class="docs-grid docs-grid-compact">
+        <a href="docs.html" class="docs-ref-card">
+          <h4>Getting Started</h4>
+          <p>The primary onboarding route: local start, first schema, temporal workflows, fixtures, Studio, and integration.</p>
+        </a>
+        <a href="doc.html?path=reference/postgres-compatibility-surface-v1.md" class="docs-ref-card">
+          <h4>Compatibility Matrix</h4>
+          <p>See the supported PostgreSQL-compatible subset and the flows that work today before assuming parity.</p>
+        </a>
+        <a href="doc.html?path=product/benchmark-one-pager-v1.md" class="docs-ref-card">
+          <h4>Benchmark One-Pager</h4>
+          <p>Review benchmark evidence, workload framing, and the current performance posture without hunting through internal notes.</p>
+        </a>
+        <a href="doc.html?path=operations/release-upgrade-compat-checklist-v1.md" class="docs-ref-card">
+          <h4>Production & Release Gates</h4>
+          <p>Inspect the compatibility, upgrade, and release validation gates that bound ASQL's public claims.</p>
+        </a>
+      </div>
+    </div>
+  </section>
+
   <!-- ═══════════════════════════ CTA ══════════════════════════ -->
   <section class="section section-cta">
     <div class="container">
       <h2>Ready to try a database that<br>actually remembers?</h2>
-      <p>ASQL is open source. Start in 2 minutes.</p>
+      <p>ASQL is open source. Start with the documented pgwire path, then validate compatibility, benchmark evidence, and operator workflows from the docs.</p>
       <div class="hero-actions">
         <a href="https://github.com/davidrjonas/asql" class="btn btn-primary" target="_blank" rel="noopener">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           Star on GitHub
         </a>
         <a href="#quickstart" class="btn btn-ghost">Quickstart Guide</a>
+        <a href="docs.html" class="btn btn-ghost">Docs & Evaluation Pack</a>
       </div>
     </div>
   </section>

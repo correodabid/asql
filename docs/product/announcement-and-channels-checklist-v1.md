@@ -44,17 +44,17 @@ Before publishing anything, verify that all public materials say consistently:
 ## Required launch assets
 
 ### 1. Website
-- [ ] home page reflects the final launch narrative
-- [ ] docs landing reflects the canonical pgwire path and compatibility stance
-- [ ] Studio page reflects temporal + cluster/operator workflows, not only UI polish
-- [ ] links to getting-started, compatibility docs, and release/production docs are visible
+- [x] home page reflects the final launch narrative
+- [x] docs landing reflects the canonical pgwire path and compatibility stance
+- [x] Studio page reflects temporal + cluster/operator workflows, not only UI polish
+- [x] links to getting-started, compatibility docs, and release/production docs are visible
 
 ### 2. Docs portal
 - [ ] README is aligned with launch messaging
 - [ ] getting-started path is the primary onboarding route
 - [ ] examples are grouped by adoption moment
-- [ ] compatibility and release docs are visible from the docs site
-- [ ] benchmark and production docs are visible for evaluators
+- [x] compatibility and release docs are visible from the docs site
+- [x] benchmark and production docs are visible for evaluators
 
 ### 3. Technical post
 - [ ] final long-form technical launch post chosen from the draft
