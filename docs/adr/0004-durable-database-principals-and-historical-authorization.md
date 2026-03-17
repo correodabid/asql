@@ -1,6 +1,6 @@
 # ADR 0004: Make database principals durable engine state and authorize historical access explicitly
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-03-17
 - Decision drivers:
   - database users, roles, and grants must survive restart, replay, and clustered replication
@@ -20,11 +20,11 @@ Current posture:
 
 That is sufficient for a narrow single-token compatibility wedge, but it is not sufficient for a multi-user database product.
 
-The missing capability becomes especially visible around time-travel and history:
+The missing capability became especially visible around time-travel and history:
 
 - ASQL can read old state with `AS OF LSN`, `AS OF TIMESTAMP`, and `FOR HISTORY`.
-- there is currently no first-class rule saying who is allowed to do that
-- there is also no durable identity/grant state that can be replayed alongside the rest of the engine state
+- there was no first-class rule saying who is allowed to do that
+- there was also no durable identity/grant state that could be replayed alongside the rest of the engine state
 
 If users/roles/grants lived only in process config or an external side store, replay could reconstruct data state without reconstructing the security state under which the system is supposed to operate.
 That would break restart correctness, weaken auditability, and create drift between nodes.

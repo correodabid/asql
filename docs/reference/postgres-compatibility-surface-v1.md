@@ -28,6 +28,7 @@ matches PostgreSQL closely enough to claim compatibility today, see
   - `AuthenticationOk` when no pgwire password is configured
   - `AuthenticationCleartextPassword` when `AuthToken` / `-auth-token` is configured or when the durable principal catalog is present
   - password validation can use either the shared deployment token or stored database principals, depending on whether the durable principal catalog has been bootstrapped
+  - for historical reads, pgwire evaluates `SELECT_HISTORY` against the current durable principal/grant state even when the target data snapshot is older
 - Session states: `ReadyForQuery` idle (`I`) and in-transaction (`T`).
 - Session/setup compatibility shim:
   - `current_database()`, `version()`, `current_schema()`, `current_user`, `session_user`, and `user`
@@ -99,6 +100,7 @@ matches PostgreSQL closely enough to claim compatibility today, see
 | Parameterized predicates like `WHERE id >= $1` | Supported | Covered through pgwire regression tests. |
 | Cross-domain transactions via `BEGIN CROSS DOMAIN ...` | Supported | ASQL-native transaction model. |
 | Temporal helpers like `current_lsn()` / `row_lsn(...)` | Supported | ASQL-native surface over SQL/pgwire. |
+| `AS OF LSN` / `AS OF TIMESTAMP` / `FOR HISTORY` with durable-principal authz | Supported | Requires explicit `SELECT_HISTORY`; authorization is evaluated against the current principal/grant state, not a historical grant snapshot. |
 | `LIMIT ... OFFSET ...` pagination | Supported | Supported in the current SQL subset; keyset pagination is still recommended for large scans. |
 | `UPDATE ... RETURNING` / `DELETE ... RETURNING` | Unsupported | `RETURNING` is not yet documented/supported end-to-end beyond `INSERT`. |
 | Arrays / `ANY(...)` | Unsupported | Not part of the current ASQL subset. |

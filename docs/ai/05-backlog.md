@@ -668,7 +668,7 @@ P0 — principal catalog and durability:
 P1 — authorization model and historical semantics:
 - [ ] Define the first privilege surface for database/domain/schema/table operations and operator-sensitive capabilities.
 - [x] Add explicit privilege semantics for temporal access (`SELECT_HISTORY` / equivalent) instead of treating historical reads as implicit `SELECT`.
-- [ ] Define and document the rule for historical authorization: by default, authorization is evaluated against the current principal/grant state, while the queried data snapshot may target an older `LSN`/timestamp.
+- [x] Define and document the rule for historical authorization: by default, authorization is evaluated against the current principal/grant state, while the queried data snapshot may target an older `LSN`/timestamp.
 - [ ] Record enough audit information to prove both the target historical point and the grant state under which access was allowed.
 
 P2 — pgwire and execution enforcement:
@@ -679,7 +679,7 @@ P2 — pgwire and execution enforcement:
 
 Acceptance gates (must pass before closing Epic AG)
 - [ ] Creating or changing a user/role/grant survives restart and replay because it is represented in durable engine state.
-- [ ] Historical reads have an explicit, documented authorization rule and dedicated regression coverage.
+- [x] Historical reads have an explicit, documented authorization rule and dedicated regression coverage.
 - [ ] A newly created principal can be granted historical-read capability without backdating its existence or weakening auditability.
 - [ ] Public compatibility docs clearly distinguish transport tokens from database principals and role-based permissions.
 

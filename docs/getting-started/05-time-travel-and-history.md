@@ -27,6 +27,38 @@ There are lower-level admin and recovery commands elsewhere in the product, but
 the normal developer path in getting-started should be pgwire queries and
 Studio.
 
+## Historical access authorization rule
+
+When the durable principal catalog is enabled, historical reads are authorized
+against the **current** principal/grant state, not against a reconstructed
+historical security state.
+
+That means:
+
+- ordinary `SELECT` is not enough for time-travel or history access,
+- `AS OF LSN`, `AS OF TIMESTAMP`, and `FOR HISTORY` require the explicit
+	`SELECT_HISTORY` privilege,
+- the data snapshot may be old, but the authorization decision is made using
+	the principal's current grants,
+- ASQL does not pretend that a user or role existed in the past just because
+	the query targets an old `LSN` or timestamp.
+
+Example consequence:
+
+1. a principal is created today,
+2. `SELECT_HISTORY` is granted today,
+3. that principal can now query older snapshots,
+4. audit output records the current authorization decision instead of inventing
+	a backdated principal history.
+
+This keeps the model deterministic and auditable:
+
+- time-travel answers “what did the data look like then?”
+- authorization answers “is this principal allowed to ask for that now?”
+
+If your workflow needs ordinary current reads but not historical visibility,
+grant current read access without granting `SELECT_HISTORY`.
+
 ## Supported temporal helper surface
 
 These helpers are part of the supported product surface:
@@ -90,6 +122,10 @@ SELECT * FROM app.users FOR HISTORY WHERE id = 1;
 ```
 
 Use this when you want the chronological mutation trail for one row or a filtered set of rows.
+
+When the durable principal catalog is enabled, `FOR HISTORY` is also covered by
+the same explicit `SELECT_HISTORY` authorization rule as `AS OF LSN` and
+`AS OF TIMESTAMP`.
 
 ## Practical workflow
 
