@@ -3831,7 +3831,7 @@ func TestBaseJoinPredicateUsesQualifiedRootAlias(t *testing.T) {
 			Value:    ast.Literal{Kind: ast.LiteralNumber, NumberValue: 42},
 		},
 	}
-	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	aliasMap := buildAliasMap(plan.DomainName, plan.TableName, plan.TableAlias, plan.Joins)
 	baseTable := &tableState{
 		columns: []string{"id", "status"},
 		indexes: map[string]*indexState{
@@ -3861,7 +3861,7 @@ func TestBaseJoinPredicateRejectsJoinedTableFilter(t *testing.T) {
 			Value:    ast.Literal{Kind: ast.LiteralNumber, NumberValue: 42},
 		},
 	}
-	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	aliasMap := buildAliasMap(plan.DomainName, plan.TableName, plan.TableAlias, plan.Joins)
 	baseTable := &tableState{columns: []string{"id", "status"}}
 
 	if predicate := baseJoinPredicate(plan, aliasMap, baseTable); predicate != nil {
@@ -3880,7 +3880,7 @@ func TestBaseJoinPredicatePreservesIndexedOR(t *testing.T) {
 			Right:    &ast.Predicate{Column: "o.id", Operator: "=", Value: ast.Literal{Kind: ast.LiteralNumber, NumberValue: 42}},
 		},
 	}
-	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	aliasMap := buildAliasMap(plan.DomainName, plan.TableName, plan.TableAlias, plan.Joins)
 	baseTable := &tableState{
 		columns: []string{"id", "status"},
 		indexes: map[string]*indexState{
@@ -3913,7 +3913,7 @@ func TestBaseJoinPredicatePreservesHybridIndexedOR(t *testing.T) {
 			Right:    &ast.Predicate{Column: "o.status", Operator: "=", Value: ast.Literal{Kind: ast.LiteralString, StringValue: "open"}},
 		},
 	}
-	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	aliasMap := buildAliasMap(plan.DomainName, plan.TableName, plan.TableAlias, plan.Joins)
 	baseTable := &tableState{
 		columns: []string{"id", "status"},
 		indexes: map[string]*indexState{
@@ -4008,7 +4008,7 @@ func TestBaseJoinPredicateUsesIndexedConjunctFromRootFilter(t *testing.T) {
 			},
 		},
 	}
-	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	aliasMap := buildAliasMap(plan.DomainName, plan.TableName, plan.TableAlias, plan.Joins)
 	baseTable := &tableState{
 		columns: []string{"id", "status"},
 		indexes: map[string]*indexState{
@@ -4046,7 +4046,7 @@ func TestBaseJoinPredicateRejectsOrFilter(t *testing.T) {
 			},
 		},
 	}
-	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	aliasMap := buildAliasMap(plan.DomainName, plan.TableName, plan.TableAlias, plan.Joins)
 	baseTable := &tableState{columns: []string{"id", "status"}}
 
 	if predicate := baseJoinPredicate(plan, aliasMap, baseTable); predicate != nil {
@@ -4073,7 +4073,7 @@ func TestRootJoinPredicateKeepsRootConjunctsOnly(t *testing.T) {
 			},
 		},
 	}
-	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	aliasMap := buildAliasMap(plan.DomainName, plan.TableName, plan.TableAlias, plan.Joins)
 	baseTable := &tableState{columns: []string{"id", "status"}}
 
 	predicate := rootJoinPredicate(plan, aliasMap, baseTable)
@@ -4104,7 +4104,7 @@ func TestRootJoinPredicatePreservesOrTree(t *testing.T) {
 			},
 		},
 	}
-	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	aliasMap := buildAliasMap(plan.DomainName, plan.TableName, plan.TableAlias, plan.Joins)
 	baseTable := &tableState{columns: []string{"id", "status"}}
 
 	predicate := rootJoinPredicate(plan, aliasMap, baseTable)
@@ -5526,6 +5526,86 @@ func TestQualifiedWindowRefsInsideDerivedTable(t *testing.T) {
 	}
 	if result.Rows[2]["s.user_id"].NumberValue != 99 || result.Rows[2]["s.amount"].NumberValue != 50 {
 		t.Fatalf("unexpected third row: %+v", result.Rows[2])
+	}
+}
+
+func TestMultipleDerivedTableJoins(t *testing.T) {
+	engine := setupJoinEngine(t)
+	ctx := context.Background()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+		"SELECT profile.name, ranked.amount FROM (SELECT id, name FROM users WHERE id <= 2) profile JOIN (SELECT user_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM orders) ranked ON profile.id = ranked.user_id JOIN (SELECT id FROM sizes WHERE id <= 2) allowed ON profile.id = allowed.id WHERE ranked.rn = 1 ORDER BY profile.name ASC",
+		[]string{"store"}, 8192)
+	if err != nil {
+		t.Fatalf("multiple derived table joins: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d: %+v", len(result.Rows), result.Rows)
+	}
+	if result.Rows[0]["profile.name"].StringValue != "Alice" || result.Rows[0]["ranked.amount"].NumberValue != 200 {
+		t.Fatalf("unexpected first row: %+v", result.Rows[0])
+	}
+	if result.Rows[1]["profile.name"].StringValue != "Bob" || result.Rows[1]["ranked.amount"].NumberValue != 150 {
+		t.Fatalf("unexpected second row: %+v", result.Rows[1])
+	}
+}
+
+func TestBaseTableWithMultipleDerivedJoins(t *testing.T) {
+	engine := setupJoinEngine(t)
+	ctx := context.Background()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+		"SELECT users.name, ranked.amount, allowed.label FROM users JOIN (SELECT user_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM orders) ranked ON users.id = ranked.user_id JOIN (SELECT id, label FROM sizes WHERE id <= 2) allowed ON users.id = allowed.id WHERE ranked.rn = 1 ORDER BY users.name ASC",
+		[]string{"store"}, 8192)
+	if err != nil {
+		t.Fatalf("base table with multiple derived joins: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d: %+v", len(result.Rows), result.Rows)
+	}
+	if result.Rows[0]["users.name"].StringValue != "Alice" || result.Rows[0]["ranked.amount"].NumberValue != 200 || result.Rows[0]["allowed.label"].StringValue != "S" {
+		t.Fatalf("unexpected first row: %+v", result.Rows[0])
+	}
+	if result.Rows[1]["users.name"].StringValue != "Bob" || result.Rows[1]["ranked.amount"].NumberValue != 150 || result.Rows[1]["allowed.label"].StringValue != "M" {
+		t.Fatalf("unexpected second row: %+v", result.Rows[1])
+	}
+}
+
+func TestFullyQualifiedBaseTableWithMultipleDerivedJoins(t *testing.T) {
+	engine := setupJoinEngine(t)
+	ctx := context.Background()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+		"SELECT users.name, ranked.amount, allowed.label FROM store.users JOIN (SELECT user_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM store.orders) ranked ON store.users.id = ranked.user_id JOIN (SELECT id, label FROM store.sizes WHERE id <= 2) allowed ON store.users.id = allowed.id WHERE ranked.rn = 1 ORDER BY store.users.id ASC",
+		[]string{"store"}, 8192)
+	if err != nil {
+		t.Fatalf("fully qualified base table with multiple derived joins: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d: %+v", len(result.Rows), result.Rows)
+	}
+	if result.Rows[0]["users.name"].StringValue != "Alice" || result.Rows[0]["ranked.amount"].NumberValue != 200 || result.Rows[0]["allowed.label"].StringValue != "S" {
+		t.Fatalf("unexpected first row: %+v", result.Rows[0])
+	}
+	if result.Rows[1]["users.name"].StringValue != "Bob" || result.Rows[1]["ranked.amount"].NumberValue != 150 || result.Rows[1]["allowed.label"].StringValue != "M" {
+		t.Fatalf("unexpected second row: %+v", result.Rows[1])
+	}
+}
+
+func TestAliasedQualifiedColumnsAcrossMultipleDerivedJoins(t *testing.T) {
+	engine := setupJoinEngine(t)
+	ctx := context.Background()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+		"SELECT users.name AS name, ranked.amount AS amount, allowed.label AS label FROM store.users JOIN (SELECT user_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM store.orders) ranked ON store.users.id = ranked.user_id JOIN (SELECT id, label FROM store.sizes WHERE id <= 2) allowed ON store.users.id = allowed.id WHERE ranked.rn = 1 ORDER BY store.users.id ASC",
+		[]string{"store"}, 8192)
+	if err != nil {
+		t.Fatalf("aliased qualified columns across multiple derived joins: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d: %+v", len(result.Rows), result.Rows)
+	}
+	if result.Rows[0]["name"].StringValue != "Alice" || result.Rows[0]["amount"].NumberValue != 200 || result.Rows[0]["label"].StringValue != "S" {
+		t.Fatalf("unexpected first row: %+v", result.Rows[0])
+	}
+	if result.Rows[1]["name"].StringValue != "Bob" || result.Rows[1]["amount"].NumberValue != 150 || result.Rows[1]["label"].StringValue != "M" {
+		t.Fatalf("unexpected second row: %+v", result.Rows[1])
 	}
 }
 

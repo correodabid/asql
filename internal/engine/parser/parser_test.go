@@ -1000,6 +1000,32 @@ func TestParseJoinWithDerivedRightTable(t *testing.T) {
 	}
 }
 
+func TestParseMultipleDerivedTableJoins(t *testing.T) {
+	stmt, err := Parse("SELECT profile.name, ranked.amount FROM (SELECT id, name FROM users WHERE id <= 2) profile JOIN (SELECT user_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM orders) ranked ON profile.id = ranked.user_id JOIN (SELECT id FROM sizes WHERE id <= 2) allowed ON profile.id = allowed.id WHERE ranked.rn = 1")
+	if err != nil {
+		t.Fatalf("parse multiple derived table joins: %v", err)
+	}
+	sel := stmt.(ast.SelectStatement)
+	if sel.TableName != "profile" {
+		t.Fatalf("expected main table profile, got %q", sel.TableName)
+	}
+	if len(sel.CTEs) != 3 {
+		t.Fatalf("expected 3 synthetic CTEs, got %d", len(sel.CTEs))
+	}
+	if sel.CTEs[0].Name != "profile" || sel.CTEs[1].Name != "ranked" || sel.CTEs[2].Name != "allowed" {
+		t.Fatalf("expected derived CTE names profile, ranked, allowed, got %+v", sel.CTEs)
+	}
+	if len(sel.Joins) != 2 {
+		t.Fatalf("expected 2 joins, got %d", len(sel.Joins))
+	}
+	if sel.Joins[0].TableName != "ranked" || sel.Joins[0].LeftColumn != "profile.id" || sel.Joins[0].RightColumn != "ranked.user_id" {
+		t.Fatalf("unexpected first join: %+v", sel.Joins[0])
+	}
+	if sel.Joins[1].TableName != "allowed" || sel.Joins[1].LeftColumn != "profile.id" || sel.Joins[1].RightColumn != "allowed.id" {
+		t.Fatalf("unexpected second join: %+v", sel.Joins[1])
+	}
+}
+
 func TestParseDerivedTableRequiresAlias(t *testing.T) {
 	_, err := Parse("SELECT * FROM (SELECT id FROM users)")
 	if err == nil {

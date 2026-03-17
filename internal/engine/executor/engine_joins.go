@@ -148,23 +148,33 @@ func nullFilledRow(columns []string) map[string]ast.Literal {
 // buildAliasMap creates a mapping from alias (or table name) to the display prefix
 // used in qualified row keys. When aliases are present, the alias is used as the
 // prefix; otherwise the table name itself is used.
-func buildAliasMap(tableName, tableAlias string, joins []ast.JoinClause) map[string]string {
+func buildAliasMap(domainName, tableName, tableAlias string, joins []ast.JoinClause) map[string]string {
 	m := make(map[string]string, 2+len(joins)*2)
-	if tableAlias != "" {
-		m[tableAlias] = tableAlias
-		m[tableName] = tableAlias
-	} else {
-		m[tableName] = tableName
-	}
+	registerAliasMapping(m, domainName, tableName, tableAlias)
 	for _, j := range joins {
-		if j.Alias != "" {
-			m[j.Alias] = j.Alias
-			m[j.TableName] = j.Alias
-		} else {
-			m[j.TableName] = j.TableName
-		}
+		registerAliasMapping(m, j.DomainName, j.TableName, j.Alias)
 	}
 	return m
+}
+
+func registerAliasMapping(target map[string]string, domainName, tableName, alias string) {
+	if alias != "" {
+		target[alias] = alias
+		target[tableName] = alias
+	} else {
+		target[tableName] = tableName
+	}
+	domainName = strings.TrimSpace(strings.ToLower(domainName))
+	tableName = strings.TrimSpace(strings.ToLower(tableName))
+	alias = strings.TrimSpace(strings.ToLower(alias))
+	if domainName != "" && tableName != "" {
+		qualified := domainName + "." + tableName
+		if alias != "" {
+			target[qualified] = alias
+		} else {
+			target[qualified] = tableName
+		}
+	}
 }
 
 // displayPrefix returns the prefix to use for qualified row keys.
@@ -496,19 +506,19 @@ func normalizeBasePredicateColumn(column string, aliasMap map[string]string, bas
 		return "", false
 	}
 
-	parts := strings.SplitN(trimmed, ".", 2)
-	if len(parts) == 2 {
-		resolvedPrefix := parts[0]
-		if aliasPrefix, ok := aliasMap[parts[0]]; ok {
+	prefix, bareColumn, ok := splitQualifiedColumnRef(trimmed)
+	if ok {
+		resolvedPrefix := prefix
+		if aliasPrefix, exists := aliasMap[prefix]; exists {
 			resolvedPrefix = aliasPrefix
 		}
 		if resolvedPrefix != strings.ToLower(basePrefix) {
 			return "", false
 		}
-		if !tableHasColumn(baseTable, parts[1]) {
+		if !tableHasColumn(baseTable, bareColumn) {
 			return "", false
 		}
-		return parts[1], true
+		return bareColumn, true
 	}
 
 	if !tableHasColumn(baseTable, trimmed) {
@@ -550,15 +560,23 @@ func mergePipelineRows(left map[string]ast.Literal, rightPrefix string, right ma
 // to use when looking up the value in pipeline rows.
 func resolveJoinColumnRef(colRef string, aliasMap map[string]string) string {
 	colRef = strings.TrimSpace(strings.ToLower(colRef))
-	parts := strings.SplitN(colRef, ".", 2)
-	if len(parts) != 2 {
-		return colRef
-	}
-	prefix, ok := aliasMap[parts[0]]
+	prefixRef, bareColumn, ok := splitQualifiedColumnRef(colRef)
 	if !ok {
 		return colRef
 	}
-	return prefix + "." + parts[1]
+	prefix, ok := aliasMap[prefixRef]
+	if !ok {
+		return colRef
+	}
+	return prefix + "." + bareColumn
+}
+
+func splitQualifiedColumnRef(colRef string) (prefix string, column string, ok bool) {
+	dot := strings.LastIndex(colRef, ".")
+	if dot <= 0 || dot+1 >= len(colRef) {
+		return "", "", false
+	}
+	return colRef[:dot], colRef[dot+1:], true
 }
 
 // extractPipelineJoinValue extracts a join column value from a pipeline row.
@@ -587,7 +605,7 @@ func findVFKForJoin(baseTable *tableState, j ast.JoinClause, baseDomain string) 
 // Starting from the base table, each JOIN step produces intermediate rows
 // that feed into the next JOIN. WHERE is applied after all JOINs complete.
 func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableState, baseDomainState *domainState, plan planner.Plan) ([]map[string]ast.Literal, scanStrategy, error) {
-	aliasMap := buildAliasMap(plan.TableName, plan.TableAlias, plan.Joins)
+	aliasMap := buildAliasMap(plan.DomainName, plan.TableName, plan.TableAlias, plan.Joins)
 
 	baseTable, exists := baseDomainState.tables[plan.TableName]
 	if !exists {
@@ -649,18 +667,18 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 		// The other references the left (pipeline) side.
 		rightColName := "" // bare column name in the right table
 		var pipelineColKey string
-		rightParts := strings.SplitN(rightColKey, ".", 2)
-		leftParts := strings.SplitN(leftColKey, ".", 2)
+		rightPrefixRef, rightBareCol, rightOK := splitQualifiedColumnRef(rightColKey)
+		leftPrefixRef, leftBareCol, leftOK := splitQualifiedColumnRef(leftColKey)
 
-		if len(rightParts) == 2 && rightParts[0] == rightPrefix {
-			rightColName = rightParts[1]
+		if rightOK && rightPrefixRef == rightPrefix {
+			rightColName = rightBareCol
 			pipelineColKey = leftColKey
-		} else if len(leftParts) == 2 && leftParts[0] == rightPrefix {
-			rightColName = leftParts[1]
+		} else if leftOK && leftPrefixRef == rightPrefix {
+			rightColName = leftBareCol
 			pipelineColKey = rightColKey
 		} else {
 			// Fallback: try both; the one matching the right table is pipelineColKey's complement.
-			rightColName = rightParts[1]
+			rightColName = rightBareCol
 			pipelineColKey = leftColKey
 		}
 
@@ -991,12 +1009,12 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 		var leftIndexTable *tableState
 		var leftIndexColRef string
 		if !hasRightIndex {
-			pparts := strings.SplitN(pipelineColKey, ".", 2)
-			if len(pparts) == 2 {
+			pipelinePrefix, pipelineBareCol, pipelineOK := splitQualifiedColumnRef(pipelineColKey)
+			if pipelineOK {
 				// Resolve alias to real table name.
-				leftRealTable := pparts[0]
+				leftRealTable := pipelinePrefix
 				for tbl, prefix := range aliasMap {
-					if prefix == pparts[0] && tbl != prefix {
+					if prefix == pipelinePrefix && tbl != prefix {
 						leftRealTable = tbl
 						break
 					}
@@ -1010,7 +1028,7 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 					}
 				}
 				if lt, ok := leftDS.tables[leftRealTable]; ok {
-					leftIndexColRef = leftRealTable + "." + pparts[1]
+					leftIndexColRef = leftRealTable + "." + pipelineBareCol
 					if hasJoinIndex(lt, leftRealTable, leftIndexColRef) {
 						hasLeftIndex = true
 						leftIndexTable = lt

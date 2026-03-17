@@ -268,6 +268,7 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 				expandQualifiedStar(projected, row, table, plan, prefix)
 				continue
 			}
+			expr, alias := stripColumnAlias(column)
 			if ja, ok := jsonAccessMap[column]; ok {
 				if val, resolved := resolveJsonAccess(row, ja); resolved {
 					projected[column] = val
@@ -282,8 +283,6 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 				continue
 			}
 			// Row-level functions: COALESCE, NULLIF.
-			// Strip AS alias if present so the function call can be parsed.
-			expr, alias := stripColumnAlias(column)
 			// NOW() — returns deterministic logical timestamp.
 			if strings.ToLower(strings.TrimSpace(expr)) == "now()" {
 				projected[alias] = ast.Literal{Kind: ast.LiteralString, StringValue: formatLogicalTimestamp(state.logicalTS)}
@@ -298,8 +297,8 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 				projected[alias] = val
 				continue
 			}
-			if value, ok := row[column]; ok {
-				projected[column] = value
+			if value, ok := row[expr]; ok {
+				projected[alias] = value
 			}
 		}
 		result = append(result, projected)

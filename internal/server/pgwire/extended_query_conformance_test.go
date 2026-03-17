@@ -714,6 +714,81 @@ func TestExtendedQueryDerivedTableRowDescriptionFollowsExpandedColumns(t *testin
 	}
 }
 
+func TestExtendedQueryMultipleDerivedJoinsDescribeAndExecute(t *testing.T) {
+	addr, cleanup := startConformanceServer(t)
+	defer cleanup()
+
+	client := newRawProtoClient(t, addr)
+	defer client.close()
+
+	client.simpleQuery("BEGIN DOMAIN accounts")
+	client.simpleQuery("CREATE TABLE users (id INT PRIMARY KEY, email TEXT)")
+	client.simpleQuery("CREATE TABLE orders (id INT PRIMARY KEY, user_id INT, amount INT)")
+	client.simpleQuery("CREATE TABLE sizes (id INT PRIMARY KEY, label TEXT)")
+	client.simpleQuery("INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')")
+	client.simpleQuery("INSERT INTO users (id, email) VALUES (2, 'two@asql.dev')")
+	client.simpleQuery("INSERT INTO users (id, email) VALUES (3, 'three@asql.dev')")
+	client.simpleQuery("INSERT INTO orders (id, user_id, amount) VALUES (10, 1, 100)")
+	client.simpleQuery("INSERT INTO orders (id, user_id, amount) VALUES (20, 1, 200)")
+	client.simpleQuery("INSERT INTO orders (id, user_id, amount) VALUES (30, 2, 150)")
+	client.simpleQuery("INSERT INTO sizes (id, label) VALUES (1, 'S')")
+	client.simpleQuery("INSERT INTO sizes (id, label) VALUES (2, 'M')")
+	client.simpleQuery("INSERT INTO sizes (id, label) VALUES (3, 'L')")
+	client.simpleQuery("COMMIT")
+
+	query := "SELECT users.email AS email, ranked.amount AS amount, allowed.label AS label FROM accounts.users JOIN (SELECT user_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM accounts.orders) ranked ON accounts.users.id = ranked.user_id JOIN (SELECT id, label FROM accounts.sizes WHERE id <= 2) allowed ON accounts.users.id = allowed.id WHERE ranked.rn = 1 ORDER BY accounts.users.id ASC"
+	client.send(
+		&pgproto3.Parse{Name: "multi_derived_join", Query: query},
+		&pgproto3.Describe{ObjectType: 'S', Name: "multi_derived_join"},
+		&pgproto3.Bind{DestinationPortal: "multi_derived_join_portal", PreparedStatement: "multi_derived_join"},
+		&pgproto3.Describe{ObjectType: 'P', Name: "multi_derived_join_portal"},
+		&pgproto3.Execute{Portal: "multi_derived_join_portal", MaxRows: 0},
+		&pgproto3.Sync{},
+	)
+	messages := client.receiveUntilReady()
+
+	var (
+		rowDescs []*pgproto3.RowDescription
+		rows     [][]string
+	)
+	for _, raw := range messages {
+		if msg, ok := raw.(*pgproto3.RowDescription); ok {
+			rowDescs = append(rowDescs, msg)
+			continue
+		}
+		if msg, ok := raw.(*pgproto3.DataRow); ok {
+			values := make([]string, len(msg.Values))
+			for i, value := range msg.Values {
+				values[i] = string(value)
+			}
+			rows = append(rows, values)
+		}
+	}
+
+	if len(rowDescs) != 2 {
+		t.Fatalf("unexpected row description count: got %d want 2", len(rowDescs))
+	}
+	for i, desc := range rowDescs {
+		if len(desc.Fields) != 3 {
+			t.Fatalf("row description %d field count: got %d want 3", i, len(desc.Fields))
+		}
+		if got := string(desc.Fields[0].Name); got != "email" || desc.Fields[0].DataTypeOID != 25 {
+			t.Fatalf("row description %d field 0 = (%q,%d), want (email,25)", i, got, desc.Fields[0].DataTypeOID)
+		}
+		if got := string(desc.Fields[1].Name); got != "amount" || desc.Fields[1].DataTypeOID != 20 {
+			t.Fatalf("row description %d field 1 = (%q,%d), want (amount,20)", i, got, desc.Fields[1].DataTypeOID)
+		}
+		if got := string(desc.Fields[2].Name); got != "label" || desc.Fields[2].DataTypeOID != 25 {
+			t.Fatalf("row description %d field 2 = (%q,%d), want (label,25)", i, got, desc.Fields[2].DataTypeOID)
+		}
+	}
+
+	wantRows := [][]string{{"one@asql.dev", "200", "S"}, {"two@asql.dev", "150", "M"}}
+	if !reflect.DeepEqual(rows, wantRows) {
+		t.Fatalf("unexpected rows: got %v want %v", rows, wantRows)
+	}
+}
+
 func TestExtendedQueryBinaryBindSupportsInt4Int8AndBool(t *testing.T) {
 	addr, cleanup := startConformanceServer(t)
 	defer cleanup()

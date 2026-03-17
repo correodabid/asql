@@ -1200,8 +1200,10 @@ func (server *Server) describeSelectColumns(sel ast.SelectStatement, importedTab
 
 	result := make([]describedSelectColumn, 0, len(sel.Columns)+2)
 	for _, raw := range sel.Columns {
-		column := strings.TrimSpace(strings.ToLower(raw))
-		if column == "" {
+		expr, displayName := splitDescribedColumnAlias(raw)
+		column := strings.TrimSpace(strings.ToLower(expr))
+		name := strings.TrimSpace(strings.ToLower(displayName))
+		if column == "" || name == "" {
 			continue
 		}
 		if column == "*" {
@@ -1235,7 +1237,7 @@ func (server *Server) describeSelectColumns(sel ast.SelectStatement, importedTab
 		} else if resolvedOID, ok := resolveDescribedColumnOID(column, sources, baseKey); ok {
 			oid = resolvedOID
 		}
-		result = append(result, describedSelectColumn{Name: column, OID: oid})
+		result = append(result, describedSelectColumn{Name: name, OID: oid})
 	}
 
 	if sel.ForHistory && len(result) > 0 {
@@ -1246,6 +1248,47 @@ func (server *Server) describeSelectColumns(sel ast.SelectStatement, importedTab
 	}
 
 	return result
+}
+
+func splitDescribedColumnAlias(column string) (expr string, alias string) {
+	trimmed := strings.TrimSpace(column)
+	if trimmed == "" {
+		return "", ""
+	}
+	lower := strings.ToLower(trimmed)
+	depth := 0
+	inString := false
+	lastAs := -1
+	for i := 0; i < len(lower); i++ {
+		ch := lower[i]
+		if ch == '\'' {
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+		if depth == 0 && i+4 <= len(lower) && lower[i:i+4] == " as " {
+			lastAs = i
+		}
+	}
+	if lastAs == -1 {
+		return trimmed, trimmed
+	}
+	expr = strings.TrimSpace(trimmed[:lastAs])
+	alias = strings.TrimSpace(trimmed[lastAs+4:])
+	if expr == "" || alias == "" {
+		return trimmed, trimmed
+	}
+	return expr, alias
 }
 
 func (server *Server) describeSelectSources(sel ast.SelectStatement, cteMap map[string]ast.SelectStatement, importedTables map[string]string, visiting map[string]bool) (map[string]describedSource, string) {
