@@ -140,6 +140,7 @@ The current recommended compromise is a narrow ORM-lite lane:
 - and avoid assuming `UPDATE ... RETURNING`, `DELETE ... RETURNING`, arrays, or full catalog parity.
 
 Use [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md) as the exact contract for that path.
+Use [../reference/postgres-app-sql-translation-guide-v1.md](../reference/postgres-app-sql-translation-guide-v1.md) for the next high-return SQL rewrites teams usually need during real app evaluation.
 
 If the team wants a concrete first proof for an existing PostgreSQL-oriented Go
 service, use [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md)

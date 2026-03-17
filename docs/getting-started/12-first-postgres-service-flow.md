@@ -17,6 +17,7 @@ Use it together with:
 - [09-go-sdk-and-integration.md](09-go-sdk-and-integration.md)
 - [10-adoption-playbook.md](10-adoption-playbook.md)
 - [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md)
+- [../reference/postgres-app-sql-translation-guide-v1.md](../reference/postgres-app-sql-translation-guide-v1.md)
 - [../migration/sqlite-postgres-lite-guide-v1.md](../migration/sqlite-postgres-lite-guide-v1.md)
 
 ## What this guide proves
@@ -286,6 +287,9 @@ Defer these until after the basic flow is green:
 
 The first migration wedge is intentionally narrow so the team can separate real
 engine/model fit from abstraction noise.
+
+For the next PostgreSQL-shaped query rewrites after this first workflow is
+green, continue with [../reference/postgres-app-sql-translation-guide-v1.md](../reference/postgres-app-sql-translation-guide-v1.md).
 
 ## Step 9 — recommended proof checklist for the app repository
 

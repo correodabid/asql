@@ -801,13 +801,14 @@ Epic AI P1 slice note (2026-03-17):
 - added regression coverage for the explicit BI-lite read-only path in `internal/server/pgwire/server_test.go`
 
 P2 — app-facing migration wedge:
-- [ ] Add support or explicit translation guidance for the next high-return SQL shapes seen in real app evaluation friction.
+- [x] Add support or explicit translation guidance for the next high-return SQL shapes seen in real app evaluation friction.
 - [x] Add one end-to-end “existing Postgres-oriented app reaches first successful read/write flow on ASQL” guide.
 - [ ] Add a release-gated compatibility smoke pack for the prioritized client/tool/app matrix.
 
 Epic AI P2 slice note (2026-03-17):
 - added [../getting-started/12-first-postgres-service-flow.md](../getting-started/12-first-postgres-service-flow.md) as the first end-to-end PostgreSQL-oriented service migration wedge
 - linked the new guide from the getting-started onboarding flow and adoption/troubleshooting surfaces
+- published [../reference/postgres-app-sql-translation-guide-v1.md](../reference/postgres-app-sql-translation-guide-v1.md) to classify high-return PostgreSQL-shaped SQL into use-now, translate-first, and defer buckets for app evaluation
 
 Acceptance gates (must pass before closing Epic AI)
 - [ ] At least 2 additional mainstream evaluation flows move from blocked to documented-working or explicitly-translated.

@@ -8,6 +8,7 @@ Use it together with:
 
 - [pgwire-driver-guidance-v1.md](pgwire-driver-guidance-v1.md)
 - [postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md)
+- [postgres-app-sql-translation-guide-v1.md](postgres-app-sql-translation-guide-v1.md)
 - [../getting-started/09-go-sdk-and-integration.md](../getting-started/09-go-sdk-and-integration.md)
 
 ## Scope
@@ -104,3 +105,6 @@ If the literal-SQL lane fails, fix the SQL/model assumptions first.
 If the literal-SQL lane passes but the abstraction layer fails, treat it as
 client-surface validation work rather than evidence that the ASQL engine model
 is wrong.
+
+For the next high-return PostgreSQL-shaped SQL rewrites beyond this narrow lane,
+use [postgres-app-sql-translation-guide-v1.md](postgres-app-sql-translation-guide-v1.md).

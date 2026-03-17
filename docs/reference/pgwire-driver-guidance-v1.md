@@ -6,6 +6,7 @@ Use it together with:
 
 - [sql-pgwire-compatibility-policy-v1.md](sql-pgwire-compatibility-policy-v1.md)
 - [postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md)
+- [postgres-app-sql-translation-guide-v1.md](postgres-app-sql-translation-guide-v1.md)
 - [orm-lite-adoption-lane-v1.md](orm-lite-adoption-lane-v1.md)
 - [bi-lite-adoption-lane-v1.md](bi-lite-adoption-lane-v1.md)
 - [../operations/pgwire-compatibility-test-pack-v1.md](../operations/pgwire-compatibility-test-pack-v1.md)
@@ -118,6 +119,11 @@ patterns already have a relatively strong adoption story:
 - narrow `COPY FROM STDIN` / `COPY TO STDOUT` flows.
 
 Treat broader ORM-generated SQL, PostgreSQL-specific types, and full catalog
+parity as separate validation work rather than as automatic consequences of the
+current wedge.
+
+For the highest-return PostgreSQL-shaped SQL rewrites teams usually need during
+app evaluation, use [postgres-app-sql-translation-guide-v1.md](postgres-app-sql-translation-guide-v1.md).
 assumptions as separate validation work, not as implicitly safe extensions of
 the list above.
 
