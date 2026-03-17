@@ -16,10 +16,11 @@ export function WorkspaceTabBar({ tabs, activeTabId, onSelect, onClose, onAdd }:
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            className={`ws-tab ${tab.id === activeTabId ? 'active' : ''}`}
+            className={`ws-tab ${tab.id === activeTabId ? 'active' : ''} ${tab.explainEnabled ? 'explain-enabled' : ''}`}
             onClick={() => onSelect(tab.id)}
           >
             <span className="ws-tab-label">{tab.label}</span>
+            {tab.explainEnabled && <span className="ws-tab-badge">EXPLAIN</span>}
             {tabs.length > 1 && (
               <span
                 className="ws-tab-close"

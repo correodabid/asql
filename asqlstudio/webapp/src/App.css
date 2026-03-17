@@ -3502,10 +3502,41 @@ select.editor-input {
   border-bottom-color: var(--accent);
 }
 
+.ws-tab.explain-enabled {
+  color: color-mix(in srgb, var(--text-primary) 70%, var(--text-accent));
+}
+
+.ws-tab.explain-enabled:not(.active) {
+  border-bottom-color: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.ws-tab.explain-enabled.active {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  box-shadow: inset 0 -2px 0 color-mix(in srgb, var(--accent) 80%, transparent);
+}
+
 .ws-tab-label {
   max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.ws-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 52px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--text-accent);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex-shrink: 0;
 }
 
 .ws-tab-close {
