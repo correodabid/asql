@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -18,6 +20,7 @@ import (
 	"asql/pkg/fixtures"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	api "asql/pkg/adminapi"
@@ -42,6 +45,8 @@ type App struct {
 	adminEndpoints   []string
 	adminToken       string
 	dataDir          string
+	txMu             sync.Mutex
+	txClients        map[string]*engineClient
 }
 
 // newApp constructs an App ready for wails.Run.
@@ -62,6 +67,7 @@ func newApp(engine *engineClient, pgwireEndpoint string, follower *engineClient,
 		adminEndpoints:   adminEndpoints,
 		adminToken:       strings.TrimSpace(adminToken),
 		dataDir:          strings.TrimSpace(dataDir),
+		txClients:        make(map[string]*engineClient),
 	}
 }
 
@@ -166,6 +172,109 @@ func (a *App) getLeaderClient() *engineClient {
 		return a.leaderClient
 	}
 	return a.engine
+}
+
+func (a *App) storeTxClient(txID string, client *engineClient) {
+	if strings.TrimSpace(txID) == "" || client == nil {
+		return
+	}
+	a.txMu.Lock()
+	a.txClients[txID] = client
+	a.txMu.Unlock()
+}
+
+func (a *App) lookupTxClient(txID string) *engineClient {
+	a.txMu.Lock()
+	defer a.txMu.Unlock()
+	return a.txClients[txID]
+}
+
+func (a *App) deleteTxClient(txID string) {
+	a.txMu.Lock()
+	delete(a.txClients, txID)
+	a.txMu.Unlock()
+}
+
+func (a *App) resetTxClients() {
+	a.txMu.Lock()
+	a.txClients = make(map[string]*engineClient)
+	a.txMu.Unlock()
+}
+
+var redirectWritesAddrPattern = regexp.MustCompile(`redirect writes to\s+([^\s]+)`)
+
+func leaderRedirectAddr(err error) string {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) {
+		return ""
+	}
+	if pgErr.Code != "25006" || !strings.Contains(strings.ToLower(pgErr.Message), "not the leader") {
+		return ""
+	}
+	if hint := strings.TrimSpace(pgErr.Hint); strings.HasPrefix(hint, "asql_leader=") {
+		return normalizeAddr(strings.TrimSpace(strings.TrimPrefix(hint, "asql_leader=")))
+	}
+	match := redirectWritesAddrPattern.FindStringSubmatch(pgErr.Message)
+	if len(match) == 2 {
+		return normalizeAddr(strings.TrimSpace(match[1]))
+	}
+	return ""
+}
+
+func (a *App) engineClientForAddr(addr string) *engineClient {
+	addr = normalizeAddr(strings.TrimSpace(addr))
+	if addr == "" {
+		return nil
+	}
+
+	a.peersMu.Lock()
+	defer a.peersMu.Unlock()
+	if a.engine != nil && normalizeAddr(a.engine.addr) == addr {
+		a.leaderClient = a.engine
+		return a.engine
+	}
+	if a.followerEngine != nil && normalizeAddr(a.followerEngine.addr) == addr {
+		a.leaderClient = a.followerEngine
+		return a.followerEngine
+	}
+	for _, ec := range a.peerEngines {
+		if ec != nil && normalizeAddr(ec.addr) == addr {
+			a.leaderClient = ec
+			return ec
+		}
+	}
+	token := ""
+	if a.engine != nil {
+		token = a.engine.password
+	}
+	ec := newEngineClient(addr, token)
+	a.peerEngines = append(a.peerEngines, ec)
+	a.leaderClient = ec
+	return ec
+}
+
+func (a *App) beginTxOnLeader(ctx context.Context, req *api.BeginTxRequest) (*api.BeginTxResponse, *engineClient, error) {
+	client := a.getLeaderClient()
+	if client == nil {
+		return nil, nil, fmt.Errorf("leader client is not available")
+	}
+	resp, err := client.BeginTx(ctx, req)
+	if err == nil {
+		return resp, client, nil
+	}
+	redirectAddr := leaderRedirectAddr(err)
+	if redirectAddr == "" {
+		return nil, nil, err
+	}
+	redirectClient := a.engineClientForAddr(redirectAddr)
+	if redirectClient == nil {
+		return nil, nil, err
+	}
+	resp, redirectErr := redirectClient.BeginTx(ctx, req)
+	if redirectErr != nil {
+		return nil, nil, redirectErr
+	}
+	return resp, redirectClient, nil
 }
 
 // bootstrapViaParameterStatus dials each addr with a raw pgx connection (no
@@ -669,6 +778,7 @@ func (a *App) SwitchConnection(req connectionSwitchRequest) (map[string]interfac
 	a.adminToken = adminToken
 	a.dataDir = dataDir
 	a.peersMu.Unlock()
+	a.resetTxClients()
 
 	closeEngineClients(append([]*engineClient{oldPrimary, oldFollower}, oldPeers...)...)
 
@@ -722,10 +832,11 @@ func (a *App) Begin(req beginRequest) (map[string]interface{}, error) {
 	ctx, cancel := a.reqCtx()
 	defer cancel()
 
-	resp, err := a.engine.BeginTx(ctx, &api.BeginTxRequest{Mode: req.Mode, Domains: req.Domains})
+	resp, client, err := a.beginTxOnLeader(ctx, &api.BeginTxRequest{Mode: req.Mode, Domains: req.Domains})
 	if err != nil {
 		return nil, err
 	}
+	a.storeTxClient(resp.TxID, client)
 	return structToMap(resp)
 }
 
@@ -738,7 +849,11 @@ func (a *App) Execute(req executeRequest) (map[string]interface{}, error) {
 	ctx, cancel := a.reqCtx()
 	defer cancel()
 
-	resp, err := a.engine.Execute(ctx, &api.ExecuteRequest{TxID: req.TxID, SQL: req.SQL})
+	client := a.lookupTxClient(req.TxID)
+	if client == nil {
+		return nil, fmt.Errorf("transaction %q not found or already closed", req.TxID)
+	}
+	resp, err := client.Execute(ctx, &api.ExecuteRequest{TxID: req.TxID, SQL: req.SQL})
 	if err != nil {
 		return nil, err
 	}
@@ -754,7 +869,11 @@ func (a *App) ExecuteBatch(req executeBatchRequest) (map[string]interface{}, err
 	ctx, cancel := a.reqCtx()
 	defer cancel()
 
-	resp, err := a.engine.ExecuteBatch(ctx, &api.ExecuteBatchRequest{TxID: req.TxID, Statements: req.Statements})
+	client := a.lookupTxClient(req.TxID)
+	if client == nil {
+		return nil, fmt.Errorf("transaction %q not found or already closed", req.TxID)
+	}
+	resp, err := client.ExecuteBatch(ctx, &api.ExecuteBatchRequest{TxID: req.TxID, Statements: req.Statements})
 	if err != nil {
 		return nil, err
 	}
@@ -770,10 +889,15 @@ func (a *App) Commit(req txRequest) (map[string]interface{}, error) {
 	ctx, cancel := a.reqCtx()
 	defer cancel()
 
-	resp, err := a.engine.CommitTx(ctx, &api.CommitTxRequest{TxID: req.TxID})
+	client := a.lookupTxClient(req.TxID)
+	if client == nil {
+		return nil, fmt.Errorf("transaction %q not found or already closed", req.TxID)
+	}
+	resp, err := client.CommitTx(ctx, &api.CommitTxRequest{TxID: req.TxID})
 	if err != nil {
 		return nil, err
 	}
+	a.deleteTxClient(req.TxID)
 	return structToMap(resp)
 }
 
@@ -786,10 +910,15 @@ func (a *App) Rollback(req txRequest) (map[string]interface{}, error) {
 	ctx, cancel := a.reqCtx()
 	defer cancel()
 
-	resp, err := a.engine.RollbackTx(ctx, &api.RollbackTxRequest{TxID: req.TxID})
+	client := a.lookupTxClient(req.TxID)
+	if client == nil {
+		return structToMap(&api.RollbackTxResponse{Status: "OK"})
+	}
+	resp, err := client.RollbackTx(ctx, &api.RollbackTxRequest{TxID: req.TxID})
 	if err != nil {
 		return nil, err
 	}
+	a.deleteTxClient(req.TxID)
 	return structToMap(resp)
 }
 

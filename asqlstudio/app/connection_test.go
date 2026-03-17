@@ -87,6 +87,64 @@ func TestConnectionInfoAndSwitchConnection(t *testing.T) {
 	}
 }
 
+func TestTransactionCallsStayOnLeaderClient(t *testing.T) {
+	followerAddr := startStudioPGWireServer(t, "studio-pass")
+	leaderAddr := startStudioPGWireServer(t, "studio-pass")
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	follower := newEngineClient(followerAddr, "studio-pass")
+	leader := newEngineClient(leaderAddr, "studio-pass")
+	app := newApp(
+		follower,
+		followerAddr,
+		nil,
+		"",
+		[]*engineClient{follower, leader},
+		[]string{followerAddr, leaderAddr},
+		nil,
+		nil,
+		"admin-secret",
+		filepath.Join(t.TempDir(), "data"),
+		logger,
+	)
+	app.leaderClient = leader
+	t.Cleanup(func() {
+		closeEngineClients(follower, leader)
+	})
+
+	beginResp, err := app.Begin(beginRequest{Domains: []string{"default"}})
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	txID, _ := beginResp["tx_id"].(string)
+	if txID == "" {
+		t.Fatalf("expected tx_id in begin response, got %+v", beginResp)
+	}
+	if got := app.lookupTxClient(txID); got != leader {
+		t.Fatalf("expected tx client to be pinned to leader, got %+v", got)
+	}
+
+	execResp, err := app.Execute(executeRequest{TxID: txID, SQL: "SHOW asql_node_role"})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	rows, _ := execResp["rows"].([]map[string]interface{})
+	if len(rows) == 0 {
+		// structToMap converts slices through reflection; tolerate []interface{} too.
+		genericRows, ok := execResp["rows"].([]interface{})
+		if !ok || len(genericRows) == 0 {
+			t.Fatalf("expected query rows, got %+v", execResp)
+		}
+	}
+
+	if _, err := app.Commit(txRequest{TxID: txID}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if got := app.lookupTxClient(txID); got != nil {
+		t.Fatalf("expected tx client to be cleared after commit, got %+v", got)
+	}
+}
+
 func startStudioPGWireServer(t *testing.T, authToken string) string {
 	t.Helper()
 
