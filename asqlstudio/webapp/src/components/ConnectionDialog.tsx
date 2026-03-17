@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { deleteRecentConnection, readRecentConnections, type RecentConnection } from '../lib/connectionHistory'
 import { IconDatabase, IconLink, IconRefresh, IconServer, IconShield, IconX } from './Icons'
 
 export type ConnectionConfig = {
@@ -48,6 +49,22 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
   const [authToken, setAuthToken] = useState('')
   const [adminAuthToken, setAdminAuthToken] = useState('')
   const [dataDir, setDataDir] = useState(() => current?.data_dir ?? '')
+  const [recentConnections, setRecentConnections] = useState<RecentConnection[]>(() => readRecentConnections())
+
+  const applyConnection = (config: ConnectionConfig) => {
+    setPgwireEndpoint(config.pgwire_endpoint ?? '')
+    setFollowerEndpoint(config.follower_endpoint ?? '')
+    setPeerEndpoints(joinEndpoints(config.peer_endpoints))
+    setAdminEndpoints(joinEndpoints(config.admin_endpoints))
+    setAuthToken('')
+    setAdminAuthToken('')
+    setDataDir(config.data_dir ?? '')
+  }
+
+  const handleDeleteRecent = (id: string) => {
+    deleteRecentConnection(id)
+    setRecentConnections((entries) => entries.filter((entry) => entry.id !== id))
+  }
 
   const handleSubmit = async () => {
     await onSubmit({
@@ -75,6 +92,40 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
         </div>
 
         <div className="conn-grid">
+          {recentConnections.length > 0 && (
+            <div className="conn-field conn-field-wide">
+              <span className="conn-label"><IconDatabase /> Recent connections</span>
+              <div className="conn-recent-list">
+                {recentConnections.map((entry) => {
+                  const isCurrent = current?.pgwire_endpoint?.trim() === entry.pgwire_endpoint.trim()
+                  return (
+                    <div key={entry.id} className={`conn-recent-card${isCurrent ? ' current' : ''}`}>
+                      <div className="conn-recent-main">
+                        <div className="conn-recent-title-row">
+                          <div className="conn-recent-title">{entry.pgwire_endpoint}</div>
+                          {isCurrent && <span className="conn-recent-badge">Current</span>}
+                        </div>
+                        <div className="conn-recent-meta">
+                          {entry.follower_endpoint ? <span>Follower: {entry.follower_endpoint}</span> : <span>No follower</span>}
+                          <span>Admin: {(entry.admin_endpoints ?? []).length || 0}</span>
+                          <span>Peers: {(entry.peer_endpoints ?? []).length || 0}</span>
+                          {entry.data_dir ? <span>Data dir: {entry.data_dir}</span> : null}
+                        </div>
+                        <div className="conn-recent-time">Used {formatRecentTime(entry.last_used_at)}</div>
+                      </div>
+                      <div className="conn-recent-actions">
+                        <button className="toolbar-btn" onClick={() => applyConnection(entry)} disabled={busy}>Use</button>
+                        <button className="icon-btn" onClick={() => handleDeleteRecent(entry.id)} disabled={busy} aria-label={`Remove ${entry.pgwire_endpoint} from recent connections`}>
+                          <IconX />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
           <label className="conn-field conn-field-wide">
             <span className="conn-label"><IconDatabase /> Pgwire endpoint</span>
             <input
@@ -170,6 +221,14 @@ export function ConnectionDialog({ current, busy, error, onClose, onSubmit }: Pr
       </div>
     </div>
   )
+}
+
+function formatRecentTime(value: string) {
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return 'recently'
+  }
+  return parsed.toLocaleString()
 }
 
 function IconKeyBadge({ configured }: { configured: boolean }) {

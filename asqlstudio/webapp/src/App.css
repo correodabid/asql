@@ -8287,6 +8287,82 @@ select.editor-input {
   line-height: 1.5;
 }
 
+.conn-recent-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.conn-recent-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.conn-recent-card.current {
+  border-color: rgba(99, 102, 241, 0.35);
+  background: rgba(99, 102, 241, 0.12);
+}
+
+.conn-recent-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.conn-recent-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.conn-recent-title {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conn-recent-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(99, 102, 241, 0.18);
+  color: var(--text-accent);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.conn-recent-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.conn-recent-time {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.conn-recent-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .conn-error {
   margin: 14px 22px 0;
   padding: 12px 14px;

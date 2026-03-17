@@ -25,6 +25,7 @@ import { ALL_DOMAINS_KEY } from './hooks/useSchemaStudio'
 import { useToast } from './hooks/useToast'
 import { useTheme } from './hooks/useTheme'
 import { useHeartbeat } from './hooks/useHeartbeat'
+import { rememberRecentConnection } from './lib/connectionHistory'
 import { api } from './lib/api'
 import './App.css'
 
@@ -178,6 +179,7 @@ function App() {
     api<ConnectionConfig>('/api/connection', 'GET')
       .then((resp) => {
         setConnectionInfo(resp)
+        rememberRecentConnection(resp)
         setConnectionError('')
       })
       .catch((error) => {
@@ -315,6 +317,7 @@ function App() {
     try {
       const response = await api<{ status: string; connection: ConnectionConfig }>('/api/connection/switch', 'POST', request)
       setConnectionInfo(response.connection)
+      rememberRecentConnection(response.connection)
       setShowConnectionDialog(false)
       setActiveTab('home')
       setConnectionEpoch((value) => value + 1)
