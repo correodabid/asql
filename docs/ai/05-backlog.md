@@ -5,12 +5,20 @@ Use strategy/product snapshot docs for context, but treat this file as the defau
 
 Current prioritization snapshot for the next execution window:
 - [docs/product/asql-ga-and-delight-plan-v1.md](../product/asql-ga-and-delight-plan-v1.md)
+- [docs/product/asql-adoption-roadmap-v1.md](../product/asql-adoption-roadmap-v1.md)
 
 Execution emphasis until Epic P closes:
 1. freeze GA compatibility and release-gate contracts,
 2. finish the canonical docs/examples surface,
 3. improve operator delight around temporal + cluster workflows,
 4. keep PostgreSQL compatibility work selective and adoption-driven.
+
+Adoption scaling refresh (2026-03-17):
+1. make mainstream PostgreSQL client/app flows work inside the documented ASQL subset,
+2. raise planner/performance credibility with benchmark-backed wins on real query shapes,
+3. turn temporal/history primitives into a clearly superior operator and developer workflow,
+4. make production operation, failover, backup, and diagnostics feel safe and boring,
+5. compress first-evaluation time with migration kits, starter apps, and fixture-first onboarding.
 
 ## How to use this backlog
 - Pick top-most unchecked task.
@@ -23,6 +31,30 @@ Execution priority for Epics M–P should follow:
 
 Sprint 2 checkpoint:
 - [x] Backup/restore MVP with integrity validation test.
+
+## Adoption roadmap (12-month, active planning view)
+
+Reference plan:
+- [docs/product/asql-adoption-roadmap-v1.md](../product/asql-adoption-roadmap-v1.md)
+
+Sequencing rule:
+- Keep single-node determinism, pgwire runtime, and explicit temporal semantics as the product center.
+- Prefer adoption-moving work over broad parity work.
+- New surface area should land only when docs, tests, and operator visibility arrive with it.
+
+H1 2026 focus:
+- Q2: mainstream PostgreSQL tool/app wedge + planner/performance credibility.
+- Q3: temporal superpower workflows + operator-grade cluster/recovery UX.
+
+H2 2026 focus:
+- Q4: migration/onboarding compression + production proof loops with benchmark, reliability, and operator evidence.
+
+Exit criteria for the roadmap window:
+- ASQL is easy to trial from existing PostgreSQL-oriented tools.
+- Core read/write/query paths have benchmark-backed credibility and visible planner behavior.
+- Time-travel/history/replay are clearly better than the baseline experience teams expect from a pragmatic PostgreSQL-compatible engine.
+- Production operators can diagnose health, failover, lag, backup, and restore without internal knowledge.
+- First successful evaluation path fits in a short local loop with examples, fixtures, and migration guidance.
 
 Legend:
 - `[ ]` pending
@@ -733,3 +765,157 @@ Acceptance gates (must pass before closing Epic AH)
 - [x] A production operator can create a user, grant historical-read access, inspect effective permissions, and revoke access from CLI without internal knowledge.
 - [x] The same core workflows are available from Studio with explicit auditability and low surprise.
 - [x] User-facing docs explain how historical access works for newly created principals and how that interacts with replay/time-travel.
+
+## Epic AI — Mainstream PostgreSQL app/tool adoption wedge
+
+Reference inputs:
+- `docs/product/asql-adoption-roadmap-v1.md`
+- `docs/reference/postgres-compatibility-surface-v1.md`
+- `docs/ai/11-technical-gap-matrix-vs-postgres.md`
+
+Execution rule:
+- Only expand compatibility where it measurably improves adoption through mainstream drivers, tools, or migration flows.
+- Preserve the explicit product stance: ASQL is a deterministic engine with a pragmatic PostgreSQL-compatible subset.
+
+P0 — identify the next real adoption blockers:
+- [ ] Audit the next 3 highest-value blocked client/tool/app flows after the current compatibility wedge (`psql`, `pgx`, GUI, ORM-lite, BI-lite).
+- [ ] For each blocked flow, classify the missing behavior as docs gap, protocol/catalog gap, SQL gap, or explicit non-goal.
+- [ ] Publish a short ranked “next adoption blockers” note with evidence and expected adoption impact.
+
+P1 — close the highest-return compatibility gaps:
+- [ ] Implement the smallest protocol/catalog/session fixes required for the top-ranked mainstream flows.
+- [ ] Add regression tests for each newly-claimed flow before expanding the public docs.
+- [ ] Extend compatibility docs with exact supported caveats, required connection settings, and known unsupported edges.
+
+P2 — app-facing migration wedge:
+- [ ] Add support or explicit translation guidance for the next high-return SQL shapes seen in real app evaluation friction.
+- [ ] Add one end-to-end “existing Postgres-oriented app reaches first successful read/write flow on ASQL” guide.
+- [ ] Add a release-gated compatibility smoke pack for the prioritized client/tool/app matrix.
+
+Acceptance gates (must pass before closing Epic AI)
+- [ ] At least 2 additional mainstream evaluation flows move from blocked to documented-working or explicitly-translated.
+- [ ] Each new compatibility claim is backed by regression coverage and matrix/docs updates.
+- [ ] Compatibility work remains evidence-driven rather than parity-driven.
+
+## Epic AJ — Planner and performance credibility
+
+Reference inputs:
+- `docs/product/asql-adoption-roadmap-v1.md`
+- `docs/product/performance-benchmark-plan-v1.md`
+- `docs/ai/09-benchmark-baseline.md`
+
+Execution rule:
+- Performance work must start from observed query shapes, explain output, and benchmark evidence.
+- Prefer planner improvements that also improve operator understanding, not only raw speed.
+
+P0 — credibility baseline:
+- [ ] Define the top adoption-critical query shapes for planner/performance work (joins, selective filters, aggregates, pagination, ordered reads).
+- [ ] Add or refresh benchmark coverage for those shapes with representative fixture sizes.
+- [ ] Add a concise operator-facing planner/performance scorecard doc tying each shape to expected scan strategy and evidence.
+
+P1 — planner visibility and determinism:
+- [ ] Extend `EXPLAIN` output so join order, access path choice, residual filters, and fallback reasons are more explicit.
+- [ ] Add regression coverage proving deterministic plan selection for the prioritized query shapes.
+- [ ] Surface the most useful planner warnings/suggestions in Studio without requiring raw-plan reading.
+
+P2 — benchmark-backed wins:
+- [ ] Implement the next measured planner/index improvements for the prioritized shapes.
+- [ ] Add release evidence showing latency and allocation improvements for those shapes.
+- [ ] Document which query shapes are now strong, acceptable, or still intentionally limited.
+
+Acceptance gates (must pass before closing Epic AJ)
+- [ ] Planner behavior for the top query shapes is benchmarked, visible, and deterministic.
+- [ ] At least 3 adoption-critical query shapes have evidence-backed performance or explainability improvements.
+- [ ] Docs and Studio expose enough information that users can reason about why a query is fast or slow.
+
+## Epic AK — Temporal superpower workflows
+
+Reference inputs:
+- `docs/product/asql-adoption-roadmap-v1.md`
+- `docs/reference/database-security-model-v1.md`
+- `docs/getting-started/05-time-travel-and-history.md`
+
+Execution rule:
+- Favor workflows that make replay, `AS OF`, `FOR HISTORY`, and entity/version primitives easier to compose and explain.
+- Keep the temporal surface general-purpose and database-native.
+
+P0 — identify the best differentiating workflows:
+- [ ] Define the top operator/developer temporal jobs ASQL should make dramatically easier than the baseline market experience.
+- [ ] Audit current CLI/Studio/docs coverage for those jobs and identify the sharpest missing links.
+- [ ] Publish a concise “temporal superpower” narrative tied to concrete workflows rather than generic claims.
+
+P1 — workflow productization:
+- [ ] Add one guided Studio workflow for “current row -> history -> chosen LSN/timestamp -> explanation/diff”.
+- [ ] Add one CLI workflow that packages the same temporal investigation path for scripts and operators.
+- [ ] Add one reference example showing how an application developer debugs a bad state transition using ASQL temporal primitives.
+
+P2 — temporal explanation depth:
+- [ ] Add first-class snapshot diff or historical explanation helpers where current raw primitives are still too manual.
+- [ ] Add audit-friendly export/report output for temporal investigations.
+- [ ] Document the recommended temporal-debugging playbook across README/getting-started/reference/Studio.
+
+Acceptance gates (must pass before closing Epic AK)
+- [ ] ASQL has at least one temporal workflow that is clearly easier to demo and teach than the default baseline.
+- [ ] Studio, CLI, and docs tell the same temporal-investigation story.
+- [ ] Temporal workflows remain deterministic, auditable, and general-purpose.
+
+## Epic AL — Operator-grade production boringness
+
+Reference inputs:
+- `docs/product/asql-adoption-roadmap-v1.md`
+- `docs/product/production-readiness-roadmap-v1.md`
+
+Execution rule:
+- Production confidence comes from clear failure behavior, drills, and diagnostics, not only from feature presence.
+- Prefer a smaller but trustworthy operator surface over a wide but ambiguous one.
+
+P0 — prove the core drills:
+- [ ] Define the canonical operator drills for failover, lag investigation, backup creation, restore, and recovery verification.
+- [ ] Audit current Studio/CLI/docs coverage for each drill and rank missing operator steps by risk.
+- [ ] Publish a concise production-drill matrix with expected inputs, outputs, and acceptance evidence.
+
+P1 — tighten operator workflows:
+- [ ] Close the highest-friction gaps in failover, lag, and recovery workflows across Studio and `asqlctl`.
+- [ ] Improve long-running write-path behavior and operator messaging during leader change and degraded states.
+- [ ] Add operator-facing evidence exports or summaries for drills and incident review.
+
+P2 — release-grade production proof:
+- [ ] Add a repeatable production-readiness validation pack covering failover, lag, backup, restore, and recovery.
+- [ ] Tie those drills to emitted metrics, logs, and operator-visible UI/CLI outputs.
+- [ ] Document the production-safe happy path and the degraded-mode/operator-response path side by side.
+
+Acceptance gates (must pass before closing Epic AL)
+- [ ] A production operator can execute the core drills without internal knowledge.
+- [ ] Failover, lag, and recovery behavior are visible through first-class tooling and docs.
+- [ ] Production-readiness claims are backed by repeatable validation evidence.
+
+## Epic AM — Migration and onboarding compression
+
+Reference inputs:
+- `docs/product/asql-adoption-roadmap-v1.md`
+- `docs/getting-started/`
+- `examples/`
+
+Execution rule:
+- Reduce time-to-first-success for serious evaluation teams.
+- Prefer concrete starter kits, fixtures, and migration recipes over generic marketing copy.
+
+P0 — compress the first hour:
+- [ ] Define the shortest credible evaluation loop for ASQL from local start to first meaningful app/query/history success.
+- [ ] Audit current docs/examples/studio/cli against that loop and identify the biggest first-hour drop-off points.
+- [ ] Publish a canonical first-hour path that does not require choosing among parallel onboarding tracks.
+
+P1 — migration starter kits:
+- [ ] Add a starter migration guide for a small PostgreSQL-oriented service using the supported ASQL subset.
+- [ ] Add one reusable starter app/template that demonstrates schema init, writes, reads, time-travel, and operator checks.
+- [ ] Add translation guidance for common “this works in Postgres but needs a different path in ASQL” moments.
+
+P2 — evaluation packaging:
+- [ ] Align README, getting-started, examples, and Studio `Start Here` around the same adoption journey.
+- [ ] Add fixture-first demo packages aimed at local evaluation, product demo, and pilot-readiness review.
+- [ ] Add an adoption scorecard/checklist for teams deciding whether to continue to pilot.
+
+Acceptance gates (must pass before closing Epic AM)
+- [ ] A serious evaluator can reach first meaningful success in a short local loop without tribal knowledge.
+- [ ] Migration and onboarding surfaces tell one coherent story across docs, examples, CLI, and Studio.
+- [ ] The next step from evaluation to pilot is explicit, documented, and measurable.
