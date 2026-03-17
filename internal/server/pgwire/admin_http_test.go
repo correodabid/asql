@@ -343,6 +343,11 @@ func TestAdminHTTPSecurityPrincipalManagementFlow(t *testing.T) {
 	if len(list.Principals) != 3 {
 		t.Fatalf("unexpected principal count: got %d want 3 (%+v)", len(list.Principals), list.Principals)
 	}
+	for _, principal := range list.Principals {
+		if principal.Name == "analyst" && len(principal.EffectivePrivileges) == 0 {
+			t.Fatalf("expected analyst effective privileges in list response: %+v", principal)
+		}
+	}
 
 	analyst, ok := server.engine.Principal("analyst")
 	if !ok {
@@ -350,6 +355,29 @@ func TestAdminHTTPSecurityPrincipalManagementFlow(t *testing.T) {
 	}
 	if !server.engine.HasPrincipalPrivilege("analyst", executor.PrincipalPrivilegeSelectHistory) {
 		t.Fatalf("expected analyst to inherit SELECT_HISTORY, got %+v", analyst)
+	}
+
+	var revokeResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/privileges/revoke", "write-secret", api.RevokePrivilegeRequest{
+		Principal: "history_readers",
+		Privilege: "SELECT_HISTORY",
+	}, &revokeResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected revoke privilege status: got %d want %d", status, http.StatusOK)
+	}
+	if server.engine.HasPrincipalPrivilege("analyst", executor.PrincipalPrivilegeSelectHistory) {
+		t.Fatal("expected analyst to lose SELECT_HISTORY after revoke")
+	}
+
+	var disableResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/principals/disable", "write-secret", api.DisablePrincipalRequest{
+		Principal: "analyst",
+	}, &disableResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected disable principal status: got %d want %d", status, http.StatusOK)
+	}
+	if disableResp.Principal == nil || disableResp.Principal.Enabled {
+		t.Fatalf("expected disabled principal response, got %+v", disableResp)
 	}
 }
 

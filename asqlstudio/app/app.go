@@ -1698,6 +1698,36 @@ func (a *App) SecurityGrantRole(principal, role string) (map[string]interface{},
 	return structToMap(resp)
 }
 
+func (a *App) SecurityRevokePrivilege(principal, privilege string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	if strings.TrimSpace(privilege) == "" {
+		return nil, fmt.Errorf("privilege is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/privileges/revoke", api.RevokePrivilegeRequest{
+		Principal: principal,
+		Privilege: privilege,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
+func (a *App) SecurityDisablePrincipal(principal string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/principals/disable", api.DisablePrincipalRequest{
+		Principal: principal,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
 func (a *App) RecoveryCreateBackup(dataDir, backupDir string) (map[string]interface{}, error) {
 	resolvedDataDir := a.recoveryDataDir(dataDir)
 	if resolvedDataDir == "" {

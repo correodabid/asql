@@ -3,11 +3,12 @@ package adminapi
 import "asql/internal/engine/executor"
 
 type PrincipalRecord struct {
-	Name       string                        `json:"name"`
-	Kind       executor.PrincipalKind        `json:"kind"`
-	Enabled    bool                          `json:"enabled"`
-	Roles      []string                      `json:"roles,omitempty"`
-	Privileges []executor.PrincipalPrivilege `json:"privileges,omitempty"`
+	Name                string                        `json:"name"`
+	Kind                executor.PrincipalKind        `json:"kind"`
+	Enabled             bool                          `json:"enabled"`
+	Roles               []string                      `json:"roles,omitempty"`
+	Privileges          []executor.PrincipalPrivilege `json:"privileges,omitempty"`
+	EffectivePrivileges []executor.PrincipalPrivilege `json:"effective_privileges,omitempty"`
 }
 
 type ListPrincipalsResponse struct {
@@ -33,9 +34,18 @@ type GrantPrivilegeRequest struct {
 	Privilege string `json:"privilege"`
 }
 
+type RevokePrivilegeRequest struct {
+	Principal string `json:"principal"`
+	Privilege string `json:"privilege"`
+}
+
 type GrantRoleRequest struct {
 	Principal string `json:"principal"`
 	Role      string `json:"role"`
+}
+
+type DisablePrincipalRequest struct {
+	Principal string `json:"principal"`
 }
 
 type SecurityMutationResponse struct {

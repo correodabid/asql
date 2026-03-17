@@ -95,11 +95,15 @@ export function SecurityCreateRole(arg1:string):Promise<Record<string, any>>;
 
 export function SecurityCreateUser(arg1:string,arg2:string):Promise<Record<string, any>>;
 
+export function SecurityDisablePrincipal(arg1:string):Promise<Record<string, any>>;
+
 export function SecurityGrantPrivilege(arg1:string,arg2:string):Promise<Record<string, any>>;
 
 export function SecurityGrantRole(arg1:string,arg2:string):Promise<Record<string, any>>;
 
 export function SecurityListPrincipals():Promise<Record<string, any>>;
+
+export function SecurityRevokePrivilege(arg1:string,arg2:string):Promise<Record<string, any>>;
 
 export function TemporalLookup(arg1:studioapp.temporalLookupRequest):Promise<Record<string, any>>;
 

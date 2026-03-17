@@ -11,6 +11,7 @@ type PrincipalRecord = {
   enabled: boolean
   roles?: string[]
   privileges?: PrincipalPrivilege[]
+  effective_privileges?: PrincipalPrivilege[]
 }
 
 type ListPrincipalsResponse = {
@@ -43,6 +44,8 @@ export function SecurityPanel() {
   const [grantPrivilege, setGrantPrivilege] = useState<PrincipalPrivilege>('SELECT_HISTORY')
   const [grantRolePrincipal, setGrantRolePrincipal] = useState('')
   const [grantRole, setGrantRole] = useState('')
+  const [revokePrincipal, setRevokePrincipal] = useState('')
+  const [revokePrivilege, setRevokePrivilege] = useState<PrincipalPrivilege>('SELECT_HISTORY')
   const [busy, setBusy] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
@@ -128,6 +131,21 @@ export function SecurityPanel() {
     setMessage(`Granted role ${grantRole} to ${grantRolePrincipal}.`)
   })
 
+  const submitRevokePrivilege = () => run('revoke-privilege', async () => {
+    await api<SecurityMutationResponse>('/api/security/privileges/revoke', 'POST', {
+      principal: revokePrincipal,
+      privilege: revokePrivilege,
+    })
+    setMessage(`Revoked ${revokePrivilege} from ${revokePrincipal}.`)
+  })
+
+  const submitDisablePrincipal = (principalName: string) => run(`disable-${principalName}`, async () => {
+    await api<SecurityMutationResponse>('/api/security/principals/disable', 'POST', {
+      principal: principalName,
+    })
+    setMessage(`Disabled principal ${principalName}.`)
+  })
+
   return (
     <div className="panel" style={{ margin: 16, padding: 16, display: 'grid', gap: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -146,7 +164,7 @@ export function SecurityPanel() {
         <MetricCard label="Principals" value={String(principals.length)} />
         <MetricCard label="Users" value={String(userPrincipals.length)} />
         <MetricCard label="Roles" value={String(rolePrincipals.length)} />
-        <MetricCard label="Temporal readers" value={String(principals.filter((p) => (p.privileges ?? []).includes('SELECT_HISTORY') || (p.roles ?? []).length > 0).length)} />
+        <MetricCard label="Temporal readers" value={String(principals.filter((p) => (p.effective_privileges ?? []).includes('SELECT_HISTORY')).length)} />
       </div>
 
       {!hasCatalog && (
@@ -241,6 +259,26 @@ export function SecurityPanel() {
             <input className="title-domain-select" list="security-role-options" value={grantRole} onChange={(e) => setGrantRole(e.target.value)} placeholder="history_readers" />
           </label>
         </ActionCard>
+
+        <ActionCard
+          title="Revoke privilege"
+          description="Remove a direct privilege grant from a user or role."
+          actionLabel="Revoke privilege"
+          icon={<IconKey />}
+          disabled={busy !== '' || !revokePrincipal.trim()}
+          onAction={() => void submitRevokePrivilege()}
+        >
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Principal</span>
+            <input className="title-domain-select" list="security-principal-options" value={revokePrincipal} onChange={(e) => setRevokePrincipal(e.target.value)} placeholder="history_readers" />
+          </label>
+          <label style={{ display: 'grid', gap: 6 }}>
+            <span>Privilege</span>
+            <select className="title-domain-select" value={revokePrivilege} onChange={(e) => setRevokePrivilege(e.target.value as PrincipalPrivilege)}>
+              {privilegeOptions.map((option) => <option key={option} value={option}>{option}</option>)}
+            </select>
+          </label>
+        </ActionCard>
       </div>
 
       <datalist id="security-principal-options">
@@ -281,6 +319,17 @@ export function SecurityPanel() {
                   <div className="text-muted" style={{ fontSize: 12 }}>
                     {(principal.roles?.length ?? 0)} role{(principal.roles?.length ?? 0) === 1 ? '' : 's'} · {(principal.privileges?.length ?? 0)} privilege{(principal.privileges?.length ?? 0) === 1 ? '' : 's'}
                   </div>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    {!principal.enabled ? null : (
+                      <button
+                        className="toolbar-btn"
+                        disabled={busy !== ''}
+                        onClick={() => void submitDisablePrincipal(principal.name)}
+                      >
+                        Disable
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <div style={{ display: 'grid', gap: 6 }}>
                   <div>
@@ -292,6 +341,12 @@ export function SecurityPanel() {
                   <div>
                     <span className="text-muted" style={{ marginRight: 8 }}>Privileges</span>
                     {sortedPrivileges(principal.privileges).length > 0 ? sortedPrivileges(principal.privileges).map((value) => (
+                      <span key={value} className="toolbar-badge" style={{ marginRight: 6 }}>{value}</span>
+                    )) : <span className="text-muted">—</span>}
+                  </div>
+                  <div>
+                    <span className="text-muted" style={{ marginRight: 8 }}>Effective</span>
+                    {sortedPrivileges(principal.effective_privileges).length > 0 ? sortedPrivileges(principal.effective_privileges).map((value) => (
                       <span key={value} className="toolbar-badge" style={{ marginRight: 6 }}>{value}</span>
                     )) : <span className="text-muted">—</span>}
                   </div>

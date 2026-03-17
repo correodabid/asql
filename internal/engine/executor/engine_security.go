@@ -52,11 +52,12 @@ type principalState struct {
 
 // PrincipalInfo is a read-only view of a durable principal.
 type PrincipalInfo struct {
-	Name       string
-	Kind       PrincipalKind
-	Enabled    bool
-	Roles      []string
-	Privileges []PrincipalPrivilege
+	Name                string
+	Kind                PrincipalKind
+	Enabled             bool
+	Roles               []string
+	Privileges          []PrincipalPrivilege
+	EffectivePrivileges []PrincipalPrivilege
 }
 
 type securityMutationPayload struct {
@@ -107,11 +108,15 @@ func (engine *Engine) currentPrincipalState(name string) (*principalState, bool)
 
 // Principal returns a read-only view of the named principal.
 func (engine *Engine) Principal(name string) (PrincipalInfo, bool) {
-	principal, ok := engine.currentPrincipalState(name)
+	state := engine.readState.Load()
+	if state == nil {
+		return PrincipalInfo{}, false
+	}
+	principal, ok := state.principals[normalizePrincipalName(name)]
 	if !ok || principal == nil {
 		return PrincipalInfo{}, false
 	}
-	return principal.info(), true
+	return state.principalInfo(principal), true
 }
 
 // ListPrincipals returns all known principals in deterministic order.
@@ -125,7 +130,7 @@ func (engine *Engine) ListPrincipals() []PrincipalInfo {
 		if principal == nil {
 			continue
 		}
-		result = append(result, principal.info())
+		result = append(result, state.principalInfo(principal))
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result
@@ -290,7 +295,11 @@ func (engine *Engine) AuthenticatePrincipal(username, password string) (Principa
 	if principal.passwordHash != hashPrincipalPassword(password) {
 		return PrincipalInfo{}, errPrincipalAuthFailed
 	}
-	return principal.info(), nil
+	state := engine.readState.Load()
+	if state == nil {
+		return PrincipalInfo{}, errPrincipalAuthFailed
+	}
+	return state.principalInfo(principal), nil
 }
 
 // HasPrincipalPrivilege evaluates effective privileges against current principal state.
@@ -343,7 +352,7 @@ func (state *readableState) hasPrincipalPrivilegeRecursive(principal string, pri
 	return false
 }
 
-func (principal *principalState) info() PrincipalInfo {
+func (state *readableState) principalInfo(principal *principalState) PrincipalInfo {
 	roles := make([]string, 0, len(principal.roles))
 	for role := range principal.roles {
 		roles = append(roles, role)
@@ -354,12 +363,19 @@ func (principal *principalState) info() PrincipalInfo {
 		privileges = append(privileges, privilege)
 	}
 	sort.Slice(privileges, func(i, j int) bool { return privileges[i] < privileges[j] })
+	effectivePrivileges := make([]PrincipalPrivilege, 0, len(privileges))
+	for _, privilege := range []PrincipalPrivilege{PrincipalPrivilegeAdmin, PrincipalPrivilegeSelectHistory} {
+		if state.hasPrincipalPrivilege(principal.name, privilege) {
+			effectivePrivileges = append(effectivePrivileges, privilege)
+		}
+	}
 	return PrincipalInfo{
-		Name:       principal.name,
-		Kind:       principal.kind,
-		Enabled:    principal.enabled,
-		Roles:      roles,
-		Privileges: privileges,
+		Name:                principal.name,
+		Kind:                principal.kind,
+		Enabled:             principal.enabled,
+		Roles:               roles,
+		Privileges:          privileges,
+		EffectivePrivileges: effectivePrivileges,
 	}
 }
 
