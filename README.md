@@ -479,6 +479,20 @@ service ASQLService {
 go run ./cmd/asqld -addr :5433 -data-dir .asql -auth-token my-secret
 ```
 
+Keep two layers separate:
+
+- operator tokens such as `-auth-token`, `-admin-read-token`, and `-admin-write-token` protect process-level pgwire/admin surfaces,
+- durable database principals (`USER`, `ROLE`, memberships, grants) govern pgwire identity and in-database authorization.
+
+When the durable principal catalog is enabled:
+
+- bootstrap the first admin once through Studio or `asqlctl`,
+- use durable principals for steady-state user, role, and password management,
+- treat historical reads as an explicit privilege boundary via `SELECT_HISTORY`.
+
+For the practical onboarding flow, see [docs/getting-started/08-studio-cli-and-daily-workflow.md](docs/getting-started/08-studio-cli-and-daily-workflow.md).
+For the durable-principal model, bootstrap rules, password rotation path, and privilege semantics, see [docs/reference/database-security-model-v1.md](docs/reference/database-security-model-v1.md).
+
 TLS transport is not part of the current local pgwire runtime surface.
 See [docs/reference/postgres-compatibility-surface-v1.md](docs/reference/postgres-compatibility-surface-v1.md) for the current compatibility stance.
 

@@ -51,6 +51,59 @@ Some `asqlctl` commands target lower-level admin or recovery surfaces instead of
 the pgwire shell path. Treat those as advanced/operator flows rather than part
 of the first-run local loop.
 
+## Bootstrap and rotate database principals
+
+When you enable durable principals, keep two layers separate:
+
+- operator tokens still protect admin/process surfaces,
+- database principals (`USER` / `ROLE`) govern pgwire login and in-database authorization.
+
+The first admin principal is a one-time bootstrap step allowed only while the
+durable principal catalog is empty.
+
+Typical local sequence:
+
+1. start `asqld` with the operator/admin token you want to use for bootstrap,
+2. bootstrap the first admin principal,
+3. use that durable principal for pgwire login,
+4. rotate passwords through the durable-principal workflow rather than by
+   changing the operator token.
+
+Bootstrap from the CLI:
+
+```bash
+printf 'admin-pass\n' | go run ./cmd/asqlctl \
+	-admin-http 127.0.0.1:9090 \
+	-auth-token write-secret \
+	-password-stdin \
+	-command principal-bootstrap-admin \
+	-principal admin
+```
+
+Rotate a user password with the ergonomic alias path:
+
+```bash
+printf 'rotated-pass\n' | go run ./cmd/asqlctl \
+	-admin-http 127.0.0.1:9090 \
+	-auth-token write-secret \
+	-password-stdin \
+	security user alter analyst
+```
+
+Studio exposes the same lifecycle through the `Security` area:
+
+- bootstrap the first admin when no principal catalog exists,
+- create users and roles,
+- grant `SELECT_HISTORY` explicitly,
+- inspect effective permissions,
+- review recent denied authz checks and recent security-relevant changes.
+
+Use the durable-principal path for database access changes. Do not treat
+operator token rotation as a substitute for user/password rotation.
+
+For the full security model, privilege semantics, and audit rules, see
+[../reference/database-security-model-v1.md](../reference/database-security-model-v1.md).
+
 Example: validate and load a fixture from the CLI.
 
 ```bash

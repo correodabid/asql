@@ -74,6 +74,7 @@ Those are the main adoption friction points this guide tries to make explicit.
 
 ## Related docs
 
+- [../reference/database-security-model-v1.md](../reference/database-security-model-v1.md)
 - [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
 - [../reference/examples-packaging-v1.md](../reference/examples-packaging-v1.md)
 - [../reference/fixture-format-and-lifecycle-v1.md](../reference/fixture-format-and-lifecycle-v1.md)

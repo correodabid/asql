@@ -725,7 +725,7 @@ P1 — Studio security UX:
 - [x] Add denial/audit visibility in Studio for failed authz checks and recent security-relevant changes.
 
 P2 — docs, examples, and operational guidance:
-- [ ] Document the database security model in getting-started/reference docs, including bootstrap and rotation flows.
+- [x] Document the database security model in getting-started/reference docs, including bootstrap and rotation flows.
 - [ ] Add examples covering: create admin, create reader, grant historical access, revoke historical access, and verify denied paths.
 - [ ] Update compatibility docs so unsupported PostgreSQL role-management statements are either implemented, explicitly translated, or still documented as unsupported.
 

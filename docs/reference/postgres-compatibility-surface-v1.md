@@ -21,6 +21,10 @@ For current pgwire error-response and SQLSTATE behavior, including where ASQL
 matches PostgreSQL closely enough to claim compatibility today, see
 [pgwire-error-sqlstate-behavior-v1.md](pgwire-error-sqlstate-behavior-v1.md).
 
+For the durable-principal security model, bootstrap flow, password rotation,
+and current privilege semantics, see
+[database-security-model-v1.md](database-security-model-v1.md).
+
 ## Supported (Spike v1)
 - Protocol: PostgreSQL startup, simple query flow, and the extended query pipeline (`Parse` / `Bind` / `Describe` / `Execute` / `Sync`).
 - SSL negotiation: `SSLRequest` is handled with `N` (no TLS). Clients using `sslmode=prefer` (the default for psql, pgx, JDBC, DBeaver, DataGrip, pgAdmin) fall back to plaintext successfully. `sslmode=disable` and `sslmode=allow` also work. `sslmode=require` / `verify-ca` / `verify-full` are unsupported and will fail.
