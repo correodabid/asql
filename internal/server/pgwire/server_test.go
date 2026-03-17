@@ -1450,6 +1450,102 @@ func TestPGWireSessionIdentityReflectsAuthenticatedPrincipal(t *testing.T) {
 	}
 }
 
+func TestPGWirePrivilegeProbesReflectDurablePrincipalGrants(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create analyst principal: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	adminConn, err := pgx.Connect(ctx, "postgres://admin:secret-pass@"+listener.Addr().String()+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	t.Cleanup(func() { _ = adminConn.Close(ctx) })
+
+	analystConn, err := pgx.Connect(ctx, "postgres://analyst:analyst-pass@"+listener.Addr().String()+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect analyst: %v", err)
+	}
+	t.Cleanup(func() { _ = analystConn.Close(ctx) })
+
+	scalar := func(t *testing.T, conn *pgx.Conn, query string) string {
+		t.Helper()
+		var value string
+		if err := conn.QueryRow(ctx, query).Scan(&value); err != nil {
+			t.Fatalf("query %q: %v", query, err)
+		}
+		return value
+	}
+
+	if got := scalar(t, analystConn, "SELECT has_database_privilege('asql', 'CONNECT')"); got != "t" {
+		t.Fatalf("analyst CONNECT privilege = %q, want %q", got, "t")
+	}
+	if got := scalar(t, analystConn, "SELECT has_database_privilege('asql', 'CREATE')"); got != "f" {
+		t.Fatalf("analyst CREATE privilege = %q, want %q", got, "f")
+	}
+	if got := scalar(t, adminConn, "SELECT has_database_privilege('asql', 'CREATE')"); got != "t" {
+		t.Fatalf("admin CREATE privilege = %q, want %q", got, "t")
+	}
+	if got := scalar(t, analystConn, "SELECT has_schema_privilege('public', 'USAGE')"); got != "t" {
+		t.Fatalf("analyst schema USAGE privilege = %q, want %q", got, "t")
+	}
+	if got := scalar(t, analystConn, "SELECT has_schema_privilege('public', 'CREATE')"); got != "f" {
+		t.Fatalf("analyst schema CREATE privilege = %q, want %q", got, "f")
+	}
+	if got := scalar(t, analystConn, "SELECT has_table_privilege('public.items', 'SELECT_HISTORY')"); got != "f" {
+		t.Fatalf("analyst SELECT_HISTORY privilege = %q, want %q", got, "f")
+	}
+	if err := server.engine.GrantPrivilege(ctx, "analyst", executor.PrincipalPrivilegeSelectHistory); err != nil {
+		t.Fatalf("grant analyst SELECT_HISTORY: %v", err)
+	}
+	if got := scalar(t, analystConn, "SELECT has_table_privilege('public.items', 'SELECT_HISTORY')"); got != "t" {
+		t.Fatalf("analyst granted SELECT_HISTORY privilege = %q, want %q", got, "t")
+	}
+	if got := scalar(t, analystConn, "SELECT has_database_privilege('admin', 'asql', 'CREATE')"); got != "t" {
+		t.Fatalf("explicit admin CREATE privilege = %q, want %q", got, "t")
+	}
+}
+
 func TestPGWirePasswordAuthenticationFailsAfterPrincipalDeletion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -37,7 +37,8 @@ matches PostgreSQL closely enough to claim compatibility today, see
 - Catalog/introspection compatibility shim:
   - `current_setting('...')`, `set_config(...)`, `pg_is_in_recovery()`, `pg_backend_pid()`, `inet_server_addr()`, `inet_server_port()`, `pg_encoding_to_char()`
   - `obj_description()`, `col_description()`, `shobj_description()` return empty results
-  - `has_schema_privilege()`, `has_table_privilege()`, `has_database_privilege()` return `true`
+  - `has_schema_privilege()`, `has_table_privilege()`, `has_database_privilege()` stay compatibility-oriented, but become principal-aware when the durable principal catalog is present
+  - current grant-aware subset: `CREATE` follows `ADMIN`, `SELECT_HISTORY` follows the explicit temporal privilege, and common introspection privileges such as database `CONNECT`, schema `USAGE`, and mainstream table-operation probes reflect the current authenticated principal instead of always returning `true`
   - synthetic catalog coverage for `pg_catalog.pg_tables`, `pg_catalog.pg_namespace`, `pg_catalog.pg_class`, `pg_catalog.pg_attribute`, `pg_catalog.pg_type`, `pg_catalog.pg_settings`, `pg_catalog.pg_database`, `information_schema.tables`, `information_schema.columns`, and `information_schema.schemata`
   - a smaller set of PostgreSQL catalog tables (`pg_index`, `pg_constraint`, `pg_proc`, `pg_am`, `pg_extension`, `pg_roles`, `pg_authid`, `pg_user`) is intercepted with empty result sets to keep mainstream tool flows moving without claiming full parity
 - Query mode:

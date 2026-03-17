@@ -38,6 +38,7 @@ var reCurrentSetting = regexp.MustCompile(`(?i)current_setting\s*\(\s*'([^']+)'\
 
 // reSetConfig matches  SELECT set_config('param', 'value', false/true)
 var reSetConfig = regexp.MustCompile(`(?i)set_config\s*\(\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*(?:false|true)\s*\)`)
+var reHasPrivilegeFunction = regexp.MustCompile(`(?is)^select\s+(has_(?:schema|table|database)_privilege)\s*\((.*)\)\s*(?:as\s+[a-z_][a-z0-9_]*)?\s*$`)
 
 var reRowLSN = regexp.MustCompile(`(?is)^select\s+row_lsn\s*\(\s*'((?:[^']|'')+)'\s*,\s*'((?:[^']|'')*)'\s*\)\s*(?:as\s+row_lsn)?\s*$`)
 var reEntityVersion = regexp.MustCompile(`(?is)^select\s+entity_version\s*\(\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'\s*\)\s*(?:as\s+entity_version)?\s*$`)
@@ -190,10 +191,8 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 
 	// ── has_schema_privilege / has_table_privilege / has_database_privilege ─
 	// Authorization-probe functions used by psql \d and GUI tools.
-	case strings.Contains(lower, "has_schema_privilege"),
-		strings.Contains(lower, "has_table_privilege"),
-		strings.Contains(lower, "has_database_privilege"):
-		return scalarResult("has_privilege", "t")
+	case reHasPrivilegeFunction.MatchString(trimmed):
+		return server.handleHasPrivilege(trimmed, principal)
 
 	// ── pg_encoding_to_char ──────────────────────────────────────────────
 	case strings.Contains(lower, "pg_encoding_to_char"):
@@ -395,6 +394,160 @@ func (server *Server) handleCurrentSetting(lower string, principal string) (inte
 	}
 	// Unknown parameter — return empty string rather than erroring out.
 	return scalarResult("current_setting", "")
+}
+
+func (server *Server) handleHasPrivilege(sql string, principal string) (interceptResult, bool) {
+	m := reHasPrivilegeFunction.FindStringSubmatch(strings.TrimSpace(sql))
+	if m == nil {
+		return interceptResult{}, false
+	}
+	functionName := strings.ToLower(m[1])
+	args := splitCatalogFunctionArgs(m[2])
+	if len(args) < 2 || len(args) > 3 {
+		return scalarResult("has_privilege", "f")
+	}
+	if !server.engine.HasPrincipalCatalog() {
+		return scalarResult("has_privilege", "t")
+	}
+	sessionPrincipal := server.catalogSessionPrincipal(principal)
+	targetPrincipal := sessionPrincipal
+	objectArgIndex := 0
+	privilegeArgIndex := 1
+	if len(args) == 3 {
+		targetPrincipal = resolveCatalogPrincipalArg(args[0], sessionPrincipal)
+		objectArgIndex = 1
+		privilegeArgIndex = 2
+	}
+	info, ok := server.engine.Principal(targetPrincipal)
+	if !ok || !info.Enabled {
+		return scalarResult("has_privilege", "f")
+	}
+	objectName := normalizeCatalogFunctionArg(args[objectArgIndex])
+	privileges := splitCatalogPrivilegeList(args[privilegeArgIndex])
+	allowed := true
+	for _, requested := range privileges {
+		if !server.hasCatalogPrivilege(functionName, targetPrincipal, objectName, requested) {
+			allowed = false
+			break
+		}
+	}
+	if allowed {
+		return scalarResult("has_privilege", "t")
+	}
+	return scalarResult("has_privilege", "f")
+}
+
+func splitCatalogFunctionArgs(raw string) []string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil
+	}
+	parts := make([]string, 0, 3)
+	start := 0
+	inQuote := false
+	for i := 0; i < len(trimmed); i++ {
+		switch trimmed[i] {
+		case '\'':
+			if inQuote && i+1 < len(trimmed) && trimmed[i+1] == '\'' {
+				i++
+				continue
+			}
+			inQuote = !inQuote
+		case ',':
+			if inQuote {
+				continue
+			}
+			parts = append(parts, strings.TrimSpace(trimmed[start:i]))
+			start = i + 1
+		}
+	}
+	parts = append(parts, strings.TrimSpace(trimmed[start:]))
+	return parts
+}
+
+func normalizeCatalogFunctionArg(raw string) string {
+	value := strings.TrimSpace(raw)
+	if len(value) >= 2 && value[0] == '\'' && value[len(value)-1] == '\'' {
+		value = value[1 : len(value)-1]
+		value = strings.ReplaceAll(value, "''", "'")
+	}
+	value = strings.Trim(value, `"`)
+	return strings.ToLower(strings.TrimSpace(value))
+}
+
+func resolveCatalogPrincipalArg(raw string, sessionPrincipal string) string {
+	value := normalizeCatalogFunctionArg(raw)
+	switch value {
+	case "", "current_user", "session_user", "user":
+		return sessionPrincipal
+	default:
+		return value
+	}
+}
+
+func splitCatalogPrivilegeList(raw string) []string {
+	value := normalizeCatalogFunctionArg(raw)
+	if value == "" {
+		return nil
+	}
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+func (server *Server) hasCatalogPrivilege(functionName string, principal string, objectName string, requested string) bool {
+	privilege := strings.ToUpper(strings.TrimSpace(requested))
+	privilege = strings.TrimSuffix(privilege, " WITH GRANT OPTION")
+	if privilege == "" {
+		return false
+	}
+	isAdmin := server.engine.HasPrincipalPrivilege(principal, executor.PrincipalPrivilegeAdmin)
+	switch privilege {
+	case "ADMIN":
+		return isAdmin
+	case "SELECT_HISTORY":
+		return server.engine.HasPrincipalPrivilege(principal, executor.PrincipalPrivilegeSelectHistory)
+	case "ALL", "ALL PRIVILEGES":
+		return isAdmin
+	case "CONNECT", "TEMP", "TEMPORARY":
+		return functionName == "has_database_privilege" && catalogDatabaseVisible(objectName)
+	case "USAGE":
+		return functionName == "has_schema_privilege" && catalogSchemaVisible(objectName)
+	case "CREATE":
+		switch functionName {
+		case "has_database_privilege":
+			return catalogDatabaseVisible(objectName) && isAdmin
+		case "has_schema_privilege":
+			return catalogSchemaVisible(objectName) && isAdmin
+		case "has_table_privilege":
+			return isAdmin
+		default:
+			return false
+		}
+	case "SELECT", "INSERT", "UPDATE", "DELETE", "TRUNCATE", "REFERENCES", "TRIGGER":
+		return functionName == "has_table_privilege"
+	default:
+		return false
+	}
+}
+
+func catalogDatabaseVisible(name string) bool {
+	return name == "asql" || name == "current_database()"
+}
+
+func catalogSchemaVisible(name string) bool {
+	switch name {
+	case "public", "pg_catalog", "information_schema":
+		return true
+	default:
+		return false
+	}
 }
 
 func (server *Server) handleRowLSN(sql string) (interceptResult, bool) {

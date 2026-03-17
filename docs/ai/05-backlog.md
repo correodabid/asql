@@ -674,7 +674,7 @@ P1 — authorization model and historical semantics:
 P2 — pgwire and execution enforcement:
 - [x] Replace the fixed shared-user pgwire posture with real database-principal authentication while preserving documented compatibility for supported clients.
 - [ ] Enforce authorization checks in planner/executor for read/write/schema/admin flows, including temporal queries and replay-sensitive operations.
-- [ ] Replace compatibility-shim privilege probes that currently always succeed with grant-aware behavior where claims are made public.
+- [x] Replace compatibility-shim privilege probes that currently always succeed with grant-aware behavior where claims are made public.
 - [x] Add deterministic regression coverage for authn/authz, replay recovery of principal state, and denied historical-access paths.
 
 Acceptance gates (must pass before closing Epic AG)
