@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 
+	"asql/internal/engine/parser"
+	"asql/internal/engine/planner"
 	"asql/internal/engine/ports"
 )
 
@@ -44,6 +46,7 @@ var (
 	errPrincipalDeleteLastPrincipal = errors.New("cannot delete the last principal in the catalog")
 	errPrincipalDeleteNotEmpty      = errors.New("principal still has direct roles or privileges")
 	errPrincipalDeleteReferenced    = errors.New("principal is still granted to other principals")
+	errPrincipalAuthzRequired       = errors.New("permission denied: authenticated principal required")
 )
 
 type principalState struct {
@@ -195,6 +198,99 @@ func (engine *Engine) AuthorizeHistoricalRead(principal string) error {
 		return errPrincipalHistoryDenied
 	}
 	return nil
+}
+
+// AuthorizeSQL resolves a SQL statement into a plan and applies the current
+// durable-principal privilege surface to that plan.
+func (engine *Engine) AuthorizeSQL(principal, sql string, txDomains []string) (planner.Plan, error) {
+	_, stripped, err := parser.ExtractImports(sql)
+	if err != nil {
+		return planner.Plan{}, fmt.Errorf("extract imports: %w", err)
+	}
+	statement, err := parser.Parse(stripped)
+	if err != nil {
+		return planner.Plan{}, fmt.Errorf("parse sql %q: %w", stripped, err)
+	}
+	txDomains = engine.expandDomainsForVFKJoins(statement, txDomains)
+	plan, err := planner.BuildForDomains(statement, txDomains)
+	if err != nil {
+		return planner.Plan{}, fmt.Errorf("plan sql %q: %w", stripped, err)
+	}
+	if err := engine.AuthorizePlan(principal, plan); err != nil {
+		return planner.Plan{}, err
+	}
+	return plan, nil
+}
+
+// AuthorizePlan applies the current MVP privilege surface to a resolved plan.
+// When no durable principal catalog exists, compatibility fallback is to allow
+// the operation.
+func (engine *Engine) AuthorizePlan(principal string, plan planner.Plan) error {
+	state := engine.readState.Load()
+	if state == nil || len(state.principals) == 0 {
+		return nil
+	}
+	principal = normalizePrincipalName(principal)
+	if principal == "" {
+		return errPrincipalAuthzRequired
+	}
+	entry, ok := state.principals[principal]
+	if !ok || entry == nil || !entry.enabled {
+		return errPrincipalAuthzRequired
+	}
+	if planRequiresAdmin(plan.Operation) && !state.hasPrincipalPrivilege(principal, PrincipalPrivilegeAdmin) {
+		return fmt.Errorf("permission denied: %s privilege required for %s", PrincipalPrivilegeAdmin, describeAuthorizedOperation(plan.Operation))
+	}
+	return nil
+}
+
+func planRequiresAdmin(operation planner.Operation) bool {
+	switch operation {
+	case planner.OperationCreateTable,
+		planner.OperationAlterTableAddColumn,
+		planner.OperationAlterTableDropColumn,
+		planner.OperationAlterTableRenameColumn,
+		planner.OperationCreateIndex,
+		planner.OperationInsert,
+		planner.OperationUpdate,
+		planner.OperationDelete,
+		planner.OperationCreateEntity,
+		planner.OperationDropTable,
+		planner.OperationDropIndex,
+		planner.OperationTruncateTable:
+		return true
+	default:
+		return false
+	}
+}
+
+func describeAuthorizedOperation(operation planner.Operation) string {
+	switch operation {
+	case planner.OperationCreateTable:
+		return "CREATE TABLE"
+	case planner.OperationAlterTableAddColumn, planner.OperationAlterTableDropColumn, planner.OperationAlterTableRenameColumn:
+		return "ALTER TABLE"
+	case planner.OperationCreateIndex:
+		return "CREATE INDEX"
+	case planner.OperationInsert:
+		return "INSERT"
+	case planner.OperationUpdate:
+		return "UPDATE"
+	case planner.OperationDelete:
+		return "DELETE"
+	case planner.OperationCreateEntity:
+		return "CREATE ENTITY"
+	case planner.OperationDropTable:
+		return "DROP TABLE"
+	case planner.OperationDropIndex:
+		return "DROP INDEX"
+	case planner.OperationTruncateTable:
+		return "TRUNCATE TABLE"
+	case planner.OperationSelect, planner.OperationSetOp:
+		return "SELECT"
+	default:
+		return strings.ToUpper(strings.ReplaceAll(string(operation), "_", " "))
+	}
 }
 
 // CreateUser persists a durable database user.

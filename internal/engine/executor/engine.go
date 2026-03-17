@@ -463,6 +463,9 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 		if err != nil {
 			return Result{}, fmt.Errorf("plan sql %q: %w", trimmed, err)
 		}
+		if err := engine.AuthorizePlan(session.Principal(), plan); err != nil {
+			return Result{}, err
+		}
 
 		// Eager default resolution for INSERT ... RETURNING.
 		// Resolve defaults (UUID_V7, autoincrement) and VFK versions now so we
@@ -584,6 +587,16 @@ func (engine *Engine) Query(ctx context.Context, sql string, domains []string) (
 
 // Explain returns deterministic plan diagnostics for a supported SQL statement.
 func (engine *Engine) Explain(sql string, txDomains []string) (Result, error) {
+	return engine.explain(sql, txDomains, "", false)
+}
+
+// ExplainAsPrincipal returns deterministic plan diagnostics only when the
+// authenticated principal is allowed to inspect the underlying statement.
+func (engine *Engine) ExplainAsPrincipal(sql string, txDomains []string, principal string) (Result, error) {
+	return engine.explain(sql, txDomains, principal, true)
+}
+
+func (engine *Engine) explain(sql string, txDomains []string, principal string, enforceAuth bool) (Result, error) {
 	trimmed := strings.TrimSpace(sql)
 	if trimmed == "" {
 		return Result{}, errExplainSQLRequired
@@ -618,6 +631,11 @@ func (engine *Engine) Explain(sql string, txDomains []string) (Result, error) {
 	plan, err := planner.BuildForDomains(statement, txDomains)
 	if err != nil {
 		return Result{}, fmt.Errorf("plan explain sql: %w", err)
+	}
+	if enforceAuth {
+		if err := engine.AuthorizePlan(principal, plan); err != nil {
+			return Result{}, err
+		}
 	}
 
 	shapeBytes, err := wal.CanonicalJSON(plan)

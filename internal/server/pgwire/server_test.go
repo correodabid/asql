@@ -17,6 +17,115 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+func TestPGWireCurrentReadAllowsAuthenticatedUsersButMutationsRequireAdmin(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create analyst user: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	addr := listener.Addr().String()
+	adminConn, err := pgx.Connect(ctx, "postgres://admin:secret-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	t.Cleanup(func() { _ = adminConn.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"COMMIT",
+	} {
+		if _, err := adminConn.Exec(ctx, sql); err != nil {
+			t.Fatalf("admin setup %q: %v", sql, err)
+		}
+	}
+
+	analystConn, err := pgx.Connect(ctx, "postgres://analyst:analyst-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect analyst: %v", err)
+	}
+	t.Cleanup(func() { _ = analystConn.Close(ctx) })
+
+	var email string
+	if err := analystConn.QueryRow(ctx, "SELECT email FROM accounts.users WHERE id = 1").Scan(&email); err != nil {
+		t.Fatalf("analyst current read: %v", err)
+	}
+	if email != "one@asql.dev" {
+		t.Fatalf("analyst read email = %q, want %q", email, "one@asql.dev")
+	}
+
+	if _, err := analystConn.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+		t.Fatalf("analyst begin domain: %v", err)
+	}
+	_, err = analystConn.Exec(ctx, "INSERT INTO users (id, email) VALUES (2, 'two@asql.dev')")
+	pgErr := requirePGErrorCode(t, err, "42501")
+	if !strings.Contains(pgErr.Message, "ADMIN privilege required") {
+		t.Fatalf("unexpected analyst insert denial message: %q", pgErr.Message)
+	}
+	if _, err := analystConn.Exec(ctx, "ROLLBACK"); err != nil {
+		t.Fatalf("rollback after denied insert: %v", err)
+	}
+
+	if _, err := analystConn.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+		t.Fatalf("analyst begin domain for schema denial: %v", err)
+	}
+	_, err = analystConn.Exec(ctx, "CREATE TABLE audit_log (id INT)")
+	pgErr = requirePGErrorCode(t, err, "42501")
+	if !strings.Contains(pgErr.Message, "ADMIN privilege required") {
+		t.Fatalf("unexpected analyst create table denial message: %q", pgErr.Message)
+	}
+	if _, err := analystConn.Exec(ctx, "ROLLBACK"); err != nil {
+		t.Fatalf("rollback after denied create table: %v", err)
+	}
+
+	_, err = analystConn.Exec(ctx, "EXPLAIN UPDATE accounts.users SET email = 'updated@asql.dev' WHERE id = 1")
+	pgErr = requirePGErrorCode(t, err, "42501")
+	if !strings.Contains(pgErr.Message, "ADMIN privilege required") {
+		t.Fatalf("unexpected analyst explain update denial message: %q", pgErr.Message)
+	}
+}
+
 func TestPGWireSimpleQueryRoundtrip(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

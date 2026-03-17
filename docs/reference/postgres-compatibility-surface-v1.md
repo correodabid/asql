@@ -28,6 +28,7 @@ matches PostgreSQL closely enough to claim compatibility today, see
   - `AuthenticationOk` when no pgwire password is configured
   - `AuthenticationCleartextPassword` when `AuthToken` / `-auth-token` is configured or when the durable principal catalog is present
   - password validation can use either the shared deployment token or stored database principals, depending on whether the durable principal catalog has been bootstrapped
+  - current MVP privilege surface when the durable principal catalog is present: any authenticated enabled principal can execute current-state `SELECT`, `ADMIN` is required for current DDL/DML/schema-changing statements, and `SELECT_HISTORY` is additionally required for temporal reads
   - for historical reads, pgwire evaluates `SELECT_HISTORY` against the current durable principal/grant state even when the target data snapshot is older
 - Session states: `ReadyForQuery` idle (`I`) and in-transaction (`T`).
 - Session/setup compatibility shim:
@@ -84,7 +85,7 @@ matches PostgreSQL closely enough to claim compatibility today, see
 
 | Pattern | Status | Notes |
 |---|---|---|
-| `SELECT ... WHERE <scalar predicate>` | Supported | Current ASQL SQL subset. |
+| `SELECT ... WHERE <scalar predicate>` | Supported | Current ASQL SQL subset; with durable principals enabled, any authenticated enabled principal can execute current-state reads. |
 | `ORDER BY ... LIMIT n` | Supported | Covered in executor and pgwire tests. |
 | Literal `IN (...)` / `NOT IN (...)` | Supported | Covered in executor tests. |
 | Subquery-based `IN (SELECT ...)` | Supported | Covered in executor tests for current shapes. |
@@ -92,9 +93,9 @@ matches PostgreSQL closely enough to claim compatibility today, see
 | `LEFT JOIN`, `RIGHT JOIN`, `CROSS JOIN` | Supported | Covered in executor tests for current join shapes. |
 | Simple `WITH` / CTE shapes | Supported | Covered in executor tests for current non-recursive shapes. |
 | `ILIKE` / `NOT ILIKE` | Supported | Covered in executor tests. |
-| `INSERT ... RETURNING ...` | Supported | Current `RETURNING` support is insert-focused. |
+| `INSERT ... RETURNING ...` | Supported | Current `RETURNING` support is insert-focused; with durable principals enabled, current DML requires `ADMIN`. |
 | `INSERT ... ON CONFLICT ...` | Supported | `DO NOTHING` and current `DO UPDATE` shapes are covered in executor tests. |
-| `TRUNCATE TABLE ...` | Supported | Covered in parser and executor tests. |
+| `TRUNCATE TABLE ...` | Supported | Covered in parser and executor tests; with durable principals enabled, current schema/data-destructive mutations require `ADMIN`. |
 | `DROP TABLE IF EXISTS` / `DROP INDEX IF EXISTS` | Supported | Covered in executor tests. |
 | Extended protocol with scalar bind parameters | Supported | Session-scoped prepared statements/portals. |
 | Parameterized predicates like `WHERE id >= $1` | Supported | Covered through pgwire regression tests. |

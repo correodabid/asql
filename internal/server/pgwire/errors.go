@@ -71,6 +71,9 @@ func sqlStateFromMessage(msg string) string {
 	if containsAny(lower, "domain is required", "domain not set") {
 		return "25000" // invalid_transaction_state
 	}
+	if containsAny(lower, "permission denied", "insufficient privilege") {
+		return "42501" // insufficient_privilege
+	}
 
 	// ── Write conflict / serialisation ── Class 40 ───────────────────────
 	if containsAny(lower, "write conflict", "serialization") {

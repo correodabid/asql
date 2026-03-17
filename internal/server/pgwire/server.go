@@ -90,10 +90,10 @@ func normalizeAuditPrincipal(user string) string {
 }
 
 type historicalReadAuditDetail struct {
-	queryKind              string
-	targetKind             string
-	targetLSN              uint64
-	targetTimestampMicros  uint64
+	queryKind             string
+	targetKind            string
+	targetLSN             uint64
+	targetTimestampMicros uint64
 }
 
 func principalPrivilegeStrings(privileges []executor.PrincipalPrivilege) []string {
@@ -1278,7 +1278,7 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 	// comment removal (e.g. "SELECT ... LIMIT 100; /* as-of-lsn: N */").
 	asOfKind, asOfValue, stripped := extractAsOf(sql)
 	if _, isExplain := stripExplainSQLPrefix(stripped); isExplain {
-		result, err := server.engine.Explain(stripped, session.ActiveDomains())
+		result, err := server.engine.ExplainAsPrincipal(stripped, session.ActiveDomains(), session.Principal())
 		if err != nil {
 			return executor.Result{}, nil, err
 		}
@@ -1289,6 +1289,9 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 	if parseErr == nil {
 		if selectStatement, isSelect := statement.(ast.SelectStatement); isSelect {
 			domains := session.ActiveDomains()
+			if _, err := server.engine.AuthorizeSQL(session.Principal(), stripped, domains); err != nil {
+				return executor.Result{}, nil, err
+			}
 			var result executor.Result
 			var err error
 			if selectStatement.ForHistory {

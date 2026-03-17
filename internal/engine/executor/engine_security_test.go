@@ -3,10 +3,51 @@ package executor
 import (
 	"context"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"asql/internal/engine/planner"
 	"asql/internal/storage/wal"
 )
+
+func TestAuthorizePlanUsesAuthenticatedReadAndAdminMutationModel(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+	walPath := filepath.Join(baseDir, "security-authz.wal")
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if err := engine.BootstrapAdminPrincipal(ctx, "admin", "secret"); err != nil {
+		t.Fatalf("bootstrap admin: %v", err)
+	}
+	if err := engine.CreateUser(ctx, "analyst", "analyst-secret"); err != nil {
+		t.Fatalf("create analyst: %v", err)
+	}
+
+	if err := engine.AuthorizePlan("analyst", planner.Plan{Operation: planner.OperationSelect}); err != nil {
+		t.Fatalf("authorize current read: %v", err)
+	}
+	if err := engine.AuthorizePlan("admin", planner.Plan{Operation: planner.OperationCreateTable}); err != nil {
+		t.Fatalf("authorize admin schema mutation: %v", err)
+	}
+	err = engine.AuthorizePlan("analyst", planner.Plan{Operation: planner.OperationInsert})
+	if err == nil || !strings.Contains(err.Error(), "ADMIN privilege required") {
+		t.Fatalf("expected ADMIN privilege denial for analyst insert, got %v", err)
+	}
+	err = engine.AuthorizePlan("", planner.Plan{Operation: planner.OperationSelect})
+	if err == nil || !strings.Contains(err.Error(), "authenticated principal required") {
+		t.Fatalf("expected authenticated principal denial, got %v", err)
+	}
+}
 
 func TestPrincipalCatalogReplayPersistsUsersAndPrivileges(t *testing.T) {
 	ctx := context.Background()
