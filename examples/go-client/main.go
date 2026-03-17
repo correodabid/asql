@@ -35,6 +35,8 @@ func (jsonCodec) Unmarshal(data []byte, value interface{}) error {
 func main() {
 	endpoint := flag.String("endpoint", "127.0.0.1:9042", "ASQL gRPC endpoint")
 	authToken := flag.String("auth-token", "", "optional bearer token")
+	dbPrincipal := flag.String("db-principal", "", "optional durable database principal for gRPC metadata auth")
+	dbPassword := flag.String("db-password", "", "optional durable database principal password for gRPC metadata auth")
 	domain := flag.String("domain", "app", "transaction domain")
 	secondaryDomain := flag.String("secondary-domain", "app_aux", "secondary domain used for cross-domain begin demo")
 	table := flag.String("table", "users", "table name")
@@ -63,7 +65,7 @@ func main() {
 	}
 	defer connection.Close()
 
-	ctx = withAuth(ctx, *authToken)
+	ctx = withAuth(ctx, *authToken, *dbPrincipal, *dbPassword)
 
 	if *initSchema {
 		if err := initializeSchema(ctx, connection, *domain, *table); err != nil {
@@ -254,17 +256,24 @@ func initializeSchema(ctx context.Context, connection *grpcgo.ClientConn, domain
 	return nil
 }
 
-func withAuth(ctx context.Context, authToken string) context.Context {
+
+func withAuth(ctx context.Context, authToken, dbPrincipal, dbPassword string) context.Context {
 	token := strings.TrimSpace(authToken)
-	if token == "" {
-		return ctx
+	if token != "" {
+		if strings.HasPrefix(strings.ToLower(token), "bearer ") {
+			ctx = metadata.AppendToOutgoingContext(ctx, "authorization", token)
+		} else {
+			ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
+		}
 	}
 
-	if strings.HasPrefix(strings.ToLower(token), "bearer ") {
-		return metadata.AppendToOutgoingContext(ctx, "authorization", token)
+	principal := strings.TrimSpace(dbPrincipal)
+	password := strings.TrimSpace(dbPassword)
+	if principal != "" || password != "" {
+		ctx = metadata.AppendToOutgoingContext(ctx, "asql-principal", principal, "asql-password", password)
 	}
 
-	return metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer "+token)
+	return ctx
 }
 
 func printJSON(label string, value interface{}) {

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"asql/internal/engine/executor"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
@@ -299,4 +301,120 @@ func TestASQLServiceBlackBoxAuthToken(t *testing.T) {
 	if beginResp.TxID == "" {
 		t.Fatal("expected tx id after authenticated begin tx")
 	}
+}
+
+func TestASQLServiceBlackBoxDatabasePrincipalAuthorization(t *testing.T) {
+	ctx := context.Background()
+	temp := t.TempDir()
+
+	server, err := New(Config{
+		Address:     "bufnet",
+		DataDirPath: filepath.Join(temp, "data"),
+		Logger:      slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new grpc server: %v", err)
+	}
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "admin-secret"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "analyst", "analyst-secret"); err != nil {
+		t.Fatalf("create analyst principal: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "historian", "historian-secret"); err != nil {
+		t.Fatalf("create historian principal: %v", err)
+	}
+	if err := server.engine.GrantPrivilege(ctx, "historian", executor.PrincipalPrivilegeSelectHistory); err != nil {
+		t.Fatalf("grant historian select_history: %v", err)
+	}
+
+	listener := bufconn.Listen(1024 * 1024)
+	t.Cleanup(func() {
+		server.grpcServer.Stop()
+		_ = listener.Close()
+	})
+
+	go func() {
+		_ = server.grpcServer.Serve(listener)
+	}()
+
+	connection, err := grpc.DialContext(
+		ctx,
+		"passthrough:///bufnet",
+		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(jsonCodec{})),
+	)
+	if err != nil {
+		t.Fatalf("dial bufconn: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close() })
+
+	if err := connection.Invoke(ctx, "/asql.v1.ASQLService/BeginTx", &BeginTxRequest{Mode: "domain", Domains: []string{"accounts"}}, new(BeginTxResponse)); status.Code(err) != codes.Unauthenticated {
+		t.Fatalf("expected unauthenticated begin without database principal metadata, got %v", err)
+	}
+
+	adminCtx := withDatabasePrincipal(ctx, "admin", "admin-secret")
+	adminBegin := new(BeginTxResponse)
+	if err := connection.Invoke(adminCtx, "/asql.v1.ASQLService/BeginTx", &BeginTxRequest{Mode: "domain", Domains: []string{"accounts"}}, adminBegin); err != nil {
+		t.Fatalf("begin admin schema tx: %v", err)
+	}
+	mustExecute(t, adminCtx, connection, adminBegin.TxID, "CREATE TABLE users (id INT, email TEXT)")
+	mustExecute(t, adminCtx, connection, adminBegin.TxID, "INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')")
+	adminCommit := new(CommitTxResponse)
+	if err := connection.Invoke(adminCtx, "/asql.v1.ASQLService/CommitTx", &CommitTxRequest{TxID: adminBegin.TxID}, adminCommit); err != nil {
+		t.Fatalf("commit admin schema tx: %v", err)
+	}
+
+	analystCtx := withDatabasePrincipal(ctx, "analyst", "analyst-secret")
+	queryResp := new(QueryResponse)
+	if err := connection.Invoke(analystCtx, "/asql.v1.ASQLService/Query", &QueryRequest{SQL: "SELECT id, email FROM users", Domains: []string{"accounts"}}, queryResp); err != nil {
+		t.Fatalf("analyst current read: %v", err)
+	}
+	if len(queryResp.Rows) != 1 {
+		t.Fatalf("unexpected analyst current-read row count: got %d want 1", len(queryResp.Rows))
+	}
+
+	analystBegin := new(BeginTxResponse)
+	if err := connection.Invoke(analystCtx, "/asql.v1.ASQLService/BeginTx", &BeginTxRequest{Mode: "domain", Domains: []string{"accounts"}}, analystBegin); err != nil {
+		t.Fatalf("begin analyst tx: %v", err)
+	}
+	insertErr := connection.Invoke(analystCtx, "/asql.v1.ASQLService/Execute", &ExecuteRequest{TxID: analystBegin.TxID, SQL: "INSERT INTO users (id, email) VALUES (2, 'two@asql.dev')"}, new(ExecuteResponse))
+	if status.Code(insertErr) != codes.PermissionDenied {
+		t.Fatalf("expected analyst insert to be permission denied, got %v", insertErr)
+	}
+	rollbackResp := new(RollbackTxResponse)
+	if err := connection.Invoke(analystCtx, "/asql.v1.ASQLService/RollbackTx", &RollbackTxRequest{TxID: analystBegin.TxID}, rollbackResp); err != nil {
+		t.Fatalf("rollback analyst tx: %v", err)
+	}
+
+	timeTravelErr := connection.Invoke(analystCtx, "/asql.v1.ASQLService/TimeTravelQuery", &TimeTravelQueryRequest{SQL: "SELECT id, email FROM users", Domains: []string{"accounts"}, LSN: adminCommit.CommitLSN}, new(TimeTravelQueryResponse))
+	if status.Code(timeTravelErr) != codes.PermissionDenied {
+		t.Fatalf("expected analyst time-travel query to be permission denied, got %v", timeTravelErr)
+	}
+
+	historianCtx := withDatabasePrincipal(ctx, "historian", "historian-secret")
+	historyResp := new(TimeTravelQueryResponse)
+	if err := connection.Invoke(historianCtx, "/asql.v1.ASQLService/TimeTravelQuery", &TimeTravelQueryRequest{SQL: "SELECT id, email FROM users", Domains: []string{"accounts"}, LSN: adminCommit.CommitLSN}, historyResp); err != nil {
+		t.Fatalf("historian time-travel query: %v", err)
+	}
+	if len(historyResp.Rows) != 1 {
+		t.Fatalf("unexpected historian time-travel row count: got %d want 1", len(historyResp.Rows))
+	}
+
+	replayErr := connection.Invoke(analystCtx, "/asql.v1.ASQLService/ReplayToLSN", &ReplayToLSNRequest{LSN: adminCommit.CommitLSN}, new(ReplayToLSNResponse))
+	if status.Code(replayErr) != codes.PermissionDenied {
+		t.Fatalf("expected analyst replay to be permission denied, got %v", replayErr)
+	}
+	if err := connection.Invoke(adminCtx, "/asql.v1.ASQLService/ReplayToLSN", &ReplayToLSNRequest{LSN: adminCommit.CommitLSN}, new(ReplayToLSNResponse)); err != nil {
+		t.Fatalf("admin replay to lsn: %v", err)
+	}
+	if err := connection.Invoke(adminCtx, "/asql.v1.ASQLService/ExplainQuery", &ExplainQueryRequest{SQL: "SELECT id, email FROM users", Domains: []string{"accounts"}}, new(ExplainQueryResponse)); err != nil {
+		t.Fatalf("admin explain query: %v", err)
+	}
+}
+
+func withDatabasePrincipal(ctx context.Context, principal, password string) context.Context {
+	return metadata.AppendToOutgoingContext(ctx, principalMetadataKey, principal, passwordMetadataKey, password)
 }

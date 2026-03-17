@@ -194,7 +194,14 @@ func (service *service) BeginTx(ctx context.Context, request *BeginTxRequest) (*
 		return nil, status.Error(codes.InvalidArgument, err.Error())
 	}
 
+	principal, err := service.authenticatedPrincipal(ctx)
+	if err != nil {
+		service.auditFailure("tx.begin", err.Error(), slog.String("mode", request.Mode), slog.Any("domains", request.Domains))
+		return nil, err
+	}
+
 	session := service.engine.NewSession()
+	session.SetPrincipal(principal)
 	result, err := service.engine.Execute(ctx, session, beginSQL)
 	if err != nil {
 		service.auditFailure("tx.begin", err.Error(), slog.String("mode", request.Mode), slog.Any("domains", request.Domains))
@@ -319,7 +326,13 @@ func (service *service) RollbackTx(ctx context.Context, request *RollbackTxReque
 }
 
 func (service *service) ReplayToLSN(ctx context.Context, request *ReplayToLSNRequest) (*ReplayToLSNResponse, error) {
-	if err := service.engine.ReplayToLSN(ctx, request.LSN); err != nil {
+	principal, err := service.authenticatedPrincipal(ctx)
+	if err != nil {
+		service.auditFailure("admin.replay_to_lsn", err.Error(), slog.Uint64("lsn", request.LSN))
+		return nil, err
+	}
+
+	if err := service.engine.ReplayToLSNAsPrincipal(ctx, request.LSN, principal); err != nil {
 		service.auditFailure("admin.replay_to_lsn", err.Error(), slog.Uint64("lsn", request.LSN))
 		return nil, mapError(err)
 	}
@@ -335,15 +348,20 @@ func (service *service) TimeTravelQuery(ctx context.Context, request *TimeTravel
 		return nil, status.Error(codes.InvalidArgument, "sql is required")
 	}
 
+	principal, err := service.authenticatedPrincipal(ctx)
+	if err != nil {
+		service.auditFailure("admin.time_travel_query", err.Error(), slog.String("sql", request.SQL), slog.Uint64("lsn", request.LSN), slog.Uint64("logical_timestamp", request.LogicalTimestamp), slog.Any("domains", request.Domains))
+		return nil, err
+	}
+
 	var (
 		result executor.Result
-		err    error
 	)
 
 	if request.LSN > 0 {
-		result, err = service.engine.TimeTravelQueryAsOfLSN(ctx, request.SQL, request.Domains, request.LSN)
+		result, err = service.engine.TimeTravelQueryAsOfLSNAsPrincipal(ctx, request.SQL, request.Domains, request.LSN, principal)
 	} else {
-		result, err = service.engine.TimeTravelQueryAsOfTimestamp(ctx, request.SQL, request.Domains, request.LogicalTimestamp)
+		result, err = service.engine.TimeTravelQueryAsOfTimestampAsPrincipal(ctx, request.SQL, request.Domains, request.LogicalTimestamp, principal)
 	}
 	if err != nil {
 		service.auditFailure("admin.time_travel_query", err.Error(), slog.String("sql", request.SQL), slog.Uint64("lsn", request.LSN), slog.Uint64("logical_timestamp", request.LogicalTimestamp), slog.Any("domains", request.Domains))
@@ -361,7 +379,13 @@ func (service *service) RowHistory(ctx context.Context, request *RowHistoryReque
 		return nil, status.Error(codes.InvalidArgument, "sql is required")
 	}
 
-	result, err := service.engine.RowHistory(ctx, request.SQL, request.Domains)
+	principal, err := service.authenticatedPrincipal(ctx)
+	if err != nil {
+		service.auditFailure("admin.row_history", err.Error(), slog.String("sql", request.SQL), slog.Any("domains", request.Domains))
+		return nil, err
+	}
+
+	result, err := service.engine.RowHistoryAsPrincipal(ctx, request.SQL, request.Domains, principal)
 	if err != nil {
 		service.auditFailure("admin.row_history", err.Error(), slog.String("sql", request.SQL), slog.Any("domains", request.Domains))
 		return nil, mapError(err)
@@ -382,7 +406,13 @@ func (service *service) EntityVersionHistory(ctx context.Context, request *Entit
 		return nil, status.Error(codes.InvalidArgument, "entity_name is required")
 	}
 
-	entries, err := service.engine.EntityVersionHistory(ctx, request.Domain, request.EntityName, request.RootPK)
+	principal, err := service.authenticatedPrincipal(ctx)
+	if err != nil {
+		service.auditFailure("admin.entity_version_history", err.Error(), slog.String("domain", request.Domain), slog.String("entity", request.EntityName), slog.String("root_pk", request.RootPK))
+		return nil, err
+	}
+
+	entries, err := service.engine.EntityVersionHistoryAsPrincipal(ctx, request.Domain, request.EntityName, request.RootPK, principal)
 	if err != nil {
 		service.auditFailure("admin.entity_version_history", err.Error(), slog.String("domain", request.Domain), slog.String("entity", request.EntityName), slog.String("root_pk", request.RootPK))
 		return nil, mapError(err)
@@ -409,13 +439,19 @@ func (service *service) EntityVersionHistory(ctx context.Context, request *Entit
 	}, nil
 }
 
-func (service *service) ExplainQuery(_ context.Context, request *ExplainQueryRequest) (*ExplainQueryResponse, error) {
+func (service *service) ExplainQuery(ctx context.Context, request *ExplainQueryRequest) (*ExplainQueryResponse, error) {
 	if strings.TrimSpace(request.SQL) == "" {
 		service.auditFailure("admin.explain_query", "sql is required")
 		return nil, status.Error(codes.InvalidArgument, "sql is required")
 	}
 
-	result, err := service.engine.Explain(request.SQL, request.Domains)
+	principal, err := service.authenticatedPrincipal(ctx)
+	if err != nil {
+		service.auditFailure("admin.explain_query", err.Error(), slog.String("sql", request.SQL), slog.Any("domains", request.Domains))
+		return nil, err
+	}
+
+	result, err := service.engine.ExplainAsPrincipal(request.SQL, request.Domains, principal)
 	if err != nil {
 		service.auditFailure("admin.explain_query", err.Error(), slog.String("sql", request.SQL), slog.Any("domains", request.Domains))
 		return nil, mapError(err)
@@ -708,7 +744,13 @@ func (service *service) Query(ctx context.Context, request *QueryRequest) (*Quer
 		return nil, status.Errorf(codes.InvalidArgument, "sql exceeds maximum length (%d bytes)", maxSQLLength)
 	}
 
-	result, err := service.engine.Query(ctx, request.SQL, request.Domains)
+	principal, err := service.authenticatedPrincipal(ctx)
+	if err != nil {
+		service.auditFailure("query.execute", err.Error(), slog.String("sql", request.SQL), slog.Any("domains", request.Domains))
+		return nil, err
+	}
+
+	result, err := service.engine.QueryAsPrincipal(ctx, request.SQL, request.Domains, principal)
 	if err != nil {
 		service.auditFailure("query.execute", err.Error(), slog.String("sql", request.SQL), slog.Any("domains", request.Domains))
 		return nil, mapError(err)
@@ -905,6 +947,10 @@ func (service *service) findSession(txID string) (*executor.Session, error) {
 	return session, nil
 }
 
+func (service *service) authenticatedPrincipal(ctx context.Context) (string, error) {
+	return authenticatePrincipalFromMetadata(ctx, service.engine)
+}
+
 func buildBeginSQL(mode string, domains []string) (string, error) {
 	canonical := make([]string, 0, len(domains))
 	for _, domain := range domains {
@@ -1017,6 +1063,11 @@ func mapError(err error) error {
 	// Parse errors → InvalidArgument
 	if strings.Contains(msg, "parse") || strings.Contains(msg, "syntax") {
 		return status.Error(codes.InvalidArgument, msg)
+	}
+
+	// Authorization failures → PermissionDenied
+	if strings.Contains(msg, "permission denied") || strings.Contains(msg, "privilege required") {
+		return status.Error(codes.PermissionDenied, msg)
 	}
 
 	// Not found errors → NotFound

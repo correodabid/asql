@@ -17,6 +17,12 @@ Reference material:
 Treat `examples/go-client` as a lower-level reference for the internal/admin
 gRPC surface, not as the default onboarding path.
 
+When the durable principal catalog is enabled, the gRPC admin/query surface now
+expects database-principal metadata on calls that open transactions or inspect
+current/historical engine state. The example client sends `asql-principal` and
+`asql-password` metadata via `-db-principal` and `-db-password`; bearer tokens
+remain separate transport/operator controls.
+
 Important: the default local runtime started by `go run ./cmd/asqld ...` in
 getting-started exposes pgwire on `:5433`. It does not make the lower-level
 gRPC example the primary application-facing path for new teams.

@@ -4,10 +4,17 @@ import (
 	"context"
 	"strings"
 
+	"asql/internal/engine/executor"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
+)
+
+const (
+	principalMetadataKey = "asql-principal"
+	passwordMetadataKey  = "asql-password"
 )
 
 func unaryAuthInterceptor(token string) grpc.UnaryServerInterceptor {
@@ -65,4 +72,40 @@ func validateAuthorizationHeader(ctx context.Context, expectedToken string) erro
 	}
 
 	return nil
+}
+
+func authenticatePrincipalFromMetadata(ctx context.Context, engine *executor.Engine) (string, error) {
+	if engine == nil || !engine.HasPrincipalCatalog() {
+		return "", nil
+	}
+
+	meta, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return "", status.Errorf(codes.Unauthenticated, "%s metadata is required", principalMetadataKey)
+	}
+
+	principal := strings.TrimSpace(firstMetadataValue(meta, principalMetadataKey))
+	if principal == "" {
+		return "", status.Errorf(codes.Unauthenticated, "%s metadata is required", principalMetadataKey)
+	}
+
+	password := strings.TrimSpace(firstMetadataValue(meta, passwordMetadataKey))
+	if password == "" {
+		return "", status.Errorf(codes.Unauthenticated, "%s metadata is required", passwordMetadataKey)
+	}
+
+	info, err := engine.AuthenticatePrincipal(principal, password)
+	if err != nil {
+		return "", status.Error(codes.Unauthenticated, err.Error())
+	}
+
+	return info.Name, nil
+}
+
+func firstMetadataValue(meta metadata.MD, key string) string {
+	values := meta.Get(key)
+	if len(values) == 0 {
+		return ""
+	}
+	return values[0]
 }
