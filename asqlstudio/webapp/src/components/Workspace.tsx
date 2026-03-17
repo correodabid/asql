@@ -140,6 +140,7 @@ export function Workspace({ domain }: Props) {
           results={tab.results}
           error={tab.error}
           loading={tab.loading}
+          explainEnabled={tab.explainEnabled}
           explainPlan={tab.explainPlan}
           selectedRow={tab.selectedRow}
           onRowClick={(i) => workspace.setSelectedRow(tab.id, i)}

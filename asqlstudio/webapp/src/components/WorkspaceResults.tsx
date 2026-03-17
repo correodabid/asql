@@ -18,6 +18,7 @@ type Props = {
   results: QueryResult[]
   error: string | null
   loading: boolean
+  explainEnabled: boolean
   explainPlan: ExplainPlan | null
   selectedRow: number | null
   onRowClick: (rowIndex: number) => void
@@ -40,6 +41,7 @@ export function WorkspaceResults({
   results,
   error,
   loading,
+  explainEnabled,
   explainPlan,
   selectedRow,
   onRowClick,
@@ -245,6 +247,7 @@ export function WorkspaceResults({
           )}
 
           <div className="console-status-bar success-bar">
+            {explainEnabled && <span className="result-mode-badge">EXPLAIN MODE</span>}
             <span className="result-meta">{result.status}</span>
             <span className="result-meta">
               {result.rowCount} row{result.rowCount !== 1 ? 's' : ''}
@@ -436,7 +439,11 @@ export function WorkspaceResults({
 
       {!result && !error && !loading && (
         <div className="panel-empty">
-          <span className="text-muted">Write a query and press Run or Cmd+Enter</span>
+          <span className="text-muted">
+            {explainEnabled
+              ? 'Write a read query and press Run to inspect its plan'
+              : 'Write a query and press Run or Cmd+Enter'}
+          </span>
         </div>
       )}
 
