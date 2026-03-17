@@ -934,6 +934,82 @@ func TestParseMultipleCTEs(t *testing.T) {
 	}
 }
 
+func TestParseDerivedTableInFrom(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM (SELECT id, name FROM users) AS u")
+	if err != nil {
+		t.Fatalf("parse derived table: %v", err)
+	}
+	sel := stmt.(ast.SelectStatement)
+	if sel.TableName != "u" {
+		t.Fatalf("expected main table u, got %q", sel.TableName)
+	}
+	if sel.TableAlias != "" {
+		t.Fatalf("expected no separate table alias, got %q", sel.TableAlias)
+	}
+	if len(sel.CTEs) != 1 {
+		t.Fatalf("expected 1 synthetic CTE, got %d", len(sel.CTEs))
+	}
+	if sel.CTEs[0].Name != "u" {
+		t.Fatalf("expected derived table CTE name u, got %q", sel.CTEs[0].Name)
+	}
+	if sel.CTEs[0].Statement.TableName != "users" {
+		t.Fatalf("expected derived table inner source users, got %q", sel.CTEs[0].Statement.TableName)
+	}
+}
+
+func TestParseDerivedTableJoin(t *testing.T) {
+	stmt, err := Parse("SELECT u.id, o.id FROM (SELECT id FROM users) u JOIN orders o ON u.id = o.user_id")
+	if err != nil {
+		t.Fatalf("parse derived table join: %v", err)
+	}
+	sel := stmt.(ast.SelectStatement)
+	if sel.TableName != "u" {
+		t.Fatalf("expected main table u, got %q", sel.TableName)
+	}
+	if len(sel.CTEs) != 1 || sel.CTEs[0].Name != "u" {
+		t.Fatalf("expected one derived-table CTE named u, got %+v", sel.CTEs)
+	}
+	if len(sel.Joins) != 1 {
+		t.Fatalf("expected 1 join, got %d", len(sel.Joins))
+	}
+	if sel.Joins[0].TableName != "orders" || sel.Joins[0].Alias != "o" {
+		t.Fatalf("expected join orders alias o, got %+v", sel.Joins[0])
+	}
+	if sel.Joins[0].LeftColumn != "u.id" || sel.Joins[0].RightColumn != "o.user_id" {
+		t.Fatalf("unexpected join columns: %+v", sel.Joins[0])
+	}
+}
+
+func TestParseJoinWithDerivedRightTable(t *testing.T) {
+	stmt, err := Parse("SELECT users.id, x.id FROM users JOIN (SELECT id, user_id FROM orders) x ON users.id = x.user_id")
+	if err != nil {
+		t.Fatalf("parse join with derived right table: %v", err)
+	}
+	sel := stmt.(ast.SelectStatement)
+	if sel.TableName != "users" {
+		t.Fatalf("expected base table users, got %q", sel.TableName)
+	}
+	if len(sel.CTEs) != 1 || sel.CTEs[0].Name != "x" {
+		t.Fatalf("expected one derived-table CTE named x, got %+v", sel.CTEs)
+	}
+	if len(sel.Joins) != 1 {
+		t.Fatalf("expected 1 join, got %d", len(sel.Joins))
+	}
+	if sel.Joins[0].TableName != "x" || sel.Joins[0].Alias != "" {
+		t.Fatalf("expected derived right table x with no extra alias, got %+v", sel.Joins[0])
+	}
+}
+
+func TestParseDerivedTableRequiresAlias(t *testing.T) {
+	_, err := Parse("SELECT * FROM (SELECT id FROM users)")
+	if err == nil {
+		t.Fatal("expected derived table without alias to fail")
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "derived table requires alias") {
+		t.Fatalf("expected alias error, got %v", err)
+	}
+}
+
 func TestParseCTEWithWhere(t *testing.T) {
 	stmt, err := Parse("WITH big AS (SELECT id, amount FROM orders WHERE amount > 100) SELECT * FROM big WHERE id = 1")
 	if err != nil {

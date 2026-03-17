@@ -253,6 +253,10 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 
 		projected := make(map[string]ast.Literal, len(plan.Columns))
 		for _, column := range plan.Columns {
+			if prefix, ok := parseQualifiedStarColumn(column); ok {
+				expandQualifiedStar(projected, row, table, plan, prefix)
+				continue
+			}
 			if ja, ok := jsonAccessMap[column]; ok {
 				if val, resolved := resolveJsonAccess(row, ja); resolved {
 					projected[column] = val
@@ -295,6 +299,53 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 	}
 
 	return result, nil
+}
+
+func parseQualifiedStarColumn(column string) (string, bool) {
+	trimmed := strings.TrimSpace(strings.ToLower(column))
+	if len(trimmed) <= 2 || !strings.HasSuffix(trimmed, ".*") {
+		return "", false
+	}
+	prefix := strings.TrimSpace(strings.TrimSuffix(trimmed, ".*"))
+	if prefix == "" {
+		return "", false
+	}
+	return prefix, true
+}
+
+func expandQualifiedStar(projected map[string]ast.Literal, row map[string]ast.Literal, table *tableState, plan planner.Plan, prefix string) {
+	if len(plan.Joins) == 0 {
+		basePrefix := strings.ToLower(displayPrefix(plan.TableName, plan.TableAlias))
+		baseTableName := strings.ToLower(plan.TableName)
+		if prefix == basePrefix || prefix == baseTableName {
+			for _, col := range table.columns {
+				if val, ok := row[col]; ok {
+					projected[col] = val
+				}
+			}
+			return
+		}
+	}
+
+	qualifiedPrefix := prefix + "."
+	matchedColumns := make([]string, 0)
+	for key := range row {
+		if !strings.HasPrefix(strings.ToLower(key), qualifiedPrefix) {
+			continue
+		}
+		columnName := key[len(qualifiedPrefix):]
+		if columnName == "" || strings.Contains(columnName, ".") {
+			continue
+		}
+		matchedColumns = append(matchedColumns, columnName)
+	}
+	sort.Strings(matchedColumns)
+	for _, columnName := range matchedColumns {
+		qualifiedName := qualifiedPrefix + columnName
+		if val, ok := row[qualifiedName]; ok {
+			projected[columnName] = val
+		}
+	}
 }
 
 func deduplicateRows(rows []map[string]ast.Literal) []map[string]ast.Literal {

@@ -166,6 +166,8 @@ regression-covered` behaviors from items that are only partially evidenced.
 | Narrow `COPY FROM STDIN` / `COPY TO STDOUT` flows | Implemented | Regression-covered | Conformance tests cover chunked copy-in, copy-out streaming, and `CopyFail` rollback behavior. |
 | `EXISTS` / `NOT EXISTS` | Implemented | Regression-covered | Covered in parser and executor tests for current shapes. |
 | `LEFT JOIN` / `RIGHT JOIN` / `CROSS JOIN` | Implemented | Regression-covered | Covered in executor tests for current supported join shapes. |
+| Qualified `table.*` / `alias.*` projection | Implemented | Regression-covered | Current support expands to unqualified output columns for tested shapes, including derived-table workflows. |
+| Non-correlated derived tables in `FROM` | Implemented | Regression-covered | Current support is limited to tested non-`LATERAL` shapes with aliases. |
 | Non-recursive `WITH` / CTE shapes | Implemented | Regression-covered | Current documented support should remain limited to tested shapes. |
 | `ILIKE` / `NOT ILIKE` | Implemented | Regression-covered | Covered in executor tests. |
 | `INSERT ... RETURNING` | Implemented | Regression-covered | This is the only `RETURNING` path currently documented as supported. |

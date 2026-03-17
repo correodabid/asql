@@ -5419,6 +5419,70 @@ func TestCTEMultiple(t *testing.T) {
 	}
 }
 
+func TestDerivedTableWithWindowJoin(t *testing.T) {
+	engine := setupJoinEngine(t)
+	ctx := context.Background()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+		"SELECT users.name, ranked.amount FROM (SELECT user_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM orders) ranked JOIN users ON ranked.user_id = users.id WHERE ranked.rn = 1 ORDER BY users.name ASC",
+		[]string{"store"}, 8192)
+	if err != nil {
+		t.Fatalf("derived table with window join: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d: %+v", len(result.Rows), result.Rows)
+	}
+	if result.Rows[0]["users.name"].StringValue != "Alice" || result.Rows[0]["ranked.amount"].NumberValue != 200 {
+		t.Fatalf("unexpected first row: %+v", result.Rows[0])
+	}
+	if result.Rows[1]["users.name"].StringValue != "Bob" || result.Rows[1]["ranked.amount"].NumberValue != 150 {
+		t.Fatalf("unexpected second row: %+v", result.Rows[1])
+	}
+}
+
+func TestQualifiedStarSingleTableAlias(t *testing.T) {
+	engine := setupJoinEngine(t)
+	ctx := context.Background()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+		"SELECT o.* FROM orders o WHERE user_id = 1 ORDER BY id ASC",
+		[]string{"store"}, 8192)
+	if err != nil {
+		t.Fatalf("qualified star single-table alias: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("expected 2 rows, got %d: %+v", len(result.Rows), result.Rows)
+	}
+	first := result.Rows[0]
+	if first["id"].NumberValue != 10 || first["user_id"].NumberValue != 1 || first["amount"].NumberValue != 100 {
+		t.Fatalf("unexpected first row: %+v", first)
+	}
+	if _, exists := first["o.id"]; exists {
+		t.Fatalf("expected qualified star to expose unqualified column names, got %+v", first)
+	}
+}
+
+func TestQualifiedStarInsideDerivedTable(t *testing.T) {
+	engine := setupJoinEngine(t)
+	ctx := context.Background()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+		"SELECT user_id, amount FROM (SELECT o.*, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM orders o) ranked WHERE rn = 1 ORDER BY user_id ASC",
+		[]string{"store"}, 8192)
+	if err != nil {
+		t.Fatalf("qualified star inside derived table: %v", err)
+	}
+	if len(result.Rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d: %+v", len(result.Rows), result.Rows)
+	}
+	if result.Rows[0]["user_id"].NumberValue != 1 || result.Rows[0]["amount"].NumberValue != 200 {
+		t.Fatalf("unexpected first row: %+v", result.Rows[0])
+	}
+	if result.Rows[1]["user_id"].NumberValue != 2 || result.Rows[1]["amount"].NumberValue != 150 {
+		t.Fatalf("unexpected second row: %+v", result.Rows[1])
+	}
+	if result.Rows[2]["user_id"].NumberValue != 99 || result.Rows[2]["amount"].NumberValue != 50 {
+		t.Fatalf("unexpected third row: %+v", result.Rows[2])
+	}
+}
+
 func TestWindowRowNumber(t *testing.T) {
 	engine := setupJoinEngine(t)
 	ctx := context.Background()

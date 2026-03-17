@@ -203,7 +203,7 @@ func parseWithCTE(sql string) (ast.Statement, error) {
 	}
 
 	sel := selectStmt.(ast.SelectStatement)
-	sel.CTEs = ctes
+	sel.CTEs = append(ctes, sel.CTEs...)
 	return sel, nil
 }
 
@@ -1201,7 +1201,7 @@ func parseSelect(sql string) (ast.Statement, error) {
 		fromSpec = strings.TrimSpace(fromSpec[:len(fromSpec)-len(" FOR HISTORY")])
 	}
 
-	table, tableAlias, joins, err := parseFromAndJoin(fromSpec)
+	table, tableAlias, joins, derivedCTEs, err := parseFromAndJoin(fromSpec)
 	if err != nil {
 		return nil, err
 	}
@@ -1310,6 +1310,7 @@ func parseSelect(sql string) (ast.Statement, error) {
 	}
 
 	return ast.SelectStatement{
+		CTEs:              derivedCTEs,
 		Distinct:          distinct,
 		Columns:           columns,
 		JsonAccessColumns: jsonAccessColumns,
@@ -1336,7 +1337,14 @@ func parseTableRef(raw string) (table, alias string) {
 	}
 	table = canonicalIdentifier(parts[0])
 	if len(parts) >= 2 {
-		candidate := parts[1]
+		candidateIndex := 1
+		if strings.EqualFold(parts[1], "AS") {
+			if len(parts) < 3 {
+				return table, ""
+			}
+			candidateIndex = 2
+		}
+		candidate := parts[candidateIndex]
 		// Don't treat SQL keywords as aliases.
 		switch {
 		case strings.EqualFold(candidate, "ON"),
@@ -1359,6 +1367,50 @@ func parseTableRef(raw string) (table, alias string) {
 	return table, alias
 }
 
+func parseFromSource(raw string) (table, alias string, derived *ast.CTE, err error) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return "", "", nil, fmt.Errorf("%w: table name required", errInvalidSQL)
+	}
+
+	if trimmed[0] != '(' {
+		table, alias = parseTableRef(trimmed)
+		if table == "" {
+			return "", "", nil, fmt.Errorf("%w: table name required", errInvalidSQL)
+		}
+		return table, alias, nil, nil
+	}
+
+	closeIndex := findMatchingParen(trimmed, 0)
+	if closeIndex == -1 {
+		return "", "", nil, fmt.Errorf("%w: unmatched parenthesis in FROM clause", errInvalidSQL)
+	}
+
+	aliasSpec := strings.TrimSpace(trimmed[closeIndex+1:])
+	if aliasSpec == "" {
+		return "", "", nil, fmt.Errorf("%w: derived table requires alias", errInvalidSQL)
+	}
+	if hasPrefixFold(aliasSpec, "AS ") {
+		aliasSpec = strings.TrimSpace(aliasSpec[len("AS "):])
+	}
+	aliasParts := strings.Fields(aliasSpec)
+	if len(aliasParts) != 1 {
+		return "", "", nil, fmt.Errorf("%w: derived table requires a single alias", errInvalidSQL)
+	}
+	alias = canonicalIdentifier(aliasParts[0])
+	if alias == "" {
+		return "", "", nil, fmt.Errorf("%w: derived table requires alias", errInvalidSQL)
+	}
+
+	sel, err := parseSubqueryExpression(trimmed[:closeIndex+1])
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	derived = &ast.CTE{Name: alias, Statement: sel}
+	return alias, "", derived, nil
+}
+
 // joinKeywords defines the recognised JOIN prefixes in specificity order.
 var joinKeywords = []struct {
 	keyword  string
@@ -1374,35 +1426,89 @@ var joinKeywords = []struct {
 // findFirstJoin finds the earliest case-insensitive JOIN keyword in s.
 // Returns the index, matched keyword string, join type, and whether a match was found.
 func findFirstJoin(s string) (int, string, ast.JoinType, bool) {
-	bestIdx := -1
-	bestKeyword := ""
-	bestType := ast.JoinInner
-	for _, jt := range joinKeywords {
-		idx := indexFold(s, jt.keyword)
-		if idx != -1 && (bestIdx == -1 || idx < bestIdx) {
-			bestIdx = idx
-			bestKeyword = jt.keyword
-			bestType = jt.joinType
+	depth := 0
+	inStr := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch == '\'' {
+			inStr = !inStr
+			continue
+		}
+		if inStr {
+			continue
+		}
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+		if depth != 0 {
+			continue
+		}
+		for _, jt := range joinKeywords {
+			if i+len(jt.keyword) <= len(s) && strings.EqualFold(s[i:i+len(jt.keyword)], jt.keyword) {
+				return i, jt.keyword, jt.joinType, true
+			}
 		}
 	}
-	return bestIdx, bestKeyword, bestType, bestIdx != -1
+	return -1, "", ast.JoinInner, false
 }
 
-func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, error) {
+func findTopLevelFold(s, needle string) int {
+	depth := 0
+	inStr := false
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch == '\'' {
+			inStr = !inStr
+			continue
+		}
+		if inStr {
+			continue
+		}
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+		if depth != 0 {
+			continue
+		}
+		if i+len(needle) <= len(s) && strings.EqualFold(s[i:i+len(needle)], needle) {
+			return i
+		}
+	}
+	return -1
+}
+
+func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, []ast.CTE, error) {
 	joinIndex, matchedKeyword, matchedType, found := findFirstJoin(spec)
+	ctes := make([]ast.CTE, 0)
 
 	if !found {
-		table, alias := parseTableRef(spec)
-		if table == "" {
-			return "", "", nil, fmt.Errorf("%w: table name required", errInvalidSQL)
+		table, alias, derived, err := parseFromSource(spec)
+		if err != nil {
+			return "", "", nil, nil, err
 		}
-		return table, alias, nil, nil
+		if derived != nil {
+			ctes = append(ctes, *derived)
+		}
+		return table, alias, nil, ctes, nil
 	}
 
 	leftRaw := strings.TrimSpace(spec[:joinIndex])
-	leftTable, leftAlias := parseTableRef(leftRaw)
-	if leftTable == "" {
-		return "", "", nil, fmt.Errorf("%w: left table name required", errInvalidSQL)
+	leftTable, leftAlias, leftDerived, err := parseFromSource(leftRaw)
+	if err != nil {
+		return "", "", nil, nil, fmt.Errorf("%w: left table name required", errInvalidSQL)
+	}
+	if leftDerived != nil {
+		ctes = append(ctes, *leftDerived)
 	}
 
 	// Iteratively parse each JOIN clause from the remainder.
@@ -1422,9 +1528,12 @@ func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, error) {
 				tableRaw = strings.TrimSpace(rest[:nextIdx])
 				rest = strings.TrimSpace(rest[nextIdx+len(nextKW):])
 			}
-			rightTable, rightAlias := parseTableRef(tableRaw)
-			if rightTable == "" {
-				return "", "", nil, fmt.Errorf("%w: right table name required", errInvalidSQL)
+			rightTable, rightAlias, rightDerived, err := parseFromSource(tableRaw)
+			if err != nil {
+				return "", "", nil, nil, fmt.Errorf("%w: right table name required", errInvalidSQL)
+			}
+			if rightDerived != nil {
+				ctes = append(ctes, *rightDerived)
 			}
 			joins = append(joins, ast.JoinClause{
 				JoinType:  ast.JoinCross,
@@ -1439,15 +1548,18 @@ func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, error) {
 		}
 
 		// Non-CROSS JOIN: find ON keyword.
-		onIndex := indexFold(rest, " ON ")
+		onIndex := findTopLevelFold(rest, " ON ")
 		if onIndex <= 0 {
-			return "", "", nil, fmt.Errorf("%w: %s JOIN requires ON clause", errInvalidSQL, string(currentType))
+			return "", "", nil, nil, fmt.Errorf("%w: %s JOIN requires ON clause", errInvalidSQL, string(currentType))
 		}
 
 		tableRaw := strings.TrimSpace(rest[:onIndex])
-		rightTable, rightAlias := parseTableRef(tableRaw)
-		if rightTable == "" {
-			return "", "", nil, fmt.Errorf("%w: right table name required", errInvalidSQL)
+		rightTable, rightAlias, rightDerived, err := parseFromSource(tableRaw)
+		if err != nil {
+			return "", "", nil, nil, fmt.Errorf("%w: right table name required", errInvalidSQL)
+		}
+		if rightDerived != nil {
+			ctes = append(ctes, *rightDerived)
 		}
 
 		afterON := strings.TrimSpace(rest[onIndex+len(" ON "):])
@@ -1465,7 +1577,7 @@ func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, error) {
 
 		leftColumn, rightColumn, err := parseJoinPredicate(onClause)
 		if err != nil {
-			return "", "", nil, err
+			return "", "", nil, nil, err
 		}
 
 		joins = append(joins, ast.JoinClause{
@@ -1482,7 +1594,7 @@ func parseFromAndJoin(spec string) (string, string, []ast.JoinClause, error) {
 		currentType = nextType
 	}
 
-	return leftTable, leftAlias, joins, nil
+	return leftTable, leftAlias, joins, ctes, nil
 }
 
 func parseJoinPredicate(clause string) (string, string, error) {
