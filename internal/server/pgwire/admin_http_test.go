@@ -344,8 +344,8 @@ func TestAdminHTTPSecurityPrincipalManagementFlow(t *testing.T) {
 		t.Fatalf("unexpected principal count: got %d want 3 (%+v)", len(list.Principals), list.Principals)
 	}
 	for _, principal := range list.Principals {
-		if principal.Name == "analyst" && len(principal.EffectivePrivileges) == 0 {
-			t.Fatalf("expected analyst effective privileges in list response: %+v", principal)
+		if principal.Name == "analyst" && (len(principal.EffectivePrivileges) == 0 || len(principal.EffectiveRoles) == 0) {
+			t.Fatalf("expected analyst effective privileges and roles in list response: %+v", principal)
 		}
 	}
 
@@ -423,6 +423,17 @@ func TestAdminHTTPSecurityPrincipalManagementFlow(t *testing.T) {
 	}
 	if disableResp.Principal == nil || disableResp.Principal.Enabled {
 		t.Fatalf("expected disabled principal response, got %+v", disableResp)
+	}
+
+	var enableResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/principals/enable", "write-secret", api.EnablePrincipalRequest{
+		Principal: "analyst",
+	}, &enableResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected enable principal status: got %d want %d", status, http.StatusOK)
+	}
+	if enableResp.Principal == nil || !enableResp.Principal.Enabled {
+		t.Fatalf("expected enabled principal response, got %+v", enableResp)
 	}
 }
 

@@ -19,7 +19,7 @@ func TestSecurityListPrincipalsUsesAdminAuthToken(t *testing.T) {
 			t.Fatalf("unexpected authorization header: %q", got)
 		}
 		_ = json.NewEncoder(w).Encode(api.ListPrincipalsResponse{
-			Principals: []api.PrincipalRecord{{Name: "admin", Kind: "USER", Enabled: true}},
+			Principals: []api.PrincipalRecord{{Name: "admin", Kind: "USER", Enabled: true, EffectiveRoles: []string{"admins"}}},
 		})
 	}))
 	defer server.Close()
@@ -94,6 +94,11 @@ func TestSecurityMutationsPostJSON(t *testing.T) {
 				t.Fatalf("unexpected disable principal payload: %+v", payload)
 			}
 			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: "analyst", Kind: "USER", Enabled: false}})
+		case "/api/v1/security/principals/enable":
+			if payload["principal"] != "analyst" {
+				t.Fatalf("unexpected enable principal payload: %+v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: "analyst", Kind: "USER", Enabled: true}})
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -127,5 +132,8 @@ func TestSecurityMutationsPostJSON(t *testing.T) {
 	}
 	if _, err := app.SecurityDisablePrincipal("analyst"); err != nil {
 		t.Fatalf("SecurityDisablePrincipal: %v", err)
+	}
+	if _, err := app.SecurityEnablePrincipal("analyst"); err != nil {
+		t.Fatalf("SecurityEnablePrincipal: %v", err)
 	}
 }

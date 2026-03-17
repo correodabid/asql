@@ -1291,6 +1291,62 @@ func TestPGWirePasswordAuthenticationRespectsPasswordRotation(t *testing.T) {
 	}
 }
 
+func TestPGWirePasswordAuthenticationRespectsDisableAndEnable(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create principal: %v", err)
+	}
+	if err := server.engine.DisablePrincipal(ctx, "analyst"); err != nil {
+		t.Fatalf("disable principal: %v", err)
+	}
+	if err := server.engine.EnablePrincipal(ctx, "analyst"); err != nil {
+		t.Fatalf("enable principal: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	conn, err := pgx.Connect(ctx, "postgres://analyst:analyst-pass@"+listener.Addr().String()+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect pgx after re-enable: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+}
+
 func TestPGWireHistoricalReadRequiresSelectHistoryPrivilege(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

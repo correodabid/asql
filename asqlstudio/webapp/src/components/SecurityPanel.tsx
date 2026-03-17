@@ -10,6 +10,7 @@ type PrincipalRecord = {
   kind: PrincipalKind
   enabled: boolean
   roles?: string[]
+  effective_roles?: string[]
   privileges?: PrincipalPrivilege[]
   effective_privileges?: PrincipalPrivilege[]
 }
@@ -165,6 +166,13 @@ export function SecurityPanel() {
       principal: principalName,
     })
     setMessage(`Disabled principal ${principalName}.`)
+  })
+
+  const submitEnablePrincipal = (principalName: string) => run(`enable-${principalName}`, async () => {
+    await api<SecurityMutationResponse>('/api/security/principals/enable', 'POST', {
+      principal: principalName,
+    })
+    setMessage(`Enabled principal ${principalName}.`)
   })
 
   return (
@@ -380,13 +388,21 @@ export function SecurityPanel() {
                     {(principal.roles?.length ?? 0)} role{(principal.roles?.length ?? 0) === 1 ? '' : 's'} · {(principal.privileges?.length ?? 0)} privilege{(principal.privileges?.length ?? 0) === 1 ? '' : 's'}
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                    {!principal.enabled ? null : (
+                    {principal.enabled ? (
                       <button
                         className="toolbar-btn"
                         disabled={busy !== ''}
                         onClick={() => void submitDisablePrincipal(principal.name)}
                       >
                         Disable
+                      </button>
+                    ) : (
+                      <button
+                        className="toolbar-btn"
+                        disabled={busy !== ''}
+                        onClick={() => void submitEnablePrincipal(principal.name)}
+                      >
+                        Enable
                       </button>
                     )}
                   </div>
@@ -395,6 +411,12 @@ export function SecurityPanel() {
                   <div>
                     <span className="text-muted" style={{ marginRight: 8 }}>Roles</span>
                     {sortedValues(principal.roles).length > 0 ? sortedValues(principal.roles).map((roleName) => (
+                      <span key={roleName} className="toolbar-badge" style={{ marginRight: 6 }}>{roleName}</span>
+                    )) : <span className="text-muted">—</span>}
+                  </div>
+                  <div>
+                    <span className="text-muted" style={{ marginRight: 8 }}>Effective roles</span>
+                    {sortedValues(principal.effective_roles).length > 0 ? sortedValues(principal.effective_roles).map((roleName) => (
                       <span key={roleName} className="toolbar-badge" style={{ marginRight: 6 }}>{roleName}</span>
                     )) : <span className="text-muted">—</span>}
                   </div>

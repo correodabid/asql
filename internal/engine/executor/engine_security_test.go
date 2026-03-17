@@ -191,3 +191,52 @@ func TestPrincipalRoleRevocationAndPasswordRotationPersistAcrossRestart(t *testi
 		t.Fatalf("authenticate with rotated password after restart: %v", err)
 	}
 }
+
+func TestPrincipalEnableRestoresAuthenticationAndEffectiveRoles(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+	walPath := filepath.Join(baseDir, "security-enable.wal")
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	defer store.Close()
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	if err := engine.CreateRole(ctx, "history_readers"); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if err := engine.CreateRole(ctx, "auditors"); err != nil {
+		t.Fatalf("create nested role: %v", err)
+	}
+	if err := engine.GrantRole(ctx, "history_readers", "auditors"); err != nil {
+		t.Fatalf("grant nested role: %v", err)
+	}
+	if err := engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := engine.GrantRole(ctx, "analyst", "history_readers"); err != nil {
+		t.Fatalf("grant role: %v", err)
+	}
+	if err := engine.DisablePrincipal(ctx, "analyst"); err != nil {
+		t.Fatalf("disable principal: %v", err)
+	}
+	if _, err := engine.AuthenticatePrincipal("analyst", "analyst-pass"); err == nil {
+		t.Fatal("expected disabled principal authentication to fail")
+	}
+	if err := engine.EnablePrincipal(ctx, "analyst"); err != nil {
+		t.Fatalf("enable principal: %v", err)
+	}
+	info, err := engine.AuthenticatePrincipal("analyst", "analyst-pass")
+	if err != nil {
+		t.Fatalf("authenticate enabled principal: %v", err)
+	}
+	if len(info.EffectiveRoles) != 2 || info.EffectiveRoles[0] != "auditors" || info.EffectiveRoles[1] != "history_readers" {
+		t.Fatalf("unexpected effective roles after enable: %+v", info)
+	}
+}

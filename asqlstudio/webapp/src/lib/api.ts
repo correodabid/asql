@@ -97,6 +97,8 @@ export async function api<T>(path: string, _method = 'GET', body?: unknown): Pro
       return App.SecuritySetPassword(b.principal ?? '', b.password ?? '') as Promise<T>
     case '/api/security/principals/disable':
       return App.SecurityDisablePrincipal(b.principal ?? '') as Promise<T>
+    case '/api/security/principals/enable':
+      return App.SecurityEnablePrincipal(b.principal ?? '') as Promise<T>
     // ── Recovery ───────────────────────────────────
     case '/api/recovery/defaults':
       return App.RecoveryDefaults() as Promise<T>

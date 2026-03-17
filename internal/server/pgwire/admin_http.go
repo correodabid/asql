@@ -143,6 +143,7 @@ func (server *Server) startAdminHTTP() error {
 	mux.HandleFunc("/api/v1/security/roles/revoke", server.withAdminAuth(adminScopeWrite, server.handleAdminRevokeRole))
 	mux.HandleFunc("/api/v1/security/passwords/set", server.withAdminAuth(adminScopeWrite, server.handleAdminSetPrincipalPassword))
 	mux.HandleFunc("/api/v1/security/principals/disable", server.withAdminAuth(adminScopeWrite, server.handleAdminDisablePrincipal))
+	mux.HandleFunc("/api/v1/security/principals/enable", server.withAdminAuth(adminScopeWrite, server.handleAdminEnablePrincipal))
 	mux.HandleFunc("/api/v1/recovery/backup-create", server.withAdminAuth(adminScopeWrite, server.handleAdminRecoveryCreateBackup))
 	mux.HandleFunc("/api/v1/recovery/backup-manifest", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryBackupManifest))
 	mux.HandleFunc("/api/v1/recovery/backup-verify", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryVerifyBackup))
@@ -503,6 +504,26 @@ func (server *Server) handleAdminDisablePrincipal(w http.ResponseWriter, r *http
 		return
 	}
 	if err := server.engine.DisablePrincipal(r.Context(), req.Principal); err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
+}
+
+func (server *Server) handleAdminEnablePrincipal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.EnablePrincipalRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	if err := server.engine.EnablePrincipal(r.Context(), req.Principal); err != nil {
 		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
@@ -1025,6 +1046,7 @@ func toAdminPrincipalRecord(principal executor.PrincipalInfo) *api.PrincipalReco
 		Kind:                principal.Kind,
 		Enabled:             principal.Enabled,
 		Roles:               roles,
+		EffectiveRoles:      append([]string(nil), principal.EffectiveRoles...),
 		Privileges:          privileges,
 		EffectivePrivileges: append([]executor.PrincipalPrivilege(nil), principal.EffectivePrivileges...),
 	}

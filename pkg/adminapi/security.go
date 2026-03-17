@@ -7,6 +7,7 @@ type PrincipalRecord struct {
 	Kind                executor.PrincipalKind        `json:"kind"`
 	Enabled             bool                          `json:"enabled"`
 	Roles               []string                      `json:"roles,omitempty"`
+	EffectiveRoles      []string                      `json:"effective_roles,omitempty"`
 	Privileges          []executor.PrincipalPrivilege `json:"privileges,omitempty"`
 	EffectivePrivileges []executor.PrincipalPrivilege `json:"effective_privileges,omitempty"`
 }
@@ -55,6 +56,10 @@ type SetPasswordRequest struct {
 }
 
 type DisablePrincipalRequest struct {
+	Principal string `json:"principal"`
+}
+
+type EnablePrincipalRequest struct {
 	Principal string `json:"principal"`
 }
 

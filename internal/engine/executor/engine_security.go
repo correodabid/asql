@@ -57,6 +57,7 @@ type PrincipalInfo struct {
 	Kind                PrincipalKind
 	Enabled             bool
 	Roles               []string
+	EffectiveRoles      []string
 	Privileges          []PrincipalPrivilege
 	EffectivePrivileges []PrincipalPrivilege
 }
@@ -241,6 +242,20 @@ func (engine *Engine) DisablePrincipal(ctx context.Context, username string) err
 	})
 }
 
+// EnablePrincipal re-enables logins and privilege use for a principal.
+func (engine *Engine) EnablePrincipal(ctx context.Context, username string) error {
+	username = normalizePrincipalName(username)
+	enabled := true
+	payload := securityMutationPayload{
+		Action:    "principal_enable",
+		Principal: username,
+		Enabled:   &enabled,
+	}
+	return engine.appendSecurityMutation(ctx, payload, func(state *readableState) error {
+		return applySecurityMutation(state, payload)
+	})
+}
+
 // GrantPrivilege adds an explicit privilege to a user or role.
 func (engine *Engine) GrantPrivilege(ctx context.Context, principal string, privilege PrincipalPrivilege) error {
 	principal = normalizePrincipalName(principal)
@@ -386,6 +401,42 @@ func (state *readableState) hasPrincipalPrivilegeRecursive(principal string, pri
 	return false
 }
 
+func (state *readableState) effectivePrincipalRoles(principal string) []string {
+	principal = normalizePrincipalName(principal)
+	if principal == "" || len(state.principals) == 0 {
+		return nil
+	}
+	entry, ok := state.principals[principal]
+	if !ok || entry == nil || !entry.enabled {
+		return nil
+	}
+	visited := make(map[string]struct{})
+	roles := make([]string, 0)
+	state.collectPrincipalRoles(principal, visited, &roles)
+	sort.Strings(roles)
+	return roles
+}
+
+func (state *readableState) collectPrincipalRoles(principal string, visited map[string]struct{}, roles *[]string) {
+	entry, ok := state.principals[principal]
+	if !ok || entry == nil || !entry.enabled {
+		return
+	}
+	for roleName := range entry.roles {
+		roleName = normalizePrincipalName(roleName)
+		if _, seen := visited[roleName]; seen {
+			continue
+		}
+		role, ok := state.principals[roleName]
+		if !ok || role == nil || !role.enabled {
+			continue
+		}
+		visited[roleName] = struct{}{}
+		*roles = append(*roles, roleName)
+		state.collectPrincipalRoles(roleName, visited, roles)
+	}
+}
+
 func (state *readableState) principalInfo(principal *principalState) PrincipalInfo {
 	roles := make([]string, 0, len(principal.roles))
 	for role := range principal.roles {
@@ -403,11 +454,13 @@ func (state *readableState) principalInfo(principal *principalState) PrincipalIn
 			effectivePrivileges = append(effectivePrivileges, privilege)
 		}
 	}
+	effectiveRoles := state.effectivePrincipalRoles(principal.name)
 	return PrincipalInfo{
 		Name:                principal.name,
 		Kind:                principal.kind,
 		Enabled:             principal.enabled,
 		Roles:               roles,
+		EffectiveRoles:      effectiveRoles,
 		Privileges:          privileges,
 		EffectivePrivileges: effectivePrivileges,
 	}
@@ -438,12 +491,12 @@ func applySecurityMutation(state *readableState, payload securityMutationPayload
 			privileges:   make(map[PrincipalPrivilege]struct{}),
 		}
 		return nil
-	case "principal_disable":
+	case "principal_disable", "principal_enable":
 		principal, ok := state.principals[principalName]
 		if !ok {
 			return errPrincipalNotFound
 		}
-		principal.enabled = false
+		principal.enabled = payload.Action == "principal_enable"
 		if payload.Enabled != nil {
 			principal.enabled = *payload.Enabled
 		}
