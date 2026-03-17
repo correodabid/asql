@@ -113,6 +113,8 @@ WHERE domain = 'billing'
 
 This is a good default CLI path because it turns raw primitives into one repeatable explanation workflow.
 
+When the durable principal catalog is enabled, treat the `asql_admin` helpers as explicit security surfaces: `asql_admin.engine_stats` and other operator/admin views require `ADMIN`, while historical helpers such as `asql_admin.entity_version_history` and `asql_admin.row_history` require `SELECT_HISTORY`.
+
 ## Suggested daily loop
 
 1. run `asqld` locally,

@@ -71,7 +71,7 @@ func sqlStateFromMessage(msg string) string {
 	if containsAny(lower, "domain is required", "domain not set") {
 		return "25000" // invalid_transaction_state
 	}
-	if containsAny(lower, "permission denied", "insufficient privilege") {
+	if containsAny(lower, "permission denied", "insufficient privilege") || strings.Contains(lower, " privilege required") {
 		return "42501" // insufficient_privilege
 	}
 

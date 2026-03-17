@@ -1093,6 +1093,10 @@ func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connSt
 	// pg_is_in_recovery, etc.) so they never reach the SQL engine.
 	{
 		ctx, finish := state.beginQuery()
+		if err := server.authorizeCatalogQuery(session.Principal(), trimmed, true); err != nil {
+			finish()
+			return sendErrorAndReady(backend, err.Error(), session)
+		}
 		if intercepted, ok := server.interceptCatalog(ctx, trimmed, session.ActiveDomains(), session.Principal()); ok {
 			finish()
 			return sendInterceptedResult(backend, session, intercepted)
@@ -1192,14 +1196,18 @@ func (server *Server) authorizeHistoricalRead(session *executor.Session, detail 
 	if session != nil {
 		principal = session.Principal()
 	}
+	return server.authorizeHistoricalReadPrincipal(principal, detail, true)
+}
+
+func (server *Server) authorizeHistoricalReadPrincipal(principal string, detail historicalReadAuditDetail, emitAudit bool) error {
 	attrs := server.historicalReadAuditAttrs(principal, detail)
 	if err := server.engine.AuthorizeHistoricalRead(principal); err != nil {
-		if server.engine.HasPrincipalCatalog() {
+		if emitAudit && server.engine.HasPrincipalCatalog() {
 			server.auditFailure("authz.historical_read", "privilege_denied", attrs...)
 		}
 		return err
 	}
-	if server.engine.HasPrincipalCatalog() {
+	if emitAudit && server.engine.HasPrincipalCatalog() {
 		server.auditSuccess("authz.historical_read", attrs...)
 	}
 	return nil

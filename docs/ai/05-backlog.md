@@ -674,6 +674,7 @@ P1 — authorization model and historical semantics:
 P2 — pgwire and execution enforcement:
 - [x] Replace the fixed shared-user pgwire posture with real database-principal authentication while preserving documented compatibility for supported clients.
 - [ ] Enforce authorization checks in planner/executor for read/write/schema/admin flows, including temporal queries and replay-sensitive operations.
+	- [x] Require `ADMIN` for operator/admin pgwire virtual-schema helpers under `asql_admin.*` and for `asql_admin.replay_to_lsn(...)`, and require `SELECT_HISTORY` for historical helper views such as `asql_admin.row_history` / `asql_admin.entity_version_history`.
 - [x] Replace compatibility-shim privilege probes that currently always succeed with grant-aware behavior where claims are made public.
 - [x] Add deterministic regression coverage for authn/authz, replay recovery of principal state, and denied historical-access paths.
 

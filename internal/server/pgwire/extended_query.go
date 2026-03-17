@@ -774,6 +774,10 @@ func (server *Server) handleExtendedExecute(backend *pgproto3.Backend, state *co
 	}
 
 	// Catalog interception.
+	if err := server.authorizeCatalogQuery(state.session.Principal(), p.sql, true); err != nil {
+		server.extendedError(backend, state, err.Error(), mapErrorToSQLState(err))
+		return nil
+	}
 	if intercepted, ok := server.interceptCatalog(ctx, p.sql, state.session.ActiveDomains(), state.session.Principal()); ok {
 		nextRow, _, err := server.streamExtendedResult(ctx, backend, state, p.sql, intercepted.result, intercepted.columns, msg.MaxRows, p.nextRow)
 		p.nextRow = nextRow
@@ -1083,6 +1087,9 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 	// For catalog / virtual-table queries, intercept now so we can derive
 	// accurate OIDs from the real row data rather than defaulting everything
 	// to text (OID 25).
+	if err := server.authorizeCatalogQuery(principal, trimmed, false); err != nil {
+		return nil
+	}
 	if intercepted, ok := server.interceptCatalog(context.Background(), trimmed, activeDomains, principal); ok {
 		if len(intercepted.columns) == 0 {
 			return nil

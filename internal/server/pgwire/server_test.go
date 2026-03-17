@@ -3,6 +3,7 @@ package pgwire
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -123,6 +124,142 @@ func TestPGWireCurrentReadAllowsAuthenticatedUsersButMutationsRequireAdmin(t *te
 	pgErr = requirePGErrorCode(t, err, "42501")
 	if !strings.Contains(pgErr.Message, "ADMIN privilege required") {
 		t.Fatalf("unexpected analyst explain update denial message: %q", pgErr.Message)
+	}
+}
+
+func TestPGWireCatalogAdminAndHistoryQueriesRespectPrincipalGrants(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "catalog-authz-data")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create analyst principal: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "historian", "historian-pass"); err != nil {
+		t.Fatalf("create historian principal: %v", err)
+	}
+	if err := server.engine.GrantPrivilege(ctx, "historian", executor.PrincipalPrivilegeSelectHistory); err != nil {
+		t.Fatalf("grant historian SELECT_HISTORY: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	addr := listener.Addr().String()
+	adminConn, err := pgx.Connect(ctx, "postgres://admin:secret-pass@"+addr+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	t.Cleanup(func() { _ = adminConn.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN history",
+		"CREATE TABLE items (id INT PRIMARY KEY, name TEXT)",
+		"INSERT INTO items (id, name) VALUES (1, 'Alice')",
+		"COMMIT",
+		"BEGIN DOMAIN history",
+		"UPDATE items SET name = 'Bob' WHERE id = 1",
+		"COMMIT",
+	} {
+		if _, err := adminConn.Exec(ctx, sql); err != nil {
+			t.Fatalf("admin setup %q: %v", sql, err)
+		}
+	}
+
+	analystConn, err := pgx.Connect(ctx, "postgres://analyst:analyst-pass@"+addr+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect analyst: %v", err)
+	}
+	t.Cleanup(func() { _ = analystConn.Close(ctx) })
+
+	if _, err := analystConn.Query(ctx, "SELECT * FROM asql_admin.engine_stats"); err == nil {
+		t.Fatal("expected analyst admin view query to fail")
+	} else {
+		pgErr := requirePGErrorCode(t, err, "42501")
+		if !strings.Contains(pgErr.Message, "ADMIN privilege required") {
+			t.Fatalf("unexpected analyst engine_stats denial message: %q", pgErr.Message)
+		}
+	}
+
+	if _, err := analystConn.Exec(ctx, "SELECT asql_admin.replay_to_lsn(1)"); err == nil {
+		t.Fatal("expected analyst replay_to_lsn to fail")
+	} else {
+		pgErr := requirePGErrorCode(t, err, "42501")
+		if !strings.Contains(pgErr.Message, "ADMIN privilege required") {
+			t.Fatalf("unexpected analyst replay_to_lsn denial message: %q", pgErr.Message)
+		}
+	}
+
+	if _, err := analystConn.Query(ctx, "SELECT * FROM asql_admin.row_history WHERE sql = 'SELECT * FROM items FOR HISTORY WHERE id = 1'"); err == nil {
+		t.Fatal("expected analyst row_history query to fail")
+	} else {
+		pgErr := requirePGErrorCode(t, err, "42501")
+		if !strings.Contains(pgErr.Message, "SELECT_HISTORY privilege required") {
+			t.Fatalf("unexpected analyst row_history denial message: %q", pgErr.Message)
+		}
+	}
+
+	historianConn, err := pgx.Connect(ctx, "postgres://historian:historian-pass@"+addr+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect historian: %v", err)
+	}
+	t.Cleanup(func() { _ = historianConn.Close(ctx) })
+
+	rows, err := historianConn.Query(ctx, "SELECT * FROM asql_admin.row_history WHERE sql = 'SELECT * FROM items FOR HISTORY WHERE id = 1'")
+	if err != nil {
+		t.Fatalf("historian row_history query: %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("expected historian row_history row")
+	}
+	var operation string
+	var commitLSN int64
+	var id int64
+	var name string
+	if err := rows.Scan(&operation, &commitLSN, &id, &name); err != nil {
+		t.Fatalf("scan historian row_history row: %v", err)
+	}
+	if operation == "" || commitLSN <= 0 || id != 1 || name == "" {
+		t.Fatalf("unexpected historian row_history row: operation=%q commit_lsn=%d id=%d name=%q", operation, commitLSN, id, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate historian row_history rows: %v", err)
 	}
 }
 

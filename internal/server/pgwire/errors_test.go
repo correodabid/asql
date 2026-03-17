@@ -28,6 +28,7 @@ func TestSQLStateFromMessageMappings(t *testing.T) {
 		{name: "already in transaction", msg: "transaction already begun", want: "25001"},
 		{name: "transaction already active", msg: "transaction already active", want: "25001"},
 		{name: "domain required", msg: "domain is required before executing statement", want: "25000"},
+		{name: "explicit privilege required", msg: "SELECT_HISTORY privilege required", want: "42501"},
 		{name: "serialization failure", msg: "write conflict detected during commit", want: "40001"},
 		{name: "deadlock detected", msg: "deadlock detected while waiting for lock", want: "40P01"},
 		{name: "invalid input", msg: "invalid input syntax for integer", want: "22P02"},

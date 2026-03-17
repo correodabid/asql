@@ -30,6 +30,13 @@ type interceptResult struct {
 	columns []string
 }
 
+type catalogPrivilegeRequirement struct {
+	privilege        executor.PrincipalPrivilege
+	capability       string
+	historical       bool
+	historicalDetail historicalReadAuditDetail
+}
+
 // ── Regex matchers for function-call interception ─────────────────────────────
 
 // reCurrentSetting matches  SELECT current_setting('param')  with optional
@@ -354,6 +361,64 @@ func (server *Server) catalogSessionPrincipal(principal string) string {
 		return "asql"
 	}
 	return resolved
+}
+
+func catalogPrivilegeForQuery(sql string) (catalogPrivilegeRequirement, bool) {
+	trimmed := strings.TrimSpace(sql)
+	trimmed = strings.TrimRight(trimmed, "; \t\n\r")
+	lower := strings.ToLower(trimmed)
+
+	switch {
+	case strings.Contains(lower, "asql_admin.row_history"):
+		return catalogPrivilegeRequirement{
+			privilege:  executor.PrincipalPrivilegeSelectHistory,
+			capability: "asql_admin.row_history",
+			historical: true,
+			historicalDetail: historicalReadAuditDetail{
+				queryKind:  "row_history",
+				targetKind: "history_stream",
+			},
+		}, true
+	case strings.Contains(lower, "asql_admin.entity_version_history"):
+		return catalogPrivilegeRequirement{
+			privilege:  executor.PrincipalPrivilegeSelectHistory,
+			capability: "asql_admin.entity_version_history",
+			historical: true,
+			historicalDetail: historicalReadAuditDetail{
+				queryKind:  "entity_version_history",
+				targetKind: "history_stream",
+			},
+		}, true
+	case strings.Contains(lower, "asql_admin.engine_stats"):
+		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.engine_stats"}, true
+	case strings.Contains(lower, "asql_admin.schema_snapshot"):
+		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.schema_snapshot"}, true
+	case strings.Contains(lower, "asql_admin.timeline_commits"):
+		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.timeline_commits"}, true
+	case strings.Contains(lower, "asql_admin.scan_strategy_stats"):
+		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.scan_strategy_stats"}, true
+	case strings.Contains(lower, "asql_admin.replication_status"):
+		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.replication_status"}, true
+	case strings.Contains(lower, "asql_admin.leadership_state"):
+		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.leadership_state"}, true
+	case strings.Contains(lower, "asql_admin.cluster_members"):
+		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.cluster_members"}, true
+	case strings.HasPrefix(lower, "select asql_admin.replay_to_lsn("):
+		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.replay_to_lsn"}, true
+	default:
+		return catalogPrivilegeRequirement{}, false
+	}
+}
+
+func (server *Server) authorizeCatalogQuery(principal, sql string, emitHistoricalAudit bool) error {
+	requirement, ok := catalogPrivilegeForQuery(sql)
+	if !ok {
+		return nil
+	}
+	if requirement.historical {
+		return server.authorizeHistoricalReadPrincipal(principal, requirement.historicalDetail, emitHistoricalAudit)
+	}
+	return server.engine.AuthorizePrincipalPrivilege(principal, requirement.privilege, requirement.capability)
 }
 
 // ── current_setting / set_config handlers ─────────────────────────────────────

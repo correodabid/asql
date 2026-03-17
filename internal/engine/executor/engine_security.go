@@ -200,6 +200,28 @@ func (engine *Engine) AuthorizeHistoricalRead(principal string) error {
 	return nil
 }
 
+// AuthorizePrincipalPrivilege requires an authenticated enabled principal to
+// hold the requested explicit privilege when the durable principal catalog is
+// present.
+func (engine *Engine) AuthorizePrincipalPrivilege(principal string, privilege PrincipalPrivilege, capability string) error {
+	state := engine.readState.Load()
+	if state == nil || len(state.principals) == 0 {
+		return nil
+	}
+	principal = normalizePrincipalName(principal)
+	if principal == "" {
+		return errPrincipalAuthzRequired
+	}
+	entry, ok := state.principals[principal]
+	if !ok || entry == nil || !entry.enabled {
+		return errPrincipalAuthzRequired
+	}
+	if !state.hasPrincipalPrivilege(principal, privilege) {
+		return fmt.Errorf("permission denied: %s privilege required for %s", privilege, capability)
+	}
+	return nil
+}
+
 // AuthorizeSQL resolves a SQL statement into a plan and applies the current
 // durable-principal privilege surface to that plan.
 func (engine *Engine) AuthorizeSQL(principal, sql string, txDomains []string) (planner.Plan, error) {

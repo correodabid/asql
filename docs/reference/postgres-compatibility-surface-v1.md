@@ -29,7 +29,7 @@ matches PostgreSQL closely enough to claim compatibility today, see
   - `AuthenticationCleartextPassword` when `AuthToken` / `-auth-token` is configured or when the durable principal catalog is present
   - password validation can use either the shared deployment token or stored database principals, depending on whether the durable principal catalog has been bootstrapped
   - deployment/operator tokens and durable database principals are intentionally different layers: tokens protect transport/admin surfaces, while principals and grants govern pgwire identity and in-database authorization
-  - current MVP privilege surface when the durable principal catalog is present: any authenticated enabled principal can execute current-state `SELECT`, `ADMIN` is required for current DDL/DML/schema-changing statements, and `SELECT_HISTORY` is additionally required for temporal reads
+  - current MVP privilege surface when the durable principal catalog is present: any authenticated enabled principal can execute current-state `SELECT`, `ADMIN` is required for current DDL/DML/schema-changing statements and operator/admin virtual-schema helpers under `asql_admin.*`, and `SELECT_HISTORY` is additionally required for temporal reads plus historical helper views such as `asql_admin.row_history` / `asql_admin.entity_version_history`
   - for historical reads, pgwire evaluates `SELECT_HISTORY` against the current durable principal/grant state even when the target data snapshot is older
 - Session states: `ReadyForQuery` idle (`I`) and in-transaction (`T`).
 - Session/setup compatibility shim:
