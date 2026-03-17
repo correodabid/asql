@@ -46,7 +46,7 @@ func main() {
 	adminHTTPAddr := flag.String("admin-http", "", "ASQL admin HTTP endpoint for operational/security commands (for example 127.0.0.1:9090)")
 	authToken := flag.String("auth-token", "", "optional bearer token for authenticated APIs")
 	demo := flag.Bool("demo", false, "run end-to-end gRPC demo flow")
-	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-revoke-privilege|principal-grant-role|principal-revoke-role|principal-set-password|principal-disable|principal-enable|principal-delete")
+	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-show|principal-who-can-history|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-revoke-privilege|principal-grant-role|principal-revoke-role|principal-set-password|principal-disable|principal-enable|principal-delete")
 	mode := flag.String("mode", "domain", "tx mode for begin: domain|cross")
 	domains := flag.String("domains", "", "comma-separated domains (required for begin and usually for time-travel)")
 	tableName := flag.String("table", "", "table filter for audit commands")
@@ -54,8 +54,8 @@ func main() {
 	txID := flag.String("tx-id", "", "transaction id for execute/commit/rollback")
 	sql := flag.String("sql", "", "sql for execute or time-travel")
 	principal := flag.String("principal", "", "principal name for security management commands")
-	password := flag.String("password", "", "principal password for bootstrap/create-user/principal-set-password commands")
-	passwordStdin := flag.Bool("password-stdin", false, "read the principal password from stdin for bootstrap/create-user/principal-set-password commands")
+	password := flag.String("password", "", "principal password for bootstrap/create-user/security user alter (principal-set-password) commands")
+	passwordStdin := flag.Bool("password-stdin", false, "read the principal password from stdin for bootstrap/create-user/security user alter (principal-set-password) commands")
 	role := flag.String("role", "", "role principal for principal-grant-role/principal-revoke-role")
 	privilege := flag.String("privilege", "", "privilege name for principal-grant-privilege (ADMIN|SELECT_HISTORY)")
 	rollbackSQL := flag.String("rollback-sql", "", "semicolon-separated rollback SQL for migration-preflight")
@@ -88,7 +88,7 @@ func main() {
 
 		if strings.TrimSpace(*command) == "" {
 			fmt.Fprintf(os.Stdout, "asqlctl ready (endpoint=%s).\n", *endpoint)
-			fmt.Fprintln(os.Stdout, "Use -demo, 'shell', or -command shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|audit-report|audit-export|... or security user|role|grant|revoke helpers")
+			fmt.Fprintln(os.Stdout, "Use -demo, 'shell', or -command shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|audit-report|audit-export|... or security user|role|grant|revoke helpers such as 'security user create' or 'security user alter'.")
 			return
 		}
 
@@ -221,6 +221,8 @@ func resolveSecurityCommandAlias(args []string) (string, string, string, string,
 		switch action {
 		case "create":
 			return "principal-create-user", target, "", "", nil
+		case "alter", "set-password", "password":
+			return "principal-set-password", target, "", "", nil
 		case "show":
 			return "principal-show", target, "", "", nil
 		case "list":

@@ -705,6 +705,7 @@ Recommended rollout order:
 
 P0 — `asqlctl` security administration:
 - [ ] Add `asqlctl` commands for user/role lifecycle (`create`, `alter`, `disable`, `list`, `show`).
+	- [x] Treat password rotation as the first `alter` workflow via `asqlctl security user alter` backed by the existing principal password-set path.
 - [x] Add `asqlctl` commands for membership and grants/revokes, including temporal-access privileges.
 - [x] Add `asqlctl` output/views that make effective permissions and inherited role membership explicit.
 - [x] Add audit-oriented CLI flows to inspect who can access historical data and why.

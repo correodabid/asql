@@ -476,6 +476,12 @@ func TestResolveCLIInputsSecurityAliases(t *testing.T) {
 			wantPrincipal: "",
 		},
 		{
+			name:          "user alter alias",
+			args:          []string{"security", "user", "alter", "analyst"},
+			wantCommand:   "principal-set-password",
+			wantPrincipal: "analyst",
+		},
+		{
 			name:          "role create alias",
 			args:          []string{"security", "role", "create", "history_readers"},
 			wantCommand:   "principal-create-role",
@@ -532,6 +538,16 @@ func TestResolveCLIInputsSecurityUserCreateWithStdinPassword(t *testing.T) {
 	}
 	if command != "principal-create-user" || principal != "analyst" || password != "stdin-secret" {
 		t.Fatalf("unexpected resolved create-user stdin inputs: command=%q principal=%q password=%q", command, principal, password)
+	}
+}
+
+func TestResolveCLIInputsSecurityUserAlterWithStdinPassword(t *testing.T) {
+	command, principal, password, _, _, err := resolveCLIInputs("", []string{"security", "user", "alter", "analyst"}, "", "", "", "", true, strings.NewReader("rotated-secret\n"))
+	if err != nil {
+		t.Fatalf("resolveCLIInputs security user alter: %v", err)
+	}
+	if command != "principal-set-password" || principal != "analyst" || password != "rotated-secret" {
+		t.Fatalf("unexpected resolved alter-user stdin inputs: command=%q principal=%q password=%q", command, principal, password)
 	}
 }
 
