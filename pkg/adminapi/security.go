@@ -8,6 +8,7 @@ type PrincipalRecord struct {
 	Enabled             bool                          `json:"enabled"`
 	Roles               []string                      `json:"roles,omitempty"`
 	EffectiveRoles      []string                      `json:"effective_roles,omitempty"`
+	ReferencedBy        []string                      `json:"referenced_by,omitempty"`
 	Privileges          []executor.PrincipalPrivilege `json:"privileges,omitempty"`
 	EffectivePrivileges []executor.PrincipalPrivilege `json:"effective_privileges,omitempty"`
 }
@@ -60,6 +61,10 @@ type DisablePrincipalRequest struct {
 }
 
 type EnablePrincipalRequest struct {
+	Principal string `json:"principal"`
+}
+
+type DeletePrincipalRequest struct {
 	Principal string `json:"principal"`
 }
 

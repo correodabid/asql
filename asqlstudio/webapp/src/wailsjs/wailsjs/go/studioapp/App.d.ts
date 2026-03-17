@@ -95,6 +95,8 @@ export function SecurityCreateRole(arg1:string):Promise<Record<string, any>>;
 
 export function SecurityCreateUser(arg1:string,arg2:string):Promise<Record<string, any>>;
 
+export function SecurityDeletePrincipal(arg1:string):Promise<Record<string, any>>;
+
 export function SecurityDisablePrincipal(arg1:string):Promise<Record<string, any>>;
 
 export function SecurityEnablePrincipal(arg1:string):Promise<Record<string, any>>;

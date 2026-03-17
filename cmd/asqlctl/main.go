@@ -46,7 +46,7 @@ func main() {
 	adminHTTPAddr := flag.String("admin-http", "", "ASQL admin HTTP endpoint for operational/security commands (for example 127.0.0.1:9090)")
 	authToken := flag.String("auth-token", "", "optional bearer token for authenticated APIs")
 	demo := flag.Bool("demo", false, "run end-to-end gRPC demo flow")
-	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-revoke-privilege|principal-grant-role|principal-revoke-role|principal-set-password|principal-disable|principal-enable")
+	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-revoke-privilege|principal-grant-role|principal-revoke-role|principal-set-password|principal-disable|principal-enable|principal-delete")
 	mode := flag.String("mode", "domain", "tx mode for begin: domain|cross")
 	domains := flag.String("domains", "", "comma-separated domains (required for begin and usually for time-travel)")
 	tableName := flag.String("table", "", "table filter for audit commands")
@@ -360,7 +360,7 @@ func isLocalAuditCommand(command string) bool {
 
 func isAdminSecurityCommand(command string) bool {
 	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "principal-list", "principal-bootstrap-admin", "principal-create-user", "principal-create-role", "principal-grant-privilege", "principal-revoke-privilege", "principal-grant-role", "principal-revoke-role", "principal-set-password", "principal-disable", "principal-enable":
+	case "principal-list", "principal-bootstrap-admin", "principal-create-user", "principal-create-role", "principal-grant-privilege", "principal-revoke-privilege", "principal-grant-role", "principal-revoke-role", "principal-set-password", "principal-disable", "principal-enable", "principal-delete":
 		return true
 	default:
 		return false
@@ -489,6 +489,15 @@ func runAdminSecurityCommand(ctx context.Context, out io.Writer, adminHTTPAddr, 
 		}
 		response := new(adminapi.SecurityMutationResponse)
 		if err := doAdminJSON(ctx, client, http.MethodPost, adminHTTPAddr, "/api/v1/security/principals/enable", authToken, adminapi.EnablePrincipalRequest{Principal: principal}, response); err != nil {
+			return err
+		}
+		return printJSONTo(out, response)
+	case "principal-delete":
+		if strings.TrimSpace(principal) == "" {
+			return errors.New("principal-delete requires -principal")
+		}
+		response := new(adminapi.SecurityMutationResponse)
+		if err := doAdminJSON(ctx, client, http.MethodPost, adminHTTPAddr, "/api/v1/security/principals/delete", authToken, adminapi.DeletePrincipalRequest{Principal: principal}, response); err != nil {
 			return err
 		}
 		return printJSONTo(out, response)

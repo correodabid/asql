@@ -186,6 +186,10 @@ export function SecurityCreateUser(arg1, arg2) {
   return window['go']['studioapp']['App']['SecurityCreateUser'](arg1, arg2);
 }
 
+export function SecurityDeletePrincipal(arg1) {
+  return window['go']['studioapp']['App']['SecurityDeletePrincipal'](arg1);
+}
+
 export function SecurityDisablePrincipal(arg1) {
   return window['go']['studioapp']['App']['SecurityDisablePrincipal'](arg1);
 }

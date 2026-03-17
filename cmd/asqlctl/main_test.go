@@ -411,10 +411,25 @@ func TestRunAdminSecurityCommand(t *testing.T) {
 	}
 
 	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-revoke-role", "analyst", "", "history_readers", ""); err != nil {
+		t.Fatalf("cleanup role command: %v", err)
+	}
+
+	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-disable", "analyst", "", "", ""); err != nil {
+		t.Fatalf("disable for delete command: %v", err)
+	}
+
+	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-delete", "analyst", "", "", ""); err != nil {
+		t.Fatalf("delete principal command: %v", err)
+	}
+
+	output.Reset()
 	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "read-secret", "principal-list", "", "", "", ""); err != nil {
 		t.Fatalf("list principals command: %v", err)
 	}
-	if !strings.Contains(output.String(), "history_readers") || !strings.Contains(output.String(), "effective_privileges") || !strings.Contains(output.String(), "effective_roles") {
+	if strings.Contains(output.String(), "\"name\": \"analyst\"") || !strings.Contains(output.String(), "history_readers") || !strings.Contains(output.String(), "effective_privileges") {
 		t.Fatalf("unexpected principal list output: %q", output.String())
 	}
 }

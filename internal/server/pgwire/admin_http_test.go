@@ -435,6 +435,28 @@ func TestAdminHTTPSecurityPrincipalManagementFlow(t *testing.T) {
 	if enableResp.Principal == nil || !enableResp.Principal.Enabled {
 		t.Fatalf("expected enabled principal response, got %+v", enableResp)
 	}
+
+	var disableForDeleteResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/principals/disable", "write-secret", api.DisablePrincipalRequest{
+		Principal: "analyst",
+	}, &disableForDeleteResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected disable-for-delete status: got %d want %d", status, http.StatusOK)
+	}
+
+	var deleteResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/principals/delete", "write-secret", api.DeletePrincipalRequest{
+		Principal: "analyst",
+	}, &deleteResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected delete principal status: got %d want %d", status, http.StatusOK)
+	}
+	if deleteResp.Principal == nil || deleteResp.Principal.Name != "analyst" {
+		t.Fatalf("expected deleted principal response, got %+v", deleteResp)
+	}
+	if _, ok := server.engine.Principal("analyst"); ok {
+		t.Fatal("expected analyst principal to be deleted")
+	}
 }
 
 func TestAdminReadyzAndLeadershipEndpoints(t *testing.T) {

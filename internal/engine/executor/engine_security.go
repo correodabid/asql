@@ -40,6 +40,10 @@ var (
 	errInvalidPrincipalName         = errors.New("principal name is required")
 	errPasswordRequired             = errors.New("password is required")
 	errPrincipalHistoryDenied       = errors.New("SELECT_HISTORY privilege required")
+	errPrincipalDeleteEnabled       = errors.New("principal must be disabled before deletion")
+	errPrincipalDeleteLastPrincipal = errors.New("cannot delete the last principal in the catalog")
+	errPrincipalDeleteNotEmpty      = errors.New("principal still has direct roles or privileges")
+	errPrincipalDeleteReferenced    = errors.New("principal is still granted to other principals")
 )
 
 type principalState struct {
@@ -58,6 +62,7 @@ type PrincipalInfo struct {
 	Enabled             bool
 	Roles               []string
 	EffectiveRoles      []string
+	ReferencedBy        []string
 	Privileges          []PrincipalPrivilege
 	EffectivePrivileges []PrincipalPrivilege
 }
@@ -256,6 +261,19 @@ func (engine *Engine) EnablePrincipal(ctx context.Context, username string) erro
 	})
 }
 
+// DeletePrincipal removes a durable principal once it is disabled, ungranted,
+// and no longer referenced by other principals.
+func (engine *Engine) DeletePrincipal(ctx context.Context, username string) error {
+	username = normalizePrincipalName(username)
+	payload := securityMutationPayload{
+		Action:    "principal_delete",
+		Principal: username,
+	}
+	return engine.appendSecurityMutation(ctx, payload, func(state *readableState) error {
+		return applySecurityMutation(state, payload)
+	})
+}
+
 // GrantPrivilege adds an explicit privilege to a user or role.
 func (engine *Engine) GrantPrivilege(ctx context.Context, principal string, privilege PrincipalPrivilege) error {
 	principal = normalizePrincipalName(principal)
@@ -417,6 +435,24 @@ func (state *readableState) effectivePrincipalRoles(principal string) []string {
 	return roles
 }
 
+func (state *readableState) principalReferencedBy(principal string) []string {
+	principal = normalizePrincipalName(principal)
+	if principal == "" || len(state.principals) == 0 {
+		return nil
+	}
+	references := make([]string, 0)
+	for name, entry := range state.principals {
+		if entry == nil {
+			continue
+		}
+		if _, ok := entry.roles[principal]; ok {
+			references = append(references, name)
+		}
+	}
+	sort.Strings(references)
+	return references
+}
+
 func (state *readableState) collectPrincipalRoles(principal string, visited map[string]struct{}, roles *[]string) {
 	entry, ok := state.principals[principal]
 	if !ok || entry == nil || !entry.enabled {
@@ -455,12 +491,14 @@ func (state *readableState) principalInfo(principal *principalState) PrincipalIn
 		}
 	}
 	effectiveRoles := state.effectivePrincipalRoles(principal.name)
+	referencedBy := state.principalReferencedBy(principal.name)
 	return PrincipalInfo{
 		Name:                principal.name,
 		Kind:                principal.kind,
 		Enabled:             principal.enabled,
 		Roles:               roles,
 		EffectiveRoles:      effectiveRoles,
+		ReferencedBy:        referencedBy,
 		Privileges:          privileges,
 		EffectivePrivileges: effectivePrivileges,
 	}
@@ -500,6 +538,25 @@ func applySecurityMutation(state *readableState, payload securityMutationPayload
 		if payload.Enabled != nil {
 			principal.enabled = *payload.Enabled
 		}
+		return nil
+	case "principal_delete":
+		principal, ok := state.principals[principalName]
+		if !ok {
+			return errPrincipalNotFound
+		}
+		if len(state.principals) == 1 {
+			return errPrincipalDeleteLastPrincipal
+		}
+		if principal.enabled {
+			return errPrincipalDeleteEnabled
+		}
+		if len(principal.roles) > 0 || len(principal.privileges) > 0 {
+			return errPrincipalDeleteNotEmpty
+		}
+		if refs := state.principalReferencedBy(principalName); len(refs) > 0 {
+			return fmt.Errorf("%w: %s", errPrincipalDeleteReferenced, strings.Join(refs, ", "))
+		}
+		delete(state.principals, principalName)
 		return nil
 	case "privilege_grant":
 		principal, ok := state.principals[principalName]

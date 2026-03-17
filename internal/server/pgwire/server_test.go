@@ -1308,6 +1308,10 @@ func TestPGWirePasswordAuthenticationRespectsDisableAndEnable(t *testing.T) {
 	}
 	t.Cleanup(server.Stop)
 
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+
 	if err := server.engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
 		t.Fatalf("create principal: %v", err)
 	}
@@ -1345,6 +1349,64 @@ func TestPGWirePasswordAuthenticationRespectsDisableAndEnable(t *testing.T) {
 		t.Fatalf("connect pgx after re-enable: %v", err)
 	}
 	t.Cleanup(func() { _ = conn.Close(ctx) })
+}
+
+func TestPGWirePasswordAuthenticationFailsAfterPrincipalDeletion(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+
+	if err := server.engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create principal: %v", err)
+	}
+	if err := server.engine.DisablePrincipal(ctx, "analyst"); err != nil {
+		t.Fatalf("disable principal: %v", err)
+	}
+	if err := server.engine.DeletePrincipal(ctx, "analyst"); err != nil {
+		t.Fatalf("delete principal: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	if _, err := pgx.Connect(ctx, "postgres://analyst:analyst-pass@"+listener.Addr().String()+"/asql?sslmode=disable"); err == nil {
+		t.Fatal("expected connection with deleted principal to fail")
+	}
 }
 
 func TestPGWireHistoricalReadRequiresSelectHistoryPrivilege(t *testing.T) {

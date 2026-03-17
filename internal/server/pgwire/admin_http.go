@@ -144,6 +144,7 @@ func (server *Server) startAdminHTTP() error {
 	mux.HandleFunc("/api/v1/security/passwords/set", server.withAdminAuth(adminScopeWrite, server.handleAdminSetPrincipalPassword))
 	mux.HandleFunc("/api/v1/security/principals/disable", server.withAdminAuth(adminScopeWrite, server.handleAdminDisablePrincipal))
 	mux.HandleFunc("/api/v1/security/principals/enable", server.withAdminAuth(adminScopeWrite, server.handleAdminEnablePrincipal))
+	mux.HandleFunc("/api/v1/security/principals/delete", server.withAdminAuth(adminScopeWrite, server.handleAdminDeletePrincipal))
 	mux.HandleFunc("/api/v1/recovery/backup-create", server.withAdminAuth(adminScopeWrite, server.handleAdminRecoveryCreateBackup))
 	mux.HandleFunc("/api/v1/recovery/backup-manifest", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryBackupManifest))
 	mux.HandleFunc("/api/v1/recovery/backup-verify", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryVerifyBackup))
@@ -528,6 +529,35 @@ func (server *Server) handleAdminEnablePrincipal(w http.ResponseWriter, r *http.
 		return
 	}
 	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
+}
+
+func (server *Server) handleAdminDeletePrincipal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.DeletePrincipalRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	principalName := strings.TrimSpace(req.Principal)
+	info, ok := server.engine.Principal(principalName)
+	if !ok {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": "principal not found"})
+		return
+	}
+	if err := server.engine.DeletePrincipal(r.Context(), req.Principal); err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, api.SecurityMutationResponse{
+		Status:    "ok",
+		Principal: toAdminPrincipalRecord(info),
+	})
 }
 
 func (server *Server) writeSecurityMutationResponse(w http.ResponseWriter, statusCode int, principal string) {
@@ -1047,6 +1077,7 @@ func toAdminPrincipalRecord(principal executor.PrincipalInfo) *api.PrincipalReco
 		Enabled:             principal.Enabled,
 		Roles:               roles,
 		EffectiveRoles:      append([]string(nil), principal.EffectiveRoles...),
+		ReferencedBy:        append([]string(nil), principal.ReferencedBy...),
 		Privileges:          privileges,
 		EffectivePrivileges: append([]executor.PrincipalPrivilege(nil), principal.EffectivePrivileges...),
 	}

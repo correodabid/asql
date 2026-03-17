@@ -11,6 +11,7 @@ type PrincipalRecord = {
   enabled: boolean
   roles?: string[]
   effective_roles?: string[]
+  referenced_by?: string[]
   privileges?: PrincipalPrivilege[]
   effective_privileges?: PrincipalPrivilege[]
 }
@@ -32,6 +33,13 @@ function sortedValues(values?: string[]) {
 
 function sortedPrivileges(values?: PrincipalPrivilege[]) {
   return [...(values ?? [])].sort((a, b) => a.localeCompare(b))
+}
+
+function canDeletePrincipal(principal: PrincipalRecord) {
+  return !principal.enabled
+    && (principal.roles?.length ?? 0) === 0
+    && (principal.privileges?.length ?? 0) === 0
+    && (principal.referenced_by?.length ?? 0) === 0
 }
 
 export function SecurityPanel() {
@@ -175,13 +183,20 @@ export function SecurityPanel() {
     setMessage(`Enabled principal ${principalName}.`)
   })
 
+  const submitDeletePrincipal = (principalName: string) => run(`delete-${principalName}`, async () => {
+    await api<SecurityMutationResponse>('/api/security/principals/delete', 'POST', {
+      principal: principalName,
+    })
+    setMessage(`Deleted principal ${principalName}.`)
+  })
+
   return (
     <div className="panel" style={{ margin: 16, padding: 16, display: 'grid', gap: 16 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, alignItems: 'center', flexWrap: 'wrap' }}>
         <div>
           <h2 style={{ margin: '0 0 8px' }}>Security</h2>
           <p className="text-muted" style={{ margin: 0 }}>
-            Bootstrap principals, create durable users and roles, rotate passwords, and manage grants from Studio.
+            Bootstrap principals, create durable users and roles, rotate passwords, manage grants, and safely remove empty disabled principals from Studio.
           </p>
         </div>
         <button className="toolbar-btn" disabled={busy !== ''} onClick={() => void refresh().catch((err) => setError(err instanceof Error ? err.message : String(err)))}>
@@ -405,6 +420,15 @@ export function SecurityPanel() {
                         Enable
                       </button>
                     )}
+                    {canDeletePrincipal(principal) ? (
+                      <button
+                        className="toolbar-btn"
+                        disabled={busy !== ''}
+                        onClick={() => void submitDeletePrincipal(principal.name)}
+                      >
+                        Delete
+                      </button>
+                    ) : null}
                   </div>
                 </div>
                 <div style={{ display: 'grid', gap: 6 }}>
@@ -418,6 +442,12 @@ export function SecurityPanel() {
                     <span className="text-muted" style={{ marginRight: 8 }}>Effective roles</span>
                     {sortedValues(principal.effective_roles).length > 0 ? sortedValues(principal.effective_roles).map((roleName) => (
                       <span key={roleName} className="toolbar-badge" style={{ marginRight: 6 }}>{roleName}</span>
+                    )) : <span className="text-muted">—</span>}
+                  </div>
+                  <div>
+                    <span className="text-muted" style={{ marginRight: 8 }}>Referenced by</span>
+                    {sortedValues(principal.referenced_by).length > 0 ? sortedValues(principal.referenced_by).map((principalName) => (
+                      <span key={principalName} className="toolbar-badge" style={{ marginRight: 6 }}>{principalName}</span>
                     )) : <span className="text-muted">—</span>}
                   </div>
                   <div>

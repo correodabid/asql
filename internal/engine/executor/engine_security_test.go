@@ -240,3 +240,93 @@ func TestPrincipalEnableRestoresAuthenticationAndEffectiveRoles(t *testing.T) {
 		t.Fatalf("unexpected effective roles after enable: %+v", info)
 	}
 }
+
+func TestPrincipalDeleteRequiresDisabledEmptyAndUnreferenced(t *testing.T) {
+	ctx := context.Background()
+	baseDir := t.TempDir()
+	walPath := filepath.Join(baseDir, "security-delete.wal")
+	snapDir := filepath.Join(baseDir, "snaps")
+
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	engine, err := New(ctx, store, snapDir)
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	if err := engine.BootstrapAdminPrincipal(ctx, "admin", "secret"); err != nil {
+		t.Fatalf("bootstrap admin: %v", err)
+	}
+
+	if err := engine.CreateRole(ctx, "history_readers"); err != nil {
+		t.Fatalf("create role: %v", err)
+	}
+	if err := engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	if err := engine.GrantRole(ctx, "analyst", "history_readers"); err != nil {
+		t.Fatalf("grant role: %v", err)
+	}
+	if err := engine.DisablePrincipal(ctx, "history_readers"); err != nil {
+		t.Fatalf("disable role: %v", err)
+	}
+	if err := engine.DeletePrincipal(ctx, "history_readers"); err == nil {
+		t.Fatal("expected delete to fail while role is referenced")
+	}
+	roleInfo, ok := engine.Principal("history_readers")
+	if !ok || len(roleInfo.ReferencedBy) != 1 || roleInfo.ReferencedBy[0] != "analyst" {
+		t.Fatalf("unexpected role references: %+v ok=%v", roleInfo, ok)
+	}
+	if err := engine.RevokeRole(ctx, "analyst", "history_readers"); err != nil {
+		t.Fatalf("revoke role: %v", err)
+	}
+	if err := engine.DeletePrincipal(ctx, "history_readers"); err != nil {
+		t.Fatalf("delete role: %v", err)
+	}
+	if _, ok := engine.Principal("history_readers"); ok {
+		t.Fatal("expected role to be deleted")
+	}
+	if err := engine.DeletePrincipal(ctx, "analyst"); err == nil {
+		t.Fatal("expected delete to fail while user is enabled")
+	}
+	if err := engine.DisablePrincipal(ctx, "analyst"); err != nil {
+		t.Fatalf("disable user: %v", err)
+	}
+	if err := engine.DeletePrincipal(ctx, "analyst"); err != nil {
+		t.Fatalf("delete user: %v", err)
+	}
+	if _, ok := engine.Principal("analyst"); ok {
+		t.Fatal("expected user to be deleted")
+	}
+
+	engine.WaitPendingSnapshots()
+	_ = store.Close()
+
+	reopenedStore, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("reopen store: %v", err)
+	}
+	defer reopenedStore.Close()
+
+	replayed, err := New(ctx, reopenedStore, snapDir)
+	if err != nil {
+		t.Fatalf("new replayed engine: %v", err)
+	}
+	if _, ok := replayed.Principal("history_readers"); ok {
+		t.Fatal("expected deleted role to stay deleted after restart")
+	}
+	if _, ok := replayed.Principal("analyst"); ok {
+		t.Fatal("expected deleted user to stay deleted after restart")
+	}
+	if _, ok := replayed.Principal("admin"); !ok {
+		t.Fatal("expected admin principal to remain after restart")
+	}
+
+	if err := replayed.DisablePrincipal(ctx, "admin"); err != nil {
+		t.Fatalf("disable remaining admin: %v", err)
+	}
+	if err := replayed.DeletePrincipal(ctx, "admin"); err == nil {
+		t.Fatal("expected delete to fail for the last remaining principal")
+	}
+}

@@ -1775,6 +1775,19 @@ func (a *App) SecurityEnablePrincipal(principal string) (map[string]interface{},
 	return structToMap(resp)
 }
 
+func (a *App) SecurityDeletePrincipal(principal string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/principals/delete", api.DeletePrincipalRequest{
+		Principal: principal,
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
 func (a *App) RecoveryCreateBackup(dataDir, backupDir string) (map[string]interface{}, error) {
 	resolvedDataDir := a.recoveryDataDir(dataDir)
 	if resolvedDataDir == "" {

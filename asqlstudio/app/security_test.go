@@ -103,6 +103,11 @@ func TestSecurityMutationsPostJSON(t *testing.T) {
 				t.Fatalf("unexpected enable principal payload: %+v", payload)
 			}
 			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: "analyst", Kind: "USER", Enabled: true}})
+		case "/api/v1/security/principals/delete":
+			if payload["principal"] != "analyst" {
+				t.Fatalf("unexpected delete principal payload: %+v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: "analyst", Kind: "USER", Enabled: false}})
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -139,5 +144,8 @@ func TestSecurityMutationsPostJSON(t *testing.T) {
 	}
 	if _, err := app.SecurityEnablePrincipal("analyst"); err != nil {
 		t.Fatalf("SecurityEnablePrincipal: %v", err)
+	}
+	if _, err := app.SecurityDeletePrincipal("analyst"); err != nil {
+		t.Fatalf("SecurityDeletePrincipal: %v", err)
 	}
 }
