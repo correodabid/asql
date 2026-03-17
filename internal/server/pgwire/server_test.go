@@ -2684,6 +2684,10 @@ func TestMainstreamToolStartupFlows(t *testing.T) {
 	// DBeaver and DataGrip issue SET/current_setting/pg_is_in_recovery
 	// during connection initialization.
 	t.Run("dbeaver_datagrip_startup", func(t *testing.T) {
+		exec(t, "BEGIN DOMAIN compliance")
+		exec(t, "CREATE TABLE ebr_reviews (id INT PRIMARY KEY, reviewer TEXT, decision TEXT)")
+		exec(t, "COMMIT")
+
 		// SET commands (no-op acceptance)
 		exec(t, "SET extra_float_digits = 3")
 		exec(t, "SET application_name = 'DBeaver 24.0'")
@@ -2725,6 +2729,126 @@ func TestMainstreamToolStartupFlows(t *testing.T) {
 		n = hasRows(t, "SELECT * FROM information_schema.schemata")
 		if n == 0 {
 			t.Error("information_schema.schemata returned 0 rows")
+		}
+
+		rows, err := conn.Query(ctx, `
+			SELECT current_database() AS TABLE_CAT,
+			       n.nspname AS TABLE_SCHEM,
+			       c.relname AS TABLE_NAME,
+			       CASE c.relkind WHEN 'r' THEN 'TABLE' ELSE '' END AS TABLE_TYPE,
+			       '' AS REMARKS,
+			       '' AS TYPE_CAT,
+			       '' AS TYPE_SCHEM,
+			       '' AS TYPE_NAME,
+			       '' AS SELF_REFERENCING_COL_NAME,
+			       '' AS REF_GENERATION
+			FROM pg_catalog.pg_class c
+			JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+			ORDER BY TABLE_SCHEM, TABLE_NAME`)
+		if err != nil {
+			t.Fatalf("jdbc-style table metadata query: %v", err)
+		}
+		defer rows.Close()
+
+		foundComplianceTable := false
+		for rows.Next() {
+			var tableCat, tableSchem, tableName, tableType, remarks string
+			var typeCat, typeSchem, typeName, selfRef, refGeneration string
+			if err := rows.Scan(&tableCat, &tableSchem, &tableName, &tableType, &remarks, &typeCat, &typeSchem, &typeName, &selfRef, &refGeneration); err != nil {
+				t.Fatalf("scan jdbc-style table metadata row: %v", err)
+			}
+			if tableSchem == "compliance" && tableName == "ebr_reviews" {
+				foundComplianceTable = true
+				if tableType != "TABLE" {
+					t.Fatalf("unexpected table type for compliance.ebr_reviews: %q", tableType)
+				}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("iterate jdbc-style table metadata rows: %v", err)
+		}
+		if !foundComplianceTable {
+			t.Fatal("jdbc-style table metadata query did not expose compliance.ebr_reviews")
+		}
+
+		columnRows, err := conn.Query(ctx, `
+			SELECT current_database() AS TABLE_CAT,
+			       n.nspname AS TABLE_SCHEM,
+			       c.relname AS TABLE_NAME,
+			       a.attname AS COLUMN_NAME,
+			       a.atttypid AS DATA_TYPE,
+			       t.typname AS TYPE_NAME,
+			       0 AS COLUMN_SIZE,
+			       0 AS BUFFER_LENGTH,
+			       0 AS DECIMAL_DIGITS,
+			       10 AS NUM_PREC_RADIX,
+			       CASE WHEN a.attnotnull THEN 0 ELSE 1 END AS NULLABLE,
+			       '' AS REMARKS,
+			       '' AS COLUMN_DEF,
+			       0 AS SQL_DATA_TYPE,
+			       0 AS SQL_DATETIME_SUB,
+			       0 AS CHAR_OCTET_LENGTH,
+			       a.attnum AS ORDINAL_POSITION,
+			       CASE WHEN a.attnotnull THEN 'NO' ELSE 'YES' END AS IS_NULLABLE,
+			       '' AS SCOPE_CATALOG,
+			       '' AS SCOPE_SCHEMA,
+			       '' AS SCOPE_TABLE,
+			       0 AS SOURCE_DATA_TYPE,
+			       'NO' AS IS_AUTOINCREMENT,
+			       'NO' AS IS_GENERATEDCOLUMN
+			FROM pg_catalog.pg_attribute a
+			JOIN pg_catalog.pg_class c ON c.oid = a.attrelid
+			JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+			JOIN pg_catalog.pg_type t ON t.oid = a.atttypid
+			ORDER BY TABLE_SCHEM, TABLE_NAME, ORDINAL_POSITION`)
+		if err != nil {
+			t.Fatalf("jdbc-style column metadata query: %v", err)
+		}
+		defer columnRows.Close()
+
+		type columnInfo struct {
+			name string
+			typ  string
+			pos  int64
+		}
+		var gotColumns []columnInfo
+		for columnRows.Next() {
+			var tableCat, tableSchem, tableName, columnName string
+			var dataType int64
+			var typeName string
+			var columnSize, bufferLength, decimalDigits, numPrecRadix, nullable int64
+			var remarks, columnDef string
+			var sqlDataType, sqlDatetimeSub, charOctetLength, ordinalPosition int64
+			var isNullable, scopeCatalog, scopeSchema, scopeTable string
+			var sourceDataType int64
+			var isAutoincrement, isGenerated string
+			if err := columnRows.Scan(
+				&tableCat, &tableSchem, &tableName, &columnName, &dataType, &typeName,
+				&columnSize, &bufferLength, &decimalDigits, &numPrecRadix, &nullable,
+				&remarks, &columnDef, &sqlDataType, &sqlDatetimeSub, &charOctetLength,
+				&ordinalPosition, &isNullable, &scopeCatalog, &scopeSchema, &scopeTable,
+				&sourceDataType, &isAutoincrement, &isGenerated,
+			); err != nil {
+				t.Fatalf("scan jdbc-style column metadata row: %v", err)
+			}
+			if tableSchem == "compliance" && tableName == "ebr_reviews" {
+				gotColumns = append(gotColumns, columnInfo{name: columnName, typ: typeName, pos: ordinalPosition})
+			}
+		}
+		if err := columnRows.Err(); err != nil {
+			t.Fatalf("iterate jdbc-style column metadata rows: %v", err)
+		}
+		if len(gotColumns) != 3 {
+			t.Fatalf("unexpected jdbc-style column count for compliance.ebr_reviews: %+v", gotColumns)
+		}
+		if gotColumns[0].name != "id" || gotColumns[0].pos != 1 {
+			t.Fatalf("unexpected first jdbc-style column: %+v", gotColumns[0])
+		}
+		if gotColumns[1].name != "reviewer" || gotColumns[1].pos != 2 {
+			t.Fatalf("unexpected second jdbc-style column: %+v", gotColumns[1])
+		}
+		if gotColumns[2].name != "decision" || gotColumns[2].pos != 3 {
+			t.Fatalf("unexpected third jdbc-style column: %+v", gotColumns[2])
 		}
 
 		// Privilege check

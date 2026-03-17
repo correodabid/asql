@@ -216,6 +216,16 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 		lower == "deallocate all":
 		return emptyResult()
 
+	// ── JDBC metadata-style table/column queries ─────────────────────────
+	// GUI tools such as DBeaver often reach catalog metadata through the
+	// PostgreSQL JDBC DatabaseMetaData queries, which project aliased columns
+	// like TABLE_SCHEM / TABLE_NAME / COLUMN_NAME rather than selecting raw
+	// pg_catalog rows directly.
+	case isJDBCTablesMetadataQuery(lower):
+		return server.catalogJDBCTables()
+	case isJDBCColumnsMetadataQuery(lower):
+		return server.catalogJDBCColumns()
+
 	// ── pg_catalog.pg_tables / information_schema.tables ────────────────
 	case strings.Contains(lower, "pg_catalog.pg_tables"),
 		strings.Contains(lower, "information_schema.tables"),
@@ -1307,15 +1317,20 @@ func (server *Server) catalogAttributes() (interceptResult, bool) {
 	relID := int64(1000)
 	for _, d := range snap.Domains {
 		for _, t := range d.Tables {
-			for i, c := range t.Columns {
+			ordinal := int64(1)
+			for _, c := range t.Columns {
+				if strings.HasPrefix(c.Name, "_") {
+					continue
+				}
 				rows = append(rows, map[string]ast.Literal{
 					"attrelid":   {Kind: ast.LiteralNumber, NumberValue: relID},
 					"attname":    {Kind: ast.LiteralString, StringValue: c.Name},
 					"atttypid":   {Kind: ast.LiteralNumber, NumberValue: schemaTypeToOID(c.Type)},
-					"attnum":     {Kind: ast.LiteralNumber, NumberValue: int64(i + 1)},
+					"attnum":     {Kind: ast.LiteralNumber, NumberValue: ordinal},
 					"attnotnull": {Kind: ast.LiteralBoolean, BoolValue: c.PrimaryKey},
 					"atthasdef":  {Kind: ast.LiteralBoolean, BoolValue: false},
 				})
+				ordinal++
 			}
 			relID++
 		}
@@ -1351,7 +1366,11 @@ func (server *Server) catalogColumns() (interceptResult, bool) {
 	rows := make([]map[string]ast.Literal, 0)
 	for _, d := range snap.Domains {
 		for _, t := range d.Tables {
-			for i, c := range t.Columns {
+			ordinal := int64(1)
+			for _, c := range t.Columns {
+				if strings.HasPrefix(c.Name, "_") {
+					continue
+				}
 				nullable := "YES"
 				if c.PrimaryKey {
 					nullable = "NO"
@@ -1360,10 +1379,11 @@ func (server *Server) catalogColumns() (interceptResult, bool) {
 					"table_schema":     litS(d.Name),
 					"table_name":       litS(t.Name),
 					"column_name":      litS(c.Name),
-					"ordinal_position": lit(int64(i + 1)),
+					"ordinal_position": lit(ordinal),
 					"data_type":        litS(strings.ToLower(c.Type)),
 					"is_nullable":      litS(nullable),
 				})
+				ordinal++
 			}
 		}
 	}
@@ -1390,6 +1410,133 @@ func (server *Server) catalogSchemata() (interceptResult, bool) {
 		result:  executor.Result{Status: "OK", Rows: rows},
 		columns: columns,
 	}, true
+}
+
+func isJDBCTablesMetadataQuery(lower string) bool {
+	return strings.Contains(lower, "table_cat") &&
+		strings.Contains(lower, "table_schem") &&
+		strings.Contains(lower, "table_name") &&
+		strings.Contains(lower, "table_type") &&
+		strings.Contains(lower, "pg_class") &&
+		strings.Contains(lower, "pg_namespace")
+}
+
+func isJDBCColumnsMetadataQuery(lower string) bool {
+	return strings.Contains(lower, "column_name") &&
+		strings.Contains(lower, "ordinal_position") &&
+		strings.Contains(lower, "table_name") &&
+		((strings.Contains(lower, "pg_attribute") && strings.Contains(lower, "pg_class")) ||
+			strings.Contains(lower, "information_schema.columns"))
+}
+
+func (server *Server) catalogJDBCTables() (interceptResult, bool) {
+	snap := server.engine.SchemaSnapshot(nil)
+	columns := []string{
+		"TABLE_CAT", "TABLE_SCHEM", "TABLE_NAME", "TABLE_TYPE", "REMARKS",
+		"TYPE_CAT", "TYPE_SCHEM", "TYPE_NAME", "SELF_REFERENCING_COL_NAME", "REF_GENERATION",
+	}
+	rows := make([]map[string]ast.Literal, 0)
+	for _, d := range snap.Domains {
+		for _, t := range d.Tables {
+			rows = append(rows, map[string]ast.Literal{
+				"TABLE_CAT":                 litS("asql"),
+				"TABLE_SCHEM":               litS(d.Name),
+				"TABLE_NAME":                litS(t.Name),
+				"TABLE_TYPE":                litS("TABLE"),
+				"REMARKS":                   litS(""),
+				"TYPE_CAT":                  litS(""),
+				"TYPE_SCHEM":                litS(""),
+				"TYPE_NAME":                 litS(""),
+				"SELF_REFERENCING_COL_NAME": litS(""),
+				"REF_GENERATION":            litS(""),
+			})
+		}
+	}
+	return interceptResult{result: executor.Result{Status: "OK", Rows: rows}, columns: columns}, true
+}
+
+func (server *Server) catalogJDBCColumns() (interceptResult, bool) {
+	snap := server.engine.SchemaSnapshot(nil)
+	columns := []string{
+		"TABLE_CAT", "TABLE_SCHEM", "TABLE_NAME", "COLUMN_NAME", "DATA_TYPE", "TYPE_NAME",
+		"COLUMN_SIZE", "BUFFER_LENGTH", "DECIMAL_DIGITS", "NUM_PREC_RADIX", "NULLABLE",
+		"REMARKS", "COLUMN_DEF", "SQL_DATA_TYPE", "SQL_DATETIME_SUB", "CHAR_OCTET_LENGTH",
+		"ORDINAL_POSITION", "IS_NULLABLE", "SCOPE_CATALOG", "SCOPE_SCHEMA", "SCOPE_TABLE",
+		"SOURCE_DATA_TYPE", "IS_AUTOINCREMENT", "IS_GENERATEDCOLUMN",
+	}
+	rows := make([]map[string]ast.Literal, 0)
+	for _, d := range snap.Domains {
+		for _, t := range d.Tables {
+			ordinal := int64(1)
+			for _, c := range t.Columns {
+				if strings.HasPrefix(c.Name, "_") {
+					continue
+				}
+				nullable := int64(1)
+				isNullable := "YES"
+				if c.PrimaryKey {
+					nullable = 0
+					isNullable = "NO"
+				}
+				rows = append(rows, map[string]ast.Literal{
+					"TABLE_CAT":          litS("asql"),
+					"TABLE_SCHEM":        litS(d.Name),
+					"TABLE_NAME":         litS(t.Name),
+					"COLUMN_NAME":        litS(c.Name),
+					"DATA_TYPE":          lit(jdbcTypeCodeForSchemaType(c.Type)),
+					"TYPE_NAME":          litS(jdbcTypeNameForSchemaType(c.Type)),
+					"COLUMN_SIZE":        lit(int64(0)),
+					"BUFFER_LENGTH":      lit(int64(0)),
+					"DECIMAL_DIGITS":     lit(int64(0)),
+					"NUM_PREC_RADIX":     lit(int64(10)),
+					"NULLABLE":           lit(nullable),
+					"REMARKS":            litS(""),
+					"COLUMN_DEF":         litS(""),
+					"SQL_DATA_TYPE":      lit(int64(0)),
+					"SQL_DATETIME_SUB":   lit(int64(0)),
+					"CHAR_OCTET_LENGTH":  lit(int64(0)),
+					"ORDINAL_POSITION":   lit(ordinal),
+					"IS_NULLABLE":        litS(isNullable),
+					"SCOPE_CATALOG":      litS(""),
+					"SCOPE_SCHEMA":       litS(""),
+					"SCOPE_TABLE":        litS(""),
+					"SOURCE_DATA_TYPE":   lit(int64(0)),
+					"IS_AUTOINCREMENT":   litS("NO"),
+					"IS_GENERATEDCOLUMN": litS("NO"),
+				})
+				ordinal++
+			}
+		}
+	}
+	return interceptResult{result: executor.Result{Status: "OK", Rows: rows}, columns: columns}, true
+}
+func jdbcTypeCodeForSchemaType(schemaType string) int64 {
+	switch strings.ToUpper(strings.TrimSpace(schemaType)) {
+	case "BOOL", "BOOLEAN":
+		return 16
+	case "INT", "INTEGER":
+		return 4
+	case "BIGINT":
+		return -5
+	case "FLOAT", "FLOAT8", "DOUBLE":
+		return 8
+	case "TIMESTAMP":
+		return 93
+	case "JSON":
+		return 1111
+	case "TEXT", "VARCHAR":
+		fallthrough
+	default:
+		return 12
+	}
+}
+
+func jdbcTypeNameForSchemaType(schemaType string) string {
+	trimmed := strings.TrimSpace(schemaType)
+	if trimmed == "" {
+		return "TEXT"
+	}
+	return strings.ToUpper(trimmed)
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
