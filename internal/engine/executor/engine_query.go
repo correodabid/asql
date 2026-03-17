@@ -61,6 +61,7 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 		case scanStrategyHashLookup:
 			candidateRows := rowsForPredicate(table, plan.Filter, state, engine)
 			for _, row := range candidateRows {
+				row = qualifySingleTableRow(table, plan, row)
 				if !matchPredicate(row, plan.Filter, state, engine) {
 					continue
 				}
@@ -70,6 +71,7 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 		case scanStrategyIndexInter:
 			candidateRows := rowsForPredicate(table, plan.Filter, state, engine)
 			for _, row := range candidateRows {
+				row = qualifySingleTableRow(table, plan, row)
 				if !matchPredicate(row, plan.Filter, state, engine) {
 					continue
 				}
@@ -79,6 +81,7 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 		case scanStrategyIndexUnion:
 			candidateRows := rowsForPredicate(table, plan.Filter, state, engine)
 			for _, row := range candidateRows {
+				row = qualifySingleTableRow(table, plan, row)
 				if !matchPredicate(row, plan.Filter, state, engine) {
 					continue
 				}
@@ -88,6 +91,7 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 		case scanStrategyIndexUnionP:
 			candidateRows := rowsForPredicate(table, plan.Filter, state, engine)
 			for _, row := range candidateRows {
+				row = qualifySingleTableRow(table, plan, row)
 				if !matchPredicate(row, plan.Filter, state, engine) {
 					continue
 				}
@@ -97,6 +101,7 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 		case scanStrategyIndexNot:
 			candidateRows := rowsForPredicate(table, plan.Filter, state, engine)
 			for _, row := range candidateRows {
+				row = qualifySingleTableRow(table, plan, row)
 				if !matchPredicate(row, plan.Filter, state, engine) {
 					continue
 				}
@@ -106,6 +111,7 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 		case scanStrategyBTreeLookup:
 			candidateRows := rowsForPredicate(table, plan.Filter, state, engine)
 			for _, row := range candidateRows {
+				row = qualifySingleTableRow(table, plan, row)
 				if !matchPredicate(row, plan.Filter, state, engine) {
 					continue
 				}
@@ -117,6 +123,7 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 		if strategy == scanStrategyFullScan {
 			for _, rowSlice := range table.rows {
 				row := rowToMap(table, rowSlice)
+				row = qualifySingleTableRow(table, plan, row)
 				if !matchPredicate(row, plan.Filter, state, engine) {
 					continue
 				}
@@ -247,6 +254,10 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 	for _, row := range matched {
 
 		if len(plan.Columns) == 1 && plan.Columns[0] == "*" {
+			if len(plan.Joins) == 0 {
+				result = append(result, stripQualifiedColumns(row))
+				continue
+			}
 			result = append(result, row)
 			continue
 		}
@@ -299,6 +310,28 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 	}
 
 	return result, nil
+}
+
+func qualifySingleTableRow(table *tableState, plan planner.Plan, row map[string]ast.Literal) map[string]ast.Literal {
+	if len(row) == 0 {
+		return row
+	}
+	prefix := displayPrefix(plan.TableName, plan.TableAlias)
+	if prefix == "" {
+		return row
+	}
+	return prefixRowWithNames(qualifiedColumnNames(prefix, table.columns), prefix, row)
+}
+
+func stripQualifiedColumns(row map[string]ast.Literal) map[string]ast.Literal {
+	result := make(map[string]ast.Literal, len(row))
+	for key, value := range row {
+		if strings.Contains(key, ".") {
+			continue
+		}
+		result[key] = value
+	}
+	return result
 }
 
 func parseQualifiedStarColumn(column string) (string, bool) {

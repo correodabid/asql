@@ -5483,6 +5483,52 @@ func TestQualifiedStarInsideDerivedTable(t *testing.T) {
 	}
 }
 
+func TestQualifiedOuterFilterOnDerivedTable(t *testing.T) {
+	engine := setupJoinEngine(t)
+	ctx := context.Background()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+		"SELECT s.user_id, s.amount FROM (SELECT user_id, amount, ROW_NUMBER() OVER (PARTITION BY user_id ORDER BY amount DESC) AS rn FROM orders) s WHERE s.rn = 1 ORDER BY s.user_id ASC",
+		[]string{"store"}, 8192)
+	if err != nil {
+		t.Fatalf("qualified outer filter on derived table: %v", err)
+	}
+	if len(result.Rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d: %+v", len(result.Rows), result.Rows)
+	}
+	if result.Rows[0]["s.user_id"].NumberValue != 1 || result.Rows[0]["s.amount"].NumberValue != 200 {
+		t.Fatalf("unexpected first row: %+v", result.Rows[0])
+	}
+	if result.Rows[1]["s.user_id"].NumberValue != 2 || result.Rows[1]["s.amount"].NumberValue != 150 {
+		t.Fatalf("unexpected second row: %+v", result.Rows[1])
+	}
+	if result.Rows[2]["s.user_id"].NumberValue != 99 || result.Rows[2]["s.amount"].NumberValue != 50 {
+		t.Fatalf("unexpected third row: %+v", result.Rows[2])
+	}
+}
+
+func TestQualifiedWindowRefsInsideDerivedTable(t *testing.T) {
+	engine := setupJoinEngine(t)
+	ctx := context.Background()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+		"SELECT s.user_id, s.amount FROM (SELECT o.*, ROW_NUMBER() OVER (PARTITION BY o.user_id ORDER BY o.amount DESC) AS rn FROM orders o) s WHERE s.rn = 1 ORDER BY s.user_id ASC",
+		[]string{"store"}, 8192)
+	if err != nil {
+		t.Fatalf("qualified window refs inside derived table: %v", err)
+	}
+	if len(result.Rows) != 3 {
+		t.Fatalf("expected 3 rows, got %d: %+v", len(result.Rows), result.Rows)
+	}
+	if result.Rows[0]["s.user_id"].NumberValue != 1 || result.Rows[0]["s.amount"].NumberValue != 200 {
+		t.Fatalf("unexpected first row: %+v", result.Rows[0])
+	}
+	if result.Rows[1]["s.user_id"].NumberValue != 2 || result.Rows[1]["s.amount"].NumberValue != 150 {
+		t.Fatalf("unexpected second row: %+v", result.Rows[1])
+	}
+	if result.Rows[2]["s.user_id"].NumberValue != 99 || result.Rows[2]["s.amount"].NumberValue != 50 {
+		t.Fatalf("unexpected third row: %+v", result.Rows[2])
+	}
+}
+
 func TestWindowRowNumber(t *testing.T) {
 	engine := setupJoinEngine(t)
 	ctx := context.Background()
