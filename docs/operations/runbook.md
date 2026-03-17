@@ -100,6 +100,7 @@ Admin, pgwire, and internal API paths emit structured audit logs with message `a
 - `status=success|failure`
 - `operation` (for example `tx.begin`, `tx.execute`, `tx.commit`, `admin.time_travel_query`, `admin.replay_to_lsn`, `admin.replication_stream`, `auth.login`, `authz.historical_read`)
 - contextual fields such as `tx_id`, `lsn`, `domains`, and `reason` for failures
+- historical-read authorization events also include the current grant-state scope plus target details such as `historical_target_kind`, `historical_target_lsn` or `historical_target_timestamp_micros`, and the principal's direct/effective roles and privileges at decision time
 
 For retained row-level audit evidence in the data directory, use `asqlctl` local commands:
 

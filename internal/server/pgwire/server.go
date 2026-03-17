@@ -89,6 +89,70 @@ func normalizeAuditPrincipal(user string) string {
 	return strings.ToLower(strings.TrimSpace(user))
 }
 
+type historicalReadAuditDetail struct {
+	queryKind              string
+	targetKind             string
+	targetLSN              uint64
+	targetTimestampMicros  uint64
+}
+
+func principalPrivilegeStrings(privileges []executor.PrincipalPrivilege) []string {
+	if len(privileges) == 0 {
+		return nil
+	}
+	result := make([]string, 0, len(privileges))
+	for _, privilege := range privileges {
+		result = append(result, string(privilege))
+	}
+	return result
+}
+
+func principalHasPrivilege(privileges []executor.PrincipalPrivilege, target executor.PrincipalPrivilege) bool {
+	for _, privilege := range privileges {
+		if privilege == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (server *Server) historicalReadAuditAttrs(principal string, detail historicalReadAuditDetail) []slog.Attr {
+	attrs := []slog.Attr{
+		slog.String("principal", normalizeAuditPrincipal(principal)),
+		slog.String("query_kind", detail.queryKind),
+		slog.String("privilege", string(executor.PrincipalPrivilegeSelectHistory)),
+		slog.String("grant_state_scope", "current"),
+		slog.String("historical_target_kind", detail.targetKind),
+	}
+	switch detail.targetKind {
+	case "lsn":
+		attrs = append(attrs, slog.Uint64("historical_target_lsn", detail.targetLSN))
+	case "timestamp":
+		attrs = append(attrs,
+			slog.Uint64("historical_target_timestamp_micros", detail.targetTimestampMicros),
+			slog.String("historical_target_timestamp_utc", time.UnixMicro(int64(detail.targetTimestampMicros)).UTC().Format(time.RFC3339Nano)),
+		)
+	}
+	if !server.engine.HasPrincipalCatalog() {
+		return attrs
+	}
+	info, ok := server.engine.Principal(principal)
+	attrs = append(attrs, slog.Bool("principal_catalog_entry", ok))
+	if !ok {
+		return attrs
+	}
+	attrs = append(attrs,
+		slog.String("principal_kind", string(info.Kind)),
+		slog.Bool("principal_enabled", info.Enabled),
+		slog.Any("principal_direct_roles", append([]string(nil), info.Roles...)),
+		slog.Any("principal_effective_roles", append([]string(nil), info.EffectiveRoles...)),
+		slog.Any("principal_direct_privileges", principalPrivilegeStrings(info.Privileges)),
+		slog.Any("principal_effective_privileges", principalPrivilegeStrings(info.EffectivePrivileges)),
+		slog.Bool("principal_has_select_history", principalHasPrivilege(info.EffectivePrivileges, executor.PrincipalPrivilegeSelectHistory)),
+	)
+	return attrs
+}
+
 // raftCommitterAdapter bridges *raft.RaftNode to the ports.RaftCommitter
 // interface expected by the executor.  When the node is not the leader, Apply
 // returns raft.ErrNotLeader, which propagates as a commit error and causes the
@@ -1123,27 +1187,20 @@ func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connSt
 	return backend.Flush()
 }
 
-func (server *Server) authorizeHistoricalRead(session *executor.Session, queryKind string) error {
+func (server *Server) authorizeHistoricalRead(session *executor.Session, detail historicalReadAuditDetail) error {
 	principal := ""
 	if session != nil {
 		principal = session.Principal()
 	}
+	attrs := server.historicalReadAuditAttrs(principal, detail)
 	if err := server.engine.AuthorizeHistoricalRead(principal); err != nil {
 		if server.engine.HasPrincipalCatalog() {
-			server.auditFailure("authz.historical_read", "privilege_denied",
-				slog.String("principal", normalizeAuditPrincipal(principal)),
-				slog.String("query_kind", queryKind),
-				slog.String("privilege", string(executor.PrincipalPrivilegeSelectHistory)),
-			)
+			server.auditFailure("authz.historical_read", "privilege_denied", attrs...)
 		}
 		return err
 	}
 	if server.engine.HasPrincipalCatalog() {
-		server.auditSuccess("authz.historical_read",
-			slog.String("principal", normalizeAuditPrincipal(principal)),
-			slog.String("query_kind", queryKind),
-			slog.String("privilege", string(executor.PrincipalPrivilegeSelectHistory)),
-		)
+		server.auditSuccess("authz.historical_read", attrs...)
 	}
 	return nil
 }
@@ -1235,21 +1292,21 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 			var result executor.Result
 			var err error
 			if selectStatement.ForHistory {
-				if err = server.authorizeHistoricalRead(session, "for_history"); err != nil {
+				if err = server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "for_history", targetKind: "history_stream"}); err != nil {
 					return executor.Result{}, nil, err
 				}
 				result, err = server.engine.RowHistory(ctx, stripped, domains)
 			} else {
 				switch asOfKind {
 				case "ts":
-					if err = server.authorizeHistoricalRead(session, "as_of_timestamp"); err != nil {
+					if err = server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "as_of_timestamp", targetKind: "timestamp", targetTimestampMicros: asOfValue}); err != nil {
 						return executor.Result{}, nil, err
 					}
 					result, err = server.engine.TimeTravelQueryAsOfTimestamp(ctx, stripped, domains, asOfValue)
 				default:
 					targetLSN := maxLSN
 					if asOfKind == "lsn" {
-						if err = server.authorizeHistoricalRead(session, "as_of_lsn"); err != nil {
+						if err = server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "as_of_lsn", targetKind: "lsn", targetLSN: asOfValue}); err != nil {
 							return executor.Result{}, nil, err
 						}
 						targetLSN = asOfValue

@@ -669,7 +669,7 @@ P1 — authorization model and historical semantics:
 - [ ] Define the first privilege surface for database/domain/schema/table operations and operator-sensitive capabilities.
 - [x] Add explicit privilege semantics for temporal access (`SELECT_HISTORY` / equivalent) instead of treating historical reads as implicit `SELECT`.
 - [x] Define and document the rule for historical authorization: by default, authorization is evaluated against the current principal/grant state, while the queried data snapshot may target an older `LSN`/timestamp.
-- [ ] Record enough audit information to prove both the target historical point and the grant state under which access was allowed.
+- [x] Record enough audit information to prove both the target historical point and the grant state under which access was allowed.
 
 P2 — pgwire and execution enforcement:
 - [x] Replace the fixed shared-user pgwire posture with real database-principal authentication while preserving documented compatibility for supported clients.

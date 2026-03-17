@@ -2580,6 +2580,46 @@ func TestPGWireAuditEventsCoverLoginAndHistoricalReadAuthorization(t *testing.T)
 	if !handler.hasAuditOperationReason("authz.historical_read", "failure", "privilege_denied") {
 		t.Fatal("missing privilege_denied historical-read audit reason")
 	}
+
+	failedHistoryAudit, ok := handler.auditEntry("authz.historical_read", "failure", "privilege_denied")
+	if !ok {
+		t.Fatal("missing failed historical-read audit entry")
+	}
+	if got, want := failedHistoryAudit["historical_target_kind"], "lsn"; got != want {
+		t.Fatalf("failed historical-read target kind = %v, want %q", got, want)
+	}
+	if got, want := failedHistoryAudit["historical_target_lsn"], targetLSN; got != want {
+		t.Fatalf("failed historical-read target lsn = %v, want %d", got, want)
+	}
+	if got, want := failedHistoryAudit["grant_state_scope"], "current"; got != want {
+		t.Fatalf("failed historical-read grant state scope = %v, want %q", got, want)
+	}
+	if got := failedHistoryAudit["principal_has_select_history"]; got != false {
+		t.Fatalf("failed historical-read principal_has_select_history = %v, want false", got)
+	}
+	if got := stringSliceFromAny(failedHistoryAudit["principal_effective_privileges"]); len(got) != 0 {
+		t.Fatalf("failed historical-read effective privileges = %v, want empty", got)
+	}
+
+	successHistoryAudit, ok := handler.auditEntry("authz.historical_read", "success", "")
+	if !ok {
+		t.Fatal("missing successful historical-read audit entry")
+	}
+	if got, want := successHistoryAudit["historical_target_kind"], "lsn"; got != want {
+		t.Fatalf("successful historical-read target kind = %v, want %q", got, want)
+	}
+	if got, want := successHistoryAudit["historical_target_lsn"], targetLSN; got != want {
+		t.Fatalf("successful historical-read target lsn = %v, want %d", got, want)
+	}
+	if got, want := successHistoryAudit["grant_state_scope"], "current"; got != want {
+		t.Fatalf("successful historical-read grant state scope = %v, want %q", got, want)
+	}
+	if got := successHistoryAudit["principal_has_select_history"]; got != true {
+		t.Fatalf("successful historical-read principal_has_select_history = %v, want true", got)
+	}
+	if got := stringSliceFromAny(successHistoryAudit["principal_effective_privileges"]); len(got) != 1 || got[0] != string(executor.PrincipalPrivilegeSelectHistory) {
+		t.Fatalf("successful historical-read effective privileges = %v, want [%s]", got, executor.PrincipalPrivilegeSelectHistory)
+	}
 }
 
 type pgwireAuditCaptureHandler struct {
@@ -2635,6 +2675,48 @@ func (handler *pgwireAuditCaptureHandler) hasAuditOperationReason(operation, sta
 		}
 	}
 	return false
+}
+
+func (handler *pgwireAuditCaptureHandler) auditEntry(operation, status, reason string) (map[string]any, bool) {
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	for _, entry := range handler.records {
+		event, _ := entry["event"].(string)
+		op, _ := entry["operation"].(string)
+		state, _ := entry["status"].(string)
+		entryReason, _ := entry["reason"].(string)
+		if event != "audit" || op != operation || state != status {
+			continue
+		}
+		if reason != "" && entryReason != reason {
+			continue
+		}
+		clone := make(map[string]any, len(entry))
+		for key, value := range entry {
+			clone[key] = value
+		}
+		return clone, true
+	}
+	return nil, false
+}
+
+func stringSliceFromAny(value any) []string {
+	switch typed := value.(type) {
+	case []string:
+		return append([]string(nil), typed...)
+	case []any:
+		result := make([]string, 0, len(typed))
+		for _, item := range typed {
+			text, ok := item.(string)
+			if !ok {
+				return nil
+			}
+			result = append(result, text)
+		}
+		return result
+	default:
+		return nil
+	}
 }
 
 func TestShowUnknownParamFallbackWorksOnExtendedProtocol(t *testing.T) {
