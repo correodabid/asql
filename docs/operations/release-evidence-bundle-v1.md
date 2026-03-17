@@ -95,6 +95,16 @@ What this proves:
 - startup/session/catalog flows still match the documented subset,
 - SQLSTATE claims remain aligned with actual wire behavior when touched.
 
+Record the prioritized mainstream smoke matrix explicitly whenever
+compatibility-facing behavior or docs changed:
+
+- `pgx` baseline,
+- `psql` baseline,
+- JDBC/GUI baseline,
+- `pgAdmin` startup/schema-browse baseline,
+- ORM-lite translated baseline,
+- BI-lite translated baseline.
+
 ### 3. Recovery
 
 Minimum evidence:
@@ -188,10 +198,19 @@ compatibility: green
   - asql-ga-compatibility-contract-v1.md reviewed: yes/no
 - evidence:
   - pgwire compatibility lanes A/B/C-or-D
+  - prioritized mainstream smoke matrix rows recorded: yes/no
+  - matrix rows covered:
+    - pgx: yes/no
+    - psql: yes/no
+    - dbeaver-datagrip: yes/no
+    - pgadmin: yes/no
+    - orm-lite: yes/no
+    - bi-lite: yes/no
   - SQLSTATE lane (if changed)
 - docs reviewed:
   - postgres-compatibility-surface-v1.md
   - postgres-compatibility-evidence-v1.md
+  - postgres-app-sql-translation-guide-v1.md
 - notes: <optional>
 
 recovery: green

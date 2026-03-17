@@ -33,6 +33,7 @@ Every release candidate should include a short evidence bundle covering:
    - the release is reviewed against the GA contract in [../reference/asql-ga-compatibility-contract-v1.md](../reference/asql-ga-compatibility-contract-v1.md).
    - compatibility docs were reviewed in the same release window.
    - documented mainstream client/tool flows still pass the current pack in [pgwire-compatibility-test-pack-v1.md](pgwire-compatibility-test-pack-v1.md).
+   - when pgwire compatibility claims or app-facing adoption docs changed, the Epic AI prioritized mainstream smoke matrix in [pgwire-compatibility-test-pack-v1.md](pgwire-compatibility-test-pack-v1.md) is included in the release evidence summary.
    - if pgwire error handling or startup/auth code changed, the SQLSTATE/error-shape lane is green in the same release window.
 4. Recovery sanity:
    - replay/restart parity suite passes.
@@ -63,6 +64,7 @@ Every release candidate should include a short evidence bundle covering:
    - pgwire onboarding flow
    - admin HTTP health/metrics flow
    - pgwire compatibility pack baseline lanes
+   - prioritized mainstream compatibility smoke matrix (`pgx`, `psql`, DBeaver/DataGrip, `pgAdmin`, ORM-lite, BI-lite) when the release touched compatibility-facing code or docs
    - focused pgwire SQLSTATE/error-shape regressions when protocol error behavior changed
    - focused failover continuity evidence when cluster/runtime, fencing, or promotion logic changed
    - release-candidate evidence summary generated

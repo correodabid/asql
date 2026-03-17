@@ -803,17 +803,18 @@ Epic AI P1 slice note (2026-03-17):
 P2 — app-facing migration wedge:
 - [x] Add support or explicit translation guidance for the next high-return SQL shapes seen in real app evaluation friction.
 - [x] Add one end-to-end “existing Postgres-oriented app reaches first successful read/write flow on ASQL” guide.
-- [ ] Add a release-gated compatibility smoke pack for the prioritized client/tool/app matrix.
+- [x] Add a release-gated compatibility smoke pack for the prioritized client/tool/app matrix.
 
 Epic AI P2 slice note (2026-03-17):
 - added [../getting-started/12-first-postgres-service-flow.md](../getting-started/12-first-postgres-service-flow.md) as the first end-to-end PostgreSQL-oriented service migration wedge
 - linked the new guide from the getting-started onboarding flow and adoption/troubleshooting surfaces
 - published [../reference/postgres-app-sql-translation-guide-v1.md](../reference/postgres-app-sql-translation-guide-v1.md) to classify high-return PostgreSQL-shaped SQL into use-now, translate-first, and defer buckets for app evaluation
+- extended [../operations/pgwire-compatibility-test-pack-v1.md](../operations/pgwire-compatibility-test-pack-v1.md) with a release-gated Epic AI smoke matrix covering `pgx`, `psql`, DBeaver/DataGrip, `pgAdmin`, ORM-lite, and BI-lite, and wired it into the release checklist/evidence bundle
 
 Acceptance gates (must pass before closing Epic AI)
-- [ ] At least 2 additional mainstream evaluation flows move from blocked to documented-working or explicitly-translated.
-- [ ] Each new compatibility claim is backed by regression coverage and matrix/docs updates.
-- [ ] Compatibility work remains evidence-driven rather than parity-driven.
+- [x] At least 2 additional mainstream evaluation flows move from blocked to documented-working or explicitly-translated.
+- [x] Each new compatibility claim is backed by regression coverage and matrix/docs updates.
+- [x] Compatibility work remains evidence-driven rather than parity-driven.
 
 ## Epic AJ — Planner and performance credibility
 

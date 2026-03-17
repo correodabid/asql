@@ -181,6 +181,134 @@ At RC time, treat these as the minimum compatibility evidence summary:
   other lane checked whenever pgwire shim/catalog code changed
 - Lane E green when `COPY` behavior or parser/shim code changed
 
+## Epic AI prioritized mainstream smoke matrix
+
+For the current adoption wedge, the release-gated smoke pack is not only a
+generic pgwire baseline.
+It is the prioritized mainstream evaluation matrix that serious evaluators are
+most likely to try first.
+
+Treat the following as the minimum Epic AI smoke matrix for release review when
+pgwire compatibility claims, startup/catalog shims, or app-facing compatibility
+docs changed.
+
+### Matrix row 1 — `pgx` app baseline
+
+Required evidence:
+
+- Lane A
+- Lane B
+
+Critical tests:
+
+- `TestPGWireSimpleQueryRoundtrip`
+- `TestPGWireCompatibilitySupportedPatterns`
+- `TestExtendedQueryPortalResumesAcrossExecuteCalls`
+- `TestExtendedQueryBinaryBindSupportsInt4Int8AndBool`
+
+Why it matters:
+
+- this is the default application-facing pgwire path,
+- it proves both the lowest-surprise simple-protocol lane and the current
+  session-scoped extended-protocol subset.
+
+### Matrix row 2 — `psql` operator/startup baseline
+
+Required evidence:
+
+- Lane C
+
+Critical tests:
+
+- `TestSSLModePreferFallback`
+- `TestCatalogStartupIntrospectionQueries`
+- `TestPGWireCompatibilityUnsupportedPatternGuidance`
+
+Why it matters:
+
+- it is still the shortest operator and evaluator sanity check for the pgwire
+  posture,
+- it proves startup/session/catalog behavior plus explicit unsupported-pattern
+  guidance.
+
+### Matrix row 3 — JDBC/GUI baseline (`DBeaver` / `DataGrip`)
+
+Required evidence:
+
+- Lane D
+
+Critical tests:
+
+- `TestMainstreamToolStartupFlows/dbeaver_datagrip_startup`
+- `TestCatalogEmptyInterceptsExposeSchemaAcrossProtocols`
+- `TestShowUnknownParamFallbackWorksOnExtendedProtocol`
+
+Why it matters:
+
+- this is the mainstream metadata-driven GUI lane already documented as working
+  inside the current shim subset.
+
+### Matrix row 4 — `pgAdmin` startup/schema-browse baseline
+
+Required evidence:
+
+- Lane D
+
+Critical tests:
+
+- `TestMainstreamToolStartupFlows/pgadmin_startup_schema_browse`
+
+Why it matters:
+
+- `pgAdmin` was a distinct Epic AI blocker and now has a narrow validated lane,
+- release review should keep it visible instead of treating it as implied by
+  broader GUI coverage.
+
+### Matrix row 5 — ORM-lite translated app baseline
+
+Required evidence:
+
+- Lane A
+
+Critical tests:
+
+- `TestPGWireORMLiteTranslatedHappyPath`
+- `TestPGWireCompatibilityUnsupportedPatternGuidance`
+
+Why it matters:
+
+- this is the main "existing PostgreSQL-oriented service can reach first real
+  write success" claim,
+- it proves explicit translations for `START TRANSACTION`, app-owned
+  transaction scope, and the supported insert/update/delete subset.
+
+### Matrix row 6 — BI-lite translated read-only baseline
+
+Required evidence:
+
+- Lane A
+
+Critical tests:
+
+- `TestPGWireBILiteReadOnlyPath`
+
+Why it matters:
+
+- this is the current narrow dashboard/datasource adoption claim,
+- it proves the documented metadata subset plus filtered and aggregate reads.
+
+## Suggested focused RC command bundle
+
+When a release primarily touches pgwire compatibility, a focused validation pass
+may use the following test groupings before the broader full-suite review:
+
+- `go test -v ./internal/server/pgwire -run 'TestPGWireSimpleQueryRoundtrip|TestPGWireCompatibilitySupportedPatterns|TestPGWireORMLiteTranslatedHappyPath|TestPGWireBILiteReadOnlyPath|TestMainstreamToolStartupFlows|TestCatalogStartupIntrospectionQueries|TestCatalogEmptyInterceptsExposeSchemaAcrossProtocols|TestPGWireCompatibilityUnsupportedPatternGuidance|TestSSLModePreferFallback' -count=1`
+- `go test -v ./internal/server/pgwire -run 'TestExtendedQueryPortalResumesAcrossExecuteCalls|TestExtendedQueryDescribeStatementInfersParameterCount|TestExtendedQueryDescribeStatementInfersInsertParameterOIDs|TestExtendedQueryDescribeStatementInfersPredicateParameterOIDs|TestExtendedQueryDescribeStatementInfersUpdateParameterOIDs|TestExtendedQueryDescribeStatementInfersArithmeticUpdateParameterOIDs|TestExtendedQueryInsertReturningUsesSchemaAwareRowDescription|TestExtendedQueryDiscardsMessagesUntilSyncAfterError|TestExtendedQueryBinaryBindSupportsInt4Int8AndBool|TestCancelRequestCancelsSimpleQueryAndKeepsConnectionUsable|TestCopyFromStdinInsertsRowsAndAcceptsChunkedCopyData|TestCopyToStdoutStreamsRows|TestCopyFromStdinCSVInsertsQuotedValues|TestCopyToStdoutCSVQuotesValues|TestCopyFailRollsBackInsertedRows' -count=1`
+- `go test -v ./internal/server/pgwire -run 'TestPGWirePasswordAuthenticationWrongPasswordReturns28P01|TestPGWirePasswordAuthenticationWrongMessageReturns08P01|TestSendFollowerRedirectErrorWrites25006AndHint|TestPGWireTransactionStateSQLStates|TestPGWireObjectAndConstraintSQLStates' -count=1`
+
+These commands do not replace the lane definitions above.
+They are a compact way to gather release evidence for the prioritized matrix.
+
 ## Triage rule for failures
 
 When a lane fails, classify it before changing code:
