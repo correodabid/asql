@@ -772,19 +772,29 @@ Reference inputs:
 - `docs/product/asql-adoption-roadmap-v1.md`
 - `docs/reference/postgres-compatibility-surface-v1.md`
 - `docs/ai/11-technical-gap-matrix-vs-postgres.md`
+- `docs/ai/12-mainstream-adoption-blockers-v1.md`
 
 Execution rule:
 - Only expand compatibility where it measurably improves adoption through mainstream drivers, tools, or migration flows.
 - Preserve the explicit product stance: ASQL is a deterministic engine with a pragmatic PostgreSQL-compatible subset.
 
 P0 — identify the next real adoption blockers:
-- [ ] Audit the next 3 highest-value blocked client/tool/app flows after the current compatibility wedge (`psql`, `pgx`, GUI, ORM-lite, BI-lite).
-- [ ] For each blocked flow, classify the missing behavior as docs gap, protocol/catalog gap, SQL gap, or explicit non-goal.
-- [ ] Publish a short ranked “next adoption blockers” note with evidence and expected adoption impact.
+- [x] Audit the next 3 highest-value blocked client/tool/app flows after the current compatibility wedge (`psql`, `pgx`, GUI, ORM-lite, BI-lite).
+- [x] For each blocked flow, classify the missing behavior as docs gap, protocol/catalog gap, SQL gap, or explicit non-goal.
+- [x] Publish a short ranked “next adoption blockers” note with evidence and expected adoption impact.
+
+Epic AI P0 audit result (2026-03-17):
+- ranked note published in `docs/ai/12-mainstream-adoption-blockers-v1.md`
+- next recommended implementation target: `pgAdmin` startup + schema-browse validation lane
+- next two ranked follow-ons: one narrow ORM-lite happy path, then one narrow BI-lite read-only datasource path
 
 P1 — close the highest-return compatibility gaps:
 - [ ] Implement the smallest protocol/catalog/session fixes required for the top-ranked mainstream flows.
 - [ ] Add regression tests for each newly-claimed flow before expanding the public docs.
+
+Epic AI P1 slice note (2026-03-17):
+- added a regression-covered `pgAdmin` startup + schema-browse lane in `internal/server/pgwire/server_test.go`
+- updated compatibility/docs guidance to treat the current `pgAdmin` startup/catalog subset as validated
 - [ ] Extend compatibility docs with exact supported caveats, required connection settings, and known unsupported edges.
 
 P2 — app-facing migration wedge:

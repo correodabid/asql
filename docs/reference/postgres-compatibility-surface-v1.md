@@ -84,6 +84,7 @@ and current privilege semantics, see
   - strings/default mapped as `TEXT` (`OID 25`)
 - Client/tool validation:
   - `pgx/v5` roundtrip is validated in integration-like tests
+  - `pgAdmin` startup and schema-browse basics are validated for the documented catalog/session subset (`current_database()`, `current_schema()`, privilege probes, `pg_namespace`, `pg_class`, `information_schema.tables`)
   - raw pgwire conformance-style tests cover portal resume, parameter inference, and extended-protocol error recovery
 
 ## Common app workflow SQL matrix

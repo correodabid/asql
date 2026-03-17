@@ -2516,6 +2516,50 @@ func TestMainstreamToolStartupFlows(t *testing.T) {
 		}
 	})
 
+	// ── Tool 4: pgAdmin startup + schema browse ────────────────────────
+	// pgAdmin relies on the same TLS fallback behavior plus catalog/schema
+	// browsing probes around current database, privileges, and visible tables.
+	t.Run("pgadmin_startup_schema_browse", func(t *testing.T) {
+		exec(t, "BEGIN DOMAIN pgadmin_demo")
+		exec(t, "CREATE TABLE widgets (id INT PRIMARY KEY, name TEXT)")
+		exec(t, "COMMIT")
+
+		v := scalar(t, "SELECT current_database()")
+		if v != "asql" {
+			t.Errorf("current_database = %q", v)
+		}
+
+		v = scalar(t, "SELECT current_schema()")
+		if v != "public" {
+			t.Errorf("current_schema = %q, want %q", v, "public")
+		}
+
+		v = scalar(t, "SELECT has_database_privilege('asql', 'CONNECT')")
+		if v != "t" {
+			t.Errorf("has_database_privilege() = %q, want %q", v, "t")
+		}
+
+		v = scalar(t, "SELECT obj_description(1234, 'pg_class')")
+		if v != "" {
+			t.Errorf("obj_description() = %q, want empty string", v)
+		}
+
+		n := hasRows(t, "SELECT * FROM pg_catalog.pg_namespace")
+		if n == 0 {
+			t.Error("pg_namespace returned 0 rows")
+		}
+
+		n = hasRows(t, "SELECT * FROM pg_catalog.pg_class")
+		if n == 0 {
+			t.Error("pg_class returned 0 rows")
+		}
+
+		n = hasRows(t, "SELECT * FROM information_schema.tables")
+		if n == 0 {
+			t.Error("information_schema.tables returned 0 rows")
+		}
+	})
+
 	// ── End-to-end data workflow (proves tools can do real work) ────────
 	t.Run("end_to_end_data_workflow", func(t *testing.T) {
 		exec(t, "BEGIN DOMAIN tooltest")

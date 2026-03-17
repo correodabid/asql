@@ -29,8 +29,7 @@ The recommendation below is about adoption risk, not only protocol capability.
 | CLI/smoke tests/scripts | Recommended | Use `asqlctl shell` or `pgx` with explicit transaction primitives. |
 | `pgx` simple protocol | Lowest-risk path | Keeps behavior closest to literal SQL text sent by the application. |
 | `pgx` extended query protocol | Supported, but validate intentionally | Safe within the documented subset; still not the first path to debug onboarding surprises. |
-| PostgreSQL GUI tools (`psql`, DBeaver, DataGrip`) | Supported for documented workflows | Good for interactive work, but not a reason to assume full PostgreSQL parity. |
-| `pgAdmin` | Unvalidated / caution | Likely to benefit from the same startup shim and `sslmode=prefer` fallback behavior, but it is not currently part of the documented regression-covered tool set. |
+| PostgreSQL GUI tools (`psql`, `DBeaver`, `DataGrip`, `pgAdmin`) | Supported for documented startup/schema-browse workflows | Good for interactive work, but not a reason to assume full PostgreSQL parity. |
 | ORMs or query builders that emit broad PostgreSQL syntax | Known-risk path | They often assume broader PostgreSQL semantics than ASQL promises. |
 | Drivers or tools that require TLS-only startup (`sslmode=require`) | Unsupported today | ASQL currently responds to `SSLRequest` with `N`. |
 
@@ -41,12 +40,10 @@ and metadata flows already exercised in regression tests:
 
 - `psql` startup/introspection basics (`current_setting`, `SHOW`, `current_database`, `current_user`, `pg_namespace`, `pg_database`),
 - DBeaver/DataGrip-style startup queries (`SET`, `set_config`, `version`, `current_schema`, `pg_settings`, `information_schema.schemata`, privilege probes),
+- `pgAdmin` startup and schema-browse basics (`current_database`, `current_schema`, `has_database_privilege`, `obj_description`, `pg_namespace`, `pg_class`, `information_schema.tables`),
 - `pgx` connection setup plus end-to-end CRUD/query flows,
 - PostgreSQL `CancelRequest` handling for supported pgwire execution boundaries,
 - narrow `COPY FROM STDIN` / `COPY TO STDOUT` flows covered by conformance-style tests.
-
-`pgAdmin` should still be treated as a separate validation target rather than
-as a regression-covered mainstream flow.
 
 For interactive tooling, this usually means:
 

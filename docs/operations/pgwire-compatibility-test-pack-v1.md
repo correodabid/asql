@@ -123,7 +123,7 @@ Important sub-areas to verify from those tests:
 - session-management no-ops,
 - explicit guardrail errors for unsupported PostgreSQL-shaped assumptions.
 
-### Lane D — JDBC / GUI baseline
+### Lane D — JDBC / GUI / pgAdmin baseline
 
 Goal: prove mainstream metadata-driven tools still get the startup and catalog
 responses they need without claiming full PostgreSQL parity.
@@ -134,11 +134,14 @@ Primary evidence:
   - `TestCatalogStartupIntrospectionQueries`
   - `TestCatalogEmptyInterceptsExposeSchemaAcrossProtocols`
   - `TestShowUnknownParamFallbackWorksOnExtendedProtocol`
+  - `TestMainstreamToolStartupFlows`
 
 Expected behaviors:
 
 - `SET`, `set_config`, `version()`, `current_schema()`, `SHOW`,
 - `pg_type`, `pg_settings`, `information_schema.schemata`,
+- `current_database()`, `has_database_privilege(...)`, `obj_description(...)`,
+- `pg_namespace`, `pg_class`, `information_schema.tables`,
 - empty-result catalog intercepts still return usable schema metadata,
 - non-`asql_*` `SHOW <param>` probes do not derail startup.
 
