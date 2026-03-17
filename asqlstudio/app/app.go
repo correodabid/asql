@@ -277,6 +277,115 @@ func (a *App) beginTxOnLeader(ctx context.Context, req *api.BeginTxRequest) (*ap
 	return resp, redirectClient, nil
 }
 
+type leaderWriteInvoker struct {
+	app *App
+	mu  sync.Mutex
+	txs map[string]*engineClient
+}
+
+func (a *App) newLeaderWriteInvoker() engineInvoker {
+	return &leaderWriteInvoker{
+		app: a,
+		txs: make(map[string]*engineClient),
+	}
+}
+
+func (i *leaderWriteInvoker) store(txID string, client *engineClient) {
+	if strings.TrimSpace(txID) == "" || client == nil {
+		return
+	}
+	i.mu.Lock()
+	i.txs[txID] = client
+	i.mu.Unlock()
+}
+
+func (i *leaderWriteInvoker) lookup(txID string) *engineClient {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return i.txs[txID]
+}
+
+func (i *leaderWriteInvoker) delete(txID string) {
+	i.mu.Lock()
+	delete(i.txs, txID)
+	i.mu.Unlock()
+}
+
+func (i *leaderWriteInvoker) BeginTx(ctx context.Context, req *api.BeginTxRequest) (*api.BeginTxResponse, error) {
+	resp, client, err := i.app.beginTxOnLeader(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	i.store(resp.TxID, client)
+	return resp, nil
+}
+
+func (i *leaderWriteInvoker) Execute(ctx context.Context, req *api.ExecuteRequest) (*api.ExecuteResponse, error) {
+	client := i.lookup(req.TxID)
+	if client == nil {
+		return nil, fmt.Errorf("transaction %q not found or already closed", req.TxID)
+	}
+	return client.Execute(ctx, req)
+}
+
+func (i *leaderWriteInvoker) ExecuteBatch(ctx context.Context, req *api.ExecuteBatchRequest) (*api.ExecuteBatchResponse, error) {
+	client := i.lookup(req.TxID)
+	if client == nil {
+		return nil, fmt.Errorf("transaction %q not found or already closed", req.TxID)
+	}
+	return client.ExecuteBatch(ctx, req)
+}
+
+func (i *leaderWriteInvoker) CommitTx(ctx context.Context, req *api.CommitTxRequest) (*api.CommitTxResponse, error) {
+	client := i.lookup(req.TxID)
+	if client == nil {
+		return nil, fmt.Errorf("transaction %q not found or already closed", req.TxID)
+	}
+	resp, err := client.CommitTx(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	i.delete(req.TxID)
+	return resp, nil
+}
+
+func (i *leaderWriteInvoker) RollbackTx(ctx context.Context, req *api.RollbackTxRequest) (*api.RollbackTxResponse, error) {
+	client := i.lookup(req.TxID)
+	if client == nil {
+		return &api.RollbackTxResponse{Status: "OK"}, nil
+	}
+	resp, err := client.RollbackTx(ctx, req)
+	i.delete(req.TxID)
+	return resp, err
+}
+
+func (i *leaderWriteInvoker) SchemaSnapshot(ctx context.Context, req *api.SchemaSnapshotRequest) (*api.SchemaSnapshotResponse, error) {
+	client := i.app.getLeaderClient()
+	if client == nil {
+		return nil, fmt.Errorf("leader client is not available")
+	}
+	return client.SchemaSnapshot(ctx, req)
+}
+
+func (a *App) applyFixtureOnLeader(ctx context.Context, fixture *fixtures.File) error {
+	client := a.getLeaderClient()
+	if client == nil {
+		return fmt.Errorf("leader client is not available")
+	}
+	if err := client.ApplyFixture(ctx, fixture); err != nil {
+		redirectAddr := leaderRedirectAddr(err)
+		if redirectAddr == "" {
+			return err
+		}
+		redirectClient := a.engineClientForAddr(redirectAddr)
+		if redirectClient == nil {
+			return err
+		}
+		return redirectClient.ApplyFixture(ctx, fixture)
+	}
+	return nil
+}
+
 // bootstrapViaParameterStatus dials each addr with a raw pgx connection (no
 // pool) and reads the asql_cluster_leader and asql_cluster_peers ParameterStatus
 // messages emitted by the server during the pgwire startup handshake.
@@ -1200,7 +1309,7 @@ func (a *App) SchemaLoadBaseline(req schemaLoadBaselineRequest) (map[string]inte
 
 	invoker := a.schemaInvoker
 	if invoker == nil {
-		invoker = a.getLeaderClient()
+		invoker = a.newLeaderWriteInvoker()
 	}
 
 	snapshot, err := invoker.SchemaSnapshot(ctx, &api.SchemaSnapshotRequest{Domains: []string{domain}})
@@ -1222,7 +1331,7 @@ func (a *App) SchemaLoadAllBaselines() (map[string]interface{}, error) {
 
 	invoker := a.schemaInvoker
 	if invoker == nil {
-		invoker = a.getLeaderClient()
+		invoker = a.newLeaderWriteInvoker()
 	}
 
 	snapshot, err := invoker.SchemaSnapshot(ctx, &api.SchemaSnapshotRequest{})
@@ -1263,7 +1372,7 @@ func (a *App) SchemaApply(req schemaDDLRequest) (map[string]interface{}, error) 
 
 	invoker := a.schemaInvoker
 	if invoker == nil {
-		invoker = a.getLeaderClient()
+		invoker = a.newLeaderWriteInvoker()
 	}
 
 	resp, err := applySchemaDDLPlan(ctx, invoker, domain, plan)
@@ -2321,11 +2430,7 @@ func (a *App) FixtureLoad(path string) (map[string]interface{}, error) {
 	if err := fixtures.ValidateDryRun(ctx, fixture); err != nil {
 		return nil, err
 	}
-	client := a.getLeaderClient()
-	if client == nil {
-		return nil, fmt.Errorf("leader client is not available")
-	}
-	if err := client.ApplyFixture(ctx, fixture); err != nil {
+	if err := a.applyFixtureOnLeader(ctx, fixture); err != nil {
 		return nil, err
 	}
 	return map[string]interface{}{

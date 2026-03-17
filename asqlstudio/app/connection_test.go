@@ -10,6 +10,7 @@ import (
 	"time"
 
 	pgwireserver "asql/internal/server/pgwire"
+	api "asql/pkg/adminapi"
 )
 
 func TestConnectionInfoAndSwitchConnection(t *testing.T) {
@@ -142,6 +143,50 @@ func TestTransactionCallsStayOnLeaderClient(t *testing.T) {
 	}
 	if got := app.lookupTxClient(txID); got != nil {
 		t.Fatalf("expected tx client to be cleared after commit, got %+v", got)
+	}
+}
+
+func TestLeaderWriteInvokerUsesLeaderClient(t *testing.T) {
+	followerAddr := startStudioPGWireServer(t, "studio-pass")
+	leaderAddr := startStudioPGWireServer(t, "studio-pass")
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	follower := newEngineClient(followerAddr, "studio-pass")
+	leader := newEngineClient(leaderAddr, "studio-pass")
+	app := newApp(
+		follower,
+		followerAddr,
+		nil,
+		"",
+		[]*engineClient{follower, leader},
+		[]string{followerAddr, leaderAddr},
+		nil,
+		nil,
+		"admin-secret",
+		filepath.Join(t.TempDir(), "data"),
+		logger,
+	)
+	app.leaderClient = leader
+	t.Cleanup(func() {
+		closeEngineClients(follower, leader)
+	})
+
+	invoker := app.newLeaderWriteInvoker()
+	beginResp, err := invoker.BeginTx(context.Background(), &api.BeginTxRequest{Mode: "domain", Domains: []string{"default"}})
+	if err != nil {
+		t.Fatalf("BeginTx: %v", err)
+	}
+	if beginResp.TxID == "" {
+		t.Fatalf("expected tx id from invoker begin")
+	}
+	if _, err := invoker.Execute(context.Background(), &api.ExecuteRequest{TxID: beginResp.TxID, SQL: "SHOW asql_node_role"}); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if _, err := invoker.CommitTx(context.Background(), &api.CommitTxRequest{TxID: beginResp.TxID}); err != nil {
+		t.Fatalf("CommitTx: %v", err)
+	}
+	if _, err := invoker.Execute(context.Background(), &api.ExecuteRequest{TxID: beginResp.TxID, SQL: "SHOW asql_node_role"}); err == nil {
+		t.Fatal("expected tx to be cleared after commit")
 	}
 }
 
