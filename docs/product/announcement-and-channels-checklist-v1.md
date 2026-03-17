@@ -70,19 +70,19 @@ Before publishing anything, verify that all public materials say consistently:
 - [ ] demo avoids unsupported or parity-claiming tool behavior
 
 ### 5. Release notes
-- [ ] release notes summarize supported path and key value pillars
-- [ ] release notes link to compatibility docs
-- [ ] release notes link to getting-started
-- [ ] release notes link to benchmark and production/readiness docs
-- [ ] release notes include any narrowed claims or known limits explicitly
+- [x] release notes summarize supported path and key value pillars
+- [x] release notes link to compatibility docs
+- [x] release notes link to getting-started
+- [x] release notes link to benchmark and production/readiness docs
+- [x] release notes include any narrowed claims or known limits explicitly
 
 ## Channel checklist
 
 ### GitHub
-- [ ] release description prepared
+- [x] release description prepared
 - [ ] release artifacts attached
-- [ ] release notes link to docs portal
-- [ ] release notes link to benchmark/compatibility docs
+- [x] release notes link to docs portal
+- [x] release notes link to benchmark/compatibility docs
 
 ### Website / docs
 - [ ] final site pages deployed
