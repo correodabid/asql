@@ -644,6 +644,20 @@ First vertical slice to execute:
 - [ ] Add `SELECT_HISTORY` as a first explicit privilege checked against current grant state for historical queries.
 - [ ] Expose the slice through a minimal admin/CLI path before adding broader PostgreSQL-style role DDL.
 
+AG-1 — bootstrap principal + historical-read baseline:
+- [ ] Add deterministic WAL record types for `principal_create`, `principal_alter`, `principal_disable`, `role_grant`, and `privilege_grant` / `privilege_revoke`.
+- [ ] Add replay/state-rebuild support for principal catalog state so restart reproduces the same effective permission graph.
+- [ ] Introduce one bootstrap path for the first admin principal that is allowed only when the durable principal catalog is empty.
+- [ ] Add stored-principal authentication in pgwire startup, including disabled-principal rejection and deterministic audit events.
+- [ ] Add one first-class privilege constant for temporal reads (`SELECT_HISTORY`) and enforce it on `AS OF LSN`, `AS OF TIMESTAMP`, and `FOR HISTORY` paths.
+- [ ] Add a minimal admin API plus `asqlctl` commands for `create user`, `list users`, `grant SELECT_HISTORY`, and effective-permission inspection.
+- [ ] Add regression coverage for bootstrap, restart/replay, successful historical read, denied historical read, and disabled principal login.
+
+AG-1 acceptance notes:
+- [ ] No fixed logical pgwire user remains on the primary authenticated path for the slice.
+- [ ] The same WAL history yields the same principal catalog and effective permissions after replay.
+- [ ] A user created today can read old history only after an explicit current grant, and audit output makes that sequence visible.
+
 P0 — principal catalog and durability:
 - [ ] Define the ASQL principal model (`USER`, `ROLE`, membership, disabled/locked state, password-hash or secret-reference shape).
 - [ ] Persist principal and grant mutations in WAL with deterministic recovery/replay semantics.
@@ -689,6 +703,12 @@ P0 — `asqlctl` security administration:
 - [ ] Add `asqlctl` commands for membership and grants/revokes, including temporal-access privileges.
 - [ ] Add `asqlctl` output/views that make effective permissions and inherited role membership explicit.
 - [ ] Add audit-oriented CLI flows to inspect who can access historical data and why.
+
+AH-1 — CLI-first management slice:
+- [ ] Add `asqlctl security user create` with password/secret input handling appropriate for the selected bootstrap model.
+- [ ] Add `asqlctl security user list` and `show` with principal state (`enabled`, `disabled`, inherited roles, temporal privileges).
+- [ ] Add `asqlctl security grant history` / `revoke history` as the first explicit temporal-permission workflow.
+- [ ] Add `asqlctl security who-can history` or equivalent inspection flow to explain effective historical access.
 
 P1 — Studio security UX:
 - [ ] Add a Studio security area for principals, roles, memberships, and grants.
