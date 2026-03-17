@@ -409,6 +409,25 @@ func TestRunAdminSecurityCommand(t *testing.T) {
 	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-grant-role", "analyst", "", "history_readers", ""); err != nil {
 		t.Fatalf("restore role command: %v", err)
 	}
+	if !strings.Contains(output.String(), "history_readers") {
+		t.Fatalf("unexpected restore role output: %q", output.String())
+	}
+
+	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "read-secret", "principal-show", "analyst", "", "", ""); err != nil {
+		t.Fatalf("principal show command: %v", err)
+	}
+	if !strings.Contains(output.String(), "\"name\": \"analyst\"") || !strings.Contains(output.String(), "\"effective_roles\": [") || !strings.Contains(output.String(), "history_readers") || !strings.Contains(output.String(), "\"effective_privileges\": [") || !strings.Contains(output.String(), "SELECT_HISTORY") {
+		t.Fatalf("unexpected principal show output: %q", output.String())
+	}
+
+	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "read-secret", "principal-who-can-history", "", "", "", ""); err != nil {
+		t.Fatalf("principal who-can-history command: %v", err)
+	}
+	if !strings.Contains(output.String(), "\"name\": \"admin\"") || !strings.Contains(output.String(), "\"name\": \"analyst\"") || !strings.Contains(output.String(), "SELECT_HISTORY") {
+		t.Fatalf("unexpected principal who-can-history output: %q", output.String())
+	}
 
 	output.Reset()
 	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-revoke-role", "analyst", "", "history_readers", ""); err != nil {

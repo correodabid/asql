@@ -2,6 +2,20 @@
 
 ASQL treats historical inspection as a normal developer workflow.
 
+## Transport tokens vs database principals
+
+Keep these two layers separate:
+
+- transport and admin tokens are deployment/operator controls,
+- durable database principals are engine-owned identities used for pgwire login and grant evaluation.
+
+That means:
+
+- `-auth-token`, `-admin-read-token`, and `-admin-write-token` protect process-level surfaces,
+- durable principals (`USER` / `ROLE`) control who may run current reads, current mutations, and historical reads inside the database model,
+- granting a database privilege does not replace operator tokens,
+- rotating an operator token does not silently grant or revoke database privileges.
+
 ## Read a past snapshot
 
 You can query past state by `LSN` directly over pgwire.
@@ -50,6 +64,16 @@ Example consequence:
 3. that principal can now query older snapshots,
 4. audit output records the current authorization decision instead of inventing
 	a backdated principal history.
+
+Concrete example:
+
+1. the row in `app.users` was written yesterday at `LSN 42`,
+2. `late_reader` is created today,
+3. `late_reader` initially cannot run `AS OF LSN 42`,
+4. `late_reader` is granted `SELECT_HISTORY` today,
+5. `late_reader` can now read `AS OF LSN 42`,
+6. audit output shows that the read was authorized by the **current** grant,
+	not by pretending `late_reader` existed yesterday.
 
 This keeps the model deterministic and auditable:
 

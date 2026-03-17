@@ -678,10 +678,10 @@ P2 — pgwire and execution enforcement:
 - [x] Add deterministic regression coverage for authn/authz, replay recovery of principal state, and denied historical-access paths.
 
 Acceptance gates (must pass before closing Epic AG)
-- [ ] Creating or changing a user/role/grant survives restart and replay because it is represented in durable engine state.
+- [x] Creating or changing a user/role/grant survives restart and replay because it is represented in durable engine state.
 - [x] Historical reads have an explicit, documented authorization rule and dedicated regression coverage.
-- [ ] A newly created principal can be granted historical-read capability without backdating its existence or weakening auditability.
-- [ ] Public compatibility docs clearly distinguish transport tokens from database principals and role-based permissions.
+- [x] A newly created principal can be granted historical-read capability without backdating its existence or weakening auditability.
+- [x] Public compatibility docs clearly distinguish transport tokens from database principals and role-based permissions.
 
 ## Epic AH — Security management surfaces (CLI + Studio)
 
@@ -702,14 +702,14 @@ Recommended rollout order:
 P0 — `asqlctl` security administration:
 - [ ] Add `asqlctl` commands for user/role lifecycle (`create`, `alter`, `disable`, `list`, `show`).
 - [x] Add `asqlctl` commands for membership and grants/revokes, including temporal-access privileges.
-- [ ] Add `asqlctl` output/views that make effective permissions and inherited role membership explicit.
-- [ ] Add audit-oriented CLI flows to inspect who can access historical data and why.
+- [x] Add `asqlctl` output/views that make effective permissions and inherited role membership explicit.
+- [x] Add audit-oriented CLI flows to inspect who can access historical data and why.
 
 AH-1 — CLI-first management slice:
 - [ ] Add `asqlctl security user create` with password/secret input handling appropriate for the selected bootstrap model.
-- [ ] Add `asqlctl security user list` and `show` with principal state (`enabled`, `disabled`, inherited roles, temporal privileges).
+- [x] Add `asqlctl security user list` and `show` with principal state (`enabled`, `disabled`, inherited roles, temporal privileges).
 - [x] Add `asqlctl security grant history` / `revoke history` as the first explicit temporal-permission workflow.
-- [ ] Add `asqlctl security who-can history` or equivalent inspection flow to explain effective historical access.
+- [x] Add `asqlctl security who-can history` or equivalent inspection flow to explain effective historical access.
 
 P1 — Studio security UX:
 - [x] Add a Studio security area for principals, roles, memberships, and grants.

@@ -53,6 +53,13 @@ Runtime flags:
 - `-admin-read-token`: optional bearer token for read-only admin JSON endpoints; falls back to `-auth-token`
 - `-admin-write-token`: optional bearer token for mutating admin JSON endpoints such as backup creation and restore; falls back to `-auth-token`
 
+Important distinction:
+
+- these process-config tokens are deployment/operator controls,
+- they are not the same thing as durable database principals,
+- when the durable principal catalog is bootstrapped, pgwire logins and in-database privileges come from stored principals and grants,
+- admin HTTP bearer tokens still remain operator-facing transport controls.
+
 If `-auth-token` is configured, clients must send:
 
 - `authorization: Bearer <token>`
@@ -115,6 +122,18 @@ Current audit policy is explicit and fail-closed:
 - retention mode is `retain_forever`,
 - pruning is not active,
 - exports include a file SHA-256 digest for external evidence handoff.
+
+Security-management examples over the admin HTTP surface:
+
+```bash
+go run ./cmd/asqlctl -command principal-list -admin-http 127.0.0.1:9090 -auth-token "$ADMIN_READ_TOKEN"
+go run ./cmd/asqlctl -command principal-show -admin-http 127.0.0.1:9090 -auth-token "$ADMIN_READ_TOKEN" -principal analyst
+go run ./cmd/asqlctl -command principal-who-can-history -admin-http 127.0.0.1:9090 -auth-token "$ADMIN_READ_TOKEN"
+```
+
+`principal-show` is the explicit CLI inspection view for inherited roles and
+effective privileges. `principal-who-can-history` narrows that view to the
+principals whose current effective grants include `SELECT_HISTORY`.
 
 ## 4) Single-node transaction flow (verified)
 

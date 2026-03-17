@@ -360,7 +360,7 @@ func isLocalAuditCommand(command string) bool {
 
 func isAdminSecurityCommand(command string) bool {
 	switch strings.ToLower(strings.TrimSpace(command)) {
-	case "principal-list", "principal-bootstrap-admin", "principal-create-user", "principal-create-role", "principal-grant-privilege", "principal-revoke-privilege", "principal-grant-role", "principal-revoke-role", "principal-set-password", "principal-disable", "principal-enable", "principal-delete":
+	case "principal-list", "principal-show", "principal-who-can-history", "principal-bootstrap-admin", "principal-create-user", "principal-create-role", "principal-grant-privilege", "principal-revoke-privilege", "principal-grant-role", "principal-revoke-role", "principal-set-password", "principal-disable", "principal-enable", "principal-delete":
 		return true
 	default:
 		return false
@@ -381,6 +381,39 @@ func runAdminSecurityCommand(ctx context.Context, out io.Writer, adminHTTPAddr, 
 			return err
 		}
 		return printJSONTo(out, response)
+	case "principal-show":
+		if strings.TrimSpace(principal) == "" {
+			return errors.New("principal-show requires -principal")
+		}
+		response := new(adminapi.ListPrincipalsResponse)
+		if err := doAdminJSON(ctx, client, http.MethodGet, adminHTTPAddr, "/api/v1/security/principals", authToken, nil, response); err != nil {
+			return err
+		}
+		target := strings.ToLower(strings.TrimSpace(principal))
+		for _, record := range response.Principals {
+			if strings.ToLower(strings.TrimSpace(record.Name)) != target {
+				continue
+			}
+			return printJSONTo(out, record)
+		}
+		return fmt.Errorf("principal %q not found", principal)
+	case "principal-who-can-history":
+		response := new(adminapi.ListPrincipalsResponse)
+		if err := doAdminJSON(ctx, client, http.MethodGet, adminHTTPAddr, "/api/v1/security/principals", authToken, nil, response); err != nil {
+			return err
+		}
+		filtered := make([]adminapi.PrincipalRecord, 0)
+		for _, record := range response.Principals {
+			for _, granted := range record.EffectivePrivileges {
+				if granted == executor.PrincipalPrivilegeSelectHistory {
+					filtered = append(filtered, record)
+					break
+				}
+			}
+		}
+		return printJSONTo(out, struct {
+			Principals []adminapi.PrincipalRecord `json:"principals"`
+		}{Principals: filtered})
 	case "principal-bootstrap-admin":
 		if strings.TrimSpace(principal) == "" {
 			return errors.New("principal-bootstrap-admin requires -principal")

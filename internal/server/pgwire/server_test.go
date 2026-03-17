@@ -1826,6 +1826,145 @@ func TestPGWireHistoricalReadRequiresSelectHistoryPrivilege(t *testing.T) {
 	}
 }
 
+func TestPGWireLateCreatedPrincipalCanBeGrantedHistoricalReadWithoutBackdating(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "late-principal-data")
+	handler := newPGWireAuditCaptureHandler()
+	logger := slog.New(handler)
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	addr := listener.Addr().String()
+	adminConn, err := pgx.Connect(ctx, "postgres://admin:secret-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	t.Cleanup(func() { _ = adminConn.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN accounts",
+		"CREATE TABLE users (id INT, email TEXT)",
+		"INSERT INTO users (id, email) VALUES (1, 'one@asql.dev')",
+		"COMMIT",
+	} {
+		if _, err := adminConn.Exec(ctx, sql); err != nil {
+			t.Fatalf("setup %q: %v", sql, err)
+		}
+	}
+
+	targetLSN := server.walStore.LastLSN()
+	historySQL := fmt.Sprintf("SELECT id, email FROM accounts.users /* as-of-lsn: %d */", targetLSN)
+
+	if err := server.engine.CreateUser(ctx, "late_reader", "late-pass"); err != nil {
+		t.Fatalf("create late_reader: %v", err)
+	}
+
+	lateConn, err := pgx.Connect(ctx, "postgres://late_reader:late-pass@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect late_reader before grant: %v", err)
+	}
+	t.Cleanup(func() { _ = lateConn.Close(ctx) })
+
+	if _, err := lateConn.Query(ctx, historySQL); err == nil || !strings.Contains(err.Error(), "SELECT_HISTORY") {
+		t.Fatalf("expected denied historical read before grant, got %v", err)
+	}
+
+	if err := server.engine.GrantPrivilege(ctx, "late_reader", executor.PrincipalPrivilegeSelectHistory); err != nil {
+		t.Fatalf("grant SELECT_HISTORY to late_reader: %v", err)
+	}
+
+	rows, err := lateConn.Query(ctx, historySQL)
+	if err != nil {
+		t.Fatalf("late_reader historical query after grant: %v", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		t.Fatal("expected historical row for late-created principal after grant")
+	}
+	var id int64
+	var email string
+	if err := rows.Scan(&id, &email); err != nil {
+		t.Fatalf("scan late_reader row: %v", err)
+	}
+	if id != 1 || email != "one@asql.dev" {
+		t.Fatalf("unexpected late_reader row: id=%d email=%q", id, email)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate late_reader rows: %v", err)
+	}
+
+	failedAudit, ok := handler.auditEntry("authz.historical_read", "failure", "privilege_denied")
+	if !ok {
+		t.Fatal("missing denied historical-read audit entry for late_reader")
+	}
+	if got, want := failedAudit["principal"], "late_reader"; got != want {
+		t.Fatalf("denied historical-read principal = %v, want %q", got, want)
+	}
+	if got, want := failedAudit["historical_target_lsn"], targetLSN; got != want {
+		t.Fatalf("denied historical-read target lsn = %v, want %d", got, want)
+	}
+	if got := failedAudit["principal_has_select_history"]; got != false {
+		t.Fatalf("denied historical-read principal_has_select_history = %v, want false", got)
+	}
+
+	successAudit, ok := handler.lastAuditEntry("authz.historical_read", "success")
+	if !ok {
+		t.Fatal("missing successful historical-read audit entry for late_reader")
+	}
+	if got, want := successAudit["principal"], "late_reader"; got != want {
+		t.Fatalf("successful historical-read principal = %v, want %q", got, want)
+	}
+	if got, want := successAudit["historical_target_lsn"], targetLSN; got != want {
+		t.Fatalf("successful historical-read target lsn = %v, want %d", got, want)
+	}
+	if got, want := successAudit["grant_state_scope"], "current"; got != want {
+		t.Fatalf("successful historical-read grant state scope = %v, want %q", got, want)
+	}
+	if got := successAudit["principal_has_select_history"]; got != true {
+		t.Fatalf("successful historical-read principal_has_select_history = %v, want true", got)
+	}
+	if got := stringSliceFromAny(successAudit["principal_effective_privileges"]); len(got) != 1 || got[0] != string(executor.PrincipalPrivilegeSelectHistory) {
+		t.Fatalf("successful historical-read effective privileges = %v, want [%s]", got, executor.PrincipalPrivilegeSelectHistory)
+	}
+}
+
 func TestIsWriteStatement(t *testing.T) {
 	writes := []string{
 		"INSERT INTO orders VALUES (1)",
@@ -2798,6 +2937,26 @@ func (handler *pgwireAuditCaptureHandler) auditEntry(operation, status, reason s
 			continue
 		}
 		if reason != "" && entryReason != reason {
+			continue
+		}
+		clone := make(map[string]any, len(entry))
+		for key, value := range entry {
+			clone[key] = value
+		}
+		return clone, true
+	}
+	return nil, false
+}
+
+func (handler *pgwireAuditCaptureHandler) lastAuditEntry(operation, status string) (map[string]any, bool) {
+	handler.mu.Lock()
+	defer handler.mu.Unlock()
+	for i := len(handler.records) - 1; i >= 0; i-- {
+		entry := handler.records[i]
+		event, _ := entry["event"].(string)
+		op, _ := entry["operation"].(string)
+		state, _ := entry["status"].(string)
+		if event != "audit" || op != operation || state != status {
 			continue
 		}
 		clone := make(map[string]any, len(entry))
