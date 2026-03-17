@@ -645,7 +645,7 @@ func (server *Server) handleBind(backend *pgproto3.Backend, state *connState, ms
 	// or not the client sent Describe Statement, Describe Portal, or neither.
 	var describedColumns []string
 	if isSelect {
-		if fields := server.describeFields(sql, state.session.ActiveDomains()); fields != nil {
+		if fields := server.describeFields(sql, state.session.ActiveDomains(), state.session.Principal()); fields != nil {
 			describedColumns = make([]string, len(fields))
 			for i, f := range fields {
 				describedColumns[i] = strings.ToLower(string(f.Name))
@@ -679,7 +679,7 @@ func (server *Server) handleDescribe(backend *pgproto3.Backend, state *connState
 			return
 		}
 		backend.Send(&pgproto3.ParameterDescription{ParameterOIDs: stmt.paramOIDs})
-		fields := server.describeFields(stmt.sql, state.session.ActiveDomains())
+		fields := server.describeFields(stmt.sql, state.session.ActiveDomains(), state.session.Principal())
 		// INSERT ... RETURNING produces rows that describeFields
 		// cannot detect (it only handles SELECT/WITH).  Fall back to the
 		// RETURNING column parser so pgx receives a RowDescription instead of
@@ -705,7 +705,7 @@ func (server *Server) handleDescribe(backend *pgproto3.Backend, state *connState
 		if !p.isSelect {
 			backend.Send(&pgproto3.NoData{})
 		} else {
-			fields := server.describeFields(p.sql, state.session.ActiveDomains())
+			fields := server.describeFields(p.sql, state.session.ActiveDomains(), state.session.Principal())
 			if fields == nil && len(p.columns) > 0 {
 				if returningFields := server.describeReturningFields(p.sql); len(returningFields) > 0 {
 					fields = returningFields
@@ -774,7 +774,7 @@ func (server *Server) handleExtendedExecute(backend *pgproto3.Backend, state *co
 	}
 
 	// Catalog interception.
-	if intercepted, ok := server.interceptCatalog(ctx, p.sql, state.session.ActiveDomains()); ok {
+	if intercepted, ok := server.interceptCatalog(ctx, p.sql, state.session.ActiveDomains(), state.session.Principal()); ok {
 		nextRow, _, err := server.streamExtendedResult(ctx, backend, state, p.sql, intercepted.result, intercepted.columns, msg.MaxRows, p.nextRow)
 		p.nextRow = nextRow
 		state.portals[msg.Portal] = p
@@ -1020,7 +1020,7 @@ func (server *Server) describeReturningFields(sql string) []pgproto3.FieldDescri
 // describeFields returns the FieldDescriptions for a SELECT query (all columns
 // typed as text for now; OIDs are refined later by the type-inference logic in
 // inferColumnTypeOIDs when rows are actually returned).
-func (server *Server) describeFields(sql string, activeDomains []string) []pgproto3.FieldDescription {
+func (server *Server) describeFields(sql string, activeDomains []string, principal string) []pgproto3.FieldDescription {
 	// Strip AS-OF comments (/* as-of-lsn: N */ / /* as-of-ts: N */) before
 	// parsing: the SQL stored in prepared statements carries the appended
 	// comment token, which our parser does not handle and would return an
@@ -1083,7 +1083,7 @@ func (server *Server) describeFields(sql string, activeDomains []string) []pgpro
 	// For catalog / virtual-table queries, intercept now so we can derive
 	// accurate OIDs from the real row data rather than defaulting everything
 	// to text (OID 25).
-	if intercepted, ok := server.interceptCatalog(context.Background(), trimmed, activeDomains); ok {
+	if intercepted, ok := server.interceptCatalog(context.Background(), trimmed, activeDomains, principal); ok {
 		if len(intercepted.columns) == 0 {
 			return nil
 		}

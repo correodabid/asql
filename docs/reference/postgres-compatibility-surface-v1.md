@@ -26,11 +26,12 @@ matches PostgreSQL closely enough to claim compatibility today, see
 - SSL negotiation: `SSLRequest` is handled with `N` (no TLS). Clients using `sslmode=prefer` (the default for psql, pgx, JDBC, DBeaver, DataGrip, pgAdmin) fall back to plaintext successfully. `sslmode=disable` and `sslmode=allow` also work. `sslmode=require` / `verify-ca` / `verify-full` are unsupported and will fail.
 - Authentication:
   - `AuthenticationOk` when no pgwire password is configured
-  - `AuthenticationCleartextPassword` when `AuthToken` / `-auth-token` is configured
-  - password validation is single-token and connection-scoped (not role-based)
+  - `AuthenticationCleartextPassword` when `AuthToken` / `-auth-token` is configured or when the durable principal catalog is present
+  - password validation can use either the shared deployment token or stored database principals, depending on whether the durable principal catalog has been bootstrapped
 - Session states: `ReadyForQuery` idle (`I`) and in-transaction (`T`).
 - Session/setup compatibility shim:
-  - `current_database()`, `version()`, `current_schema()`, `current_user`, and `user`
+  - `current_database()`, `version()`, `current_schema()`, `current_user`, `session_user`, and `user`
+  - when a durable principal authenticates, `current_user` / `session_user` and `current_setting('session_authorization')` reflect that authenticated principal
   - `SHOW server_version`, `SHOW server_version_num`, `SHOW search_path`, plus generic `SHOW <param>` fallback for common tool probes
   - `SET`, `RESET`, `RESET ALL`, `DEALLOCATE`, and `DEALLOCATE ALL` are accepted as deterministic no-ops for client/tool session management
 - Catalog/introspection compatibility shim:

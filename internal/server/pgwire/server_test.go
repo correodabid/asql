@@ -1351,6 +1351,105 @@ func TestPGWirePasswordAuthenticationRespectsDisableAndEnable(t *testing.T) {
 	t.Cleanup(func() { _ = conn.Close(ctx) })
 }
 
+func TestPGWireSessionIdentityReflectsAuthenticatedPrincipal(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	if err := server.engine.BootstrapAdminPrincipal(ctx, "admin", "secret-pass"); err != nil {
+		t.Fatalf("bootstrap admin principal: %v", err)
+	}
+	if err := server.engine.CreateUser(ctx, "analyst", "analyst-pass"); err != nil {
+		t.Fatalf("create analyst principal: %v", err)
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	adminConn, err := pgx.Connect(ctx, "postgres://admin:secret-pass@"+listener.Addr().String()+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect admin: %v", err)
+	}
+	t.Cleanup(func() { _ = adminConn.Close(ctx) })
+
+	analystConn, err := pgx.Connect(ctx, "postgres://analyst:analyst-pass@"+listener.Addr().String()+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect analyst: %v", err)
+	}
+	t.Cleanup(func() { _ = analystConn.Close(ctx) })
+
+	var currentUser string
+	if err := analystConn.QueryRow(ctx, "SELECT current_user").Scan(&currentUser); err != nil {
+		t.Fatalf("select current_user: %v", err)
+	}
+	if currentUser != "analyst" {
+		t.Fatalf("current_user = %q, want %q", currentUser, "analyst")
+	}
+
+	var sessionUser string
+	if err := analystConn.QueryRow(ctx, "SELECT session_user").Scan(&sessionUser); err != nil {
+		t.Fatalf("select session_user: %v", err)
+	}
+	if sessionUser != "analyst" {
+		t.Fatalf("session_user = %q, want %q", sessionUser, "analyst")
+	}
+
+	var sessionAuth string
+	if err := analystConn.QueryRow(ctx, "SELECT current_setting('session_authorization')").Scan(&sessionAuth); err != nil {
+		t.Fatalf("select session_authorization: %v", err)
+	}
+	if sessionAuth != "analyst" {
+		t.Fatalf("session_authorization = %q, want %q", sessionAuth, "analyst")
+	}
+
+	var analystSuper string
+	if err := analystConn.QueryRow(ctx, "SELECT current_setting('is_superuser')").Scan(&analystSuper); err != nil {
+		t.Fatalf("select analyst is_superuser: %v", err)
+	}
+	if analystSuper != "off" {
+		t.Fatalf("analyst is_superuser = %q, want %q", analystSuper, "off")
+	}
+
+	var adminSuper string
+	if err := adminConn.QueryRow(ctx, "SELECT current_setting('is_superuser')").Scan(&adminSuper); err != nil {
+		t.Fatalf("select admin is_superuser: %v", err)
+	}
+	if adminSuper != "on" {
+		t.Fatalf("admin is_superuser = %q, want %q", adminSuper, "on")
+	}
+}
+
 func TestPGWirePasswordAuthenticationFailsAfterPrincipalDeletion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

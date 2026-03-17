@@ -640,42 +640,42 @@ Recommended MVP execution order:
 4. Add Studio management and inspection flows only after the engine and CLI semantics are stable.
 
 First vertical slice to execute:
-- [ ] Add durable principal catalog state with one bootstrap admin principal and replay-safe WAL mutations.
-- [ ] Authenticate pgwire sessions against stored principals instead of the fixed shared logical user.
-- [ ] Add `SELECT_HISTORY` as a first explicit privilege checked against current grant state for historical queries.
-- [ ] Expose the slice through a minimal admin/CLI path before adding broader PostgreSQL-style role DDL.
+- [x] Add durable principal catalog state with one bootstrap admin principal and replay-safe WAL mutations.
+- [x] Authenticate pgwire sessions against stored principals instead of the fixed shared logical user.
+- [x] Add `SELECT_HISTORY` as a first explicit privilege checked against current grant state for historical queries.
+- [x] Expose the slice through a minimal admin/CLI path before adding broader PostgreSQL-style role DDL.
 
 AG-1 — bootstrap principal + historical-read baseline:
 - [ ] Add deterministic WAL record types for `principal_create`, `principal_alter`, `principal_disable`, `role_grant`, and `privilege_grant` / `privilege_revoke`.
-- [ ] Add replay/state-rebuild support for principal catalog state so restart reproduces the same effective permission graph.
-- [ ] Introduce one bootstrap path for the first admin principal that is allowed only when the durable principal catalog is empty.
+- [x] Add replay/state-rebuild support for principal catalog state so restart reproduces the same effective permission graph.
+- [x] Introduce one bootstrap path for the first admin principal that is allowed only when the durable principal catalog is empty.
 - [ ] Add stored-principal authentication in pgwire startup, including disabled-principal rejection and deterministic audit events.
-- [ ] Add one first-class privilege constant for temporal reads (`SELECT_HISTORY`) and enforce it on `AS OF LSN`, `AS OF TIMESTAMP`, and `FOR HISTORY` paths.
-- [ ] Add a minimal admin API plus `asqlctl` commands for `create user`, `list users`, `grant SELECT_HISTORY`, and effective-permission inspection.
-- [ ] Add regression coverage for bootstrap, restart/replay, successful historical read, denied historical read, and disabled principal login.
+- [x] Add one first-class privilege constant for temporal reads (`SELECT_HISTORY`) and enforce it on `AS OF LSN`, `AS OF TIMESTAMP`, and `FOR HISTORY` paths.
+- [x] Add a minimal admin API plus `asqlctl` commands for `create user`, `list users`, `grant SELECT_HISTORY`, and effective-permission inspection.
+- [x] Add regression coverage for bootstrap, restart/replay, successful historical read, denied historical read, and disabled principal login.
 
 AG-1 acceptance notes:
-- [ ] No fixed logical pgwire user remains on the primary authenticated path for the slice.
-- [ ] The same WAL history yields the same principal catalog and effective permissions after replay.
-- [ ] A user created today can read old history only after an explicit current grant, and audit output makes that sequence visible.
+- [x] No fixed logical pgwire user remains on the primary authenticated path for the slice.
+- [x] The same WAL history yields the same principal catalog and effective permissions after replay.
+- [x] A user created today can read old history only after an explicit current grant, and audit output makes that sequence visible.
 
 P0 — principal catalog and durability:
-- [ ] Define the ASQL principal model (`USER`, `ROLE`, membership, disabled/locked state, password-hash or secret-reference shape).
-- [ ] Persist principal and grant mutations in WAL with deterministic recovery/replay semantics.
-- [ ] Add engine/catalog APIs for principal lookup, role expansion, and grant resolution without relying on process-global mutable state.
-- [ ] Define bootstrap semantics for the first admin principal without making steady-state identity management config-only.
+- [x] Define the ASQL principal model (`USER`, `ROLE`, membership, disabled/locked state, password-hash or secret-reference shape).
+- [x] Persist principal and grant mutations in WAL with deterministic recovery/replay semantics.
+- [x] Add engine/catalog APIs for principal lookup, role expansion, and grant resolution without relying on process-global mutable state.
+- [x] Define bootstrap semantics for the first admin principal without making steady-state identity management config-only.
 
 P1 — authorization model and historical semantics:
 - [ ] Define the first privilege surface for database/domain/schema/table operations and operator-sensitive capabilities.
-- [ ] Add explicit privilege semantics for temporal access (`SELECT_HISTORY` / equivalent) instead of treating historical reads as implicit `SELECT`.
+- [x] Add explicit privilege semantics for temporal access (`SELECT_HISTORY` / equivalent) instead of treating historical reads as implicit `SELECT`.
 - [ ] Define and document the rule for historical authorization: by default, authorization is evaluated against the current principal/grant state, while the queried data snapshot may target an older `LSN`/timestamp.
 - [ ] Record enough audit information to prove both the target historical point and the grant state under which access was allowed.
 
 P2 — pgwire and execution enforcement:
-- [ ] Replace the fixed shared-user pgwire posture with real database-principal authentication while preserving documented compatibility for supported clients.
+- [x] Replace the fixed shared-user pgwire posture with real database-principal authentication while preserving documented compatibility for supported clients.
 - [ ] Enforce authorization checks in planner/executor for read/write/schema/admin flows, including temporal queries and replay-sensitive operations.
 - [ ] Replace compatibility-shim privilege probes that currently always succeed with grant-aware behavior where claims are made public.
-- [ ] Add deterministic regression coverage for authn/authz, replay recovery of principal state, and denied historical-access paths.
+- [x] Add deterministic regression coverage for authn/authz, replay recovery of principal state, and denied historical-access paths.
 
 Acceptance gates (must pass before closing Epic AG)
 - [ ] Creating or changing a user/role/grant survives restart and replay because it is represented in durable engine state.
@@ -701,18 +701,18 @@ Recommended rollout order:
 
 P0 — `asqlctl` security administration:
 - [ ] Add `asqlctl` commands for user/role lifecycle (`create`, `alter`, `disable`, `list`, `show`).
-- [ ] Add `asqlctl` commands for membership and grants/revokes, including temporal-access privileges.
+- [x] Add `asqlctl` commands for membership and grants/revokes, including temporal-access privileges.
 - [ ] Add `asqlctl` output/views that make effective permissions and inherited role membership explicit.
 - [ ] Add audit-oriented CLI flows to inspect who can access historical data and why.
 
 AH-1 — CLI-first management slice:
 - [ ] Add `asqlctl security user create` with password/secret input handling appropriate for the selected bootstrap model.
 - [ ] Add `asqlctl security user list` and `show` with principal state (`enabled`, `disabled`, inherited roles, temporal privileges).
-- [ ] Add `asqlctl security grant history` / `revoke history` as the first explicit temporal-permission workflow.
+- [x] Add `asqlctl security grant history` / `revoke history` as the first explicit temporal-permission workflow.
 - [ ] Add `asqlctl security who-can history` or equivalent inspection flow to explain effective historical access.
 
 P1 — Studio security UX:
-- [ ] Add a Studio security area for principals, roles, memberships, and grants.
+- [x] Add a Studio security area for principals, roles, memberships, and grants.
 - [ ] Add a guided grant flow that makes historical-read access an explicit choice, not an accidental byproduct.
 - [ ] Add effective-permission inspection for a selected user/role, including inherited roles and temporal capabilities.
 - [ ] Add denial/audit visibility in Studio for failed authz checks and recent security-relevant changes.

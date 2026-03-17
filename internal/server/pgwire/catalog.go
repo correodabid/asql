@@ -76,10 +76,11 @@ var currentSettingDefaults = map[string]string{
 
 // interceptCatalog returns a synthetic result when sql is a recognised catalog
 // query.  The second return value is true when the query was intercepted.
-func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDomains []string) (interceptResult, bool) {
+func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDomains []string, principal string) (interceptResult, bool) {
 	trimmed := strings.TrimSpace(sql)
 	trimmed = strings.TrimRight(trimmed, "; \t\n\r")
 	lower := strings.ToLower(trimmed)
+	sessionPrincipal := server.catalogSessionPrincipal(principal)
 
 	switch {
 	// ── Scalar utility queries ────────────────────────────────────────────
@@ -118,7 +119,11 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 	case lower == "select current_user",
 		lower == "select current_user as current_user",
 		lower == "select user":
-		return scalarResult("current_user", "asql")
+		return scalarResult("current_user", sessionPrincipal)
+
+	case lower == "select session_user",
+		lower == "select session_user as session_user":
+		return scalarResult("session_user", sessionPrincipal)
 
 	case strings.HasPrefix(lower, "show server_version"):
 		return scalarResult("server_version", "16.0-asql")
@@ -143,7 +148,7 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 	// psql, JDBC, DBeaver, and many pgx-based drivers call current_setting()
 	// during connection setup and introspection to discover server capabilities.
 	case reCurrentSetting.MatchString(lower):
-		return server.handleCurrentSetting(lower)
+		return server.handleCurrentSetting(lower, principal)
 
 	// ── pg_catalog.set_config(name, value, is_local) ────────────────────
 	// DBeaver and DataGrip call set_config on connect.  Treat as a no-op
@@ -344,16 +349,25 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 	return interceptResult{}, false
 }
 
+func (server *Server) catalogSessionPrincipal(principal string) string {
+	resolved := strings.TrimSpace(strings.ToLower(principal))
+	if resolved == "" {
+		return "asql"
+	}
+	return resolved
+}
+
 // ── current_setting / set_config handlers ─────────────────────────────────────
 
 // handleCurrentSetting extracts the parameter name from a
 // SELECT current_setting('param') query and returns its default value.
-func (server *Server) handleCurrentSetting(lower string) (interceptResult, bool) {
+func (server *Server) handleCurrentSetting(lower string, principal string) (interceptResult, bool) {
 	m := reCurrentSetting.FindStringSubmatch(lower)
 	if m == nil {
 		return interceptResult{}, false
 	}
 	param := strings.ToLower(m[1])
+	sessionPrincipal := server.catalogSessionPrincipal(principal)
 
 	// Special case: pg_is_in_recovery is sometimes queried via current_setting.
 	if param == "is_in_recovery" {
@@ -362,6 +376,18 @@ func (server *Server) handleCurrentSetting(lower string) (interceptResult, bool)
 			v = "on"
 		}
 		return scalarResult("current_setting", v)
+	}
+	if param == "session_authorization" {
+		return scalarResult("current_setting", sessionPrincipal)
+	}
+	if param == "is_superuser" {
+		if !server.engine.HasPrincipalCatalog() {
+			return scalarResult("current_setting", "on")
+		}
+		if server.engine.HasPrincipalPrivilege(sessionPrincipal, executor.PrincipalPrivilegeAdmin) {
+			return scalarResult("current_setting", "on")
+		}
+		return scalarResult("current_setting", "off")
 	}
 
 	if val, ok := currentSettingDefaults[param]; ok {
