@@ -221,6 +221,17 @@ func leaderRedirectAddr(err error) string {
 	return ""
 }
 
+func txLeaderChangeError(txID string, err error) error {
+	redirectAddr := leaderRedirectAddr(err)
+	if redirectAddr == "" {
+		return err
+	}
+	if strings.TrimSpace(txID) == "" {
+		return fmt.Errorf("leader changed during write; restart the operation on leader %s: %w", redirectAddr, err)
+	}
+	return fmt.Errorf("transaction %q lost its leader while the write was in flight; start a new transaction on leader %s and retry: %w", txID, redirectAddr, err)
+}
+
 func (a *App) engineClientForAddr(addr string) *engineClient {
 	addr = normalizeAddr(strings.TrimSpace(addr))
 	if addr == "" {
@@ -964,7 +975,10 @@ func (a *App) Execute(req executeRequest) (map[string]interface{}, error) {
 	}
 	resp, err := client.Execute(ctx, &api.ExecuteRequest{TxID: req.TxID, SQL: req.SQL})
 	if err != nil {
-		return nil, err
+		if leaderRedirectAddr(err) != "" {
+			a.deleteTxClient(req.TxID)
+		}
+		return nil, txLeaderChangeError(req.TxID, err)
 	}
 	return structToMap(resp)
 }
@@ -984,7 +998,10 @@ func (a *App) ExecuteBatch(req executeBatchRequest) (map[string]interface{}, err
 	}
 	resp, err := client.ExecuteBatch(ctx, &api.ExecuteBatchRequest{TxID: req.TxID, Statements: req.Statements})
 	if err != nil {
-		return nil, err
+		if leaderRedirectAddr(err) != "" {
+			a.deleteTxClient(req.TxID)
+		}
+		return nil, txLeaderChangeError(req.TxID, err)
 	}
 	return structToMap(resp)
 }
@@ -1004,7 +1021,10 @@ func (a *App) Commit(req txRequest) (map[string]interface{}, error) {
 	}
 	resp, err := client.CommitTx(ctx, &api.CommitTxRequest{TxID: req.TxID})
 	if err != nil {
-		return nil, err
+		if leaderRedirectAddr(err) != "" {
+			a.deleteTxClient(req.TxID)
+		}
+		return nil, txLeaderChangeError(req.TxID, err)
 	}
 	a.deleteTxClient(req.TxID)
 	return structToMap(resp)
@@ -1025,6 +1045,10 @@ func (a *App) Rollback(req txRequest) (map[string]interface{}, error) {
 	}
 	resp, err := client.RollbackTx(ctx, &api.RollbackTxRequest{TxID: req.TxID})
 	if err != nil {
+		if leaderRedirectAddr(err) != "" {
+			a.deleteTxClient(req.TxID)
+			return structToMap(&api.RollbackTxResponse{Status: "OK"})
+		}
 		return nil, err
 	}
 	a.deleteTxClient(req.TxID)

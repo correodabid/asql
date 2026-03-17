@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"net"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	pgwireserver "asql/internal/server/pgwire"
 	api "asql/pkg/adminapi"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestConnectionInfoAndSwitchConnection(t *testing.T) {
@@ -187,6 +189,27 @@ func TestLeaderWriteInvokerUsesLeaderClient(t *testing.T) {
 	}
 	if _, err := invoker.Execute(context.Background(), &api.ExecuteRequest{TxID: beginResp.TxID, SQL: "SHOW asql_node_role"}); err == nil {
 		t.Fatal("expected tx to be cleared after commit")
+	}
+}
+
+func TestTxLeaderChangeErrorExplainsRestart(t *testing.T) {
+	err := txLeaderChangeError("tx-123", &pgconn.PgError{
+		Code:    "25006",
+		Message: "not the leader: redirect writes to 127.0.0.1:5433",
+		Hint:    "asql_leader=127.0.0.1:5433",
+	})
+	if err == nil {
+		t.Fatal("expected rewritten transaction error")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "start a new transaction") {
+		t.Fatalf("expected restart guidance, got %q", msg)
+	}
+	if !strings.Contains(msg, "127.0.0.1:5433") {
+		t.Fatalf("expected leader address in message, got %q", msg)
+	}
+	if !strings.Contains(msg, "tx-123") {
+		t.Fatalf("expected tx id in message, got %q", msg)
 	}
 }
 
