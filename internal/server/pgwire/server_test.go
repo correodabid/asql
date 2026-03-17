@@ -632,6 +632,119 @@ func TestPGWireCompatibilitySupportedPatterns(t *testing.T) {
 	}
 }
 
+func TestPGWireORMLiteTranslatedHappyPath(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "orm-lite-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+
+	if _, err := conn.Exec(ctx, "START TRANSACTION"); err == nil || !strings.Contains(err.Error(), "BEGIN DOMAIN") {
+		t.Fatalf("expected START TRANSACTION guidance error, got %v", err)
+	}
+
+	if _, err := conn.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+		t.Fatalf("begin domain: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "CREATE TABLE users (id INT PRIMARY KEY, email TEXT, active INT)"); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "COMMIT"); err != nil {
+		t.Fatalf("commit schema setup: %v", err)
+	}
+
+	if _, err := conn.Exec(ctx, "BEGIN DOMAIN accounts"); err != nil {
+		t.Fatalf("begin domain for orm-lite flow: %v", err)
+	}
+
+	var insertedID int64
+	if err := conn.QueryRow(ctx, "INSERT INTO users (id, email, active) VALUES (1, 'one@asql.dev', 1) RETURNING id").Scan(&insertedID); err != nil {
+		t.Fatalf("insert returning id: %v", err)
+	}
+	if insertedID != 1 {
+		t.Fatalf("inserted id = %d, want 1", insertedID)
+	}
+
+	if _, err := conn.Exec(ctx, "INSERT INTO users (id, email, active) VALUES ($1, $2, $3)", int64(2), "two@asql.dev", int64(0)); err != nil {
+		t.Fatalf("insert second row: %v", err)
+	}
+
+	if _, err := conn.Exec(ctx, "UPDATE users SET active = $1 WHERE id = $2", int64(1), int64(2)); err != nil {
+		t.Fatalf("update second row: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "DELETE FROM users WHERE id = $1", int64(1)); err != nil {
+		t.Fatalf("delete first row: %v", err)
+	}
+	if _, err := conn.Exec(ctx, "COMMIT"); err != nil {
+		t.Fatalf("commit orm-lite flow: %v", err)
+	}
+
+	rows, err := conn.Query(ctx, "SELECT id, email FROM accounts.users WHERE active = $1 ORDER BY id ASC LIMIT 5", int64(1))
+	if err != nil {
+		t.Fatalf("select committed active rows: %v", err)
+	}
+	defer rows.Close()
+
+	var gotIDs []string
+	var gotEmails []string
+	for rows.Next() {
+		var id string
+		var email string
+		if err := rows.Scan(&id, &email); err != nil {
+			t.Fatalf("scan committed active row: %v", err)
+		}
+		gotIDs = append(gotIDs, id)
+		gotEmails = append(gotEmails, email)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate committed active rows: %v", err)
+	}
+	if len(gotIDs) != 1 || gotIDs[0] != "2" {
+		t.Fatalf("unexpected committed ids: %v", gotIDs)
+	}
+	if len(gotEmails) != 1 || gotEmails[0] != "two@asql.dev" {
+		t.Fatalf("unexpected committed emails: %v", gotEmails)
+	}
+}
+
 func TestPGWireCompatibilityUnsupportedPatternGuidance(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

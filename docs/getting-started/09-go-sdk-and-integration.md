@@ -6,6 +6,7 @@ For ordinary application reads and writes, prefer pgwire with `pgx` or `pgxpool`
 Use lower-level gRPC tooling only when you intentionally need engine-level administrative flows.
 
 For driver/query-mode guidance, see [../reference/pgwire-driver-guidance-v1.md](../reference/pgwire-driver-guidance-v1.md).
+For the narrow app-facing translation lane that works today with PostgreSQL-oriented services, see [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md).
 
 ## Start from the example
 
@@ -123,6 +124,14 @@ ASQL supports the extended query pipeline for the documented subset.
 Still, simple protocol is the recommended first adoption path because it makes compatibility issues easier to reproduce and reason about.
 
 For a reusable app-side baseline, use the compact starter conventions in [10-adoption-playbook.md](10-adoption-playbook.md).
+
+If the team is evaluating a light query builder or ORM-like layer, keep the first proof narrow:
+
+- pin `default_query_exec_mode=simple_protocol`,
+- keep `BEGIN DOMAIN ...` or `BEGIN CROSS DOMAIN ...` explicit,
+- use `INSERT ... RETURNING` only on the documented insert path,
+- use plain `UPDATE` / `DELETE` plus a follow-up `SELECT` when the app needs post-mutation state,
+- inspect emitted SQL instead of assuming broad PostgreSQL parity.
 
 ## Common expectation mismatch
 

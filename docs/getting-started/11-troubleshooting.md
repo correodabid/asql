@@ -99,6 +99,18 @@ That is often normal at first.
 ASQL prefers explicit orchestration over hidden repository behavior.
 Start with a thin helper around `BEGIN DOMAIN ...` or `BEGIN CROSS DOMAIN ...`, then standardize request IDs, timestamps, and audit payload construction in the service layer.
 
+## ORM or query-builder integration fails early
+
+Usually one of these is true:
+
+- the layer emitted bare `BEGIN` or `START TRANSACTION`,
+- it assumed `UPDATE ... RETURNING` or `DELETE ... RETURNING`,
+- it emitted arrays / `ANY(...)`,
+- or it relied on broader PostgreSQL metadata behavior than the documented subset.
+
+Start by proving the same workflow with literal SQL over pgwire and the exact connection settings from [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md).
+If the literal-SQL path works, the remaining issue is usually in the abstraction layer rather than the engine semantics.
+
 ## where to look next
 
 - [README.md](../../README.md)

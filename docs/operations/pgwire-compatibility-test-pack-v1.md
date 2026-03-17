@@ -35,6 +35,7 @@ Primary evidence:
 - `internal/server/pgwire/server_test.go`
   - `TestPGWireSimpleQueryRoundtrip`
   - `TestPGWireCompatibilitySupportedPatterns`
+  - `TestPGWireORMLiteTranslatedHappyPath`
 - `internal/server/pgwire/history_regression_test.go`
   - `TestPGWireForHistoryRegressionStableMetadataAndRows`
 
@@ -43,6 +44,7 @@ What this lane covers:
 - connection startup,
 - domain transaction flow,
 - DDL + DML roundtrip,
+- the current explicitly translated ORM-lite happy path,
 - scalar bind parameters,
 - `ORDER BY` / `LIMIT` / `OFFSET`,
 - literal `IN (...)`,

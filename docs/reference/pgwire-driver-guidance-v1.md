@@ -6,6 +6,7 @@ Use it together with:
 
 - [sql-pgwire-compatibility-policy-v1.md](sql-pgwire-compatibility-policy-v1.md)
 - [postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md)
+- [orm-lite-adoption-lane-v1.md](orm-lite-adoption-lane-v1.md)
 - [../operations/pgwire-compatibility-test-pack-v1.md](../operations/pgwire-compatibility-test-pack-v1.md)
 
 ## Short version
@@ -30,6 +31,7 @@ The recommendation below is about adoption risk, not only protocol capability.
 | `pgx` simple protocol | Lowest-risk path | Keeps behavior closest to literal SQL text sent by the application. |
 | `pgx` extended query protocol | Supported, but validate intentionally | Safe within the documented subset; still not the first path to debug onboarding surprises. |
 | PostgreSQL GUI tools (`psql`, `DBeaver`, `DataGrip`, `pgAdmin`) | Supported for documented startup/schema-browse workflows | Good for interactive work, but not a reason to assume full PostgreSQL parity. |
+| ORM-lite or query-builder-lite service path with inspectable SQL | Supported when intentionally constrained | Use the explicit translation rules in [orm-lite-adoption-lane-v1.md](orm-lite-adoption-lane-v1.md); this is not a broad ORM-parity claim. |
 | ORMs or query builders that emit broad PostgreSQL syntax | Known-risk path | They often assume broader PostgreSQL semantics than ASQL promises. |
 | Drivers or tools that require TLS-only startup (`sslmode=require`) | Unsupported today | ASQL currently responds to `SSLRequest` with `N`. |
 
@@ -41,6 +43,7 @@ and metadata flows already exercised in regression tests:
 - `psql` startup/introspection basics (`current_setting`, `SHOW`, `current_database`, `current_user`, `pg_namespace`, `pg_database`),
 - DBeaver/DataGrip-style startup queries (`SET`, `set_config`, `version`, `current_schema`, `pg_settings`, `information_schema.schemata`, privilege probes),
 - `pgAdmin` startup and schema-browse basics (`current_database`, `current_schema`, `has_database_privilege`, `obj_description`, `pg_namespace`, `pg_class`, `information_schema.tables`),
+- a narrow ORM-lite service flow using `simple_protocol`, explicit `BEGIN DOMAIN ...`, `INSERT ... RETURNING`, parameterized `SELECT`, `UPDATE`, and `DELETE`,
 - `pgx` connection setup plus end-to-end CRUD/query flows,
 - PostgreSQL `CancelRequest` handling for supported pgwire execution boundaries,
 - narrow `COPY FROM STDIN` / `COPY TO STDOUT` flows covered by conformance-style tests.
@@ -114,6 +117,22 @@ patterns already have a relatively strong adoption story:
 Treat broader ORM-generated SQL, PostgreSQL-specific types, and full catalog
 assumptions as separate validation work, not as implicitly safe extensions of
 the list above.
+
+## Narrow ORM-lite adoption lane
+
+The recommended first app-facing abstraction layer is now an explicitly
+translated ORM-lite lane, not broad ORM parity.
+
+Use it when:
+
+- the team can inspect emitted SQL,
+- transactions are opened explicitly with `BEGIN DOMAIN ...` or `BEGIN CROSS DOMAIN ...`,
+- the service stays inside the current documented SQL subset,
+- and any `RETURNING` reliance is limited to `INSERT ... RETURNING`.
+
+Do not treat the lane as evidence that arbitrary ORM-generated SQL is safe.
+For the exact supported caveats and translation rules, see
+[orm-lite-adoption-lane-v1.md](orm-lite-adoption-lane-v1.md).
 
 ## Known-risk patterns
 

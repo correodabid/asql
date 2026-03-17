@@ -131,6 +131,15 @@ It is that ASQL expects explicit transaction boundaries and clearer ownership of
 
 If your ORM assumes hidden transaction flow, invisible cross-boundary writes, or full PostgreSQL behavior, expect integration work.
 
+The current recommended compromise is a narrow ORM-lite lane:
+
+- keep SQL inspectable,
+- use `simple_protocol` first,
+- translate bare PostgreSQL transaction opens to explicit ASQL transaction primitives,
+- and avoid assuming `UPDATE ... RETURNING`, `DELETE ... RETURNING`, arrays, or full catalog parity.
+
+Use [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md) as the exact contract for that path.
+
 ### Why does ASQL push fixtures so early?
 
 Because fixtures expose adoption problems early:

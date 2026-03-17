@@ -42,6 +42,7 @@ Status meanings:
 | `COPY FROM STDIN` / `COPY TO STDOUT`, chunked `CopyData`, `CopyFail` rollback | `internal/server/pgwire/extended_query_conformance_test.go`: `TestCopyFromStdinInsertsRowsAndAcceptsChunkedCopyData`, `TestCopyToStdoutStreamsRows`, `TestCopyFromStdinCSVInsertsQuotedValues`, `TestCopyToStdoutCSVQuotesValues`, `TestCopyFailRollsBackInsertedRows` | Direct | Covers text and CSV copy flows, including quoted CSV fields, chunked input, streaming output, and rollback on `CopyFail`. |
 | `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` over pgwire | `internal/server/pgwire/server_test.go`: `TestPGWireCreateIfNotExistsRegression` | Direct | Confirms duplicate create fails without the guard and succeeds with `IF NOT EXISTS`. |
 | `pgx` client roundtrip and metadata stability | `internal/server/pgwire/history_regression_test.go`: `TestPGWireForHistoryRegressionStableMetadataAndRows` | Direct | Covers stable column names and OIDs for a pgwire `FOR HISTORY` workflow. |
+| Narrow ORM-lite translated pgwire app path | `internal/server/pgwire/server_test.go`: `TestPGWireORMLiteTranslatedHappyPath`, `TestPGWireCompatibilityUnsupportedPatternGuidance` | Direct | Covers the currently documented explicit-translation lane: `simple_protocol`, ASQL-native transaction open, `INSERT ... RETURNING`, parameterized reads, `UPDATE`/`DELETE`, and actionable guardrail errors for unsupported PostgreSQL transaction syntax and `ANY(...)`. |
 
 ## Common SQL subset evidence
 
