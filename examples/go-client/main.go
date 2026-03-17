@@ -256,7 +256,6 @@ func initializeSchema(ctx context.Context, connection *grpcgo.ClientConn, domain
 	return nil
 }
 
-
 func withAuth(ctx context.Context, authToken, dbPrincipal, dbPassword string) context.Context {
 	token := strings.TrimSpace(authToken)
 	if token != "" {

@@ -21,6 +21,11 @@ import (
 // auditBufSize is the capacity of the async audit log channel.
 const auditBufSize = 4096
 
+const (
+	principalHeader = "asql-principal"
+	passwordHeader  = "asql-password"
+)
+
 type auditEntry struct {
 	level slog.Level
 	msg   string
@@ -180,7 +185,15 @@ func (svc *service) handleBeginTx(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	principal, err := svc.authenticatedPrincipal(r)
+	if err != nil {
+		svc.auditFailure("tx.begin", err.Error(), slog.String("mode", req.Mode), slog.Any("domains", req.Domains))
+		writeSecurityError(w, err)
+		return
+	}
+
 	session := svc.engine.NewSession()
+	session.SetPrincipal(principal)
 	result, err := svc.engine.Execute(r.Context(), session, beginSQL)
 	if err != nil {
 		svc.auditFailure("tx.begin", err.Error(), slog.String("mode", req.Mode), slog.Any("domains", req.Domains))
@@ -381,7 +394,14 @@ func (svc *service) handleQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := svc.engine.Query(r.Context(), req.SQL, req.Domains)
+	principal, err := svc.authenticatedPrincipal(r)
+	if err != nil {
+		svc.auditFailure("query.execute", err.Error(), slog.String("sql", req.SQL), slog.Any("domains", req.Domains))
+		writeSecurityError(w, err)
+		return
+	}
+
+	result, err := svc.engine.QueryAsPrincipal(r.Context(), req.SQL, req.Domains, principal)
 	if err != nil {
 		svc.auditFailure("query.execute", err.Error(), slog.String("sql", req.SQL), slog.Any("domains", req.Domains))
 		writeMapError(w, err)
@@ -407,15 +427,21 @@ func (svc *service) handleTimeTravelQuery(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	principal, err := svc.authenticatedPrincipal(r)
+	if err != nil {
+		svc.auditFailure("admin.time_travel_query", err.Error(), slog.String("sql", req.SQL), slog.Uint64("lsn", req.LSN), slog.Uint64("logical_timestamp", req.LogicalTimestamp), slog.Any("domains", req.Domains))
+		writeSecurityError(w, err)
+		return
+	}
+
 	var (
 		result executor.Result
-		err    error
 	)
 
 	if req.LSN > 0 {
-		result, err = svc.engine.TimeTravelQueryAsOfLSN(r.Context(), req.SQL, req.Domains, req.LSN)
+		result, err = svc.engine.TimeTravelQueryAsOfLSNAsPrincipal(r.Context(), req.SQL, req.Domains, req.LSN, principal)
 	} else {
-		result, err = svc.engine.TimeTravelQueryAsOfTimestamp(r.Context(), req.SQL, req.Domains, req.LogicalTimestamp)
+		result, err = svc.engine.TimeTravelQueryAsOfTimestampAsPrincipal(r.Context(), req.SQL, req.Domains, req.LogicalTimestamp, principal)
 	}
 	if err != nil {
 		svc.auditFailure("admin.time_travel_query", err.Error(), slog.String("sql", req.SQL), slog.Uint64("lsn", req.LSN), slog.Uint64("logical_timestamp", req.LogicalTimestamp), slog.Any("domains", req.Domains))
@@ -442,7 +468,14 @@ func (svc *service) handleRowHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := svc.engine.RowHistory(r.Context(), req.SQL, req.Domains)
+	principal, err := svc.authenticatedPrincipal(r)
+	if err != nil {
+		svc.auditFailure("admin.row_history", err.Error(), slog.String("sql", req.SQL), slog.Any("domains", req.Domains))
+		writeSecurityError(w, err)
+		return
+	}
+
+	result, err := svc.engine.RowHistoryAsPrincipal(r.Context(), req.SQL, req.Domains, principal)
 	if err != nil {
 		svc.auditFailure("admin.row_history", err.Error(), slog.String("sql", req.SQL), slog.Any("domains", req.Domains))
 		writeMapError(w, err)
@@ -473,7 +506,14 @@ func (svc *service) handleEntityVersionHistory(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	entries, err := svc.engine.EntityVersionHistory(r.Context(), req.Domain, req.EntityName, req.RootPK)
+	principal, err := svc.authenticatedPrincipal(r)
+	if err != nil {
+		svc.auditFailure("admin.entity_version_history", err.Error(), slog.String("domain", req.Domain), slog.String("entity", req.EntityName), slog.String("root_pk", req.RootPK))
+		writeSecurityError(w, err)
+		return
+	}
+
+	entries, err := svc.engine.EntityVersionHistoryAsPrincipal(r.Context(), req.Domain, req.EntityName, req.RootPK, principal)
 	if err != nil {
 		svc.auditFailure("admin.entity_version_history", err.Error(), slog.String("domain", req.Domain), slog.String("entity", req.EntityName), slog.String("root_pk", req.RootPK))
 		writeMapError(w, err)
@@ -515,7 +555,14 @@ func (svc *service) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := svc.engine.Explain(req.SQL, req.Domains)
+	principal, err := svc.authenticatedPrincipal(r)
+	if err != nil {
+		svc.auditFailure("admin.explain_query", err.Error(), slog.String("sql", req.SQL), slog.Any("domains", req.Domains))
+		writeSecurityError(w, err)
+		return
+	}
+
+	result, err := svc.engine.ExplainAsPrincipal(req.SQL, req.Domains, principal)
 	if err != nil {
 		svc.auditFailure("admin.explain_query", err.Error(), slog.String("sql", req.SQL), slog.Any("domains", req.Domains))
 		writeMapError(w, err)
@@ -528,7 +575,13 @@ func (svc *service) handleExplainQuery(w http.ResponseWriter, r *http.Request) {
 
 // ─── ScanStrategyStats ──────────────────────────────────────────────────────
 
-func (svc *service) handleScanStrategyStats(w http.ResponseWriter, _ *http.Request) {
+func (svc *service) handleScanStrategyStats(w http.ResponseWriter, r *http.Request) {
+	if err := svc.authorizeAdminCapability(r, "scan_strategy_stats"); err != nil {
+		svc.auditFailure("admin.scan_strategy_stats", err.Error())
+		writeSecurityError(w, err)
+		return
+	}
+
 	counts := svc.engine.ScanStrategyCounts()
 	svc.auditSuccess("admin.scan_strategy_stats", slog.Int("strategies", len(counts)))
 	writeJSON(w, http.StatusOK, &ScanStrategyStatsResponse{Counts: counts})
@@ -537,6 +590,12 @@ func (svc *service) handleScanStrategyStats(w http.ResponseWriter, _ *http.Reque
 // ─── SchemaSnapshot ─────────────────────────────────────────────────────────
 
 func (svc *service) handleSchemaSnapshot(w http.ResponseWriter, r *http.Request) {
+	if err := svc.authorizeAdminCapability(r, "schema_snapshot"); err != nil {
+		svc.auditFailure("admin.schema_snapshot", err.Error())
+		writeSecurityError(w, err)
+		return
+	}
+
 	var req SchemaSnapshotRequest
 	_ = decodeBody(r, &req) // ignore errors for empty body → returns all
 
@@ -605,7 +664,14 @@ func (svc *service) handleReplayToLSN(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := svc.engine.ReplayToLSN(r.Context(), req.LSN); err != nil {
+	principal, err := svc.authenticatedPrincipal(r)
+	if err != nil {
+		svc.auditFailure("admin.replay_to_lsn", err.Error(), slog.Uint64("lsn", req.LSN))
+		writeSecurityError(w, err)
+		return
+	}
+
+	if err := svc.engine.ReplayToLSNAsPrincipal(r.Context(), req.LSN, principal); err != nil {
 		svc.auditFailure("admin.replay_to_lsn", err.Error(), slog.Uint64("lsn", req.LSN))
 		writeMapError(w, err)
 		return
@@ -617,7 +683,13 @@ func (svc *service) handleReplayToLSN(w http.ResponseWriter, r *http.Request) {
 
 // ─── EngineStats ────────────────────────────────────────────────────────────
 
-func (svc *service) handleEngineStats(w http.ResponseWriter, _ *http.Request) {
+func (svc *service) handleEngineStats(w http.ResponseWriter, r *http.Request) {
+	if err := svc.authorizeAdminCapability(r, "engine_stats"); err != nil {
+		svc.auditFailure("admin.engine_stats", err.Error())
+		writeSecurityError(w, err)
+		return
+	}
+
 	snap := svc.engine.PerfStats()
 	svc.auditSuccess("admin.engine_stats")
 	writeJSON(w, http.StatusOK, &EngineStatsResponse{
@@ -660,6 +732,12 @@ func (svc *service) handleEngineStats(w http.ResponseWriter, _ *http.Request) {
 // ─── TimelineCommits ────────────────────────────────────────────────────────
 
 func (svc *service) handleTimelineCommits(w http.ResponseWriter, r *http.Request) {
+	if err := svc.authorizeAdminCapability(r, "timeline_commits"); err != nil {
+		svc.auditFailure("admin.timeline_commits", err.Error())
+		writeSecurityError(w, err)
+		return
+	}
+
 	var req TimelineCommitsRequest
 	_ = decodeBody(r, &req)
 
@@ -694,7 +772,13 @@ func (svc *service) handleTimelineCommits(w http.ResponseWriter, r *http.Request
 
 // ─── TimelineEvents ─────────────────────────────────────────────────────────
 
-func (svc *service) handleTimelineEvents(w http.ResponseWriter, _ *http.Request) {
+func (svc *service) handleTimelineEvents(w http.ResponseWriter, r *http.Request) {
+	if err := svc.authorizeAdminCapability(r, "timeline_events"); err != nil {
+		svc.auditFailure("admin.timeline_events", err.Error())
+		writeSecurityError(w, err)
+		return
+	}
+
 	memLSNs, diskLSNs := svc.engine.ListSnapshotPoints()
 
 	memPoints := make([]TimelineSnapshotPoint, len(memLSNs))
@@ -719,6 +803,12 @@ func (svc *service) handleTimelineEvents(w http.ResponseWriter, _ *http.Request)
 // ─── LeadershipState ────────────────────────────────────────────────────────
 
 func (svc *service) handleLeadershipState(w http.ResponseWriter, r *http.Request) {
+	if err := svc.authorizeAdminCapability(r, "leadership_state"); err != nil {
+		svc.auditFailure("admin.leadership_state", err.Error())
+		writeSecurityError(w, err)
+		return
+	}
+
 	var req LeadershipStateRequest
 	if err := decodeBody(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -760,6 +850,12 @@ func (svc *service) handleLeadershipState(w http.ResponseWriter, r *http.Request
 // ─── EvaluateReadRoute ──────────────────────────────────────────────────────
 
 func (svc *service) handleEvaluateReadRoute(w http.ResponseWriter, r *http.Request) {
+	if err := svc.authorizeAdminCapability(r, "evaluate_read_route"); err != nil {
+		svc.auditFailure("admin.evaluate_read_route", err.Error())
+		writeSecurityError(w, err)
+		return
+	}
+
 	var req EvaluateReadRouteRequest
 	if err := decodeBody(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -808,7 +904,13 @@ func (svc *service) handleEvaluateReadRoute(w http.ResponseWriter, r *http.Reque
 
 // ─── ReadRoutingStats ───────────────────────────────────────────────────────
 
-func (svc *service) handleReadRoutingStats(w http.ResponseWriter, _ *http.Request) {
+func (svc *service) handleReadRoutingStats(w http.ResponseWriter, r *http.Request) {
+	if err := svc.authorizeAdminCapability(r, "read_routing_stats"); err != nil {
+		svc.auditFailure("admin.read_routing_stats", err.Error())
+		writeSecurityError(w, err)
+		return
+	}
+
 	counts := map[string]uint64{}
 	if svc.routing != nil {
 		counts = svc.routing.snapshot()
@@ -819,7 +921,13 @@ func (svc *service) handleReadRoutingStats(w http.ResponseWriter, _ *http.Reques
 
 // ─── LastLSN (replication) ──────────────────────────────────────────────────
 
-func (svc *service) handleLastLSN(w http.ResponseWriter, _ *http.Request) {
+func (svc *service) handleLastLSN(w http.ResponseWriter, r *http.Request) {
+	if err := svc.authorizeAdminCapability(r, "replication_last_lsn"); err != nil {
+		svc.auditFailure("admin.replication_last_lsn", err.Error())
+		writeSecurityError(w, err)
+		return
+	}
+
 	withLastLSN, ok := svc.logStore.(interface{ LastLSN() uint64 })
 	if !ok {
 		writeError(w, http.StatusPreconditionFailed, "log store does not expose last lsn")
@@ -891,6 +999,37 @@ func (svc *service) findSession(txID string) (*executor.Session, error) {
 
 	svc.sessionSeen[trimmed] = time.Now()
 	return session, nil
+}
+
+func (svc *service) authenticatedPrincipal(r *http.Request) (string, error) {
+	if svc.engine == nil || !svc.engine.HasPrincipalCatalog() {
+		return "", nil
+	}
+
+	principal := strings.TrimSpace(r.Header.Get(principalHeader))
+	if principal == "" {
+		return "", errors.New("asql-principal header is required")
+	}
+
+	password := strings.TrimSpace(r.Header.Get(passwordHeader))
+	if password == "" {
+		return "", errors.New("asql-password header is required")
+	}
+
+	info, err := svc.engine.AuthenticatePrincipal(principal, password)
+	if err != nil {
+		return "", err
+	}
+
+	return info.Name, nil
+}
+
+func (svc *service) authorizeAdminCapability(r *http.Request, capability string) error {
+	principal, err := svc.authenticatedPrincipal(r)
+	if err != nil {
+		return err
+	}
+	return svc.engine.AuthorizePrincipalPrivilege(principal, executor.PrincipalPrivilegeAdmin, capability)
 }
 
 func (svc *service) sessionCleanupLoop() {
@@ -986,6 +1125,18 @@ func writeMapError(w http.ResponseWriter, err error) {
 		return
 	}
 
+	// Authentication failures → 401
+	if strings.Contains(msg, "header is required") || strings.Contains(msg, "authentication failed") || strings.Contains(msg, "principal is disabled") {
+		writeError(w, http.StatusUnauthorized, msg)
+		return
+	}
+
+	// Authorization failures → 403
+	if strings.Contains(msg, "permission denied") || strings.Contains(msg, "privilege required") {
+		writeError(w, http.StatusForbidden, msg)
+		return
+	}
+
 	// Not found → 404
 	if strings.Contains(msg, "not found") || strings.Contains(msg, "does not exist") {
 		writeError(w, http.StatusNotFound, msg)
@@ -1011,6 +1162,10 @@ func writeMapError(w http.ResponseWriter, err error) {
 	}
 
 	writeError(w, http.StatusInternalServerError, msg)
+}
+
+func writeSecurityError(w http.ResponseWriter, err error) {
+	writeMapError(w, err)
 }
 
 // ─── Audit system ───────────────────────────────────────────────────────────

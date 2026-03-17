@@ -646,7 +646,7 @@ First vertical slice to execute:
 - [x] Expose the slice through a minimal admin/CLI path before adding broader PostgreSQL-style role DDL.
 
 AG-1 — bootstrap principal + historical-read baseline:
-- [ ] Add deterministic WAL record types for `principal_create`, `principal_alter`, `principal_disable`, `role_grant`, and `privilege_grant` / `privilege_revoke`.
+- [x] Add deterministic WAL record types for `principal_create`, `principal_alter`, `principal_disable`, `role_grant`, and `privilege_grant` / `privilege_revoke`.
 - [x] Add replay/state-rebuild support for principal catalog state so restart reproduces the same effective permission graph.
 - [x] Introduce one bootstrap path for the first admin principal that is allowed only when the durable principal catalog is empty.
 - [x] Add stored-principal authentication in pgwire startup, including disabled-principal rejection and deterministic audit events.
@@ -673,10 +673,11 @@ P1 — authorization model and historical semantics:
 
 P2 — pgwire and execution enforcement:
 - [x] Replace the fixed shared-user pgwire posture with real database-principal authentication while preserving documented compatibility for supported clients.
-- [ ] Enforce authorization checks in planner/executor for read/write/schema/admin flows, including temporal queries and replay-sensitive operations.
+- [x] Enforce authorization checks in planner/executor for read/write/schema/admin flows, including temporal queries and replay-sensitive operations.
 	- [x] Require `ADMIN` for operator/admin pgwire virtual-schema helpers under `asql_admin.*` and for `asql_admin.replay_to_lsn(...)`, and require `SELECT_HISTORY` for historical helper views such as `asql_admin.row_history` / `asql_admin.entity_version_history`.
 	- [x] Add principal-aware executor helpers for current reads, temporal reads, history inspection, and replay-to-LSN so engine-level callers can reuse the same `ADMIN` / `SELECT_HISTORY` checks outside direct pgwire statement execution.
 	- [x] Require durable-principal metadata on gRPC `BeginTx` / query / explain / temporal-history / replay helpers when the principal catalog is enabled, and route those handlers through the shared principal-aware executor helpers.
+	- [x] Require durable-principal headers on the standalone/internal HTTP `BeginTx` / query / explain / temporal-history / replay and operator/admin helper endpoints when the principal catalog is enabled, and route those handlers through the same principal-aware executor/admin privilege checks.
 - [x] Replace compatibility-shim privilege probes that currently always succeed with grant-aware behavior where claims are made public.
 - [x] Add deterministic regression coverage for authn/authz, replay recovery of principal state, and denied historical-access paths.
 
