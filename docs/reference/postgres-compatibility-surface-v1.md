@@ -108,6 +108,9 @@ and current privilege semantics, see
 | Temporal helpers like `current_lsn()` / `row_lsn(...)` | Supported | ASQL-native surface over SQL/pgwire. |
 | `AS OF LSN` / `AS OF TIMESTAMP` / `FOR HISTORY` with durable-principal authz | Supported | Requires explicit `SELECT_HISTORY`; authorization is evaluated against the current principal/grant state, not a historical grant snapshot. |
 | `LIMIT ... OFFSET ...` pagination | Supported | Supported in the current SQL subset; keyset pagination is still recommended for large scans. |
+| PostgreSQL role/user SQL such as `CREATE ROLE`, `CREATE USER`, `ALTER ROLE`, `ALTER USER`, `DROP ROLE`, `DROP USER` | Unsupported | Durable-principal lifecycle is not managed through SQL role DDL today; use Studio, `asqlctl`, or admin HTTP security endpoints. |
+| PostgreSQL role-membership SQL such as `GRANT role TO user` / `REVOKE role FROM user` | Unsupported | Use the durable-principal admin workflows instead of PostgreSQL role SQL. |
+| PostgreSQL privilege SQL for the ASQL durable-principal surface such as `GRANT SELECT_HISTORY ...` / `REVOKE SELECT_HISTORY ...` | Unsupported | Use `asqlctl security grant history` / `revoke history`, Studio security flows, or the admin API. |
 | `UPDATE ... RETURNING` / `DELETE ... RETURNING` | Unsupported | `RETURNING` is not yet documented/supported end-to-end beyond `INSERT`. |
 | Arrays / `ANY(...)` | Unsupported | Not part of the current ASQL subset. |
 | Bare `BEGIN` / `START TRANSACTION` | Unsupported | Use `BEGIN DOMAIN ...` or `BEGIN CROSS DOMAIN ...`; guardrail errors are explicit. |
@@ -116,7 +119,8 @@ and current privilege semantics, see
 | Broader PostgreSQL feature parity beyond documented subset | Planned/Unsupported | Add only with docs + regression tests. |
 
 ## Unsupported (v1)
-- PostgreSQL password authentication methods beyond the narrow cleartext-password token flow above (MD5/SCRAM), role/user management.
+- PostgreSQL password authentication methods beyond the narrow cleartext-password token flow above (MD5/SCRAM).
+- PostgreSQL SQL role-management statements such as `CREATE ROLE`, `CREATE USER`, `ALTER ROLE`, `ALTER USER`, `DROP ROLE`, `DROP USER`, and SQL `GRANT` / `REVOKE` flows for durable principal management.
 - TLS transport for pgwire connections (assessed and deferred — current `SSLRequest -> N` is sufficient for all mainstream tools in default configuration; see TLS reassessment below).
 - Full PostgreSQL type system and general binary formats/results.
 - Broad PostgreSQL catalog/system-table compatibility beyond the documented shim subset above.
@@ -135,6 +139,31 @@ patterns that are outside the supported subset.
   `BEGIN CROSS DOMAIN ...`.
 - `ANY(...)` / `ARRAY[...]` → points callers to `IN (...)`, `IN (SELECT ...)`,
   or JSON/row modeling alternatives.
+
+## PostgreSQL role-management translation guide
+
+ASQL exposes durable principals today, but not PostgreSQL role-management SQL.
+
+Use the following translation rule:
+
+| PostgreSQL-shaped intent | Current ASQL path |
+|---|---|
+| `CREATE USER name PASSWORD '...'` | `asqlctl security user create`, Studio `Security`, or `POST /api/v1/security/users` |
+| `CREATE ROLE name` | `asqlctl security role create`, Studio `Security`, or `POST /api/v1/security/roles` |
+| `ALTER USER name PASSWORD '...'` / `ALTER ROLE ... PASSWORD ...` | `asqlctl security user alter`, Studio password update, or `POST /api/v1/security/passwords/set` |
+| `DROP USER name` / `DROP ROLE name` | `asqlctl security user delete` / `security role delete`, Studio delete flow, or `POST /api/v1/security/principals/delete` |
+| `GRANT role_name TO principal` | `POST /api/v1/security/roles/grant` or the equivalent Studio / CLI flow |
+| `REVOKE role_name FROM principal` | `POST /api/v1/security/roles/revoke` or the equivalent Studio / CLI flow |
+| `GRANT SELECT_HISTORY TO principal` | `asqlctl security grant history`, Studio guided history-access grant, or `POST /api/v1/security/privileges/grant` |
+| `REVOKE SELECT_HISTORY FROM principal` | `asqlctl security revoke history`, Studio revoke flow, or `POST /api/v1/security/privileges/revoke` |
+
+Important:
+
+- `pg_roles`, `pg_user`, and related catalog shims are present for startup and
+  metadata compatibility only; they are not evidence that PostgreSQL role DDL
+  is accepted.
+- Durable principal management is currently an admin/API/CLI/Studio workflow,
+  not a pgwire SQL role-DDL workflow.
 
 ## Determinism Notes
 - Query execution remains delegated to ASQL engine primitives.

@@ -288,6 +288,34 @@ Current `asqlctl` ergonomic paths include:
 
 These guided paths are the current operator-facing security workflow.
 
+## PostgreSQL role-management status
+
+ASQL does **not** currently accept PostgreSQL role-management SQL as the public
+durable-principal management path.
+
+That means statements such as these should still be treated as unsupported for
+principal lifecycle management over pgwire SQL:
+
+- `CREATE USER ...`
+- `CREATE ROLE ...`
+- `ALTER USER ...`
+- `ALTER ROLE ...`
+- `DROP USER ...`
+- `DROP ROLE ...`
+- `GRANT role_name TO principal`
+- `REVOKE role_name FROM principal`
+- `GRANT SELECT_HISTORY ...`
+- `REVOKE SELECT_HISTORY ...`
+
+Use the explicit durable-principal management surfaces instead:
+
+- Studio `Security`
+- `asqlctl security ...`
+- admin HTTP security endpoints
+
+For the compatibility-oriented statement matrix and translation guide, see
+[postgres-compatibility-surface-v1.md](postgres-compatibility-surface-v1.md).
+
 ## Audit expectations
 
 ASQL records security-relevant events for the current durable-principal model,

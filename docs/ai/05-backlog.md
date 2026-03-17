@@ -727,7 +727,7 @@ P1 — Studio security UX:
 P2 — docs, examples, and operational guidance:
 - [x] Document the database security model in getting-started/reference docs, including bootstrap and rotation flows.
 - [x] Add examples covering: create admin, create reader, grant historical access, revoke historical access, and verify denied paths.
-- [ ] Update compatibility docs so unsupported PostgreSQL role-management statements are either implemented, explicitly translated, or still documented as unsupported.
+- [x] Update compatibility docs so unsupported PostgreSQL role-management statements are either implemented, explicitly translated, or still documented as unsupported.
 
 Acceptance gates (must pass before closing Epic AH)
 - [ ] A production operator can create a user, grant historical-read access, inspect effective permissions, and revoke access from CLI without internal knowledge.
