@@ -181,13 +181,13 @@ If the team is unsure whether a friction should become engine work, docs, SDK he
 
 ## Team checklist
 
-- [ ] One local startup command is documented
-- [ ] Domain boundaries are named and explained
-- [ ] First schema path is documented
-- [ ] Fixtures exist for realistic scenarios
-- [ ] `FOR HISTORY` and time-travel are part of debugging workflow
-- [ ] Studio is part of onboarding
-- [ ] One application integration example exists
+- [x] One local startup command is documented
+- [x] Domain boundaries are named and explained
+- [x] First schema path is documented
+- [x] Fixtures exist for realistic scenarios
+- [x] `FOR HISTORY` and time-travel are part of debugging workflow
+- [x] Studio is part of onboarding
+- [x] One application integration example exists
 
 ## Compact starter conventions
 

@@ -1,7 +1,12 @@
 # ASQL adoption friction prioritized backlog v1
 
-Status note (2026-03-13): this document is a product backlog snapshot, not the active engineering execution source.
-Use [../ai/05-backlog.md](../ai/05-backlog.md) for current execution order and treat this file as prioritization context for adoption work.
+Status note (2026-03-17): this document is now a historical product backlog snapshot, not the active engineering execution source.
+Use [../ai/05-backlog.md](../ai/05-backlog.md) for current execution order.
+
+Historical note:
+- the adoption-friction work tracked here was absorbed into the active engineering backlog and the corresponding adoption slices were closed there,
+- several checkboxes below remain intentionally unchecked because this file is preserved as a planning artifact rather than maintained as the current source of execution truth,
+- when current product state matters, prefer the getting-started guide, reference docs, and the active backlog over this snapshot.
 
 ## Purpose
 
