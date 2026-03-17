@@ -730,6 +730,6 @@ P2 — docs, examples, and operational guidance:
 - [x] Update compatibility docs so unsupported PostgreSQL role-management statements are either implemented, explicitly translated, or still documented as unsupported.
 
 Acceptance gates (must pass before closing Epic AH)
-- [ ] A production operator can create a user, grant historical-read access, inspect effective permissions, and revoke access from CLI without internal knowledge.
-- [ ] The same core workflows are available from Studio with explicit auditability and low surprise.
-- [ ] User-facing docs explain how historical access works for newly created principals and how that interacts with replay/time-travel.
+- [x] A production operator can create a user, grant historical-read access, inspect effective permissions, and revoke access from CLI without internal knowledge.
+- [x] The same core workflows are available from Studio with explicit auditability and low surprise.
+- [x] User-facing docs explain how historical access works for newly created principals and how that interacts with replay/time-travel.
