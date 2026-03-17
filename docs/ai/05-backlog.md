@@ -789,8 +789,8 @@ Epic AI P0 audit result (2026-03-17):
 - next two ranked follow-ons: one narrow ORM-lite happy path, then one narrow BI-lite read-only datasource path
 
 P1 — close the highest-return compatibility gaps:
-- [ ] Implement the smallest protocol/catalog/session fixes required for the top-ranked mainstream flows.
-- [ ] Add regression tests for each newly-claimed flow before expanding the public docs.
+- [x] Implement the smallest protocol/catalog/session fixes required for the top-ranked mainstream flows.
+- [x] Add regression tests for each newly-claimed flow before expanding the public docs.
 
 Epic AI P1 slice note (2026-03-17):
 - added a regression-covered `pgAdmin` startup + schema-browse lane in `internal/server/pgwire/server_test.go`
@@ -802,8 +802,12 @@ Epic AI P1 slice note (2026-03-17):
 
 P2 — app-facing migration wedge:
 - [ ] Add support or explicit translation guidance for the next high-return SQL shapes seen in real app evaluation friction.
-- [ ] Add one end-to-end “existing Postgres-oriented app reaches first successful read/write flow on ASQL” guide.
+- [x] Add one end-to-end “existing Postgres-oriented app reaches first successful read/write flow on ASQL” guide.
 - [ ] Add a release-gated compatibility smoke pack for the prioritized client/tool/app matrix.
+
+Epic AI P2 slice note (2026-03-17):
+- added [../getting-started/12-first-postgres-service-flow.md](../getting-started/12-first-postgres-service-flow.md) as the first end-to-end PostgreSQL-oriented service migration wedge
+- linked the new guide from the getting-started onboarding flow and adoption/troubleshooting surfaces
 
 Acceptance gates (must pass before closing Epic AI)
 - [ ] At least 2 additional mainstream evaluation flows move from blocked to documented-working or explicitly-translated.

@@ -73,6 +73,7 @@ The main mindset change is that ASQL makes boundaries visible instead of letting
 Related docs:
 
 - [../migration/sqlite-postgres-lite-guide-v1.md](../migration/sqlite-postgres-lite-guide-v1.md)
+- [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md)
 
 ## Common adoption mistakes
 
@@ -139,6 +140,10 @@ The current recommended compromise is a narrow ORM-lite lane:
 - and avoid assuming `UPDATE ... RETURNING`, `DELETE ... RETURNING`, arrays, or full catalog parity.
 
 Use [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md) as the exact contract for that path.
+
+If the team wants a concrete first proof for an existing PostgreSQL-oriented Go
+service, use [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md)
+before widening the adoption scope.
 
 ### Why does ASQL push fixtures so early?
 

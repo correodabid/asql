@@ -7,6 +7,7 @@ Use lower-level gRPC tooling only when you intentionally need engine-level admin
 
 For driver/query-mode guidance, see [../reference/pgwire-driver-guidance-v1.md](../reference/pgwire-driver-guidance-v1.md).
 For the narrow app-facing translation lane that works today with PostgreSQL-oriented services, see [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md).
+For one end-to-end "existing PostgreSQL-oriented service reaches its first successful read/write flow" guide, see [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md).
 
 ## Start from the example
 

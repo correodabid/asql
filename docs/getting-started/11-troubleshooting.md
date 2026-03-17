@@ -129,6 +129,7 @@ If that works, treat any remaining builder/autocomplete issue as tool-surface va
 - [02-install-and-run.md](02-install-and-run.md)
 - [03-first-database.md](03-first-database.md)
 - [10-adoption-playbook.md](10-adoption-playbook.md)
+- [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md)
 - [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
 - [../reference/fixture-format-and-lifecycle-v1.md](../reference/fixture-format-and-lifecycle-v1.md)
 - [../reference/temporal-introspection-surface-v1.md](../reference/temporal-introspection-surface-v1.md)

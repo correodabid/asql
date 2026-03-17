@@ -39,11 +39,13 @@ Use this rule from the start:
 9. [09-go-sdk-and-integration.md](09-go-sdk-and-integration.md) — integrating ASQL into Go services
 10. [10-adoption-playbook.md](10-adoption-playbook.md) — how to roll ASQL into an existing app
 11. [11-troubleshooting.md](11-troubleshooting.md) — common problems and fixes
+12. [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md) — first successful PostgreSQL-oriented service flow on ASQL
 
 ## Fast paths
 
 - Want the shortest possible path? Start with [02-install-and-run.md](02-install-and-run.md) and [03-first-database.md](03-first-database.md).
 - Migrating from SQLite-style workloads? Read [10-adoption-playbook.md](10-adoption-playbook.md).
+- Migrating an existing PostgreSQL-oriented service one workflow at a time? Read [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md).
 - Want reproducible demo/test data? Jump to [07-fixtures-and-seeding.md](07-fixtures-and-seeding.md).
 - Want to understand ASQL's differentiators before coding? Start with [01-overview.md](01-overview.md).
 - Want one deeper example app that forces domains, entities, history, temporal helpers, and fixtures into the same workflow? Study [../../bankapp/README.md](../../bankapp/README.md) after chapters 04–09.
