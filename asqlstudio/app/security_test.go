@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"asql/internal/engine/executor"
 	api "asql/pkg/adminapi"
 )
 
@@ -69,10 +70,18 @@ func TestSecurityMutationsPostJSON(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: "history_readers", Kind: "ROLE", Enabled: true}})
 		case "/api/v1/security/privileges/grant":
-			if payload["principal"] != "history_readers" || payload["privilege"] != "SELECT_HISTORY" {
+			if payload["privilege"] != "SELECT_HISTORY" {
 				t.Fatalf("unexpected grant privilege payload: %+v", payload)
 			}
-			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: "history_readers", Kind: "ROLE", Enabled: true}})
+			principal, _ := payload["principal"].(string)
+			if principal != "history_readers" && principal != "analyst" {
+				t.Fatalf("unexpected grant privilege principal: %+v", payload)
+			}
+			kind := executor.PrincipalKindRole
+			if principal == "analyst" {
+				kind = executor.PrincipalKindUser
+			}
+			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: principal, Kind: kind, Enabled: true}})
 		case "/api/v1/security/roles/grant":
 			if payload["principal"] != "analyst" || payload["role"] != "history_readers" {
 				t.Fatalf("unexpected grant role payload: %+v", payload)
@@ -126,6 +135,9 @@ func TestSecurityMutationsPostJSON(t *testing.T) {
 	}
 	if _, err := app.SecurityGrantPrivilege("history_readers", "SELECT_HISTORY"); err != nil {
 		t.Fatalf("SecurityGrantPrivilege: %v", err)
+	}
+	if _, err := app.SecurityGrantHistoricalAccess("analyst"); err != nil {
+		t.Fatalf("SecurityGrantHistoricalAccess: %v", err)
 	}
 	if _, err := app.SecurityGrantRole("analyst", "history_readers"); err != nil {
 		t.Fatalf("SecurityGrantRole: %v", err)

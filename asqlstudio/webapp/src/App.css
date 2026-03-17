@@ -13608,6 +13608,51 @@ tr:hover .te-expand-btn { opacity: 1; }
   margin-bottom: 14px;
 }
 
+.sec-guide-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+  background: rgba(6, 182, 212, 0.08);
+}
+
+.sec-guide-card-subtle {
+  border-color: var(--border);
+  background: var(--bg-elevated);
+}
+
+.sec-guide-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+
+.sec-guide-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.sec-guide-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sec-guide-preview-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
 .sec-drawer-footer {
   display: flex;
   gap: 8px;

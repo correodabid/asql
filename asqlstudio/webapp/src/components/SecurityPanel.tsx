@@ -42,6 +42,7 @@ type SecurityMutationResponse = {
 }
 
 const privilegeOptions: PrincipalPrivilege[] = ['SELECT_HISTORY', 'ADMIN']
+const guidedGrantPrivilegeOptions: PrincipalPrivilege[] = ['ADMIN']
 
 /* ── Helpers ──────────────────────────────────────────────── */
 
@@ -68,6 +69,7 @@ let toastSeq = 0
 type DrawerId =
   | 'create-user'
   | 'create-role'
+  | 'grant-history-access'
   | 'grant-privilege'
   | 'revoke-privilege'
   | 'grant-role'
@@ -95,9 +97,12 @@ export function SecurityPanel() {
   /* create role form */
   const [newRole, setNewRole] = useState('')
 
+  /* guided historical access grant */
+  const [historyAccessPrincipal, setHistoryAccessPrincipal] = useState('')
+
   /* grant/revoke privilege */
   const [grantPrincipal, setGrantPrincipal] = useState('')
-  const [grantPrivilege, setGrantPrivilege] = useState<PrincipalPrivilege>('SELECT_HISTORY')
+  const [grantPrivilege, setGrantPrivilege] = useState<PrincipalPrivilege>('ADMIN')
   const [revokePrincipal, setRevokePrincipal] = useState('')
   const [revokePrivilege, setRevokePrivilege] = useState<PrincipalPrivilege>('SELECT_HISTORY')
 
@@ -184,6 +189,16 @@ export function SecurityPanel() {
       setNewRole('')
       setActiveDrawer(null)
       return `Role "${resp.principal?.name ?? newRole}" created.`
+    })
+
+  const submitGrantHistoricalAccess = () =>
+    run('grant-history-access', async () => {
+      await api<SecurityMutationResponse>('/api/security/history-access/grant', 'POST', {
+        principal: historyAccessPrincipal,
+      })
+      setHistoryAccessPrincipal('')
+      setActiveDrawer(null)
+      return `Granted historical access to ${historyAccessPrincipal}.`
     })
 
   const submitGrantPrivilege = () =>
@@ -351,6 +366,12 @@ export function SecurityPanel() {
               />
               <ActionChip
                 icon={<IconKey />}
+                label="Grant historical access"
+                active={activeDrawer === 'grant-history-access'}
+                onClick={() => toggleDrawer('grant-history-access')}
+              />
+              <ActionChip
+                icon={<IconKey />}
                 label="Grant privilege"
                 active={activeDrawer === 'grant-privilege'}
                 onClick={() => toggleDrawer('grant-privilege')}
@@ -418,12 +439,43 @@ export function SecurityPanel() {
               </DrawerForm>
             )}
 
+            {activeDrawer === 'grant-history-access' && (
+              <DrawerForm
+                title="Grant historical access"
+                description="Make temporal access an explicit choice. This grants SELECT_HISTORY so the principal can run AS OF LSN, AS OF TIMESTAMP, and FOR HISTORY queries based on current grant state."
+                actionLabel="Grant historical access"
+                disabled={busy !== '' || !historyAccessPrincipal.trim()}
+                onSubmit={() => void submitGrantHistoricalAccess()}
+                onClose={() => setActiveDrawer(null)}
+              >
+                <div className="sec-guide-card">
+                  <div className="sec-guide-title">What this unlocks</div>
+                  <ul className="sec-guide-list">
+                    <li>Temporal reads against current or older snapshots.</li>
+                    <li>Historical helper workflows in pgwire, gRPC, HTTP, and Studio.</li>
+                    <li>Access is evaluated against the principal&apos;s current grants, not historical grant state.</li>
+                  </ul>
+                </div>
+                <label className="sec-field">
+                  <span className="sec-field-label">Principal</span>
+                  <input className="sec-input" list="sec-dl-principals" value={historyAccessPrincipal} onChange={(e) => setHistoryAccessPrincipal(e.target.value)} placeholder="analyst or history_readers" />
+                </label>
+                <div className="sec-guide-card sec-guide-card-subtle">
+                  <div className="sec-guide-title">Grant preview</div>
+                  <div className="sec-guide-preview">
+                    <span className="sec-chip sec-chip-privilege">SELECT_HISTORY</span>
+                    <span className="sec-guide-preview-text">Direct grant to {historyAccessPrincipal.trim() || 'selected principal'}</span>
+                  </div>
+                </div>
+              </DrawerForm>
+            )}
+
             {activeDrawer === 'grant-privilege' && (
               <DrawerForm
                 title="Grant privilege"
-                description="Grant an explicit privilege directly to a user or role."
+                description="Grant an explicit non-temporal privilege directly to a user or role. Use the dedicated historical-access flow for temporal reads."
                 actionLabel="Grant"
-                disabled={busy !== '' || !grantPrincipal.trim()}
+                disabled={busy !== '' || !grantPrincipal.trim() || !grantPrivilege}
                 onSubmit={() => void submitGrantPrivilege()}
                 onClose={() => setActiveDrawer(null)}
               >
@@ -434,7 +486,7 @@ export function SecurityPanel() {
                 <label className="sec-field">
                   <span className="sec-field-label">Privilege</span>
                   <select className="sec-input" value={grantPrivilege} onChange={(e) => setGrantPrivilege(e.target.value as PrincipalPrivilege)}>
-                    {privilegeOptions.map((o) => <option key={o} value={o}>{o}</option>)}
+                    {guidedGrantPrivilegeOptions.map((o) => <option key={o} value={o}>{o}</option>)}
                   </select>
                 </label>
               </DrawerForm>

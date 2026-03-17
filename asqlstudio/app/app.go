@@ -1681,6 +1681,20 @@ func (a *App) SecurityGrantPrivilege(principal, privilege string) (map[string]in
 	return structToMap(resp)
 }
 
+func (a *App) SecurityGrantHistoricalAccess(principal string) (map[string]interface{}, error) {
+	if strings.TrimSpace(principal) == "" {
+		return nil, fmt.Errorf("principal is required")
+	}
+	var resp api.SecurityMutationResponse
+	if err := a.callPrimaryAdmin(http.MethodPost, "/api/v1/security/privileges/grant", api.GrantPrivilegeRequest{
+		Principal: principal,
+		Privilege: string("SELECT_HISTORY"),
+	}, &resp); err != nil {
+		return nil, err
+	}
+	return structToMap(resp)
+}
+
 func (a *App) SecurityGrantRole(principal, role string) (map[string]interface{}, error) {
 	if strings.TrimSpace(principal) == "" {
 		return nil, fmt.Errorf("principal is required")

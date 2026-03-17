@@ -198,6 +198,10 @@ export function SecurityEnablePrincipal(arg1) {
   return window['go']['studioapp']['App']['SecurityEnablePrincipal'](arg1);
 }
 
+export function SecurityGrantHistoricalAccess(arg1) {
+  return window['go']['studioapp']['App']['SecurityGrantHistoricalAccess'](arg1);
+}
+
 export function SecurityGrantPrivilege(arg1, arg2) {
   return window['go']['studioapp']['App']['SecurityGrantPrivilege'](arg1, arg2);
 }
