@@ -674,6 +674,15 @@ func (server *Server) allocateBackendKey() backendCancelKey {
 	return backendCancelKey{processID: processID, secretKey: processID ^ 0x5A17C0DE}
 }
 
+// AdminHTTPAddress returns the bound admin HTTP address when the optional
+// admin listener is running.
+func (server *Server) AdminHTTPAddress() string {
+	if server == nil || server.adminListener == nil {
+		return ""
+	}
+	return server.adminListener.Addr().String()
+}
+
 func (server *Server) registerCancelableConnection(key backendCancelKey, state *connState) {
 	server.cancelMu.Lock()
 	defer server.cancelMu.Unlock()

@@ -16,6 +16,7 @@ import (
 
 	"asql/internal/cluster/coordinator"
 	"asql/internal/cluster/raft"
+	"asql/internal/engine/executor"
 	api "asql/pkg/adminapi"
 
 	"github.com/jackc/pgx/v5"
@@ -240,6 +241,115 @@ func TestAdminMetricsExposeFailoverLeaderAndSafeLSN(t *testing.T) {
 		if !strings.Contains(body, fragment) {
 			t.Fatalf("metrics body missing fragment %q\n%s", fragment, body)
 		}
+	}
+}
+
+func TestAdminHTTPSecurityPrincipalManagementFlow(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server, _, adminAddr, cleanup := startAdminSmokeServer(t, Config{
+		Address:         "127.0.0.1:0",
+		AdminHTTPAddr:   "127.0.0.1:0",
+		DataDirPath:     filepath.Join(t.TempDir(), "data"),
+		Logger:          logger,
+		AdminReadToken:  "read-secret",
+		AdminWriteToken: "write-secret",
+	})
+	defer cleanup()
+
+	client := &http.Client{Timeout: 2 * time.Second}
+	doJSON := func(method, path, token string, payload any, out any) int {
+		t.Helper()
+		var body io.Reader
+		if payload != nil {
+			data, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatalf("marshal %s payload: %v", path, err)
+			}
+			body = bytes.NewReader(data)
+		}
+		req, err := http.NewRequest(method, "http://"+adminAddr+path, body)
+		if err != nil {
+			t.Fatalf("new %s request: %v", path, err)
+		}
+		if payload != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("do %s request: %v", path, err)
+		}
+		defer resp.Body.Close()
+		if out != nil {
+			if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+				t.Fatalf("decode %s response: %v", path, err)
+			}
+		}
+		return resp.StatusCode
+	}
+
+	var bootstrap api.SecurityMutationResponse
+	status := doJSON(http.MethodPost, "/api/v1/security/bootstrap-admin", "write-secret", api.BootstrapAdminPrincipalRequest{
+		Principal: "admin",
+		Password:  "secret-pass",
+	}, &bootstrap)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected bootstrap status: got %d want %d", status, http.StatusOK)
+	}
+	if bootstrap.Principal == nil || bootstrap.Principal.Name != "admin" || bootstrap.Principal.Kind != executor.PrincipalKindUser {
+		t.Fatalf("unexpected bootstrap response: %+v", bootstrap)
+	}
+
+	var roleResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/roles", "write-secret", api.CreateRoleRequest{Principal: "history_readers"}, &roleResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected create role status: got %d want %d", status, http.StatusOK)
+	}
+
+	var privilegeResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/privileges/grant", "write-secret", api.GrantPrivilegeRequest{
+		Principal: "history_readers",
+		Privilege: "SELECT_HISTORY",
+	}, &privilegeResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected grant privilege status: got %d want %d", status, http.StatusOK)
+	}
+
+	var userResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/users", "write-secret", api.CreateUserRequest{
+		Principal: "analyst",
+		Password:  "analyst-pass",
+	}, &userResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected create user status: got %d want %d", status, http.StatusOK)
+	}
+
+	var grantRoleResp api.SecurityMutationResponse
+	status = doJSON(http.MethodPost, "/api/v1/security/roles/grant", "write-secret", api.GrantRoleRequest{
+		Principal: "analyst",
+		Role:      "history_readers",
+	}, &grantRoleResp)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected grant role status: got %d want %d", status, http.StatusOK)
+	}
+
+	var list api.ListPrincipalsResponse
+	status = doJSON(http.MethodGet, "/api/v1/security/principals", "read-secret", nil, &list)
+	if status != http.StatusOK {
+		t.Fatalf("unexpected list principals status: got %d want %d", status, http.StatusOK)
+	}
+	if len(list.Principals) != 3 {
+		t.Fatalf("unexpected principal count: got %d want 3 (%+v)", len(list.Principals), list.Principals)
+	}
+
+	analyst, ok := server.engine.Principal("analyst")
+	if !ok {
+		t.Fatal("expected analyst principal in engine state")
+	}
+	if !server.engine.HasPrincipalPrivilege("analyst", executor.PrincipalPrivilegeSelectHistory) {
+		t.Fatalf("expected analyst to inherit SELECT_HISTORY, got %+v", analyst)
 	}
 }
 

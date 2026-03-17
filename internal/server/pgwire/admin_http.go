@@ -133,6 +133,12 @@ func (server *Server) startAdminHTTP() error {
 	mux.HandleFunc("/api/v1/failover-history", server.withAdminAuth(adminScopeRead, server.handleAdminFailoverHistory))
 	mux.HandleFunc("/api/v1/snapshot-catalog", server.withAdminAuth(adminScopeRead, server.handleAdminSnapshotCatalog))
 	mux.HandleFunc("/api/v1/wal-retention", server.withAdminAuth(adminScopeRead, server.handleAdminWALRetention))
+	mux.HandleFunc("/api/v1/security/principals", server.withAdminAuth(adminScopeRead, server.handleAdminListPrincipals))
+	mux.HandleFunc("/api/v1/security/bootstrap-admin", server.withAdminAuth(adminScopeWrite, server.handleAdminBootstrapPrincipal))
+	mux.HandleFunc("/api/v1/security/users", server.withAdminAuth(adminScopeWrite, server.handleAdminCreateUser))
+	mux.HandleFunc("/api/v1/security/roles", server.withAdminAuth(adminScopeWrite, server.handleAdminCreateRole))
+	mux.HandleFunc("/api/v1/security/privileges/grant", server.withAdminAuth(adminScopeWrite, server.handleAdminGrantPrivilege))
+	mux.HandleFunc("/api/v1/security/roles/grant", server.withAdminAuth(adminScopeWrite, server.handleAdminGrantRole))
 	mux.HandleFunc("/api/v1/recovery/backup-create", server.withAdminAuth(adminScopeWrite, server.handleAdminRecoveryCreateBackup))
 	mux.HandleFunc("/api/v1/recovery/backup-manifest", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryBackupManifest))
 	mux.HandleFunc("/api/v1/recovery/backup-verify", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryVerifyBackup))
@@ -295,6 +301,139 @@ func (server *Server) handleAdminWALRetention(w http.ResponseWriter, _ *http.Req
 		return
 	}
 	writeAdminJSON(w, http.StatusOK, state)
+}
+
+func (server *Server) handleAdminListPrincipals(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	writeAdminJSON(w, http.StatusOK, api.ListPrincipalsResponse{Principals: toAdminPrincipalRecords(server.engine.ListPrincipals())})
+}
+
+func (server *Server) handleAdminBootstrapPrincipal(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.BootstrapAdminPrincipalRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	if err := server.engine.BootstrapAdminPrincipal(r.Context(), req.Principal, req.Password); err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
+}
+
+func (server *Server) handleAdminCreateUser(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.CreateUserRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	if err := server.engine.CreateUser(r.Context(), req.Principal, req.Password); err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
+}
+
+func (server *Server) handleAdminCreateRole(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.CreateRoleRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	if err := server.engine.CreateRole(r.Context(), req.Principal); err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
+}
+
+func (server *Server) handleAdminGrantPrivilege(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.GrantPrivilegeRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	privilege, err := executor.ParsePrincipalPrivilege(req.Privilege)
+	if err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if err := server.engine.GrantPrivilege(r.Context(), req.Principal, privilege); err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
+}
+
+func (server *Server) handleAdminGrantRole(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAdminJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+	var req api.GrantRoleRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return
+	}
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	if err := server.engine.GrantRole(r.Context(), req.Principal, req.Role); err != nil {
+		writeAdminJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	server.writeSecurityMutationResponse(w, http.StatusOK, strings.TrimSpace(req.Principal))
+}
+
+func (server *Server) writeSecurityMutationResponse(w http.ResponseWriter, statusCode int, principal string) {
+	if server == nil || server.engine == nil {
+		writeAdminJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "engine unavailable"})
+		return
+	}
+	info, ok := server.engine.Principal(principal)
+	if !ok {
+		writeAdminJSON(w, http.StatusInternalServerError, map[string]string{"error": "principal state unavailable after mutation"})
+		return
+	}
+	writeAdminJSON(w, statusCode, api.SecurityMutationResponse{
+		Status:    "ok",
+		Principal: toAdminPrincipalRecord(info),
+	})
 }
 
 func (server *Server) handleAdminRecoveryCreateBackup(w http.ResponseWriter, r *http.Request) {
@@ -779,6 +918,26 @@ func toAdminWALRetentionState(state executor.WALRetentionState) api.WALRetention
 		})
 	}
 	return out
+}
+
+func toAdminPrincipalRecords(principals []executor.PrincipalInfo) []api.PrincipalRecord {
+	out := make([]api.PrincipalRecord, 0, len(principals))
+	for _, principal := range principals {
+		out = append(out, *toAdminPrincipalRecord(principal))
+	}
+	return out
+}
+
+func toAdminPrincipalRecord(principal executor.PrincipalInfo) *api.PrincipalRecord {
+	roles := append([]string(nil), principal.Roles...)
+	privileges := append([]executor.PrincipalPrivilege(nil), principal.Privileges...)
+	return &api.PrincipalRecord{
+		Name:       principal.Name,
+		Kind:       principal.Kind,
+		Enabled:    principal.Enabled,
+		Roles:      roles,
+		Privileges: privileges,
+	}
 }
 
 func writeMetricHelp(buf *bytes.Buffer, name, help, typ string) {

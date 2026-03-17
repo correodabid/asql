@@ -292,6 +292,92 @@ func TestRunCommandMigrationPreflight(t *testing.T) {
 	}
 }
 
+func TestRunAdminSecurityCommand(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	server, err := pgwire.New(pgwire.Config{
+		Address:         "127.0.0.1:0",
+		AdminHTTPAddr:   "127.0.0.1:0",
+		DataDirPath:     filepath.Join(t.TempDir(), "security-admin-data"),
+		Logger:          slog.New(slog.NewTextHandler(os.Stdout, nil)),
+		AdminReadToken:  "read-secret",
+		AdminWriteToken: "write-secret",
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.ServeOnListener(ctx, listener) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire shutdown")
+		}
+	})
+
+	var adminAddr string
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if server.AdminHTTPAddress() != "" {
+			adminAddr = server.AdminHTTPAddress()
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if adminAddr == "" {
+		t.Fatal("timeout waiting for admin listener")
+	}
+
+	var output bytes.Buffer
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-bootstrap-admin", "admin", "secret-pass", "", ""); err != nil {
+		t.Fatalf("bootstrap admin command: %v", err)
+	}
+	if !strings.Contains(output.String(), "\"name\": \"admin\"") {
+		t.Fatalf("unexpected bootstrap output: %q", output.String())
+	}
+
+	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-create-role", "history_readers", "", "", ""); err != nil {
+		t.Fatalf("create role command: %v", err)
+	}
+
+	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-grant-privilege", "history_readers", "", "", "SELECT_HISTORY"); err != nil {
+		t.Fatalf("grant privilege command: %v", err)
+	}
+
+	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-create-user", "analyst", "analyst-pass", "", ""); err != nil {
+		t.Fatalf("create user command: %v", err)
+	}
+
+	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "write-secret", "principal-grant-role", "analyst", "", "history_readers", ""); err != nil {
+		t.Fatalf("grant role command: %v", err)
+	}
+
+	output.Reset()
+	if err := runAdminSecurityCommand(ctx, &output, adminAddr, "read-secret", "principal-list", "", "", "", ""); err != nil {
+		t.Fatalf("list principals command: %v", err)
+	}
+	if !strings.Contains(output.String(), "history_readers") || !strings.Contains(output.String(), "SELECT_HISTORY") {
+		t.Fatalf("unexpected principal list output: %q", output.String())
+	}
+}
+
 func TestSplitSQLStatements(t *testing.T) {
 	statements := splitSQLStatements("INSERT INTO demo.items VALUES ('a;b'); UPDATE demo.items SET name = 'x';")
 	if len(statements) != 2 {

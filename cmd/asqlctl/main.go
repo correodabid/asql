@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,11 +9,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	adminapi "asql/pkg/adminapi"
 	"asql/internal/engine/executor"
 	api "asql/internal/server/grpc"
 	"asql/pkg/fixtures"
@@ -40,15 +43,20 @@ func (jsonCodec) Unmarshal(data []byte, value interface{}) error {
 func main() {
 	endpoint := flag.String("endpoint", "127.0.0.1:9042", "ASQL gRPC endpoint")
 	pgwireAddr := flag.String("pgwire", "127.0.0.1:5433", "ASQL pgwire endpoint (used by shell)")
+	adminHTTPAddr := flag.String("admin-http", "", "ASQL admin HTTP endpoint for operational/security commands (for example 127.0.0.1:9090)")
 	authToken := flag.String("auth-token", "", "optional bearer token for authenticated APIs")
 	demo := flag.Bool("demo", false, "run end-to-end gRPC demo flow")
-	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|audit-report|audit-export|fixture-validate|fixture-load|fixture-export")
+	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-grant-role")
 	mode := flag.String("mode", "domain", "tx mode for begin: domain|cross")
 	domains := flag.String("domains", "", "comma-separated domains (required for begin and usually for time-travel)")
 	tableName := flag.String("table", "", "table filter for audit commands")
 	operation := flag.String("operation", "", "operation filter for audit commands (INSERT|UPDATE|DELETE)")
 	txID := flag.String("tx-id", "", "transaction id for execute/commit/rollback")
 	sql := flag.String("sql", "", "sql for execute or time-travel")
+	principal := flag.String("principal", "", "principal name for security management commands")
+	password := flag.String("password", "", "principal password for bootstrap/create-user commands")
+	role := flag.String("role", "", "role principal for principal-grant-role")
+	privilege := flag.String("privilege", "", "privilege name for principal-grant-privilege (ADMIN|SELECT_HISTORY)")
 	rollbackSQL := flag.String("rollback-sql", "", "semicolon-separated rollback SQL for migration-preflight")
 	lsn := flag.Uint64("lsn", 0, "lsn for replay or time-travel")
 	limit := flag.Int("limit", 0, "row limit for audit commands (0 = unlimited)")
@@ -86,6 +94,14 @@ func main() {
 
 		if isFixtureCommand(*command) {
 			if err := runFixtureCommand(context.Background(), os.Stdout, *command, *fixtureFile, *domains, *pgwireAddr, *authToken); err != nil {
+				fmt.Fprintf(os.Stderr, "command failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+
+		if isAdminSecurityCommand(*command) {
+			if err := runAdminSecurityCommand(context.Background(), os.Stdout, *adminHTTPAddr, *authToken, *command, *principal, *password, *role, *privilege); err != nil {
 				fmt.Fprintf(os.Stderr, "command failed: %v\n", err)
 				os.Exit(1)
 			}
@@ -340,6 +356,134 @@ func isLocalAuditCommand(command string) bool {
 	default:
 		return false
 	}
+}
+
+func isAdminSecurityCommand(command string) bool {
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "principal-list", "principal-bootstrap-admin", "principal-create-user", "principal-create-role", "principal-grant-privilege", "principal-grant-role":
+		return true
+	default:
+		return false
+	}
+}
+
+func runAdminSecurityCommand(ctx context.Context, out io.Writer, adminHTTPAddr, authToken, command, principal, password, role, privilege string) error {
+	adminHTTPAddr = strings.TrimSpace(adminHTTPAddr)
+	if adminHTTPAddr == "" {
+		return errors.New("security commands require -admin-http")
+	}
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	switch strings.ToLower(strings.TrimSpace(command)) {
+	case "principal-list":
+		response := new(adminapi.ListPrincipalsResponse)
+		if err := doAdminJSON(ctx, client, http.MethodGet, adminHTTPAddr, "/api/v1/security/principals", authToken, nil, response); err != nil {
+			return err
+		}
+		return printJSONTo(out, response)
+	case "principal-bootstrap-admin":
+		if strings.TrimSpace(principal) == "" {
+			return errors.New("principal-bootstrap-admin requires -principal")
+		}
+		if strings.TrimSpace(password) == "" {
+			return errors.New("principal-bootstrap-admin requires -password")
+		}
+		response := new(adminapi.SecurityMutationResponse)
+		if err := doAdminJSON(ctx, client, http.MethodPost, adminHTTPAddr, "/api/v1/security/bootstrap-admin", authToken, adminapi.BootstrapAdminPrincipalRequest{Principal: principal, Password: password}, response); err != nil {
+			return err
+		}
+		return printJSONTo(out, response)
+	case "principal-create-user":
+		if strings.TrimSpace(principal) == "" {
+			return errors.New("principal-create-user requires -principal")
+		}
+		if strings.TrimSpace(password) == "" {
+			return errors.New("principal-create-user requires -password")
+		}
+		response := new(adminapi.SecurityMutationResponse)
+		if err := doAdminJSON(ctx, client, http.MethodPost, adminHTTPAddr, "/api/v1/security/users", authToken, adminapi.CreateUserRequest{Principal: principal, Password: password}, response); err != nil {
+			return err
+		}
+		return printJSONTo(out, response)
+	case "principal-create-role":
+		if strings.TrimSpace(principal) == "" {
+			return errors.New("principal-create-role requires -principal")
+		}
+		response := new(adminapi.SecurityMutationResponse)
+		if err := doAdminJSON(ctx, client, http.MethodPost, adminHTTPAddr, "/api/v1/security/roles", authToken, adminapi.CreateRoleRequest{Principal: principal}, response); err != nil {
+			return err
+		}
+		return printJSONTo(out, response)
+	case "principal-grant-privilege":
+		if strings.TrimSpace(principal) == "" {
+			return errors.New("principal-grant-privilege requires -principal")
+		}
+		if strings.TrimSpace(privilege) == "" {
+			return errors.New("principal-grant-privilege requires -privilege")
+		}
+		response := new(adminapi.SecurityMutationResponse)
+		if err := doAdminJSON(ctx, client, http.MethodPost, adminHTTPAddr, "/api/v1/security/privileges/grant", authToken, adminapi.GrantPrivilegeRequest{Principal: principal, Privilege: privilege}, response); err != nil {
+			return err
+		}
+		return printJSONTo(out, response)
+	case "principal-grant-role":
+		if strings.TrimSpace(principal) == "" {
+			return errors.New("principal-grant-role requires -principal")
+		}
+		if strings.TrimSpace(role) == "" {
+			return errors.New("principal-grant-role requires -role")
+		}
+		response := new(adminapi.SecurityMutationResponse)
+		if err := doAdminJSON(ctx, client, http.MethodPost, adminHTTPAddr, "/api/v1/security/roles/grant", authToken, adminapi.GrantRoleRequest{Principal: principal, Role: role}, response); err != nil {
+			return err
+		}
+		return printJSONTo(out, response)
+	default:
+		return fmt.Errorf("unsupported security command %q", command)
+	}
+}
+
+func doAdminJSON(ctx context.Context, client *http.Client, method, adminHTTPAddr, path, authToken string, requestBody, responseBody any) error {
+	var bodyReader io.Reader
+	if requestBody != nil {
+		payload, err := json.Marshal(requestBody)
+		if err != nil {
+			return err
+		}
+		bodyReader = bytes.NewReader(payload)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, "http://"+adminHTTPAddr+path, bodyReader)
+	if err != nil {
+		return err
+	}
+	if requestBody != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token := strings.TrimSpace(authToken); token != "" {
+		if strings.HasPrefix(strings.ToLower(token), "bearer ") {
+			req.Header.Set("Authorization", token)
+		} else {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var apiErr struct {
+			Error string `json:"error"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&apiErr); err == nil && strings.TrimSpace(apiErr.Error) != "" {
+			return errors.New(apiErr.Error)
+		}
+		return fmt.Errorf("admin api request failed with status %d", resp.StatusCode)
+	}
+	if responseBody == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(responseBody)
 }
 
 func runLocalRecoveryCommand(ctx context.Context, out io.Writer, command, dataDir, backupDir string, lsn, logicalTS uint64) error {

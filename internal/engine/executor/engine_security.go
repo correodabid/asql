@@ -205,6 +205,22 @@ func (engine *Engine) CreateUser(ctx context.Context, username, password string)
 	})
 }
 
+// CreateRole persists a durable database role.
+func (engine *Engine) CreateRole(ctx context.Context, role string) error {
+	role = normalizePrincipalName(role)
+	if role == "" {
+		return errInvalidPrincipalName
+	}
+	payload := securityMutationPayload{
+		Action:    "principal_create",
+		Principal: role,
+		Kind:      PrincipalKindRole,
+	}
+	return engine.appendSecurityMutation(ctx, payload, func(state *readableState) error {
+		return applySecurityMutation(state, payload)
+	})
+}
+
 // DisablePrincipal disables logins and privilege use for a principal.
 func (engine *Engine) DisablePrincipal(ctx context.Context, username string) error {
 	username = normalizePrincipalName(username)
@@ -284,6 +300,18 @@ func (engine *Engine) HasPrincipalPrivilege(principal string, privilege Principa
 		return false
 	}
 	return state.hasPrincipalPrivilege(principal, privilege)
+}
+
+// ParsePrincipalPrivilege converts textual privilege names into supported values.
+func ParsePrincipalPrivilege(value string) (PrincipalPrivilege, error) {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case string(PrincipalPrivilegeAdmin):
+		return PrincipalPrivilegeAdmin, nil
+	case string(PrincipalPrivilegeSelectHistory):
+		return PrincipalPrivilegeSelectHistory, nil
+	default:
+		return "", fmt.Errorf("unsupported privilege %q", value)
+	}
 }
 
 func (state *readableState) hasPrincipalPrivilege(principal string, privilege PrincipalPrivilege) bool {
