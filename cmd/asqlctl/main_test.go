@@ -476,15 +476,57 @@ func TestResolveCLIInputsSecurityAliases(t *testing.T) {
 			wantPrincipal: "",
 		},
 		{
+			name:          "user show alias",
+			args:          []string{"security", "user", "show", "analyst"},
+			wantCommand:   "principal-show",
+			wantPrincipal: "analyst",
+		},
+		{
 			name:          "user alter alias",
 			args:          []string{"security", "user", "alter", "analyst"},
 			wantCommand:   "principal-set-password",
 			wantPrincipal: "analyst",
 		},
 		{
+			name:          "user disable alias",
+			args:          []string{"security", "user", "disable", "analyst"},
+			wantCommand:   "principal-disable",
+			wantPrincipal: "analyst",
+		},
+		{
 			name:          "role create alias",
 			args:          []string{"security", "role", "create", "history_readers"},
 			wantCommand:   "principal-create-role",
+			wantPrincipal: "history_readers",
+		},
+		{
+			name:          "role show alias",
+			args:          []string{"security", "role", "show", "history_readers"},
+			wantCommand:   "principal-show",
+			wantPrincipal: "history_readers",
+		},
+		{
+			name:          "role list alias",
+			args:          []string{"security", "role", "list"},
+			wantCommand:   "principal-list",
+			wantPrincipal: "",
+		},
+		{
+			name:          "role disable alias",
+			args:          []string{"security", "role", "disable", "history_readers"},
+			wantCommand:   "principal-disable",
+			wantPrincipal: "history_readers",
+		},
+		{
+			name:          "role enable alias",
+			args:          []string{"security", "role", "enable", "history_readers"},
+			wantCommand:   "principal-enable",
+			wantPrincipal: "history_readers",
+		},
+		{
+			name:          "role delete alias",
+			args:          []string{"security", "role", "delete", "history_readers"},
+			wantCommand:   "principal-delete",
 			wantPrincipal: "history_readers",
 		},
 		{

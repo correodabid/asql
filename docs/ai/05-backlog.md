@@ -704,7 +704,9 @@ Recommended rollout order:
 4. Studio management screens after CLI semantics prove stable.
 
 P0 — `asqlctl` security administration:
-- [ ] Add `asqlctl` commands for user/role lifecycle (`create`, `alter`, `disable`, `list`, `show`).
+- [x] Add `asqlctl` commands for user/role lifecycle (`create`, `alter`, `disable`, `list`, `show`).
+	- [x] User lifecycle flows now have ergonomic `asqlctl security user create|alter|disable|enable|delete|list|show` entry points backed by the existing principal admin APIs.
+	- [x] Role lifecycle flows now have ergonomic `asqlctl security role create|disable|enable|delete|list|show` entry points, with `show`/`list` reusing the shared principal inspection surface.
 	- [x] Treat password rotation as the first `alter` workflow via `asqlctl security user alter` backed by the existing principal password-set path.
 - [x] Add `asqlctl` commands for membership and grants/revokes, including temporal-access privileges.
 - [x] Add `asqlctl` output/views that make effective permissions and inherited role membership explicit.
