@@ -55,6 +55,7 @@ func main() {
 	sql := flag.String("sql", "", "sql for execute or time-travel")
 	principal := flag.String("principal", "", "principal name for security management commands")
 	password := flag.String("password", "", "principal password for bootstrap/create-user/principal-set-password commands")
+	passwordStdin := flag.Bool("password-stdin", false, "read the principal password from stdin for bootstrap/create-user/principal-set-password commands")
 	role := flag.String("role", "", "role principal for principal-grant-role/principal-revoke-role")
 	privilege := flag.String("privilege", "", "privilege name for principal-grant-privilege (ADMIN|SELECT_HISTORY)")
 	rollbackSQL := flag.String("rollback-sql", "", "semicolon-separated rollback SQL for migration-preflight")
@@ -74,9 +75,20 @@ func main() {
 	}
 
 	if !*demo {
+		resolvedCommand, resolvedPrincipal, resolvedPassword, resolvedRole, resolvedPrivilege, err := resolveCLIInputs(*command, flag.Args(), *principal, *password, *role, *privilege, *passwordStdin, os.Stdin)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "command failed: %v\n", err)
+			os.Exit(1)
+		}
+		*command = resolvedCommand
+		*principal = resolvedPrincipal
+		*password = resolvedPassword
+		*role = resolvedRole
+		*privilege = resolvedPrivilege
+
 		if strings.TrimSpace(*command) == "" {
 			fmt.Fprintf(os.Stdout, "asqlctl ready (endpoint=%s).\n", *endpoint)
-			fmt.Fprintln(os.Stdout, "Use -demo, 'shell', or -command shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|audit-report|audit-export|...")
+			fmt.Fprintln(os.Stdout, "Use -demo, 'shell', or -command shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|audit-report|audit-export|... or security user|role|grant|revoke helpers")
 			return
 		}
 
@@ -139,6 +151,147 @@ func main() {
 	}
 
 	fmt.Fprintln(os.Stdout, "demo completed successfully")
+}
+
+func resolveCLIInputs(command string, args []string, principal, password, role, privilege string, passwordStdin bool, in io.Reader) (string, string, string, string, string, error) {
+	resolvedCommand := strings.TrimSpace(command)
+	resolvedPrincipal := principal
+	resolvedPassword := password
+	resolvedRole := role
+	resolvedPrivilege := privilege
+
+	if resolvedCommand == "" {
+		aliasCommand, aliasPrincipal, aliasRole, aliasPrivilege, err := resolveSecurityCommandAlias(args)
+		if err != nil {
+			return "", "", "", "", "", err
+		}
+		if aliasCommand != "" {
+			resolvedCommand = aliasCommand
+			if strings.TrimSpace(resolvedPrincipal) == "" {
+				resolvedPrincipal = aliasPrincipal
+			}
+			if strings.TrimSpace(resolvedRole) == "" {
+				resolvedRole = aliasRole
+			}
+			if strings.TrimSpace(resolvedPrivilege) == "" {
+				resolvedPrivilege = aliasPrivilege
+			}
+		}
+	}
+
+	if isAdminSecurityCommand(resolvedCommand) {
+		secret, err := resolvePasswordInput(resolvedPassword, passwordStdin, in, resolvedCommand)
+		if err != nil {
+			return "", "", "", "", "", err
+		}
+		resolvedPassword = secret
+	}
+
+	return resolvedCommand, resolvedPrincipal, resolvedPassword, resolvedRole, resolvedPrivilege, nil
+}
+
+func resolveSecurityCommandAlias(args []string) (string, string, string, string, error) {
+	if len(args) == 0 || !strings.EqualFold(strings.TrimSpace(args[0]), "security") {
+		return "", "", "", "", nil
+	}
+	if len(args) < 2 {
+		return "", "", "", "", errors.New("security command requires a subject such as user, role, grant, revoke, or who-can")
+	}
+
+	subject := strings.ToLower(strings.TrimSpace(args[1]))
+	suffix := make([]string, 0, len(args)-2)
+	for _, arg := range args[2:] {
+		trimmed := strings.TrimSpace(arg)
+		if trimmed != "" {
+			suffix = append(suffix, trimmed)
+		}
+	}
+
+	safe := func(index int) string {
+		if index < 0 || index >= len(suffix) {
+			return ""
+		}
+		return suffix[index]
+	}
+
+	switch subject {
+	case "user":
+		action := strings.ToLower(safe(0))
+		target := safe(1)
+		switch action {
+		case "create":
+			return "principal-create-user", target, "", "", nil
+		case "show":
+			return "principal-show", target, "", "", nil
+		case "list":
+			return "principal-list", "", "", "", nil
+		case "disable":
+			return "principal-disable", target, "", "", nil
+		case "enable":
+			return "principal-enable", target, "", "", nil
+		case "delete":
+			return "principal-delete", target, "", "", nil
+		default:
+			return "", "", "", "", fmt.Errorf("unsupported security user action %q", action)
+		}
+	case "role":
+		action := strings.ToLower(safe(0))
+		target := safe(1)
+		switch action {
+		case "create":
+			return "principal-create-role", target, "", "", nil
+		case "show":
+			return "principal-show", target, "", "", nil
+		case "list":
+			return "principal-list", "", "", "", nil
+		case "disable":
+			return "principal-disable", target, "", "", nil
+		case "enable":
+			return "principal-enable", target, "", "", nil
+		case "delete":
+			return "principal-delete", target, "", "", nil
+		default:
+			return "", "", "", "", fmt.Errorf("unsupported security role action %q", action)
+		}
+	case "grant":
+		if strings.EqualFold(safe(0), "history") {
+			return "principal-grant-privilege", safe(1), "", string(executor.PrincipalPrivilegeSelectHistory), nil
+		}
+		return "", "", "", "", fmt.Errorf("unsupported security grant target %q", safe(0))
+	case "revoke":
+		if strings.EqualFold(safe(0), "history") {
+			return "principal-revoke-privilege", safe(1), "", string(executor.PrincipalPrivilegeSelectHistory), nil
+		}
+		return "", "", "", "", fmt.Errorf("unsupported security revoke target %q", safe(0))
+	case "who-can":
+		if strings.EqualFold(safe(0), "history") {
+			return "principal-who-can-history", "", "", "", nil
+		}
+		return "", "", "", "", fmt.Errorf("unsupported security who-can target %q", safe(0))
+	default:
+		return "", "", "", "", fmt.Errorf("unsupported security subject %q", subject)
+	}
+}
+
+func resolvePasswordInput(password string, passwordStdin bool, in io.Reader, command string) (string, error) {
+	if !passwordStdin {
+		return password, nil
+	}
+	if strings.TrimSpace(password) != "" {
+		return "", fmt.Errorf("%s does not allow both -password and -password-stdin", command)
+	}
+	if in == nil {
+		return "", fmt.Errorf("%s requires stdin when -password-stdin is set", command)
+	}
+	raw, err := io.ReadAll(io.LimitReader(in, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("read password from stdin: %w", err)
+	}
+	secret := strings.TrimSpace(string(raw))
+	if secret == "" {
+		return "", fmt.Errorf("%s requires a non-empty password from stdin", command)
+	}
+	return secret, nil
 }
 
 func runDemo(endpoint, authToken string) error {

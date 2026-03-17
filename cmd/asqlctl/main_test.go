@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -450,6 +451,99 @@ func TestRunAdminSecurityCommand(t *testing.T) {
 	}
 	if strings.Contains(output.String(), "\"name\": \"analyst\"") || !strings.Contains(output.String(), "history_readers") || !strings.Contains(output.String(), "effective_privileges") {
 		t.Fatalf("unexpected principal list output: %q", output.String())
+	}
+}
+
+func TestResolveCLIInputsSecurityAliases(t *testing.T) {
+	tests := []struct {
+		name          string
+		args          []string
+		wantCommand   string
+		wantPrincipal string
+		wantRole      string
+		wantPrivilege string
+	}{
+		{
+			name:          "user create alias",
+			args:          []string{"security", "user", "create", "analyst"},
+			wantCommand:   "principal-create-user",
+			wantPrincipal: "analyst",
+		},
+		{
+			name:          "user list alias",
+			args:          []string{"security", "user", "list"},
+			wantCommand:   "principal-list",
+			wantPrincipal: "",
+		},
+		{
+			name:          "role create alias",
+			args:          []string{"security", "role", "create", "history_readers"},
+			wantCommand:   "principal-create-role",
+			wantPrincipal: "history_readers",
+		},
+		{
+			name:          "grant history alias",
+			args:          []string{"security", "grant", "history", "analyst"},
+			wantCommand:   "principal-grant-privilege",
+			wantPrincipal: "analyst",
+			wantPrivilege: "SELECT_HISTORY",
+		},
+		{
+			name:        "who can history alias",
+			args:        []string{"security", "who-can", "history"},
+			wantCommand: "principal-who-can-history",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			command, principal, password, role, privilege, err := resolveCLIInputs("", tt.args, "", "", "", "", false, strings.NewReader(""))
+			if err != nil {
+				t.Fatalf("resolveCLIInputs: %v", err)
+			}
+			if command != tt.wantCommand || principal != tt.wantPrincipal || role != tt.wantRole || privilege != tt.wantPrivilege {
+				t.Fatalf("resolved (%q,%q,%q,%q,%q), want (%q,%q,%q,%q,%q)", command, principal, password, role, privilege, tt.wantCommand, tt.wantPrincipal, "", tt.wantRole, tt.wantPrivilege)
+			}
+		})
+	}
+}
+
+func TestResolveCLIInputsPasswordFromStdin(t *testing.T) {
+	command, principal, password, role, privilege, err := resolveCLIInputs("principal-create-user", nil, "analyst", "", "", "", true, strings.NewReader("stdin-secret\n"))
+	if err != nil {
+		t.Fatalf("resolveCLIInputs password-stdin: %v", err)
+	}
+	if command != "principal-create-user" || principal != "analyst" || password != "stdin-secret" || role != "" || privilege != "" {
+		t.Fatalf("unexpected resolved values: command=%q principal=%q password=%q role=%q privilege=%q", command, principal, password, role, privilege)
+	}
+}
+
+func TestResolveCLIInputsPasswordFromStdinRejectsConflict(t *testing.T) {
+	_, _, _, _, _, err := resolveCLIInputs("principal-create-user", nil, "analyst", "flag-secret", "", "", true, strings.NewReader("stdin-secret\n"))
+	if err == nil || !strings.Contains(err.Error(), "does not allow both -password and -password-stdin") {
+		t.Fatalf("expected conflict error, got %v", err)
+	}
+}
+
+func TestResolveCLIInputsSecurityUserCreateWithStdinPassword(t *testing.T) {
+	command, principal, password, _, _, err := resolveCLIInputs("", []string{"security", "user", "create", "analyst"}, "", "", "", "", true, strings.NewReader("stdin-secret\n"))
+	if err != nil {
+		t.Fatalf("resolveCLIInputs security user create: %v", err)
+	}
+	if command != "principal-create-user" || principal != "analyst" || password != "stdin-secret" {
+		t.Fatalf("unexpected resolved create-user stdin inputs: command=%q principal=%q password=%q", command, principal, password)
+	}
+}
+
+func TestResolvePasswordInputRequiresNonEmptySecret(t *testing.T) {
+	_, err := resolvePasswordInput("", true, strings.NewReader("\n\n"), "principal-create-user")
+	if err == nil || !strings.Contains(err.Error(), "requires a non-empty password") {
+		t.Fatalf("expected non-empty password error, got %v", err)
+	}
+
+	_, err = resolvePasswordInput("", true, io.NopCloser(strings.NewReader("secret\n")), "principal-create-user")
+	if err != nil {
+		t.Fatalf("resolvePasswordInput with stdin reader: %v", err)
 	}
 }
 

@@ -710,7 +710,7 @@ P0 — `asqlctl` security administration:
 - [x] Add audit-oriented CLI flows to inspect who can access historical data and why.
 
 AH-1 — CLI-first management slice:
-- [ ] Add `asqlctl security user create` with password/secret input handling appropriate for the selected bootstrap model.
+- [x] Add `asqlctl security user create` with password/secret input handling appropriate for the selected bootstrap model.
 - [x] Add `asqlctl security user list` and `show` with principal state (`enabled`, `disabled`, inherited roles, temporal privileges).
 - [x] Add `asqlctl security grant history` / `revoke history` as the first explicit temporal-permission workflow.
 - [x] Add `asqlctl security who-can history` or equivalent inspection flow to explain effective historical access.
