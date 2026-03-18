@@ -2757,6 +2757,102 @@ func TestAggregateAliasProjection(t *testing.T) {
 	}
 }
 
+func TestCountDistinctAggregate(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "count-distinct.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	if _, err := engine.Execute(ctx, session, "BEGIN DOMAIN warehouse"); err != nil {
+		t.Fatalf("begin domain: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE batch_orders (id INT PRIMARY KEY, opened_by TEXT, status TEXT)"); err != nil {
+		t.Fatalf("create table: %v", err)
+	}
+	for i, row := range []struct{ by, status string }{
+		{"alice", "open"}, {"bob", "open"}, {"alice", "closed"}, {"carol", "open"}, {"bob", "closed"},
+	} {
+		sql := fmt.Sprintf("INSERT INTO batch_orders (id, opened_by, status) VALUES (%d, '%s', '%s')", i+1, row.by, row.status)
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("insert %d: %v", i+1, err)
+		}
+	}
+	if _, err := engine.Execute(ctx, session, "COMMIT"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	// COUNT(DISTINCT col) should return unique non-null values.
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT COUNT(DISTINCT opened_by) AS total FROM batch_orders", []string{"warehouse"}, 8192)
+	if err != nil {
+		t.Fatalf("count distinct query: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("unexpected row count: got %d want 1", len(result.Rows))
+	}
+	if got := result.Rows[0]["total"].NumberValue; got != 3 {
+		t.Fatalf("COUNT(DISTINCT opened_by): got %d want 3", got)
+	}
+
+	// COUNT(DISTINCT col) with GROUP BY.
+	result, err = engine.TimeTravelQueryAsOfLSN(ctx, "SELECT status, COUNT(DISTINCT opened_by) AS n FROM batch_orders GROUP BY status", []string{"warehouse"}, 8192)
+	if err != nil {
+		t.Fatalf("count distinct group by: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("unexpected group count: got %d want 2", len(result.Rows))
+	}
+	// open: alice, bob, carol = 3; closed: alice, bob = 2
+	counts := make(map[string]int64, 2)
+	for _, row := range result.Rows {
+		counts[row["status"].StringValue] = row["n"].NumberValue
+	}
+	if counts["open"] != 3 {
+		t.Fatalf("open distinct count: got %d want 3", counts["open"])
+	}
+	if counts["closed"] != 2 {
+		t.Fatalf("closed distinct count: got %d want 2", counts["closed"])
+	}
+
+	// SUM(DISTINCT amount) — verify DISTINCT works for other aggregates.
+	if _, err := engine.Execute(ctx, session, "BEGIN DOMAIN sums"); err != nil {
+		t.Fatalf("begin domain: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE vals (id INT PRIMARY KEY, n INT)"); err != nil {
+		t.Fatalf("create vals: %v", err)
+	}
+	for i, n := range []int{10, 20, 10, 30, 20} {
+		sql := fmt.Sprintf("INSERT INTO vals (id, n) VALUES (%d, %d)", i+1, n)
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("insert val %d: %v", i+1, err)
+		}
+	}
+	if _, err := engine.Execute(ctx, session, "COMMIT"); err != nil {
+		t.Fatalf("commit sums: %v", err)
+	}
+
+	result, err = engine.TimeTravelQueryAsOfLSN(ctx, "SELECT SUM(DISTINCT n) AS total FROM vals", []string{"sums"}, 8192)
+	if err != nil {
+		t.Fatalf("sum distinct: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("unexpected row count for sum distinct: %d", len(result.Rows))
+	}
+	// 10 + 20 + 30 = 60
+	if got := result.Rows[0]["total"].NumberValue; got != 60 {
+		t.Fatalf("SUM(DISTINCT n): got %d want 60", got)
+	}
+}
+
 func TestAggregateHavingArithmeticExpression(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "aggregate-having-arithmetic.wal")

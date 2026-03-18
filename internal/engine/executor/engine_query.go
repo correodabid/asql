@@ -559,7 +559,15 @@ func parseAggregateSelectColumn(column string) (aggregateSelectSpec, bool) {
 
 	function := strings.TrimSpace(canonical[:open])
 	argument := strings.TrimSpace(canonical[open+1 : close])
-	spec := aggregateSelectSpec{OutputColumn: alias, Function: function, Argument: argument}
+
+	// Handle DISTINCT inside aggregate functions, e.g. COUNT(DISTINCT col).
+	distinct := false
+	if strings.HasPrefix(argument, "distinct ") {
+		distinct = true
+		argument = strings.TrimSpace(argument[len("distinct "):])
+	}
+
+	spec := aggregateSelectSpec{OutputColumn: alias, Function: function, Argument: argument, Distinct: distinct}
 
 	switch function {
 	case "count":
@@ -582,10 +590,42 @@ func parseAggregateSelectColumn(column string) (aggregateSelectSpec, bool) {
 }
 
 func computeAggregate(spec aggregateSelectSpec, rows []map[string]ast.Literal) (ast.Literal, error) {
+	// For DISTINCT aggregates (except COUNT which has its own optimized path),
+	// pre-filter rows to unique non-null values of the argument column.
+	if spec.Distinct && !spec.CountAll && spec.Function != "count" {
+		seen := make(map[string]struct{})
+		filtered := make([]map[string]ast.Literal, 0, len(rows))
+		for _, row := range rows {
+			value := valueOrNull(row, spec.Argument)
+			if value.Kind == ast.LiteralNull {
+				continue
+			}
+			key := literalKey(value)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			filtered = append(filtered, row)
+		}
+		rows = filtered
+	}
+
 	switch spec.Function {
 	case "count":
 		if spec.CountAll {
 			return ast.Literal{Kind: ast.LiteralNumber, NumberValue: int64(len(rows))}, nil
+		}
+
+		if spec.Distinct {
+			seen := make(map[string]struct{})
+			for _, row := range rows {
+				value := valueOrNull(row, spec.Argument)
+				if value.Kind == ast.LiteralNull {
+					continue
+				}
+				seen[literalKey(value)] = struct{}{}
+			}
+			return ast.Literal{Kind: ast.LiteralNumber, NumberValue: int64(len(seen))}, nil
 		}
 
 		count := int64(0)

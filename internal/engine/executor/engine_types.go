@@ -1043,6 +1043,7 @@ type aggregateSelectSpec struct {
 	Function     string
 	Argument     string
 	CountAll     bool
+	Distinct     bool
 }
 
 type scanCostEstimate struct {
