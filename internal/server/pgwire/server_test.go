@@ -2784,6 +2784,12 @@ func TestMainstreamToolStartupFlows(t *testing.T) {
 		}
 		defer namespaceRows.Close()
 
+		for _, field := range namespaceRows.FieldDescriptions() {
+			if field.TableOID != 0 || field.TableAttributeNumber != 0 {
+				t.Fatalf("unexpected pg_namespace field metadata for %q: table_oid=%d attr=%d", field.Name, field.TableOID, field.TableAttributeNumber)
+			}
+		}
+
 		var complianceNamespaceOID int64
 		for namespaceRows.Next() {
 			var oid, owner int64
@@ -3014,6 +3020,12 @@ func TestMainstreamToolStartupFlows(t *testing.T) {
 		if err != nil {
 			t.Fatalf("quoted schema-qualified data query: %v", err)
 		}
+		for _, field := range dataRows.FieldDescriptions() {
+			if field.TableOID != 0 || field.TableAttributeNumber != 0 {
+				dataRows.Close()
+				t.Fatalf("unexpected quoted data field metadata for %q: table_oid=%d attr=%d", field.Name, field.TableOID, field.TableAttributeNumber)
+			}
+		}
 		if !dataRows.Next() {
 			dataRows.Close()
 			t.Fatal("quoted schema-qualified data query returned no rows")
@@ -3027,6 +3039,25 @@ func TestMainstreamToolStartupFlows(t *testing.T) {
 		dataRows.Close()
 		if reviewID != 1 || reviewer != "alice" || decision != "approve" {
 			t.Fatalf("unexpected quoted schema-qualified data row: id=%d reviewer=%q decision=%q", reviewID, reviewer, decision)
+		}
+
+		aliasedRows, err := conn.Query(ctx, `SELECT r.* FROM "compliance"."ebr_reviews" AS r ORDER BY r.id LIMIT 10`)
+		if err != nil {
+			t.Fatalf("aliased schema-qualified data query: %v", err)
+		}
+		if !aliasedRows.Next() {
+			aliasedRows.Close()
+			t.Fatal("aliased schema-qualified data query returned no rows")
+		}
+		var aliasedID int64
+		var aliasedReviewer, aliasedDecision string
+		if err := aliasedRows.Scan(&aliasedID, &aliasedReviewer, &aliasedDecision); err != nil {
+			aliasedRows.Close()
+			t.Fatalf("scan aliased schema-qualified data row: %v", err)
+		}
+		aliasedRows.Close()
+		if aliasedID != 1 || aliasedReviewer != "alice" || aliasedDecision != "approve" {
+			t.Fatalf("unexpected aliased schema-qualified data row: id=%d reviewer=%q decision=%q", aliasedID, aliasedReviewer, aliasedDecision)
 		}
 
 		// Privilege check

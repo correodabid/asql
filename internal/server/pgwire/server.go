@@ -1215,11 +1215,11 @@ func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connSt
 	if len(columns) > 0 {
 		columnTypeOIDs := inferColumnTypeOIDs(columns, result.Rows)
 		fields := make([]pgproto3.FieldDescription, 0, len(columns))
-		for index, column := range columns {
+		for _, column := range columns {
 			fields = append(fields, pgproto3.FieldDescription{
 				Name:                 []byte(column),
 				TableOID:             0,
-				TableAttributeNumber: uint16(index + 1),
+				TableAttributeNumber: 0,
 				DataTypeOID:          columnTypeOIDs[column],
 				DataTypeSize:         -1,
 				TypeModifier:         -1,
@@ -1309,11 +1309,11 @@ func sendInterceptedResult(backend *pgproto3.Backend, session *executor.Session,
 	if len(columns) > 0 {
 		columnTypeOIDs := inferColumnTypeOIDs(columns, rows)
 		fields := make([]pgproto3.FieldDescription, 0, len(columns))
-		for i, col := range columns {
+		for _, col := range columns {
 			fields = append(fields, pgproto3.FieldDescription{
 				Name:                 []byte(col),
 				TableOID:             0,
-				TableAttributeNumber: uint16(i + 1),
+				TableAttributeNumber: 0,
 				DataTypeOID:          columnTypeOIDs[col],
 				DataTypeSize:         -1,
 				TypeModifier:         -1,
@@ -1451,7 +1451,7 @@ func deriveColumns(statement ast.Statement, rows []map[string]ast.Literal) []str
 			columns := make([]string, 0, len(selectStatement.Columns))
 			for _, column := range selectStatement.Columns {
 				canonical := strings.TrimSpace(strings.ToLower(column))
-				if canonical == "" || canonical == "*" {
+				if canonical == "" || canonical == "*" || isQualifiedStarProjection(canonical) {
 					continue
 				}
 				columns = append(columns, canonical)
@@ -1470,6 +1470,11 @@ func deriveColumns(statement ast.Statement, rows []map[string]ast.Literal) []str
 	}
 	sortColumns(fallback)
 	return fallback
+}
+
+func isQualifiedStarProjection(column string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(column))
+	return len(trimmed) > 2 && strings.HasSuffix(trimmed, ".*") && strings.TrimSpace(strings.TrimSuffix(trimmed, ".*")) != ""
 }
 
 func inferColumnTypeOIDs(columns []string, rows []map[string]ast.Literal) map[string]uint32 {

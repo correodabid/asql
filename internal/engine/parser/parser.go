@@ -1362,7 +1362,7 @@ func parseTableRef(raw string) (table, alias string) {
 			strings.EqualFold(candidate, "FOR"):
 			return table, ""
 		}
-		alias = canonicalIdentifier(parts[1])
+		alias = canonicalIdentifier(candidate)
 	}
 	return table, alias
 }

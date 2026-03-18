@@ -714,7 +714,7 @@ func (server *Server) handleDescribe(backend *pgproto3.Backend, state *connState
 					for i, c := range p.columns {
 						fields[i] = pgproto3.FieldDescription{
 							Name:                 []byte(c),
-							TableAttributeNumber: uint16(i + 1),
+							TableAttributeNumber: 0,
 							DataTypeOID:          25,
 							DataTypeSize:         -1,
 							TypeModifier:         -1,
@@ -1012,7 +1012,7 @@ func (server *Server) describeReturningFields(sql string) []pgproto3.FieldDescri
 	for i, c := range cols {
 		fields[i] = pgproto3.FieldDescription{
 			Name:                 []byte(c),
-			TableAttributeNumber: uint16(i + 1),
+			TableAttributeNumber: 0,
 			DataTypeOID:          oids[c],
 			DataTypeSize:         -1,
 			TypeModifier:         -1,
@@ -1070,7 +1070,7 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 		for i, column := range explainResultColumns {
 			fields[i] = pgproto3.FieldDescription{
 				Name:                 []byte(column),
-				TableAttributeNumber: uint16(i + 1),
+				TableAttributeNumber: 0,
 				DataTypeOID:          25,
 				DataTypeSize:         -1,
 				TypeModifier:         -1,
@@ -1099,7 +1099,7 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 		for i, c := range intercepted.columns {
 			fields[i] = pgproto3.FieldDescription{
 				Name:                 []byte(c),
-				TableAttributeNumber: uint16(i + 1),
+				TableAttributeNumber: 0,
 				DataTypeOID:          oids[c],
 				DataTypeSize:         -1,
 				TypeModifier:         -1,
@@ -1152,7 +1152,7 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 			}
 			fields[i] = pgproto3.FieldDescription{
 				Name:                 []byte(c),
-				TableAttributeNumber: uint16(i + 1),
+				TableAttributeNumber: 0,
 				DataTypeOID:          oid,
 				DataTypeSize:         -1,
 				TypeModifier:         -1,
@@ -1165,7 +1165,7 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 	for i, c := range cols {
 		fields[i] = pgproto3.FieldDescription{
 			Name:                 []byte(c),
-			TableAttributeNumber: uint16(i + 1),
+			TableAttributeNumber: 0,
 			DataTypeOID:          colOIDs[c],
 			DataTypeSize:         -1,
 			TypeModifier:         -1,
@@ -1511,6 +1511,9 @@ func (server *Server) resolveStarColumns(sel ast.SelectStatement) []string {
 			if strings.ToLower(t.Name) == tableName {
 				cols := make([]string, 0, len(t.Columns))
 				for _, c := range t.Columns {
+					if isHiddenProjectionColumn(c.Name) {
+						continue
+					}
 					cols = append(cols, strings.ToLower(c.Name))
 				}
 				sortColumns(cols)
@@ -1547,12 +1550,19 @@ func (server *Server) resolveTableColumns(tableName string) []string {
 			}
 			cols := make([]string, 0, len(t.Columns))
 			for _, c := range t.Columns {
+				if isHiddenProjectionColumn(c.Name) {
+					continue
+				}
 				cols = append(cols, strings.ToLower(c.Name))
 			}
 			return cols
 		}
 	}
 	return nil
+}
+
+func isHiddenProjectionColumn(columnName string) bool {
+	return strings.HasPrefix(strings.TrimSpace(columnName), "_")
 }
 
 // ── Parameter substitution ────────────────────────────────────────────────────
