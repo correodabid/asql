@@ -2853,6 +2853,166 @@ func TestCountDistinctAggregate(t *testing.T) {
 	}
 }
 
+func TestCorrelatedExistsSubquery(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "correlated-exists.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	if _, err := engine.Execute(ctx, session, "BEGIN DOMAIN factory"); err != nil {
+		t.Fatalf("begin domain: %v", err)
+	}
+	// Parent table: orders.
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE orders (id INT PRIMARY KEY, customer TEXT)"); err != nil {
+		t.Fatalf("create orders: %v", err)
+	}
+	// Child table: items referencing order_id.
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE items (id INT PRIMARY KEY, order_id INT, product TEXT)"); err != nil {
+		t.Fatalf("create items: %v", err)
+	}
+	for i, c := range []string{"alice", "bob", "carol"} {
+		sql := fmt.Sprintf("INSERT INTO orders (id, customer) VALUES (%d, '%s')", i+1, c)
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("insert order %d: %v", i+1, err)
+		}
+	}
+	// Only orders 1 and 3 have items.
+	for i, item := range []struct {
+		orderID int
+		product string
+	}{
+		{1, "widget"}, {1, "gadget"}, {3, "sprocket"},
+	} {
+		sql := fmt.Sprintf("INSERT INTO items (id, order_id, product) VALUES (%d, %d, '%s')", i+1, item.orderID, item.product)
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("insert item %d: %v", i+1, err)
+		}
+	}
+	if _, err := engine.Execute(ctx, session, "COMMIT"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	t.Run("EXISTS correlated", func(t *testing.T) {
+		// "Orders that have at least one item" — should return alice (1) and carol (3).
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+			"SELECT customer FROM orders WHERE EXISTS (SELECT id FROM items WHERE order_id = orders.id)",
+			[]string{"factory"}, 8192)
+		if err != nil {
+			t.Fatalf("correlated EXISTS: %v", err)
+		}
+		got := make(map[string]bool)
+		for _, row := range result.Rows {
+			got[row["customer"].StringValue] = true
+		}
+		if len(got) != 2 || !got["alice"] || !got["carol"] {
+			t.Fatalf("expected {alice, carol}, got %v", got)
+		}
+	})
+
+	t.Run("NOT EXISTS correlated", func(t *testing.T) {
+		// "Orders that have no items" — should return bob (2).
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+			"SELECT customer FROM orders WHERE NOT EXISTS (SELECT id FROM items WHERE order_id = orders.id)",
+			[]string{"factory"}, 8192)
+		if err != nil {
+			t.Fatalf("correlated NOT EXISTS: %v", err)
+		}
+		if len(result.Rows) != 1 || result.Rows[0]["customer"].StringValue != "bob" {
+			t.Fatalf("expected [bob], got %v", result.Rows)
+		}
+	})
+
+	t.Run("IN with correlated nested EXISTS", func(t *testing.T) {
+		// Add a categories table to test nested correlated subquery.
+		session2 := engine.NewSession()
+		if _, err := engine.Execute(ctx, session2, "BEGIN DOMAIN factory"); err != nil {
+			t.Fatalf("begin domain: %v", err)
+		}
+		if _, err := engine.Execute(ctx, session2, "CREATE TABLE categories (id INT PRIMARY KEY, product TEXT, category TEXT)"); err != nil {
+			t.Fatalf("create categories: %v", err)
+		}
+		// Only widget and sprocket are categorised.
+		for i, c := range []struct {
+			product, cat string
+		}{
+			{"widget", "mechanical"}, {"sprocket", "mechanical"},
+		} {
+			sql := fmt.Sprintf("INSERT INTO categories (id, product, category) VALUES (%d, '%s', '%s')", i+1, c.product, c.cat)
+			if _, err := engine.Execute(ctx, session2, sql); err != nil {
+				t.Fatalf("insert cat %d: %v", i+1, err)
+			}
+		}
+		if _, err := engine.Execute(ctx, session2, "COMMIT"); err != nil {
+			t.Fatalf("commit categories: %v", err)
+		}
+
+		// Orders that have at least one item whose product exists in categories.
+		// Should still return alice (has widget, which is in categories) and carol (sprocket).
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+			"SELECT customer FROM orders WHERE EXISTS (SELECT id FROM items WHERE order_id = orders.id AND product IN (SELECT product FROM categories))",
+			[]string{"factory"}, 8192)
+		if err != nil {
+			t.Fatalf("nested correlated: %v", err)
+		}
+		got := make(map[string]bool)
+		for _, row := range result.Rows {
+			got[row["customer"].StringValue] = true
+		}
+		if len(got) != 2 || !got["alice"] || !got["carol"] {
+			t.Fatalf("expected {alice, carol}, got %v", got)
+		}
+	})
+
+	t.Run("column-to-column without subquery", func(t *testing.T) {
+		// Self-referential column comparison: rows where two columns are equal.
+		session3 := engine.NewSession()
+		if _, err := engine.Execute(ctx, session3, "BEGIN DOMAIN selfref"); err != nil {
+			t.Fatalf("begin domain: %v", err)
+		}
+		if _, err := engine.Execute(ctx, session3, "CREATE TABLE pairs (id INT PRIMARY KEY, a TEXT, b TEXT)"); err != nil {
+			t.Fatalf("create pairs: %v", err)
+		}
+		for i, p := range []struct{ a, b string }{
+			{"x", "x"}, {"x", "y"}, {"z", "z"},
+		} {
+			sql := fmt.Sprintf("INSERT INTO pairs (id, a, b) VALUES (%d, '%s', '%s')", i+1, p.a, p.b)
+			if _, err := engine.Execute(ctx, session3, sql); err != nil {
+				t.Fatalf("insert pair %d: %v", i+1, err)
+			}
+		}
+		if _, err := engine.Execute(ctx, session3, "COMMIT"); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+			"SELECT id FROM pairs WHERE a = b",
+			[]string{"selfref"}, 8192)
+		if err != nil {
+			t.Fatalf("column-to-column: %v", err)
+		}
+		if len(result.Rows) != 2 {
+			t.Fatalf("expected 2 rows, got %d: %v", len(result.Rows), result.Rows)
+		}
+		ids := make(map[int64]bool)
+		for _, row := range result.Rows {
+			ids[row["id"].NumberValue] = true
+		}
+		if !ids[1] || !ids[3] {
+			t.Fatalf("expected ids {1,3}, got %v", ids)
+		}
+	})
+}
+
 func TestAggregateHavingArithmeticExpression(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "aggregate-having-arithmetic.wal")

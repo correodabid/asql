@@ -2301,6 +2301,16 @@ func parseSimplePredicate(clause string) (*ast.Predicate, error) {
 
 	value, err := parseLiteral(right)
 	if err != nil {
+		// If literal parsing fails, try as a column reference (e.g., alias.column
+		// for correlated subqueries or column-to-column comparisons).
+		rightCol := canonicalIdentifier(strings.TrimSpace(right))
+		if rightCol != "" && isColumnReference(rightCol) {
+			return &ast.Predicate{
+				Column:      column,
+				Operator:    operator,
+				RightColumn: rightCol,
+			}, nil
+		}
 		return nil, err
 	}
 
@@ -2309,6 +2319,39 @@ func parseSimplePredicate(clause string) (*ast.Predicate, error) {
 		Operator: operator,
 		Value:    value,
 	}, nil
+}
+
+// isColumnReference returns true if s looks like a bare identifier or a dotted
+// qualified identifier (alias.column). It does NOT match strings, numbers, or
+// SQL keywords used as values.
+func isColumnReference(s string) bool {
+	if s == "" {
+		return false
+	}
+	// Must not start with a digit.
+	if s[0] >= '0' && s[0] <= '9' {
+		return false
+	}
+	dots := 0
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if ch == '.' {
+			dots++
+			if dots > 1 {
+				return false // at most one dot: alias.column
+			}
+			continue
+		}
+		if (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_' {
+			continue
+		}
+		return false
+	}
+	// Must not be just a dot or end with a dot.
+	if s[len(s)-1] == '.' || s[0] == '.' {
+		return false
+	}
+	return true
 }
 
 // findComparisonOperator finds the position of the comparison operator (=, >, <, >=, <=)

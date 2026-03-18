@@ -733,7 +733,9 @@ func computeAggregate(spec aggregateSelectSpec, rows []map[string]ast.Literal) (
 }
 
 // executeSubquery runs a subquery SELECT statement against the current state.
-func executeSubquery(sub *ast.Subquery, state *readableState, engine *Engine) ([]map[string]ast.Literal, error) {
+// outerRow carries column values from enclosing query scopes for correlated subqueries.
+// It may be nil for non-correlated subqueries.
+func executeSubquery(sub *ast.Subquery, state *readableState, engine *Engine, outerRow map[string]ast.Literal) ([]map[string]ast.Literal, error) {
 	if state == nil || engine == nil {
 		return nil, fmt.Errorf("subquery requires engine context")
 	}
@@ -749,6 +751,13 @@ func executeSubquery(sub *ast.Subquery, state *readableState, engine *Engine) ([
 		return nil, fmt.Errorf("subquery plan: %w", err)
 	}
 
+	// For correlated subqueries, substitute outer-row column references
+	// in the plan filter with concrete literal values.  This "decorrelation"
+	// avoids threading the outer row through the entire selectRows pipeline.
+	if outerRow != nil && plan.Filter != nil {
+		plan.Filter = decorrelateFilter(plan.Filter, outerRow)
+	}
+
 	rows, err := engine.selectRows(context.Background(), state, plan)
 	if err != nil {
 		return nil, fmt.Errorf("subquery exec: %w", err)
@@ -757,9 +766,51 @@ func executeSubquery(sub *ast.Subquery, state *readableState, engine *Engine) ([
 	return rows, nil
 }
 
+// decorrelateFilter replaces RightColumn references in a predicate tree with
+// concrete literal values from the outer row.  It recurses into nested
+// subqueries so that multi-level correlated subqueries are fully resolved.
+func decorrelateFilter(pred *ast.Predicate, outerRow map[string]ast.Literal) *ast.Predicate {
+	if pred == nil {
+		return nil
+	}
+	p := *pred // shallow copy
+
+	// Substitute RightColumn → Value when the outer row has a match.
+	if p.RightColumn != "" {
+		key := strings.ToLower(p.RightColumn)
+		if val, exists := outerRow[key]; exists {
+			p.Value = val
+			p.RightColumn = ""
+		}
+	}
+
+	// Also check if Column itself is an outer-scope reference (rare, but
+	// possible when the LHS of a comparison is from an outer scope).
+	// We skip this because Column is always resolved against the current row
+	// at evaluation time, and the merge approach in subquery evaluators
+	// handles it.
+
+	// Recurse into nested subqueries.
+	if p.Subquery != nil {
+		newSub := *p.Subquery
+		newStmt := newSub.Statement
+		if newStmt.Where != nil {
+			newStmt.Where = decorrelateFilter(newStmt.Where, outerRow)
+		}
+		newSub.Statement = newStmt
+		p.Subquery = &newSub
+	}
+
+	p.Left = decorrelateFilter(p.Left, outerRow)
+	p.Right = decorrelateFilter(p.Right, outerRow)
+
+	return &p
+}
+
 // evaluateExistsSubquery evaluates EXISTS (SELECT ...).
-func evaluateExistsSubquery(sub *ast.Subquery, state *readableState, engine *Engine) ternaryResult {
-	rows, err := executeSubquery(sub, state, engine)
+// outerRow provides the enclosing row for correlated subqueries.
+func evaluateExistsSubquery(sub *ast.Subquery, state *readableState, engine *Engine, outerRow map[string]ast.Literal) ternaryResult {
+	rows, err := executeSubquery(sub, state, engine, outerRow)
 	if err != nil {
 		return ternaryFalse
 	}
@@ -782,7 +833,7 @@ func evaluateInSubquery(row map[string]ast.Literal, predicate *ast.Predicate, st
 		return ternaryUnknown
 	}
 
-	subRows, err := executeSubquery(predicate.Subquery, state, engine)
+	subRows, err := executeSubquery(predicate.Subquery, state, engine, row)
 	if err != nil {
 		return ternaryFalse
 	}
@@ -838,8 +889,8 @@ func evaluateInSubquery(row map[string]ast.Literal, predicate *ast.Predicate, st
 }
 
 // evaluateScalarSubquery evaluates col op (SELECT ... LIMIT 1).
-func evaluateScalarSubquery(value ast.Literal, operator string, sub *ast.Subquery, state *readableState, engine *Engine) ternaryResult {
-	subRows, err := executeSubquery(sub, state, engine)
+func evaluateScalarSubquery(value ast.Literal, operator string, sub *ast.Subquery, state *readableState, engine *Engine, outerRow map[string]ast.Literal) ternaryResult {
+	subRows, err := executeSubquery(sub, state, engine, outerRow)
 	if err != nil {
 		return ternaryFalse
 	}

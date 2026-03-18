@@ -109,7 +109,7 @@ func evaluatePredicate3VL(row map[string]ast.Literal, predicate *ast.Predicate, 
 		if predicate.Subquery == nil {
 			return ternaryFalse
 		}
-		return evaluateExistsSubquery(predicate.Subquery, state, engine)
+		return evaluateExistsSubquery(predicate.Subquery, state, engine, row)
 	case "IN":
 		if predicate.Subquery != nil {
 			return evaluateInSubquery(row, predicate, state, engine, false)
@@ -209,14 +209,43 @@ func evaluatePredicate3VL(row map[string]ast.Literal, predicate *ast.Predicate, 
 	if value.Kind == ast.LiteralNull || predicate.Value.Kind == ast.LiteralNull {
 		// Scalar subquery: col op (SELECT ...)
 		if predicate.Subquery != nil && value.Kind != ast.LiteralNull {
-			return evaluateScalarSubquery(value, operator, predicate.Subquery, state, engine)
+			return evaluateScalarSubquery(value, operator, predicate.Subquery, state, engine, row)
+		}
+		// Column-to-column comparison where right side is null.
+		if predicate.RightColumn != "" {
+			rightVal, rightExists := resolvePredicateOperand(row, predicate.RightColumn)
+			if !rightExists || rightVal.Kind == ast.LiteralNull {
+				return ternaryUnknown
+			}
+			if value.Kind == ast.LiteralNull {
+				return ternaryUnknown
+			}
+			if compareLiteralByOperator(value, operator, rightVal) {
+				return ternaryTrue
+			}
+			return ternaryFalse
 		}
 		return ternaryUnknown
 	}
 
 	// Scalar subquery with non-null literal value
 	if predicate.Subquery != nil {
-		return evaluateScalarSubquery(value, operator, predicate.Subquery, state, engine)
+		return evaluateScalarSubquery(value, operator, predicate.Subquery, state, engine, row)
+	}
+
+	// Column-to-column comparison (e.g., a.id = b.id, or correlated outer references).
+	if predicate.RightColumn != "" {
+		rightVal, rightExists := resolvePredicateOperand(row, predicate.RightColumn)
+		if !rightExists {
+			return ternaryFalse
+		}
+		if rightVal.Kind == ast.LiteralNull {
+			return ternaryUnknown
+		}
+		if compareLiteralByOperator(value, operator, rightVal) {
+			return ternaryTrue
+		}
+		return ternaryFalse
 	}
 
 	if compareLiteralByOperator(value, operator, predicate.Value) {

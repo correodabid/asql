@@ -70,15 +70,16 @@ type Subquery struct {
 }
 
 type Predicate struct {
-	Column     string      `json:"column,omitempty"`
-	JsonAccess *JsonAccess `json:"json_access,omitempty"`
-	Operator   string      `json:"operator"`
-	Value      Literal     `json:"value,omitempty"`
-	Value2     *Literal    `json:"value2,omitempty"`    // for BETWEEN: upper bound
-	InValues   []Literal   `json:"in_values,omitempty"` // for IN (list): literal values
-	Left       *Predicate  `json:"left,omitempty"`
-	Right      *Predicate  `json:"right,omitempty"`
-	Subquery   *Subquery   `json:"subquery,omitempty"`
+	Column      string      `json:"column,omitempty"`
+	RightColumn string      `json:"right_column,omitempty"` // column-to-column comparison (correlated subqueries, join predicates)
+	JsonAccess  *JsonAccess `json:"json_access,omitempty"`
+	Operator    string      `json:"operator"`
+	Value       Literal     `json:"value,omitempty"`
+	Value2      *Literal    `json:"value2,omitempty"`    // for BETWEEN: upper bound
+	InValues    []Literal   `json:"in_values,omitempty"` // for IN (list): literal values
+	Left        *Predicate  `json:"left,omitempty"`
+	Right       *Predicate  `json:"right,omitempty"`
+	Subquery    *Subquery   `json:"subquery,omitempty"`
 }
 
 // JsonAccess represents a PostgreSQL-style JSON path expression: col->>'key' or col->'key'.

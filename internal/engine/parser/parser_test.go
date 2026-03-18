@@ -726,6 +726,60 @@ func TestParseSubqueryWithAND(t *testing.T) {
 	}
 }
 
+func TestParseColumnToColumnPredicate(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM items WHERE block_code = bc.block_id")
+	if err != nil {
+		t.Fatalf("parse column-to-column: %v", err)
+	}
+	sel := stmt.(ast.SelectStatement)
+	if sel.Where == nil {
+		t.Fatal("expected WHERE clause")
+	}
+	if sel.Where.Column != "block_code" {
+		t.Fatalf("expected column block_code, got %q", sel.Where.Column)
+	}
+	if sel.Where.RightColumn != "bc.block_id" {
+		t.Fatalf("expected right_column bc.block_id, got %q", sel.Where.RightColumn)
+	}
+	if sel.Where.Operator != "=" {
+		t.Fatalf("expected operator =, got %q", sel.Where.Operator)
+	}
+}
+
+func TestParseCorrelatedSubqueryINWithColumnRef(t *testing.T) {
+	sql := "SELECT * FROM phases WHERE phase_code IN (SELECT phase_code FROM phase_blocks WHERE block_code = outer_ref.id)"
+	stmt, err := Parse(sql)
+	if err != nil {
+		t.Fatalf("parse correlated IN subquery: %v", err)
+	}
+	sel := stmt.(ast.SelectStatement)
+	if sel.Where == nil || sel.Where.Subquery == nil {
+		t.Fatal("expected IN subquery")
+	}
+	inner := sel.Where.Subquery.Statement
+	if inner.Where == nil {
+		t.Fatal("expected inner WHERE")
+	}
+	if inner.Where.RightColumn != "outer_ref.id" {
+		t.Fatalf("expected inner right_column outer_ref.id, got %q", inner.Where.RightColumn)
+	}
+}
+
+func TestParseColumnRefDoesNotMatchNumericLiterals(t *testing.T) {
+	// Numeric values should still parse as literals, not column refs.
+	stmt, err := Parse("SELECT * FROM items WHERE id = 42")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	sel := stmt.(ast.SelectStatement)
+	if sel.Where.RightColumn != "" {
+		t.Fatalf("expected no right_column for numeric literal, got %q", sel.Where.RightColumn)
+	}
+	if sel.Where.Value.Kind != ast.LiteralNumber || sel.Where.Value.NumberValue != 42 {
+		t.Fatalf("expected literal number 42, got %+v", sel.Where.Value)
+	}
+}
+
 func TestParseLeftJoin(t *testing.T) {
 	stmt, err := Parse("SELECT * FROM users LEFT JOIN orders ON users.id = orders.user_id")
 	if err != nil {
