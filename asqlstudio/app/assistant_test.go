@@ -71,7 +71,7 @@ func TestBuildAssistantQueryPlanCount(t *testing.T) {
 		}},
 	}
 
-	plan, err := buildAssistantQueryPlan("¿Cuántos users hay?", []string{"default"}, snapshot)
+	plan, err := buildAssistantQueryPlan("Count users", []string{"default"}, snapshot)
 	if err != nil {
 		t.Fatalf("buildAssistantQueryPlan: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestBuildAssistantQueryPlanLatest(t *testing.T) {
 		}},
 	}
 
-	plan, err := buildAssistantQueryPlan("Muéstrame los últimos 5 orders", []string{"default"}, snapshot)
+	plan, err := buildAssistantQueryPlan("Show me the latest 5 orders", []string{"default"}, snapshot)
 	if err != nil {
 		t.Fatalf("buildAssistantQueryPlan: %v", err)
 	}
@@ -165,8 +165,8 @@ func TestAppAssistQueryUsesLLMWhenEnabled(t *testing.T) {
 	}}
 	fakeLLM := &fakeAssistantLLMClient{plan: &assistantLLMPlanEnvelope{
 		SQL:         "SELECT id, amount FROM orders ORDER BY created_at DESC LIMIT 3;",
-		Summary:     "Trae los últimos pedidos.",
-		Assumptions: []string{"Interpreto latest como orden descendente por created_at."},
+		Summary:     "Return the latest orders.",
+		Assumptions: []string{"Interpret latest as descending order by created_at."},
 		Mode:        "latest",
 	}}
 	app := &App{schemaInvoker: fakeSchema, assistantLLM: fakeLLM}
@@ -335,6 +335,49 @@ func TestNormalizeAssistantLLMSettingsSupportsRequiredAPIKeyProvider(t *testing.
 	}
 	if settings.BaseURL != provider.DefaultBaseURL {
 		t.Fatalf("unexpected provider base url: %q", settings.BaseURL)
+	}
+}
+
+func TestBuildAssistantLLMPromptsDescribeASQLSubset(t *testing.T) {
+	system, _ := buildAssistantLLMPrompts(assistantLLMPlanRequest{})
+	checks := []string{
+		"FULL OUTER JOIN",
+		"JOIN rules are strict",
+		"OR/AND inside JOIN ON predicates",
+		"GROUP BY must list raw columns",
+		"UNION/UNION ALL",
+	}
+	for _, check := range checks {
+		if !strings.Contains(system, check) {
+			t.Fatalf("expected system prompt to mention %q, got:\n%s", check, system)
+		}
+	}
+}
+
+func TestValidateAssistantGeneratedSQLRejectsFullOuterJoin(t *testing.T) {
+	sql := "SELECT * FROM users FULL OUTER JOIN orders ON users.id = orders.user_id;"
+	if _, err := (&App{}).validateAssistantGeneratedSQL(context.Background(), sql, []string{"default"}); err == nil {
+		t.Fatal("expected FULL OUTER JOIN to be rejected")
+	} else if !strings.Contains(err.Error(), "FULL OUTER JOIN") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateAssistantGeneratedSQLRejectsJoinPredicateWithOR(t *testing.T) {
+	sql := "SELECT * FROM users u LEFT JOIN orders o ON u.id = o.user_id OR u.email = o.user_email;"
+	if _, err := (&App{}).validateAssistantGeneratedSQL(context.Background(), sql, []string{"default"}); err == nil {
+		t.Fatal("expected JOIN ON with OR to be rejected")
+	} else if !strings.Contains(err.Error(), "JOIN predicate") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateAssistantGeneratedSQLRejectsComputedGroupBy(t *testing.T) {
+	sql := "SELECT COALESCE(name, email) AS display, COUNT(*) AS total FROM users GROUP BY COALESCE(name, email);"
+	if _, err := (&App{}).validateAssistantGeneratedSQL(context.Background(), sql, []string{"default"}); err == nil {
+		t.Fatal("expected computed GROUP BY to be rejected")
+	} else if !strings.Contains(err.Error(), "GROUP BY") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

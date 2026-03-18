@@ -13,18 +13,14 @@ import (
 var (
 	assistantTokenPattern       = regexp.MustCompile(`[a-z0-9]+`)
 	assistantQuotedValuePattern = regexp.MustCompile(`["']([^"']+)["']`)
-	assistantTopNPattern        = regexp.MustCompile(`\b(top|last|latest|first|ultimos|ultimas|primeros|primeras)\s+(\d+)\b`)
-	assistantReverseTopNPattern = regexp.MustCompile(`\b(\d+)\s+(latest|last|ultimos|ultimas|primeros|primeras)\b`)
+	assistantTopNPattern        = regexp.MustCompile(`\b(top|last|latest|first)\s+(\d+)\b`)
+	assistantReverseTopNPattern = regexp.MustCompile(`\b(\d+)\s+(latest|last)\b`)
 	assistantIDPattern          = regexp.MustCompile(`\bid\s+(\d+)\b`)
 )
 
 var assistantStopWords = map[string]struct{}{
-	"a": {}, "all": {}, "by": {}, "con": {}, "cuanto": {}, "cuantos": {}, "cuantas": {},
-	"dame": {}, "de": {}, "del": {}, "el": {}, "en": {}, "for": {}, "from": {},
-	"hay": {}, "la": {}, "las": {}, "list": {}, "lista": {}, "los": {}, "me": {},
-	"muestra": {}, "muestame": {}, "muestrame": {}, "por": {}, "que": {}, "quiero": {},
-	"recientes": {}, "show": {}, "the": {}, "top": {}, "ultimas": {}, "ultimos": {},
-	"un": {}, "una": {}, "where": {}, "with": {}, "y": {},
+	"a": {}, "all": {}, "by": {}, "for": {}, "from": {}, "list": {},
+	"show": {}, "the": {}, "top": {}, "where": {}, "with": {},
 }
 
 var assistantGenericColumnTokens = map[string]struct{}{
@@ -110,7 +106,7 @@ func buildAssistantQueryPlan(question string, preferredDomains []string, snapsho
 		if totalTables == 1 {
 			domain := orderedDomains[0]
 			chosen := assistantTableCandidate{domain: domain.Name, table: domain.Tables[0], score: 1}
-			warnings = append(warnings, "No encontré una coincidencia clara con la pregunta; usé la única tabla disponible en el dominio.")
+			warnings = append(warnings, "Did not find a clear match for the question; used the only table available in the domain.")
 			return finalizeAssistantPlan(question, normalizedQuestion, questionTokens, chosen, warnings, assumptions)
 		}
 		return nil, fmt.Errorf("could not match the question to a table in the selected domains")
@@ -128,10 +124,10 @@ func buildAssistantQueryPlan(question string, preferredDomains []string, snapsho
 
 	chosen := candidates[0]
 	if len(candidates) > 1 && candidates[1].score == chosen.score && candidates[1].table.Name != chosen.table.Name {
-		warnings = append(warnings, fmt.Sprintf("La pregunta también podría referirse a %s.%s; revisa el SQL antes de ejecutarlo.", candidates[1].domain, candidates[1].table.Name))
+		warnings = append(warnings, fmt.Sprintf("The question could also refer to %s.%s; review the SQL before running it.", candidates[1].domain, candidates[1].table.Name))
 	}
 	if !chosen.exactNameMatch {
-		assumptions = append(assumptions, fmt.Sprintf("Inferí que la tabla principal es %s.%s a partir de similitud con nombres de tabla/columna.", chosen.domain, chosen.table.Name))
+		assumptions = append(assumptions, fmt.Sprintf("Inferred %s.%s as the primary table based on table and column name similarity.", chosen.domain, chosen.table.Name))
 	}
 
 	return finalizeAssistantPlan(question, normalizedQuestion, questionTokens, chosen, warnings, assumptions)
@@ -244,22 +240,22 @@ func scoreAssistantTable(question string, questionTokens []string, domain string
 }
 
 func detectAssistantMode(tokens []string) string {
-	if hasAnyAssistantToken(tokens, "count", "cuanto", "cuantos", "cuantas", "total", "numero", "number") {
+	if hasAnyAssistantToken(tokens, "count", "total", "number") {
 		return "count"
 	}
-	if hasAnyAssistantToken(tokens, "sum", "suma") {
+	if hasAnyAssistantToken(tokens, "sum") {
 		return "sum"
 	}
-	if hasAnyAssistantToken(tokens, "avg", "average", "promedio", "media") {
+	if hasAnyAssistantToken(tokens, "avg", "average") {
 		return "avg"
 	}
-	if hasAnyAssistantToken(tokens, "max", "maximo", "mayor", "highest") {
+	if hasAnyAssistantToken(tokens, "max", "highest") {
 		return "max"
 	}
-	if hasAnyAssistantToken(tokens, "min", "minimo", "lowest", "menor") {
+	if hasAnyAssistantToken(tokens, "min", "lowest") {
 		return "min"
 	}
-	if hasAnyAssistantToken(tokens, "latest", "last", "recent", "recientes", "ultimos", "ultimas") {
+	if hasAnyAssistantToken(tokens, "latest", "last", "recent") {
 		return "latest"
 	}
 	if hasAnyAssistantToken(tokens, "top") {
@@ -320,13 +316,13 @@ func buildAssistantFilters(question string, questionTokens []string, table api.S
 	if len(quoted) > 0 {
 		if column := chooseAssistantSearchColumn(table, matchedColumns); column != nil {
 			filters = append(filters, assistantFilter{column: column.Name, value: quoted[0], isText: !assistantColumnIsNumeric(*column)})
-			assumptions = append(assumptions, fmt.Sprintf("Usé el valor citado %q como filtro sobre %s.", quoted[0], column.Name))
+			assumptions = append(assumptions, fmt.Sprintf("Used quoted value %q as a filter on %s.", quoted[0], column.Name))
 		}
 	}
 	if matches := assistantIDPattern.FindStringSubmatch(question); len(matches) == 2 {
 		if column := findAssistantColumn(table, "id"); column != nil {
 			filters = append(filters, assistantFilter{column: column.Name, value: matches[1], isText: !assistantColumnIsNumeric(*column)})
-			assumptions = append(assumptions, fmt.Sprintf("Interpreté %s como filtro por %s.", matches[1], column.Name))
+			assumptions = append(assumptions, fmt.Sprintf("Interpreted %s as a filter on %s.", matches[1], column.Name))
 		}
 	}
 	if len(filters) == 0 {
@@ -340,7 +336,7 @@ func buildAssistantFilters(question string, questionTokens []string, table api.S
 			}
 			if column != nil {
 				filters = append(filters, assistantFilter{column: column.Name, value: keyword, isText: true})
-				assumptions = append(assumptions, fmt.Sprintf("Apliqué un filtro %s = %q porque la pregunta menciona ese estado.", column.Name, keyword))
+				assumptions = append(assumptions, fmt.Sprintf("Applied filter %s = %q because the question mentions that status.", column.Name, keyword))
 			}
 			break
 		}
@@ -363,17 +359,17 @@ func buildAssistantSQL(mode string, table api.SchemaSnapshotTable, selectColumns
 		return fmt.Sprintf("SELECT %s(%s) AS %s_%s FROM %s%s;", fn, metricColumn, aliasPrefix, metricColumn, table.Name, whereClause), assumptions, nil
 	case "latest":
 		if timeColumn == "" {
-			assumptions = append(assumptions, "No encontré una columna temporal clara; devolví una lista limitada sin orden temporal.")
+			assumptions = append(assumptions, "Did not find a clear time column; returned a limited list without temporal ordering.")
 			return fmt.Sprintf("SELECT %s FROM %s%s LIMIT %d;", buildAssistantSelectClause(selectColumns), table.Name, whereClause, limit), assumptions, nil
 		}
-		assumptions = append(assumptions, fmt.Sprintf("Ordené por %s DESC para responder a la intención de "+"recientes/últimos"+".", timeColumn))
+		assumptions = append(assumptions, fmt.Sprintf("Ordered by %s DESC to satisfy the latest/recent intent.", timeColumn))
 		return fmt.Sprintf("SELECT %s FROM %s%s ORDER BY %s DESC LIMIT %d;", buildAssistantSelectClause(selectColumns), table.Name, whereClause, timeColumn, limit), assumptions, nil
 	case "top":
 		if metricColumn != "" {
-			assumptions = append(assumptions, fmt.Sprintf("Ordené por %s DESC para responder a la intención de ranking/top.", metricColumn))
+			assumptions = append(assumptions, fmt.Sprintf("Ordered by %s DESC to satisfy the ranking/top intent.", metricColumn))
 			return fmt.Sprintf("SELECT %s FROM %s%s ORDER BY %s DESC LIMIT %d;", buildAssistantSelectClause(selectColumns), table.Name, whereClause, metricColumn, limit), assumptions, nil
 		}
-		assumptions = append(assumptions, "No encontré una métrica numérica clara; devolví una lista limitada.")
+		assumptions = append(assumptions, "Did not find a clear numeric metric; returned a limited list.")
 		return fmt.Sprintf("SELECT %s FROM %s%s LIMIT %d;", buildAssistantSelectClause(selectColumns), table.Name, whereClause, limit), assumptions, nil
 	default:
 		return fmt.Sprintf("SELECT %s FROM %s%s LIMIT %d;", buildAssistantSelectClause(selectColumns), table.Name, whereClause, limit), assumptions, nil
@@ -494,32 +490,32 @@ func buildAssistantSummary(mode, domain, table, metricColumn, timeColumn string,
 	switch mode {
 	case "count":
 		if len(filters) > 0 {
-			return fmt.Sprintf("Conteo read-only sobre %s con filtros inferidos desde la pregunta.", target)
+			return fmt.Sprintf("Read-only count over %s with filters inferred from the question.", target)
 		}
-		return fmt.Sprintf("Conteo read-only sobre %s.", target)
+		return fmt.Sprintf("Read-only count over %s.", target)
 	case "sum":
-		return fmt.Sprintf("Agregado SUM sobre %s usando %s como métrica principal.", target, metricColumn)
+		return fmt.Sprintf("Read-only SUM aggregate over %s using %s as the primary metric.", target, metricColumn)
 	case "avg":
-		return fmt.Sprintf("Agregado AVG sobre %s usando %s como métrica principal.", target, metricColumn)
+		return fmt.Sprintf("Read-only AVG aggregate over %s using %s as the primary metric.", target, metricColumn)
 	case "max":
-		return fmt.Sprintf("Agregado MAX sobre %s usando %s como métrica principal.", target, metricColumn)
+		return fmt.Sprintf("Read-only MAX aggregate over %s using %s as the primary metric.", target, metricColumn)
 	case "min":
-		return fmt.Sprintf("Agregado MIN sobre %s usando %s como métrica principal.", target, metricColumn)
+		return fmt.Sprintf("Read-only MIN aggregate over %s using %s as the primary metric.", target, metricColumn)
 	case "latest":
 		if timeColumn != "" {
-			return fmt.Sprintf("Listado read-only de registros recientes de %s ordenados por %s DESC.", target, timeColumn)
+			return fmt.Sprintf("Read-only list of recent rows from %s ordered by %s DESC.", target, timeColumn)
 		}
-		return fmt.Sprintf("Listado read-only de %s con límite por defecto porque no encontré una columna temporal clara.", target)
+		return fmt.Sprintf("Read-only list of %s with the default limit because no clear time column was found.", target)
 	case "top":
 		if metricColumn != "" {
-			return fmt.Sprintf("Ranking read-only sobre %s ordenado por %s DESC.", target, metricColumn)
+			return fmt.Sprintf("Read-only ranking over %s ordered by %s DESC.", target, metricColumn)
 		}
-		return fmt.Sprintf("Listado read-only limitado sobre %s.", target)
+		return fmt.Sprintf("Limited read-only list over %s.", target)
 	default:
 		if len(filters) > 0 {
-			return fmt.Sprintf("Listado read-only sobre %s con filtros inferidos desde la pregunta.", target)
+			return fmt.Sprintf("Read-only list over %s with filters inferred from the question.", target)
 		}
-		return fmt.Sprintf("Listado read-only sobre %s.", target)
+		return fmt.Sprintf("Read-only list over %s.", target)
 	}
 }
 

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"asql/internal/engine/parser"
 	api "asql/pkg/adminapi"
 )
 
@@ -54,7 +55,7 @@ func (a *App) assistQueryWithLLM(ctx context.Context, question string, domains [
 	settings, err := normalizeAssistantLLMSettings(raw)
 	if err != nil {
 		if raw.AllowFallback && fallbackPlan != nil && fallbackErr == nil {
-			fallbackPlan.Warnings = uniqueStrings(append(fallbackPlan.Warnings, fmt.Sprintf("No pude usar el modelo configurado; devolví el plan determinista: %v", err)))
+			fallbackPlan.Warnings = uniqueStrings(append(fallbackPlan.Warnings, fmt.Sprintf("Could not use the configured model; returned the deterministic plan instead: %v", err)))
 			return fallbackPlan, nil
 		}
 		return nil, err
@@ -86,7 +87,7 @@ func (a *App) assistQueryWithLLM(ctx context.Context, question string, domains [
 	})
 	if err != nil {
 		if settings.AllowFallback && fallbackPlan != nil && fallbackErr == nil {
-			fallbackPlan.Warnings = uniqueStrings(append(fallbackPlan.Warnings, fmt.Sprintf("El modelo %s no respondió como esperaba; devolví el plan determinista validado. Detalle: %v", settings.Model, err)))
+			fallbackPlan.Warnings = uniqueStrings(append(fallbackPlan.Warnings, fmt.Sprintf("Model %s did not respond as expected; returned the validated deterministic plan instead. Detail: %v", settings.Model, err)))
 			return fallbackPlan, nil
 		}
 		return nil, err
@@ -95,7 +96,7 @@ func (a *App) assistQueryWithLLM(ctx context.Context, question string, domains [
 	validatedSQL, err := a.validateAssistantGeneratedSQL(ctx, envelope.SQL, domains)
 	if err != nil {
 		if settings.AllowFallback && fallbackPlan != nil && fallbackErr == nil {
-			fallbackPlan.Warnings = uniqueStrings(append(fallbackPlan.Warnings, fmt.Sprintf("El SQL del modelo fue rechazado por las guardas de lectura; devolví el plan determinista. Detalle: %v", err)))
+			fallbackPlan.Warnings = uniqueStrings(append(fallbackPlan.Warnings, fmt.Sprintf("Model SQL was rejected by the read-only guards; returned the deterministic plan instead. Detail: %v", err)))
 			return fallbackPlan, nil
 		}
 		return nil, err
@@ -111,12 +112,12 @@ func (a *App) assistQueryWithLLM(ctx context.Context, question string, domains [
 	}
 	summary := strings.TrimSpace(envelope.Summary)
 	if summary == "" {
-		summary = fmt.Sprintf("Consulta generada por el modelo y validada como solo lectura sobre %s.", meta.DomainTableLabel())
+		summary = fmt.Sprintf("Model-generated query validated as read-only against %s.", meta.DomainTableLabel())
 	}
 	warnings := uniqueStrings(envelope.Warnings)
 	assumptions := uniqueStrings(envelope.Assumptions)
 	if fallbackSQL != "" {
-		assumptions = uniqueStrings(append(assumptions, "La salida del modelo se validó con el parser de ASQL antes de mostrarse."))
+		assumptions = uniqueStrings(append(assumptions, "The model output was validated with the ASQL parser before being shown."))
 	}
 
 	confidence := "medium"
@@ -224,6 +225,10 @@ func buildAssistantLLMPrompts(req assistantLLMPlanRequest) (string, string) {
 		"You are the SQL planner inside ASQL Studio.",
 		"Return exactly one read-only ASQL query using only the provided schema.",
 		"Allowed shape: SELECT or WITH ... SELECT. Never emit INSERT, UPDATE, DELETE, DDL, comments, or multiple statements.",
+		"Target the current ASQL subset only: SELECT, WITH, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, UNION/UNION ALL, and JOIN/CROSS JOIN/LEFT JOIN/RIGHT JOIN.",
+		"JOIN rules are strict: use exactly one equality in each ON clause (example: a.id = b.a_id). Do not use FULL OUTER JOIN, NATURAL JOIN, LATERAL, USING, or OR/AND inside JOIN ON predicates.",
+		"GROUP BY must list raw columns already available in the row shape. Do not GROUP BY computed expressions such as COALESCE(...), CASE ..., arithmetic, or function calls.",
+		"Prefer simple PostgreSQL-compatible subset syntax already documented by ASQL. If a request needs unsupported SQL, fall back to the closest valid ASQL query and explain the compromise in assumptions or warnings.",
 		"Prefer COUNT(*) AS total for counts and LIMIT 100 for open-ended row listings.",
 		"Return JSON only with keys: sql, summary, assumptions, warnings, mode.",
 		"The sql value must end with a semicolon.",
@@ -477,9 +482,9 @@ func decodeAssistantLLMEnvelope(raw string) (*assistantLLMPlanEnvelope, error) {
 	}
 	return &assistantLLMPlanEnvelope{
 		SQL:         sql,
-		Summary:     "Consulta generada por el modelo y recuperada sin el sobre JSON esperado.",
-		Warnings:    []string{"El modelo no devolvió el JSON solicitado; solo se recuperó el SQL."},
-		Assumptions: []string{"La respuesta del modelo se redujo a un único SQL antes de validarla."},
+		Summary:     "Model-generated query recovered without the expected JSON envelope.",
+		Warnings:    []string{"The model did not return the requested JSON; only the SQL was recovered."},
+		Assumptions: []string{"The model response was reduced to a single SQL statement before validation."},
 	}, nil
 }
 
@@ -577,6 +582,12 @@ func (a *App) validateAssistantGeneratedSQL(ctx context.Context, sql string, dom
 	if !strings.HasSuffix(trimmed, ";") {
 		trimmed += ";"
 	}
+	if err := validateAssistantSQLSubset(trimmed); err != nil {
+		return "", err
+	}
+	if _, err := parser.Parse(trimmed); err != nil {
+		return "", fmt.Errorf("generated SQL did not parse as supported ASQL: %w", err)
+	}
 	client := a.getLeaderClient()
 	if client == nil {
 		client = a.engine
@@ -587,6 +598,194 @@ func (a *App) validateAssistantGeneratedSQL(ctx context.Context, sql string, dom
 		}
 	}
 	return trimmed, nil
+}
+
+func validateAssistantSQLSubset(sql string) error {
+	if assistantHasFullJoin(sql) {
+		return fmt.Errorf("generated SQL uses FULL OUTER JOIN, which is not supported in ASQL")
+	}
+	if assistantHasUnsupportedJoinPredicate(sql) {
+		return fmt.Errorf("generated SQL uses an unsupported JOIN predicate; ASQL only supports a single equality in each JOIN ON clause")
+	}
+	if assistantHasComputedGroupBy(sql) {
+		return fmt.Errorf("generated SQL uses an unsupported GROUP BY expression; ASQL requires raw columns in GROUP BY")
+	}
+	return nil
+}
+
+func assistantHasFullJoin(sql string) bool {
+	upper := strings.ToUpper(sql)
+	return strings.Contains(upper, " FULL JOIN ") || strings.Contains(upper, " FULL OUTER JOIN ")
+}
+
+func assistantHasUnsupportedJoinPredicate(sql string) bool {
+	upper := sql
+	searchFrom := 0
+	for {
+		joinIndex := assistantFindTopLevelKeyword(upper, searchFrom, []string{" LEFT JOIN ", " RIGHT JOIN ", " INNER JOIN ", " CROSS JOIN ", " JOIN "})
+		if joinIndex < 0 {
+			return false
+		}
+		onIndex := assistantFindTopLevelLiteral(upper, joinIndex, " ON ")
+		if onIndex < 0 {
+			searchFrom = joinIndex + 1
+			continue
+		}
+		predicateStart := onIndex + len(" ON ")
+		predicateEnd := assistantFindTopLevelKeyword(upper, predicateStart, []string{" LEFT JOIN ", " RIGHT JOIN ", " INNER JOIN ", " CROSS JOIN ", " JOIN ", " WHERE ", " GROUP BY ", " HAVING ", " ORDER BY ", " LIMIT ", " OFFSET ", " UNION ALL ", " UNION ", ";"})
+		if predicateEnd < 0 {
+			predicateEnd = len(upper)
+		}
+		predicate := strings.TrimSpace(upper[predicateStart:predicateEnd])
+		if assistantPredicateHasBooleanConnector(predicate) || strings.Count(predicate, "=") != 1 {
+			return true
+		}
+		searchFrom = predicateEnd
+	}
+}
+
+func assistantHasComputedGroupBy(sql string) bool {
+	groupByIndex := assistantFindTopLevelLiteral(sql, 0, " GROUP BY ")
+	if groupByIndex < 0 {
+		return false
+	}
+	clauseStart := groupByIndex + len(" GROUP BY ")
+	clauseEnd := assistantFindTopLevelKeyword(sql, clauseStart, []string{" HAVING ", " ORDER BY ", " LIMIT ", " OFFSET ", " UNION ALL ", " UNION ", ";"})
+	if clauseEnd < 0 {
+		clauseEnd = len(sql)
+	}
+	for _, entry := range assistantSplitTopLevelCSV(sql[clauseStart:clauseEnd]) {
+		trimmed := strings.TrimSpace(entry)
+		if trimmed == "" {
+			continue
+		}
+		canonical := parserCanonicalIdentifier(trimmed)
+		if !assistantSimpleColumnPattern.MatchString(canonical) {
+			return true
+		}
+	}
+	return false
+}
+
+var assistantSimpleColumnPattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*(\.[a-z_][a-z0-9_]*)?$`)
+
+func assistantPredicateHasBooleanConnector(predicate string) bool {
+	return assistantFindTopLevelLiteral(predicate, 0, " OR ") >= 0 || assistantFindTopLevelLiteral(predicate, 0, " AND ") >= 0
+}
+
+func assistantFindTopLevelKeyword(sql string, start int, keywords []string) int {
+	best := -1
+	for _, keyword := range keywords {
+		idx := assistantFindTopLevelLiteral(sql, start, keyword)
+		if idx >= 0 && (best < 0 || idx < best) {
+			best = idx
+		}
+	}
+	return best
+}
+
+func assistantFindTopLevelLiteral(sql string, start int, needle string) int {
+	depth := 0
+	inString := false
+	for i := start; i < len(sql); i++ {
+		ch := sql[i]
+		if ch == '\'' {
+			if inString && i+1 < len(sql) && sql[i+1] == '\'' {
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		}
+		if depth != 0 {
+			continue
+		}
+		if needle == ";" {
+			if ch == ';' {
+				return i
+			}
+			continue
+		}
+		if i+len(needle) <= len(sql) && strings.EqualFold(sql[i:i+len(needle)], needle) {
+			return i
+		}
+	}
+	return -1
+}
+
+func assistantSplitTopLevelCSV(input string) []string {
+	depth := 0
+	inString := false
+	start := 0
+	parts := make([]string, 0, 4)
+	for i := 0; i < len(input); i++ {
+		ch := input[i]
+		if ch == '\'' {
+			if inString && i+1 < len(input) && input[i+1] == '\'' {
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				parts = append(parts, strings.TrimSpace(input[start:i]))
+				start = i + 1
+			}
+		}
+	}
+	parts = append(parts, strings.TrimSpace(input[start:]))
+	return parts
+}
+
+func parserCanonicalIdentifier(identifier string) string {
+	trimmed := strings.TrimSpace(identifier)
+	if trimmed == "" {
+		return ""
+	}
+	var result strings.Builder
+	result.Grow(len(trimmed))
+	inQuote := false
+	for i := 0; i < len(trimmed); i++ {
+		ch := trimmed[i]
+		if ch == '\'' {
+			inQuote = !inQuote
+			result.WriteByte(ch)
+			continue
+		}
+		if inQuote {
+			result.WriteByte(ch)
+			continue
+		}
+		if ch >= 'A' && ch <= 'Z' {
+			result.WriteByte(ch + ('a' - 'A'))
+			continue
+		}
+		result.WriteByte(ch)
+	}
+	return strings.TrimSpace(result.String())
 }
 
 func hasAssistantInternalSemicolon(sql string) bool {
