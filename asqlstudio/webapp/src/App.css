@@ -15103,29 +15103,6 @@ tr:hover .te-expand-btn { opacity: 1; }
   font-size: 11px;
 }
 
-.ws-assistant-examples {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.ws-assistant-chip {
-  border: 1px solid var(--border);
-  background: rgba(15, 23, 42, 0.45);
-  color: var(--text-secondary);
-  border-radius: 999px;
-  padding: 4px 8px;
-  font-size: 10px;
-  cursor: pointer;
-  transition: all var(--transition);
-}
-
-.ws-assistant-chip:hover {
-  color: var(--text-primary);
-  border-color: rgba(56, 189, 248, 0.4);
-  background: rgba(56, 189, 248, 0.08);
-}
-
 .ws-assistant-feedback {
   display: flex;
   align-items: flex-start;

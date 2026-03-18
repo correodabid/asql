@@ -12,12 +12,6 @@ type Props = {
   onClose: () => void
 }
 
-const EXAMPLES = [
-  '¿Cuántos users hay?',
-  'Últimos 20 orders',
-  'Users con email "alice@…"',
-]
-
 export function WorkspaceAssistant({ domain, busy, onInsertSQL, onRunSQL, onClose }: Props) {
   const initialLLM = readAssistantLLMPreferences()
   const [question, setQuestion] = useState('')
@@ -140,13 +134,6 @@ export function WorkspaceAssistant({ domain, busy, onInsertSQL, onRunSQL, onClos
               <IconPlay /> Run
             </button>
           </div>
-        </div>
-
-        {/* Examples */}
-        <div className="ws-assistant-examples">
-          {EXAMPLES.map((ex) => (
-            <button key={ex} className="ws-assistant-chip" onClick={() => setQuestion(ex)} disabled={isBusy}>{ex}</button>
-          ))}
         </div>
 
         {/* Error */}
