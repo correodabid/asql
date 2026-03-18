@@ -37,10 +37,32 @@ export namespace studioapp {
 	        this.label = source["label"];
 	    }
 	}
+	export class assistantLLMTransportCatalog {
+	    type: string;
+	    method?: string;
+	    path?: string;
+	    headers?: Record<string, string>;
+	    body?: any;
+	    response_text_paths?: string[];
+	
+	    static createFrom(source: any = {}) {
+	        return new assistantLLMTransportCatalog(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.type = source["type"];
+	        this.method = source["method"];
+	        this.path = source["path"];
+	        this.headers = source["headers"];
+	        this.body = source["body"];
+	        this.response_text_paths = source["response_text_paths"];
+	    }
+	}
 	export class assistantLLMProviderCatalog {
 	    id: string;
 	    label: string;
-	    transport: string;
+	    transport: assistantLLMTransportCatalog;
 	    default_base_url?: string;
 	    supports_custom_base_url?: boolean;
 	    supports_custom_model?: boolean;
@@ -58,7 +80,7 @@ export namespace studioapp {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.id = source["id"];
 	        this.label = source["label"];
-	        this.transport = source["transport"];
+	        this.transport = this.convertValues(source["transport"], assistantLLMTransportCatalog);
 	        this.default_base_url = source["default_base_url"];
 	        this.supports_custom_base_url = source["supports_custom_base_url"];
 	        this.supports_custom_model = source["supports_custom_model"];
@@ -145,6 +167,7 @@ export namespace studioapp {
 	        this.allow_fallback = source["allow_fallback"];
 	    }
 	}
+	
 	export class assistantQueryRequest {
 	    question: string;
 	    domains: string[];

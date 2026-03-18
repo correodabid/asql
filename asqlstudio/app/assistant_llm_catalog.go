@@ -9,8 +9,7 @@ import (
 )
 
 const (
-	assistantLLMTransportOllamaChat = "ollama-chat"
-	assistantLLMTransportOpenAIChat = "openai-chat"
+	assistantLLMTransportHTTPJSON = "http-json"
 
 	assistantLLMAPIKeyModeRequired = "required"
 	assistantLLMAPIKeyModeOptional = "optional"
@@ -31,18 +30,27 @@ type assistantLLMModelCatalog struct {
 	Label string `json:"label,omitempty"`
 }
 
+type assistantLLMTransportCatalog struct {
+	Type              string            `json:"type"`
+	Method            string            `json:"method,omitempty"`
+	Path              string            `json:"path,omitempty"`
+	Headers           map[string]string `json:"headers,omitempty"`
+	Body              interface{}       `json:"body,omitempty"`
+	ResponseTextPaths []string          `json:"response_text_paths,omitempty"`
+}
+
 type assistantLLMProviderCatalog struct {
-	ID                    string                     `json:"id"`
-	Label                 string                     `json:"label"`
-	Transport             string                     `json:"transport"`
-	DefaultBaseURL        string                     `json:"default_base_url,omitempty"`
-	SupportsCustomBaseURL bool                       `json:"supports_custom_base_url,omitempty"`
-	SupportsCustomModel   bool                       `json:"supports_custom_model,omitempty"`
-	ModelPlaceholder      string                     `json:"model_placeholder,omitempty"`
-	APIKeyMode            string                     `json:"api_key_mode,omitempty"`
-	APIKeyLabel           string                     `json:"api_key_label,omitempty"`
-	APIKeyPlaceholder     string                     `json:"api_key_placeholder,omitempty"`
-	Models                []assistantLLMModelCatalog `json:"models,omitempty"`
+	ID                    string                       `json:"id"`
+	Label                 string                       `json:"label"`
+	Transport             assistantLLMTransportCatalog `json:"transport"`
+	DefaultBaseURL        string                       `json:"default_base_url,omitempty"`
+	SupportsCustomBaseURL bool                         `json:"supports_custom_base_url,omitempty"`
+	SupportsCustomModel   bool                         `json:"supports_custom_model,omitempty"`
+	ModelPlaceholder      string                       `json:"model_placeholder,omitempty"`
+	APIKeyMode            string                       `json:"api_key_mode,omitempty"`
+	APIKeyLabel           string                       `json:"api_key_label,omitempty"`
+	APIKeyPlaceholder     string                       `json:"api_key_placeholder,omitempty"`
+	Models                []assistantLLMModelCatalog   `json:"models,omitempty"`
 }
 
 type assistantLLMCatalog struct {
@@ -97,7 +105,9 @@ func (c *assistantLLMCatalog) validate() error {
 		provider := &c.Providers[i]
 		provider.ID = strings.ToLower(strings.TrimSpace(provider.ID))
 		provider.Label = strings.TrimSpace(provider.Label)
-		provider.Transport = strings.TrimSpace(provider.Transport)
+		provider.Transport.Type = strings.ToLower(strings.TrimSpace(provider.Transport.Type))
+		provider.Transport.Method = strings.ToUpper(strings.TrimSpace(provider.Transport.Method))
+		provider.Transport.Path = strings.TrimSpace(provider.Transport.Path)
 		provider.DefaultBaseURL = strings.TrimSpace(provider.DefaultBaseURL)
 		provider.ModelPlaceholder = strings.TrimSpace(provider.ModelPlaceholder)
 		provider.APIKeyMode = strings.ToLower(strings.TrimSpace(provider.APIKeyMode))
@@ -116,10 +126,34 @@ func (c *assistantLLMCatalog) validate() error {
 		if provider.ID == c.DefaultProvider {
 			defaultFound = true
 		}
-		switch provider.Transport {
-		case assistantLLMTransportOllamaChat, assistantLLMTransportOpenAIChat:
+		switch provider.Transport.Type {
+		case assistantLLMTransportHTTPJSON:
+			if provider.Transport.Method == "" {
+				provider.Transport.Method = "POST"
+			}
+			if provider.Transport.Path == "" {
+				return fmt.Errorf("assistant llm catalog provider %q must declare transport.path", provider.ID)
+			}
+			if len(provider.Transport.ResponseTextPaths) == 0 {
+				return fmt.Errorf("assistant llm catalog provider %q must declare at least one response_text_path", provider.ID)
+			}
+			for key, value := range provider.Transport.Headers {
+				trimmedKey := strings.TrimSpace(key)
+				trimmedValue := strings.TrimSpace(value)
+				if trimmedKey == "" {
+					return fmt.Errorf("assistant llm catalog provider %q declares an empty transport header name", provider.ID)
+				}
+				delete(provider.Transport.Headers, key)
+				provider.Transport.Headers[trimmedKey] = trimmedValue
+			}
+			for idx, path := range provider.Transport.ResponseTextPaths {
+				provider.Transport.ResponseTextPaths[idx] = strings.TrimSpace(path)
+				if provider.Transport.ResponseTextPaths[idx] == "" {
+					return fmt.Errorf("assistant llm catalog provider %q contains an empty response_text_path", provider.ID)
+				}
+			}
 		default:
-			return fmt.Errorf("assistant llm catalog provider %q uses unsupported transport %q", provider.ID, provider.Transport)
+			return fmt.Errorf("assistant llm catalog provider %q uses unsupported transport type %q", provider.ID, provider.Transport.Type)
 		}
 		switch provider.APIKeyMode {
 		case "":

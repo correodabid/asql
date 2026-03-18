@@ -15,6 +15,39 @@ type fakeAssistantLLMClient struct {
 	seen []assistantLLMPlanRequest
 }
 
+func mustAssistantCatalog(t *testing.T) *assistantLLMCatalog {
+	t.Helper()
+	catalog, err := loadAssistantLLMCatalog()
+	if err != nil {
+		t.Fatalf("loadAssistantLLMCatalog: %v", err)
+	}
+	return catalog
+}
+
+func mustAssistantProvider(t *testing.T, description string, match func(assistantLLMProviderCatalog) bool) assistantLLMProviderCatalog {
+	t.Helper()
+	catalog := mustAssistantCatalog(t)
+	for _, provider := range catalog.Providers {
+		if match(provider) {
+			return provider
+		}
+	}
+	t.Fatalf("assistant provider not found for %s", description)
+	return assistantLLMProviderCatalog{}
+}
+
+func mustAssistantProviderModel(t *testing.T, provider assistantLLMProviderCatalog) string {
+	t.Helper()
+	if len(provider.Models) > 0 {
+		return provider.Models[0].ID
+	}
+	if provider.ModelPlaceholder != "" {
+		return provider.ModelPlaceholder
+	}
+	t.Fatalf("assistant provider %q has no model or placeholder", provider.ID)
+	return ""
+}
+
 func (f *fakeAssistantLLMClient) Plan(_ context.Context, req assistantLLMPlanRequest) (*assistantLLMPlanEnvelope, error) {
 	f.seen = append(f.seen, req)
 	if f.err != nil {
@@ -137,15 +170,19 @@ func TestAppAssistQueryUsesLLMWhenEnabled(t *testing.T) {
 		Mode:        "latest",
 	}}
 	app := &App{schemaInvoker: fakeSchema, assistantLLM: fakeLLM}
+	provider := mustAssistantProvider(t, "llm request without mandatory api key", func(provider assistantLLMProviderCatalog) bool {
+		return provider.APIKeyMode != assistantLLMAPIKeyModeRequired && provider.DefaultBaseURL != ""
+	})
+	model := mustAssistantProviderModel(t, provider)
 
 	resp, err := app.AssistQuery(assistantQueryRequest{
 		Question: "show me the latest 3 orders",
 		Domains:  []string{"default"},
 		LLM: &assistantLLMSettings{
 			Enabled:  true,
-			Provider: assistantLLMProviderOllama,
-			BaseURL:  "http://127.0.0.1:11434",
-			Model:    "llama3.2",
+			Provider: provider.ID,
+			BaseURL:  provider.DefaultBaseURL,
+			Model:    model,
 		},
 	})
 	if err != nil {
@@ -154,10 +191,10 @@ func TestAppAssistQueryUsesLLMWhenEnabled(t *testing.T) {
 	if resp.Planner != "llm" {
 		t.Fatalf("unexpected planner: %q", resp.Planner)
 	}
-	if resp.Provider != assistantLLMProviderOllama {
+	if resp.Provider != provider.ID {
 		t.Fatalf("unexpected provider: %q", resp.Provider)
 	}
-	if resp.Model != "llama3.2" {
+	if resp.Model != model {
 		t.Fatalf("unexpected model: %q", resp.Model)
 	}
 	if got, want := resp.SQL, "SELECT id, amount FROM orders ORDER BY created_at DESC LIMIT 3;"; got != want {
@@ -184,15 +221,18 @@ func TestAppAssistQueryFallsBackWhenLLMUnavailable(t *testing.T) {
 	}}
 	fakeLLM := &fakeAssistantLLMClient{err: fmt.Errorf("connection refused")}
 	app := &App{schemaInvoker: fakeSchema, assistantLLM: fakeLLM}
+	provider := mustAssistantProvider(t, "fallback request without mandatory api key", func(provider assistantLLMProviderCatalog) bool {
+		return provider.APIKeyMode != assistantLLMAPIKeyModeRequired && provider.DefaultBaseURL != ""
+	})
 
 	resp, err := app.AssistQuery(assistantQueryRequest{
 		Question: "find users with email \"alice@example.com\"",
 		Domains:  []string{"default"},
 		LLM: &assistantLLMSettings{
 			Enabled:       true,
-			Provider:      assistantLLMProviderOllama,
-			BaseURL:       "http://127.0.0.1:11434",
-			Model:         "llama3.2",
+			Provider:      provider.ID,
+			BaseURL:       provider.DefaultBaseURL,
+			Model:         mustAssistantProviderModel(t, provider),
 			AllowFallback: true,
 		},
 	})
@@ -211,60 +251,90 @@ func TestAppAssistQueryFallsBackWhenLLMUnavailable(t *testing.T) {
 }
 
 func TestAssistantLLMCatalogLoadsProvidersFromJSON(t *testing.T) {
-	catalog, err := loadAssistantLLMCatalog()
-	if err != nil {
-		t.Fatalf("loadAssistantLLMCatalog: %v", err)
-	}
-	if catalog.DefaultProvider != assistantLLMProviderOllama {
+	catalog := mustAssistantCatalog(t)
+	if catalog.DefaultProvider == "" {
 		t.Fatalf("unexpected default provider: %q", catalog.DefaultProvider)
 	}
-	ollama, ok := catalog.providerByID(assistantLLMProviderOllama)
+	defaultProvider, ok := catalog.providerByID(catalog.DefaultProvider)
 	if !ok {
-		t.Fatal("expected ollama provider in catalog")
+		t.Fatalf("expected default provider %q to exist", catalog.DefaultProvider)
 	}
-	if ollama.Transport != assistantLLMTransportOllamaChat {
-		t.Fatalf("unexpected ollama transport: %q", ollama.Transport)
+	if defaultProvider.Transport.Type != assistantLLMTransportHTTPJSON {
+		t.Fatalf("unexpected default transport type: %q", defaultProvider.Transport.Type)
 	}
-	if len(ollama.Models) == 0 {
-		t.Fatal("expected ollama models to be loaded from catalog")
+	hasRequiredAPIKeyProvider := false
+	hasOptionalAPIKeyProvider := false
+	for _, provider := range catalog.Providers {
+		if provider.Transport.Type != assistantLLMTransportHTTPJSON {
+			t.Fatalf("unexpected transport type for provider %q: %q", provider.ID, provider.Transport.Type)
+		}
+		if len(provider.Models) == 0 {
+			t.Fatalf("expected provider %q to expose catalog models", provider.ID)
+		}
+		switch provider.APIKeyMode {
+		case assistantLLMAPIKeyModeRequired:
+			hasRequiredAPIKeyProvider = true
+		case assistantLLMAPIKeyModeOptional, assistantLLMAPIKeyModeNone:
+			hasOptionalAPIKeyProvider = true
+		}
 	}
-	openAI, ok := catalog.providerByID(assistantLLMProviderOpenAI)
-	if !ok {
-		t.Fatal("expected openai provider in catalog")
+	if !hasRequiredAPIKeyProvider {
+		t.Fatal("expected at least one provider requiring an api key")
 	}
-	if openAI.APIKeyMode != assistantLLMAPIKeyModeRequired {
-		t.Fatalf("unexpected openai api key mode: %q", openAI.APIKeyMode)
+	if !hasOptionalAPIKeyProvider {
+		t.Fatal("expected at least one provider without mandatory api key")
 	}
 }
 
 func TestNormalizeAssistantLLMSettingsUsesCatalogDefaults(t *testing.T) {
+	provider := mustAssistantProvider(t, "provider with default base url", func(provider assistantLLMProviderCatalog) bool {
+		return provider.DefaultBaseURL != "" && (len(provider.Models) > 0 || provider.ModelPlaceholder != "")
+	})
 	settings, err := normalizeAssistantLLMSettings(assistantLLMSettings{
 		Enabled:  true,
-		Provider: assistantLLMProviderOllama,
-		Model:    "llama3.2",
+		Provider: provider.ID,
+		Model:    mustAssistantProviderModel(t, provider),
 	})
 	if err != nil {
 		t.Fatalf("normalizeAssistantLLMSettings: %v", err)
 	}
-	if settings.BaseURL != "http://127.0.0.1:11434" {
+	if settings.BaseURL != provider.DefaultBaseURL {
 		t.Fatalf("unexpected default base url: %q", settings.BaseURL)
-	}
-	if settings.Transport != assistantLLMTransportOllamaChat {
-		t.Fatalf("unexpected transport: %q", settings.Transport)
 	}
 }
 
 func TestNormalizeAssistantLLMSettingsRequiresCatalogConfiguredAPIKey(t *testing.T) {
+	provider := mustAssistantProvider(t, "provider requiring api key", func(provider assistantLLMProviderCatalog) bool {
+		return provider.APIKeyMode == assistantLLMAPIKeyModeRequired && (len(provider.Models) > 0 || provider.ModelPlaceholder != "")
+	})
 	_, err := normalizeAssistantLLMSettings(assistantLLMSettings{
 		Enabled:  true,
-		Provider: assistantLLMProviderOpenAI,
-		Model:    "gpt-4.1-mini",
+		Provider: provider.ID,
+		Model:    mustAssistantProviderModel(t, provider),
 	})
 	if err == nil {
 		t.Fatal("expected missing api key to be rejected")
 	}
 	if !strings.Contains(err.Error(), "api key is required") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNormalizeAssistantLLMSettingsSupportsRequiredAPIKeyProvider(t *testing.T) {
+	provider := mustAssistantProvider(t, "configured provider requiring api key", func(provider assistantLLMProviderCatalog) bool {
+		return provider.APIKeyMode == assistantLLMAPIKeyModeRequired && provider.DefaultBaseURL != "" && (len(provider.Models) > 0 || provider.ModelPlaceholder != "")
+	})
+	settings, err := normalizeAssistantLLMSettings(assistantLLMSettings{
+		Enabled:  true,
+		Provider: provider.ID,
+		Model:    mustAssistantProviderModel(t, provider),
+		APIKey:   "test-api-key",
+	})
+	if err != nil {
+		t.Fatalf("normalizeAssistantLLMSettings: %v", err)
+	}
+	if settings.BaseURL != provider.DefaultBaseURL {
+		t.Fatalf("unexpected provider base url: %q", settings.BaseURL)
 	}
 }
 

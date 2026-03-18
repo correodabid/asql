@@ -10,15 +10,11 @@ import (
 	"os"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	api "asql/pkg/adminapi"
-)
-
-const (
-	assistantLLMProviderOllama = "ollama"
-	assistantLLMProviderOpenAI = "openai"
 )
 
 var (
@@ -185,7 +181,6 @@ func normalizeAssistantLLMSettings(raw assistantLLMSettings) (assistantLLMSettin
 	if !ok {
 		return assistantLLMSettings{}, fmt.Errorf("unsupported LLM provider %q", settings.Provider)
 	}
-	settings.Transport = provider.Transport
 	if settings.BaseURL == "" {
 		settings.BaseURL = provider.DefaultBaseURL
 	}
@@ -209,16 +204,15 @@ func (c *httpAssistantLLMClient) Plan(ctx context.Context, req assistantLLMPlanR
 	}
 
 	systemPrompt, userPrompt := buildAssistantLLMPrompts(req)
-	var raw string
-	var err error
-	switch req.Settings.Transport {
-	case assistantLLMTransportOllamaChat:
-		raw, err = c.planWithOllama(ctx, req.Settings, systemPrompt, userPrompt)
-	case assistantLLMTransportOpenAIChat:
-		raw, err = c.planWithOpenAI(ctx, req.Settings, systemPrompt, userPrompt)
-	default:
-		return nil, fmt.Errorf("unsupported LLM transport %q for provider %q", req.Settings.Transport, req.Settings.Provider)
+	catalog, err := loadAssistantLLMCatalog()
+	if err != nil {
+		return nil, err
 	}
+	provider, ok := catalog.providerByID(req.Settings.Provider)
+	if !ok {
+		return nil, fmt.Errorf("unsupported LLM provider %q", req.Settings.Provider)
+	}
+	raw, err := c.planWithProvider(ctx, provider, req.Settings, systemPrompt, userPrompt)
 	if err != nil {
 		return nil, err
 	}
@@ -257,25 +251,46 @@ func buildAssistantLLMPrompts(req assistantLLMPlanRequest) (string, string) {
 	return system, user.String()
 }
 
-func (c *httpAssistantLLMClient) planWithOllama(ctx context.Context, settings assistantLLMSettings, systemPrompt, userPrompt string) (string, error) {
-	payload := map[string]interface{}{
-		"model":  settings.Model,
-		"stream": false,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userPrompt},
-		},
-		"options": map[string]float64{"temperature": settings.Temperature},
+func (c *httpAssistantLLMClient) planWithProvider(ctx context.Context, provider assistantLLMProviderCatalog, settings assistantLLMSettings, systemPrompt, userPrompt string) (string, error) {
+	switch provider.Transport.Type {
+	case assistantLLMTransportHTTPJSON:
+		return c.planWithHTTPJSON(ctx, provider, settings, systemPrompt, userPrompt)
+	default:
+		return "", fmt.Errorf("unsupported transport type %q for provider %q", provider.Transport.Type, provider.ID)
 	}
-	body, err := json.Marshal(payload)
+}
+
+func (c *httpAssistantLLMClient) planWithHTTPJSON(ctx context.Context, provider assistantLLMProviderCatalog, settings assistantLLMSettings, systemPrompt, userPrompt string) (string, error) {
+	ctxValues := map[string]interface{}{
+		"api_key":       settings.APIKey,
+		"model":         settings.Model,
+		"system_prompt": systemPrompt,
+		"temperature":   settings.Temperature,
+		"user_prompt":   userPrompt,
+	}
+	bodyValue, err := assistantApplyTemplate(provider.Transport.Body, ctxValues)
+	if err != nil {
+		return "", fmt.Errorf("render request body for provider %q: %w", provider.ID, err)
+	}
+	body, err := json.Marshal(bodyValue)
 	if err != nil {
 		return "", err
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, settings.BaseURL+"/api/chat", bytes.NewReader(body))
+	path, err := assistantExpandTemplateString(provider.Transport.Path, ctxValues)
+	if err != nil {
+		return "", fmt.Errorf("render request path for provider %q: %w", provider.ID, err)
+	}
+	httpReq, err := http.NewRequestWithContext(ctx, provider.Transport.Method, settings.BaseURL+path, bytes.NewReader(body))
 	if err != nil {
 		return "", err
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	for key, value := range provider.Transport.Headers {
+		expanded, err := assistantExpandTemplateString(value, ctxValues)
+		if err != nil {
+			return "", fmt.Errorf("render request header %q for provider %q: %w", key, provider.ID, err)
+		}
+		httpReq.Header.Set(key, expanded)
+	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -287,86 +302,162 @@ func (c *httpAssistantLLMClient) planWithOllama(ctx context.Context, settings as
 		return "", err
 	}
 	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("ollama returned %s: %s", resp.Status, strings.TrimSpace(string(rawBody)))
+		return "", fmt.Errorf("%s returned %s: %s", provider.ID, resp.Status, strings.TrimSpace(string(rawBody)))
 	}
-	var decoded struct {
-		Message struct {
-			Content string `json:"content"`
-		} `json:"message"`
-	}
-	if err := json.Unmarshal(rawBody, &decoded); err != nil {
-		return "", err
-	}
-	return decoded.Message.Content, nil
+	return assistantExtractResponseText(rawBody, provider.Transport.ResponseTextPaths)
 }
 
-func (c *httpAssistantLLMClient) planWithOpenAI(ctx context.Context, settings assistantLLMSettings, systemPrompt, userPrompt string) (string, error) {
-	payload := map[string]interface{}{
-		"model":       settings.Model,
-		"temperature": settings.Temperature,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userPrompt},
-		},
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, settings.BaseURL+"/chat/completions", bytes.NewReader(body))
-	if err != nil {
-		return "", err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-	httpReq.Header.Set("Authorization", "Bearer "+settings.APIKey)
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-	rawBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
-	if err != nil {
-		return "", err
-	}
-	if resp.StatusCode >= 300 {
-		return "", fmt.Errorf("openai-compatible endpoint returned %s: %s", resp.Status, strings.TrimSpace(string(rawBody)))
-	}
-	var decoded struct {
-		Choices []struct {
-			Message struct {
-				Content interface{} `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-	if err := json.Unmarshal(rawBody, &decoded); err != nil {
-		return "", err
-	}
-	if len(decoded.Choices) == 0 {
-		return "", fmt.Errorf("model response did not include any choices")
-	}
-	return openAIMessageText(decoded.Choices[0].Message.Content), nil
-}
-
-func openAIMessageText(content interface{}) string {
-	switch typed := content.(type) {
+func assistantApplyTemplate(value interface{}, ctx map[string]interface{}) (interface{}, error) {
+	switch typed := value.(type) {
+	case nil:
+		return nil, nil
 	case string:
-		return typed
+		return assistantTemplateValue(typed, ctx)
 	case []interface{}:
-		parts := make([]string, 0, len(typed))
+		out := make([]interface{}, 0, len(typed))
 		for _, item := range typed {
-			obj, ok := item.(map[string]interface{})
-			if !ok {
-				continue
+			rendered, err := assistantApplyTemplate(item, ctx)
+			if err != nil {
+				return nil, err
 			}
-			if text, ok := obj["text"].(string); ok {
-				parts = append(parts, text)
+			out = append(out, rendered)
+		}
+		return out, nil
+	case map[string]interface{}:
+		out := make(map[string]interface{}, len(typed))
+		for key, item := range typed {
+			rendered, err := assistantApplyTemplate(item, ctx)
+			if err != nil {
+				return nil, err
+			}
+			out[key] = rendered
+		}
+		return out, nil
+	default:
+		return value, nil
+	}
+}
+
+func assistantTemplateValue(template string, ctx map[string]interface{}) (interface{}, error) {
+	trimmed := strings.TrimSpace(template)
+	if strings.HasPrefix(trimmed, "${") && strings.HasSuffix(trimmed, "}") && !strings.Contains(trimmed[2:len(trimmed)-1], "${") {
+		key := strings.TrimSpace(trimmed[2 : len(trimmed)-1])
+		value, ok := ctx[key]
+		if !ok {
+			return nil, fmt.Errorf("unknown template variable %q", key)
+		}
+		return value, nil
+	}
+	return assistantExpandTemplateString(template, ctx)
+}
+
+func assistantExpandTemplateString(template string, ctx map[string]interface{}) (string, error) {
+	var out strings.Builder
+	remaining := template
+	for {
+		start := strings.Index(remaining, "${")
+		if start < 0 {
+			out.WriteString(remaining)
+			break
+		}
+		out.WriteString(remaining[:start])
+		remaining = remaining[start+2:]
+		end := strings.Index(remaining, "}")
+		if end < 0 {
+			return "", fmt.Errorf("unterminated template expression in %q", template)
+		}
+		key := strings.TrimSpace(remaining[:end])
+		value, ok := ctx[key]
+		if !ok {
+			return "", fmt.Errorf("unknown template variable %q", key)
+		}
+		out.WriteString(fmt.Sprint(value))
+		remaining = remaining[end+1:]
+	}
+	return out.String(), nil
+}
+
+func assistantExtractResponseText(rawBody []byte, paths []string) (string, error) {
+	var decoded interface{}
+	if err := json.Unmarshal(rawBody, &decoded); err != nil {
+		return "", err
+	}
+	parts := make([]string, 0)
+	for _, path := range paths {
+		values := assistantCollectJSONPath(decoded, strings.Split(path, "."))
+		for _, value := range values {
+			parts = append(parts, assistantFlattenText(value)...)
+		}
+	}
+	parts = uniqueStrings(parts)
+	if len(parts) == 0 {
+		return "", fmt.Errorf("model response did not include any text at configured response paths")
+	}
+	return strings.Join(parts, "\n"), nil
+}
+
+func assistantCollectJSONPath(value interface{}, segments []string) []interface{} {
+	if len(segments) == 0 {
+		return []interface{}{value}
+	}
+	segment := segments[0]
+	rest := segments[1:]
+	switch typed := value.(type) {
+	case map[string]interface{}:
+		next, ok := typed[segment]
+		if !ok {
+			return nil
+		}
+		return assistantCollectJSONPath(next, rest)
+	case []interface{}:
+		if segment == "*" {
+			out := make([]interface{}, 0)
+			for _, item := range typed {
+				out = append(out, assistantCollectJSONPath(item, rest)...)
+			}
+			return out
+		}
+		index := -1
+		for i := 0; i < len(segment); i++ {
+			if segment[i] < '0' || segment[i] > '9' {
+				index = -1
+				break
 			}
 		}
-		return strings.Join(parts, "\n")
-	default:
-		return ""
+		if segment != "" {
+			var err error
+			index, err = strconv.Atoi(segment)
+			if err == nil && index >= 0 && index < len(typed) {
+				return assistantCollectJSONPath(typed[index], rest)
+			}
+		}
 	}
+	return nil
+}
+
+func assistantFlattenText(value interface{}) []string {
+	switch typed := value.(type) {
+	case string:
+		text := strings.TrimSpace(typed)
+		if text == "" {
+			return nil
+		}
+		return []string{text}
+	case []interface{}:
+		out := make([]string, 0)
+		for _, item := range typed {
+			out = append(out, assistantFlattenText(item)...)
+		}
+		return out
+	case map[string]interface{}:
+		if text, ok := typed["text"]; ok {
+			return assistantFlattenText(text)
+		}
+		if content, ok := typed["content"]; ok {
+			return assistantFlattenText(content)
+		}
+	}
+	return nil
 }
 
 func decodeAssistantLLMEnvelope(raw string) (*assistantLLMPlanEnvelope, error) {
