@@ -457,11 +457,12 @@ func aggregateRows(rows []map[string]ast.Literal, plan planner.Plan, state *read
 			if _, isAggregate := aggregateSpecs[column]; isAggregate {
 				continue
 			}
+			expr, _ := stripColumnAlias(column)
 			if len(plan.GroupBy) == 0 {
-				return nil, fmt.Errorf("non-aggregated column %s requires GROUP BY", column)
+				return nil, fmt.Errorf("non-aggregated column %s requires GROUP BY", expr)
 			}
-			if _, ok := groupBySet[column]; !ok {
-				return nil, fmt.Errorf("non-aggregated column %s must appear in GROUP BY", column)
+			if _, ok := groupBySet[expr]; !ok {
+				return nil, fmt.Errorf("non-aggregated column %s must appear in GROUP BY", expr)
 			}
 		}
 	}
@@ -502,25 +503,26 @@ func aggregateRows(rows []map[string]ast.Literal, plan planner.Plan, state *read
 		projected := make(map[string]ast.Literal, len(plan.Columns))
 
 		for _, column := range plan.Columns {
+			expr, alias := stripColumnAlias(column)
 			if spec, ok := aggregateSpecs[column]; ok {
 				value, err := computeAggregate(spec, group.rows)
 				if err != nil {
 					return nil, err
 				}
-				projected[column] = value
+				projected[spec.OutputColumn] = value
 				continue
 			}
 
 			if len(plan.GroupBy) > 0 {
-				projected[column] = group.groupValue[column]
+				projected[alias] = group.groupValue[expr]
 				continue
 			}
 
 			if len(group.rows) == 0 {
-				projected[column] = ast.Literal{Kind: ast.LiteralNull}
+				projected[alias] = ast.Literal{Kind: ast.LiteralNull}
 				continue
 			}
-			projected[column] = valueOrNull(group.rows[0], column)
+			projected[alias] = valueOrNull(group.rows[0], expr)
 		}
 
 		if plan.Having != nil && !matchPredicate(projected, plan.Having, state, engine) {
@@ -547,7 +549,8 @@ func buildGroupKey(row map[string]ast.Literal, groupBy []string) string {
 }
 
 func parseAggregateSelectColumn(column string) (aggregateSelectSpec, bool) {
-	canonical := strings.TrimSpace(strings.ToLower(column))
+	expr, alias := stripColumnAlias(column)
+	canonical := strings.TrimSpace(strings.ToLower(expr))
 	open := strings.Index(canonical, "(")
 	close := strings.LastIndex(canonical, ")")
 	if open <= 0 || close <= open || close != len(canonical)-1 {
@@ -556,7 +559,7 @@ func parseAggregateSelectColumn(column string) (aggregateSelectSpec, bool) {
 
 	function := strings.TrimSpace(canonical[:open])
 	argument := strings.TrimSpace(canonical[open+1 : close])
-	spec := aggregateSelectSpec{OutputColumn: column, Function: function, Argument: argument}
+	spec := aggregateSelectSpec{OutputColumn: alias, Function: function, Argument: argument}
 
 	switch function {
 	case "count":

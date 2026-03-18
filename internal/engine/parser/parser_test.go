@@ -411,6 +411,23 @@ func TestParseSelectGroupByHavingSnapshot(t *testing.T) {
 	}
 }
 
+func TestParseSelectAggregateAliasSnapshot(t *testing.T) {
+	statement, err := Parse("SELECT COUNT(*) AS total FROM batch_orders;")
+	if err != nil {
+		t.Fatalf("parse select aggregate alias: %v", err)
+	}
+
+	bytes, err := json.Marshal(statement)
+	if err != nil {
+		t.Fatalf("marshal ast: %v", err)
+	}
+
+	expected := `{"columns":["count(*) as total"],"table_name":"batch_orders"}`
+	if string(bytes) != expected {
+		t.Fatalf("snapshot mismatch\n got: %s\nwant: %s", string(bytes), expected)
+	}
+}
+
 func TestParseBeginCrossDomainSnapshot(t *testing.T) {
 	statement, err := Parse("BEGIN CROSS DOMAIN loans, accounts, accounts;")
 	if err != nil {

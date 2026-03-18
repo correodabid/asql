@@ -89,6 +89,40 @@ type explainRequest struct {
 	Domains []string `json:"domains,omitempty"`
 }
 
+type assistantQueryRequest struct {
+	Question string   `json:"question"`
+	Domains  []string `json:"domains"`
+	LLM      *assistantLLMSettings `json:"llm,omitempty"`
+}
+
+type assistantLLMSettings struct {
+	Enabled       bool    `json:"enabled,omitempty"`
+	Provider      string  `json:"provider,omitempty"`
+	BaseURL       string  `json:"base_url,omitempty"`
+	Model         string  `json:"model,omitempty"`
+	APIKey        string  `json:"api_key,omitempty"`
+	Temperature   float64 `json:"temperature,omitempty"`
+	AllowFallback bool    `json:"allow_fallback,omitempty"`
+}
+
+type assistantQueryResponse struct {
+	Status         string   `json:"status"`
+	Question       string   `json:"question"`
+	Domain         string   `json:"domain"`
+	Mode           string   `json:"mode"`
+	Planner        string   `json:"planner,omitempty"`
+	Provider       string   `json:"provider,omitempty"`
+	Model          string   `json:"model,omitempty"`
+	Summary        string   `json:"summary"`
+	SQL            string   `json:"sql"`
+	PrimaryTable   string   `json:"primary_table,omitempty"`
+	MatchedTables  []string `json:"matched_tables,omitempty"`
+	MatchedColumns []string `json:"matched_columns,omitempty"`
+	Assumptions    []string `json:"assumptions,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
+	Confidence     string   `json:"confidence,omitempty"`
+}
+
 type clusterGroupStatus struct {
 	Group        string `json:"group"`
 	LeaderID     string `json:"leader_id"`

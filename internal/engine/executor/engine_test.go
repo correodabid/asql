@@ -2708,6 +2708,55 @@ func TestAggregateGroupByHavingDeterministic(t *testing.T) {
 	}
 }
 
+func TestAggregateAliasProjection(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "aggregate-alias-projection.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	if _, err := engine.Execute(ctx, session, "BEGIN DOMAIN accounts"); err != nil {
+		t.Fatalf("begin domain: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE batch_orders (id INT PRIMARY KEY, amount INT)"); err != nil {
+		t.Fatalf("create batch_orders table: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "INSERT INTO batch_orders (id, amount) VALUES (1, 10)"); err != nil {
+		t.Fatalf("insert 1: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "INSERT INTO batch_orders (id, amount) VALUES (2, 20)"); err != nil {
+		t.Fatalf("insert 2: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "COMMIT"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT COUNT(*) AS total FROM batch_orders", []string{"accounts"}, 8192)
+	if err != nil {
+		t.Fatalf("aggregate alias query: %v", err)
+	}
+
+	if len(result.Rows) != 1 {
+		t.Fatalf("unexpected aggregate row count: got %d want 1", len(result.Rows))
+	}
+	row := result.Rows[0]
+	if row["total"].NumberValue != 2 {
+		t.Fatalf("unexpected total: got %d want 2", row["total"].NumberValue)
+	}
+	if _, ok := row["count(*) as total"]; ok {
+		t.Fatalf("expected aliased aggregate output to use alias only, got row keys %+v", row)
+	}
+}
+
 func TestAggregateHavingArithmeticExpression(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "aggregate-having-arithmetic.wal")

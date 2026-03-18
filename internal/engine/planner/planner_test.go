@@ -447,6 +447,28 @@ func TestBuildSelectGroupByHavingPlanSnapshot(t *testing.T) {
 	}
 }
 
+func TestBuildSelectAggregateAliasPlanSnapshot(t *testing.T) {
+	statement, err := parser.Parse("SELECT COUNT(*) AS total FROM batch_orders")
+	if err != nil {
+		t.Fatalf("parse select aggregate alias: %v", err)
+	}
+
+	plan, err := Build(statement)
+	if err != nil {
+		t.Fatalf("build plan: %v", err)
+	}
+
+	bytes, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("marshal plan: %v", err)
+	}
+
+	expected := `{"operation":"select","table_name":"batch_orders","columns":["count(*) as total"]}`
+	if string(bytes) != expected {
+		t.Fatalf("snapshot mismatch\n got: %s\nwant: %s", string(bytes), expected)
+	}
+}
+
 func TestBuildForDomainRejectsCrossDomainTable(t *testing.T) {
 	statement, err := parser.Parse("SELECT id FROM loans.users WHERE id = 10")
 	if err != nil {

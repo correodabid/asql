@@ -47,6 +47,7 @@ type App struct {
 	dataDir          string
 	txMu             sync.Mutex
 	txClients        map[string]*engineClient
+	assistantLLM     assistantLLMClient
 }
 
 // newApp constructs an App ready for wails.Run.
@@ -68,6 +69,7 @@ func newApp(engine *engineClient, pgwireEndpoint string, follower *engineClient,
 		adminToken:       strings.TrimSpace(adminToken),
 		dataDir:          strings.TrimSpace(dataDir),
 		txClients:        make(map[string]*engineClient),
+		assistantLLM:     &httpAssistantLLMClient{httpClient: &http.Client{Timeout: 45 * time.Second}},
 	}
 }
 

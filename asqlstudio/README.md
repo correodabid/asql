@@ -8,6 +8,8 @@ Source of truth:
 - Frontend source lives under `webapp/`.
 - `webapp/src/` is the canonical UI source.
 
+Studio also includes an “Ask your data” assistant in the Workspace. By default it can run as a deterministic schema-aware planner, and it now also supports model-guided planning through a local Ollama endpoint or an OpenAI-compatible chat endpoint. In both modes Studio keeps the final step deterministic: it validates the generated SQL against the ASQL parser, rejects non-read statements, surfaces assumptions/warnings, and lets the user review, insert, or run the resulting read query.
+
 Generated artifacts:
 
 - `app/web/` is a generated embed target produced by `npm run build` from `webapp/`.
