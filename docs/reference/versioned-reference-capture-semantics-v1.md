@@ -62,7 +62,7 @@ A realistic multi-domain seed can now use ordinary inserts without manual raw
 BEGIN CROSS DOMAIN billing, clinical, patients;
 
 UPDATE patients.patients
-SET full_name = 'Ana López García'
+SET full_name = 'Anna Lopez'
 WHERE id = 'patient-1';
 
 UPDATE clinical.admissions

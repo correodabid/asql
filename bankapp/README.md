@@ -1,120 +1,120 @@
 # BankApp on ASQL
 
-Aplicación de referencia para explorar la adopción de ASQL en un sistema de gestión bancaria.
+Reference application for exploring ASQL adoption in a banking management system.
 
-Esta app no es una ruta paralela de onboarding.
-Debe leerse como una extensión práctica de [docs/getting-started/README.md](../docs/getting-started/README.md), especialmente después de los capítulos 04–09.
+This app is not a parallel onboarding path.
+It should be read as a practical extension of [docs/getting-started/README.md](../docs/getting-started/README.md), especially after chapters 04–09.
 
-El objetivo no es modelar un producto bancario completo, sino forzar un recorrido de adopción profundo sobre capacidades propias de ASQL:
+The goal is not to model a complete banking product, but to force a deep adoption path over core ASQL capabilities:
 
-- dominios explícitos,
-- transacciones `DOMAIN` y `CROSS DOMAIN`,
-- entidades y versionado,
+- explicit domains,
+- `DOMAIN` and `CROSS DOMAIN` transactions,
+- entities and versioning,
 - `VERSIONED FOREIGN KEY`,
-- consultas `AS OF LSN`,
+- `AS OF LSN` queries,
 - `FOR HISTORY`,
-- helpers temporales como `current_lsn()`, `row_lsn(...)`, `entity_version(...)` y `resolve_reference(...)`,
-- fixtures deterministas.
+- temporal helpers such as `current_lsn()`, `row_lsn(...)`, `entity_version(...)`, and `resolve_reference(...)`,
+- deterministic fixtures.
 
 ## Responsibility boundary
 
-- **Engine-owned concern**: dominios explícitos, referencias versionadas, historia, snapshots `AS OF LSN`, fixtures deterministas.
-- **App-owned concern**: reglas de riesgo, semántica de aprobación, vocabulario regulatorio, significado de eventos y políticas de negocio.
-- **Recommended integration pattern**: usar la muestra para aprender a componer primitivas de ASQL, no para convertir ASQL en un producto bancario vertical.
+- **Engine-owned concern**: explicit domains, versioned references, history, `AS OF LSN` snapshots, deterministic fixtures.
+- **App-owned concern**: risk rules, approval semantics, regulatory vocabulary, event meaning, and business policies.
+- **Recommended integration pattern**: use the sample to learn how to compose ASQL primitives, not to turn ASQL into a vertical banking product.
 
-## Qué incluye
+## What it includes
 
-- [main.go](main.go): ejecutable Go que crea esquema, carga escenario y lanza inspección temporal.
-- [scenario.go](scenario.go): definición determinista del escenario.
-- [tx_helpers.go](tx_helpers.go): patrón Go de helper para `DOMAIN` y `CROSS DOMAIN` sin esconder la frontera transaccional.
-- [fixtures/banking-core-demo-v1.json](fixtures/banking-core-demo-v1.json): fixture reproducible para validar y cargar con `asqlctl`.
-- [FRICTION_LOG.md](FRICTION_LOG.md): documento de fricciones tecnológicas encontradas al adoptar ASQL.
+- [main.go](main.go): Go executable that creates the schema, loads the scenario, and runs temporal inspection.
+- [scenario.go](scenario.go): deterministic scenario definition.
+- [tx_helpers.go](tx_helpers.go): Go helper pattern for `DOMAIN` and `CROSS DOMAIN` without hiding the transactional boundary.
+- [fixtures/banking-core-demo-v1.json](fixtures/banking-core-demo-v1.json): reproducible fixture for validation and loading with `asqlctl`.
+- [FRICTION_LOG.md](FRICTION_LOG.md): document describing the technology frictions encountered while adopting ASQL.
 
-## Cómo usar esta app dentro del onboarding
+## How to use this app in the onboarding flow
 
-Orden recomendado:
+Recommended order:
 
-1. recorrer [docs/getting-started/04-domains-and-transactions.md](../docs/getting-started/04-domains-and-transactions.md),
-2. recorrer [docs/getting-started/05-time-travel-and-history.md](../docs/getting-started/05-time-travel-and-history.md),
-3. recorrer [docs/getting-started/06-entities-and-versioned-references.md](../docs/getting-started/06-entities-and-versioned-references.md),
-4. recorrer [docs/getting-started/07-fixtures-and-seeding.md](../docs/getting-started/07-fixtures-and-seeding.md),
-5. revisar las convenciones compactas de adopción en [docs/getting-started/10-adoption-playbook.md](../docs/getting-started/10-adoption-playbook.md),
-6. usar esta app como ejemplo profundo que combina todo lo anterior.
+1. read [docs/getting-started/04-domains-and-transactions.md](../docs/getting-started/04-domains-and-transactions.md),
+2. read [docs/getting-started/05-time-travel-and-history.md](../docs/getting-started/05-time-travel-and-history.md),
+3. read [docs/getting-started/06-entities-and-versioned-references.md](../docs/getting-started/06-entities-and-versioned-references.md),
+4. read [docs/getting-started/07-fixtures-and-seeding.md](../docs/getting-started/07-fixtures-and-seeding.md),
+5. review the compact adoption conventions in [docs/getting-started/10-adoption-playbook.md](../docs/getting-started/10-adoption-playbook.md),
+6. use this app as a deeper example that combines everything above.
 
-## Dominios usados
+## Domains used
 
-- `identity`: clientes y contactos.
-- `ledger`: cuentas y apuntes contables.
-- `payments`: solicitudes y eventos de transferencia.
-- `risk`: revisiones de riesgo.
+- `identity`: customers and contacts.
+- `ledger`: accounts and ledger entries.
+- `payments`: transfer requests and events.
+- `risk`: risk reviews.
 
-## Flujo que se ejercita
+## Flow exercised
 
-1. alta de dos clientes en `identity`,
-2. apertura de cuentas en `ledger`,
-3. creación de una transferencia en `payments` con referencias versionadas a cliente y cuentas,
-4. aprobación en `risk`,
-5. liquidación en `payments` + `ledger`,
-6. actualización posterior del cliente para demostrar separación entre snapshot capturado y estado actual.
+1. register two customers in `identity`,
+2. open accounts in `ledger`,
+3. create a transfer in `payments` with versioned references to the customer and accounts,
+4. approve it in `risk`,
+5. settle it in `payments` + `ledger`,
+6. update the customer afterwards to demonstrate separation between the captured snapshot and the current state.
 
-## Arranque local
+## Local startup
 
-### 1. Levantar ASQL
+### 1. Start ASQL
 
-Desde la raíz del repositorio:
+From the repository root:
 
 ```bash
 go run ./cmd/asqld -addr :5433 -data-dir .asql-bankapp
 ```
 
-### 2. Ejecutar la aplicación
+### 2. Run the application
 
-En otra terminal:
+In another terminal:
 
 ```bash
 go run ./bankapp -pgwire 127.0.0.1:5433 -mode all
 ```
 
-`-mode all` hace tres cosas:
+`-mode all` does three things:
 
-- aplica el esquema,
-- ejecuta el escenario,
-- imprime lecturas actuales e históricas.
+- applies the schema,
+- executes the scenario,
+- prints current and historical reads.
 
-También puedes usar:
+You can also use:
 
 - `-mode schema`
 - `-mode scenario`
 - `-mode inspect`
 - `-mode print-sql`
 
-Importante: `schema` y `all` están pensados para un `data-dir` fresco.
+Important: `schema` and `all` are intended for a fresh `data-dir`.
 
-## Flujo fixture-first
+## Fixture-first flow
 
-Validar fixture:
+Validate the fixture:
 
 ```bash
 go run ./cmd/asqlctl -command fixture-validate -fixture-file bankapp/fixtures/banking-core-demo-v1.json
 ```
 
-Cargar fixture:
+Load the fixture:
 
 ```bash
 go run ./cmd/asqlctl -command fixture-load -pgwire 127.0.0.1:5433 -fixture-file bankapp/fixtures/banking-core-demo-v1.json
 ```
 
-## Qué observar
+## What to observe
 
-Tras ejecutar `-mode all`, conviene fijarse en:
+After running `-mode all`, pay attention to:
 
-- la obligación de declarar los dominios antes de cada unidad de trabajo,
-- las columnas de captura temporal (`customer_version`, `source_account_version`, `destination_account_version`, `transfer_version`),
-- la diferencia entre el estado actual y el estado `AS OF LSN`,
-- el uso de `FOR HISTORY` para explicar una transición,
-- cómo `resolve_reference(...)` devuelve el token temporal actual de una fila o entidad.
+- the need to declare domains before each unit of work,
+- the temporal capture columns (`customer_version`, `source_account_version`, `destination_account_version`, `transfer_version`),
+- the difference between the current state and the `AS OF LSN` state,
+- the use of `FOR HISTORY` to explain a transition,
+- how `resolve_reference(...)` returns the current temporal token for a row or entity.
 
-## Consultas manuales útiles
+## Useful manual queries
 
 ```sql
 SELECT current_lsn();
@@ -126,7 +126,7 @@ SELECT resolve_reference('identity.customers', 'cust-001');
 SELECT * FROM payments.transfer_requests FOR HISTORY WHERE id = 'tr-001';
 ```
 
-## Lectura recomendada
+## Recommended reading
 
 - [docs/getting-started/04-domains-and-transactions.md](../docs/getting-started/04-domains-and-transactions.md)
 - [docs/getting-started/05-time-travel-and-history.md](../docs/getting-started/05-time-travel-and-history.md)
@@ -134,4 +134,4 @@ SELECT * FROM payments.transfer_requests FOR HISTORY WHERE id = 'tr-001';
 - [docs/getting-started/07-fixtures-and-seeding.md](../docs/getting-started/07-fixtures-and-seeding.md)
 - [docs/getting-started/09-go-sdk-and-integration.md](../docs/getting-started/09-go-sdk-and-integration.md)
 
-Si el equipo duda sobre `ROOT` e `INCLUDES`, revisar el checklist en [docs/getting-started/06-entities-and-versioned-references.md](../docs/getting-started/06-entities-and-versioned-references.md).
+If the team is unsure about `ROOT` and `INCLUDES`, review the checklist in [docs/getting-started/06-entities-and-versioned-references.md](../docs/getting-started/06-entities-and-versioned-references.md).

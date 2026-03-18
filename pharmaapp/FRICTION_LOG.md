@@ -1,141 +1,141 @@
 # Pharma Manufacturing App – ASQL Friction Log
 
-## Objetivo
+## Objective
 
-Este documento recoge fricciones detectadas al construir una aplicación de referencia que usa ASQL de forma intensa en un contexto de trazabilidad fuerte.
+This document captures frictions observed while building a reference application that uses ASQL intensively in a strong-traceability context.
 
-El foco es exclusivamente tecnológico:
+The focus is strictly technological:
 
-- fricciones del motor,
-- de su modelo mental,
-- de su superficie SQL/pgwire,
-- de su ergonomía de integración,
-- y de su workflow operativo.
+- engine friction,
+- mental-model friction,
+- SQL/pgwire surface friction,
+- integration ergonomics,
+- and operational workflow friction.
 
-No se consideran fricciones propias del dominio pharma.
-Tampoco se usan estas observaciones para pedir que ASQL absorba semántica regulatoria o vocabulario GxP.
+Pharma-domain friction is intentionally out of scope.
+These observations are also not meant to argue that ASQL should absorb regulatory semantics or GxP vocabulary.
 
-## Qué se forzó en la muestra
+## What the sample deliberately forced
 
-La muestra usa deliberadamente:
+The sample deliberately uses:
 
-- 5 dominios explícitos,
-- transacciones `BEGIN DOMAIN ...` y `BEGIN CROSS DOMAIN ...`,
-- entidades (`CREATE ENTITY`),
+- 5 explicit domains,
+- `BEGIN DOMAIN ...` and `BEGIN CROSS DOMAIN ...` transactions,
+- entities (`CREATE ENTITY`),
 - `VERSIONED FOREIGN KEY`,
-- helpers temporales,
+- temporal helpers,
 - `FOR HISTORY`,
 - `AS OF LSN`,
-- fixture determinista,
-- integración Go vía pgwire con `pgx`,
-- un caso donde la aplicación necesita explicar qué recipe, qué lotes y qué versión de batch quedaron realmente capturados.
+- deterministic fixtures,
+- Go integration via pgwire with `pgx`,
+- a case where the application needs to explain exactly which recipe, which lots, and which batch version were actually captured.
 
-Eso hace visible dónde un equipo sufrirá durante las primeras semanas de adopción.
+That makes it visible where a team will struggle during the first weeks of adoption.
 
-## Cómo leer este log
+## How to read this log
 
-Este log no intenta demostrar que ASQL sea inadecuado para el caso.
-Intenta identificar qué partes del coste de adopción pertenecen realmente al motor y, por tanto, deberían responderse con una de estas salidas de producto:
+This log does not try to prove that ASQL is a poor fit for the use case.
+It tries to identify which adoption costs truly belong to the engine and should therefore be answered with one of these product outputs:
 
-- mejores primitivas,
-- mejores diagnósticos,
-- mejor documentación,
-- mejor tooling,
-- mejores SDKs o patrones de integración,
-- mejor observabilidad orientada a adopción.
+- better primitives,
+- better diagnostics,
+- better documentation,
+- better tooling,
+- better SDKs or integration patterns,
+- better adoption-oriented observability.
 
-La regla de lectura es simple:
+The reading rule is simple:
 
-- si la fricción exige más claridad o ergonomía sobre fronteras, historia, determinismo o referencias temporales, probablemente es fricción de ASQL,
-- si la fricción exige vocabulario regulatorio, workflow sectorial o semántica de negocio, no pertenece al motor.
+- if the friction demands more clarity or ergonomics around boundaries, history, determinism, or temporal references, it is probably ASQL friction,
+- if the friction demands regulatory vocabulary, sector workflows, or business semantics, it does not belong in the engine.
 
-## Fricciones observadas
+## Observed frictions
 
-### 1. La frontera transaccional deja de ser una decisión invisible
+### 1. The transactional boundary stops being an invisible decision
 
-**Dónde aparece**
+**Where it appears**
 
-La app necesita decidir en cada operación si el trabajo vive en un solo dominio o si debe usar `CROSS DOMAIN` entre `recipe`, `inventory`, `execution`, `quality` y `compliance`.
+The app must decide on every operation whether the work lives in a single domain or should use `CROSS DOMAIN` across `recipe`, `inventory`, `execution`, `quality`, and `compliance`.
 
-**Por qué es fricción de ASQL**
+**Why this is ASQL friction**
 
-Es una propiedad central del producto: ASQL exige fronteras explícitas.
-No es un detalle del ejemplo.
+This is a central property of the product: ASQL requires explicit boundaries.
+It is not a detail of the sample.
 
-**Impacto en adopción**
+**Adoption impact**
 
-- obliga a rediseñar pronto la capa de servicios,
-- hace visibles decisiones que muchos equipos hoy esconden dentro de repositorios u ORMs,
-- aumenta la necesidad de helpers de transacción desde el primer sprint.
+- forces early redesign of the service layer,
+- makes visible decisions that many teams currently hide inside repositories or ORMs,
+- increases the need for transaction helpers from the very first sprint.
 
-**Oportunidad de producto**
+**Product opportunity**
 
-- patrones oficiales para helpers de scope transaccional,
-- heurísticas y métricas para detectar sobreuso de `CROSS DOMAIN`,
-- guía breve para descubrir primeras fronteras útiles.
+- official patterns for transactional-scope helpers,
+- heuristics and metrics for detecting `CROSS DOMAIN` overuse,
+- a short guide for discovering the first useful boundaries.
 
-**Prioridad**: P0
-
----
-
-### 2. El versionado temporal invade el esquema físico desde el día uno
-
-**Dónde aparece**
-
-Aparecen columnas explícitas como `recipe_version`, `lot_version`, `batch_version` y `deviation_version` en tablas de trabajo normales.
-
-**Por qué es fricción de ASQL**
-
-La semántica temporal no es un añadido solo de consulta.
-Modifica cómo se modelan tablas, migraciones y referencias.
-
-**Impacto en adopción**
-
-- el equipo debe decidir cuándo capturar versión de entidad y cuándo `LSN` de fila,
-- el esquema incorpora columnas técnicas poco familiares,
-- sube el coste de revisión de diseño porque la historia futura depende del shape actual.
-
-**Oportunidad de producto**
-
-- plantillas de esquema para referencias versionadas,
-- linters o sugerencias para `VERSIONED FOREIGN KEY`,
-- guía comparativa entre referencia normal, referencia row-based y referencia entity-based.
-
-**Prioridad**: P0
+**Priority**: P0
 
 ---
 
-### 3. `CREATE ENTITY` aporta claridad, pero obliga a un modelado más maduro del que muchos equipos tienen al inicio
+### 2. Temporal versioning invades the physical schema from day one
 
-**Dónde aparece**
+**Where it appears**
 
-Hay que decidir pronto que `master_recipes`, `material_lots`, `batch_orders` y `deviations` son raíces válidas, y qué tablas deben entrar en `INCLUDES`.
+Explicit columns such as `recipe_version`, `lot_version`, `batch_version`, and `deviation_version` appear in ordinary working tables.
 
-**Por qué es fricción de ASQL**
+**Why this is ASQL friction**
 
-ASQL ofrece una capa agregada potente, pero no existe una traducción automática desde un esquema relacional convencional.
+Temporal semantics are not just a query-time add-on.
+They change how tables, migrations, and references are modeled.
 
-**Impacto en adopción**
+**Adoption impact**
 
-- retrasa a equipos que aún no dominan sus agregados,
-- puede fijar entidades malas demasiado pronto,
-- mezcla diseño lógico y estrategia de depuración histórica en la misma conversación.
+- the team must decide when to capture entity version and when to capture row `LSN`,
+- the schema gains technical columns that feel unfamiliar,
+- design-review cost increases because future history depends on the current shape.
 
-**Oportunidad de producto**
+**Product opportunity**
 
-- checklist más operativo para elegir `ROOT` e `INCLUDES`,
-- validaciones de entidades sospechosamente grandes o ambiguas,
-- ejemplos de modelado en varias industrias sin empujar verticalización del motor.
+- schema templates for versioned references,
+- linters or suggestions for `VERSIONED FOREIGN KEY`,
+- comparative guidance between ordinary references, row-based references, and entity-based references.
 
-**Prioridad**: P1
+**Priority**: P0
 
 ---
 
-### 4. La explicación histórica real sigue siendo demasiado manual para el valor que promete ASQL
+### 3. `CREATE ENTITY` adds clarity, but demands more mature modeling than many teams have at the start
 
-**Dónde aparece**
+**Where it appears**
 
-Para explicar un batch hay que combinar manualmente:
+Teams must decide early that `master_recipes`, `material_lots`, `batch_orders`, and `deviations` are valid roots, and which tables belong in `INCLUDES`.
+
+**Why this is ASQL friction**
+
+ASQL offers a powerful aggregate layer, but there is no automatic translation from a conventional relational schema.
+
+**Adoption impact**
+
+- slows down teams that do not yet understand their aggregates,
+- can lock in bad entities too early,
+- mixes logical design and historical-debugging strategy into the same discussion.
+
+**Product opportunity**
+
+- a more operational checklist for choosing `ROOT` and `INCLUDES`,
+- validations for suspiciously large or ambiguous entities,
+- modeling examples across industries without pushing engine verticalization.
+
+**Priority**: P1
+
+---
+
+### 4. Real historical explanation is still too manual for the value ASQL promises
+
+**Where it appears**
+
+To explain a batch, the app must combine manually:
 
 - `current_lsn()`,
 - `row_lsn(...)`,
@@ -145,273 +145,273 @@ Para explicar un batch hay que combinar manualmente:
 - `FOR HISTORY`,
 - `AS OF LSN`.
 
-**Por qué es fricción de ASQL**
+**Why this is ASQL friction**
 
-Estas capacidades son parte del corazón del producto, pero hoy la composición recae en quien integra.
+These capabilities are part of the core product value, but composition still falls on the integrator.
 
-**Impacto en adopción**
+**Adoption impact**
 
-- cuesta convertir primitivas potentes en playbooks diarios,
-- la depuración histórica se siente experta en vez de normal,
-- cada equipo acaba inventando su propio lenguaje de inspección temporal.
+- it is hard to turn powerful primitives into daily playbooks,
+- historical debugging feels expert-only instead of normal,
+- every team ends up inventing its own temporal inspection language.
 
-**Oportunidad de producto**
+**Product opportunity**
 
-- cookbook más prescriptivo,
-- helpers SDK para snapshot + history + explanation,
-- recorridos de Studio más guiados para análisis temporal multi-tabla.
+- a more prescriptive cookbook,
+- SDK helpers for snapshot + history + explanation,
+- more guided Studio flows for multi-table temporal analysis.
 
-**Prioridad**: P1
-
----
-
-### 5. La promesa fixture-first es correcta, pero el coste de autoría todavía es alto
-
-**Dónde aparece**
-
-El fixture de la muestra es claro y determinista, pero escribirlo exige ordenar dominios, dependencias, referencias versionadas y pasos de transacción con mucho detalle.
-
-**Por qué es fricción de ASQL**
-
-El determinismo estricto es una propiedad del producto.
-Eso endurece el formato y elimina atajos comunes de seeds informales.
-
-**Impacto en adopción**
-
-- curva de aprendizaje mayor para equipos que vienen de SQL scripts u ORMs,
-- dificultad para mantener fixtures grandes durante cambios de esquema,
-- más coste inicial antes de que la recompensa de reproducibilidad se vuelva evidente.
-
-**Oportunidad de producto**
-
-- tooling para derivar fixtures desde escenarios locales controlados,
-- validaciones con feedback más pedagógico,
-- starter packs fixture-first por tipo de integración.
-
-**Prioridad**: P1
+**Priority**: P1
 
 ---
 
-### 6. La compatibilidad pgwire ayuda, pero todavía obliga a pensar activamente en el subconjunto soportado
+### 5. The fixture-first promise is right, but authoring cost is still high
 
-**Dónde aparece**
+**Where it appears**
 
-La integración Go con `pgx` funciona, pero la app sigue necesitando asumir un subconjunto PostgreSQL concreto y detalles como `simple_protocol`.
+The sample fixture is clear and deterministic, but writing it requires careful ordering of domains, dependencies, versioned references, and transaction steps.
 
-**Por qué es fricción de ASQL**
+**Why this is ASQL friction**
 
-La expectativa natural es “si habla pgwire, mi stack PostgreSQL debería entrar casi sin fricción”.
-La realidad es más matizada.
+Strict determinism is a core product property.
+That hardens the format and removes shortcuts common in informal seeding.
 
-**Impacto en adopción**
+**Adoption impact**
 
-- dudas tempranas sobre qué cliente o capa de acceso será segura,
-- más necesidad de pruebas exploratorias,
-- fricción adicional para stacks que no controlan bien el SQL emitido.
+- steeper learning curve for teams coming from SQL scripts or ORMs,
+- difficulty maintaining large fixtures during schema changes,
+- more up-front cost before the reproducibility payoff becomes obvious.
 
-**Oportunidad de producto**
+**Product opportunity**
 
-- matriz de compatibilidad más accionable,
-- guías por tipo de cliente,
-- errores con recomendaciones concretas cuando se sale del subset soportado.
+- tooling to derive fixtures from controlled local scenarios,
+- validations with more pedagogical feedback,
+- fixture-first starter packs by integration type.
 
-**Prioridad**: P0
-
----
-
-### 7. Falta una capa intermedia de ergonomía entre primitivas del motor y patrones de integración reutilizables
-
-**Dónde aparece**
-
-La aplicación termina creando helpers propios para:
-
-- iniciar scopes transaccionales correctos,
-- registrar checkpoints de `LSN`,
-- resolver snapshots históricos,
-- traducir historia bruta a explicaciones legibles.
-
-**Por qué es fricción de ASQL**
-
-El motor expone bien las primitivas, pero deja demasiado ensamblaje repetitivo a cada equipo.
-No es un problema de modelado conceptual puro, sino de falta de una capa de integración reusable entre SQL crudo y uso cotidiano.
-
-**Impacto en adopción**
-
-- duplicación de utilidades entre proyectos,
-- integración menos idiomática de la necesaria,
-- tiempo más largo hasta que el equipo siente que “ya sabe usar ASQL bien”.
-
-**Oportunidad de producto**
-
-- helpers SDK genéricos,
-- paquetes de referencia no verticales,
-- convenciones recomendadas para transaction scopes, temporal inspection y explicaciones históricas.
-
-**Prioridad**: P1
+**Priority**: P1
 
 ---
 
-### 8. El modelo mental de ASQL exige más responsabilidad explícita y eleva la barra inicial de adopción
+### 6. Pgwire compatibility helps, but still forces teams to think actively about the supported subset
 
-**Dónde aparece**
+**Where it appears**
 
-La app tiene que decidir:
+Go integration with `pgx` works, but the app still needs to assume a concrete PostgreSQL subset and details such as `simple_protocol`.
 
-- qué dominios participan,
-- qué tablas deben ser entidades,
-- qué snapshot quiere capturar una referencia,
-- qué estado se explica con historia de fila y cuál con versión de entidad,
-- qué inspecciones temporales deben entrar en los workflows operativos.
+**Why this is ASQL friction**
 
-**Por qué es fricción de ASQL**
+The natural expectation is “if it speaks pgwire, my PostgreSQL stack should fit with little friction.”
+Reality is more nuanced.
 
-Es el coste natural de un motor que prioriza determinismo, historia y fronteras visibles.
-No es lo mismo que la fricción 1, que trata la frontera transaccional concreta, ni que la 7, que trata la falta de helpers y patrones reutilizables.
-Aquí el problema es el salto completo de modelo mental que el equipo debe interiorizar.
+**Adoption impact**
 
-**Impacto en adopción**
+- early uncertainty about which client or access layer is safe,
+- more need for exploratory testing,
+- additional friction for stacks that do not control the emitted SQL well.
 
-- onboarding más lento que en una base de datos relacional tradicional,
-- mayor necesidad de coaching arquitectónico,
-- riesgo de decepción si el equipo esperaba solo “Postgres con extras”.
+**Product opportunity**
 
-**Oportunidad de producto**
+- a more actionable compatibility matrix,
+- guides by client type,
+- errors with concrete recommendations when the query leaves the supported subset.
 
-- narrativa más clara sobre el salto de modelo mental,
-- training específico de adopción,
-- apps de referencia profundas como ésta subordinadas al getting-started.
-
-**Prioridad**: P0
+**Priority**: P0
 
 ---
 
-### 9. La observabilidad de adopción todavía necesita cerrar mejor el bucle entre modelado y runtime
+### 7. There is still no ergonomic middle layer between engine primitives and reusable integration patterns
 
-**Dónde aparece**
+**Where it appears**
 
-La muestra deja preguntas útiles que hoy requieren investigación manual, por ejemplo:
+The application ends up creating its own helpers to:
 
-- cuántas transacciones cruzan demasiados dominios,
-- qué referencias versionadas capturan más cambios de los esperados,
-- qué entidades generan más versiones por unidad de trabajo,
-- dónde se concentran las consultas `AS OF LSN` y `FOR HISTORY`.
+- start the correct transactional scopes,
+- record `LSN` checkpoints,
+- resolve historical snapshots,
+- translate raw history into readable explanations.
 
-**Por qué es fricción de ASQL**
+**Why this is ASQL friction**
 
-Son señales clave para saber si un equipo está usando bien el modelo del motor, no solo para operar el runtime.
+The engine exposes the primitives well, but still leaves too much repetitive assembly work to every team.
+This is not purely a conceptual modeling problem; it is the lack of a reusable integration layer between raw SQL and everyday usage.
 
-**Impacto en adopción**
+**Adoption impact**
 
-- feedback lento sobre malas decisiones de modelado,
-- dificultad para mejorar integraciones de forma iterativa,
-- más dependencia de revisión manual de código y fixtures.
+- duplicated utilities across projects,
+- less idiomatic integrations than necessary,
+- longer time until the team feels it “knows how to use ASQL well.”
 
-**Oportunidad de producto**
+**Product opportunity**
 
-- métricas de adopción temporal y de cross-domain usage,
-- vistas admin orientadas a modelado,
-- diagnósticos que unan schema shape con patrones runtime.
+- generic SDK helpers,
+- non-vertical reference packages,
+- recommended conventions for transaction scopes, temporal inspection, and historical explanation.
 
-**Prioridad**: P2
-
----
-
-### 10. La evolución de esquema se vuelve más delicada cuando el diseño ya incorpora historia, entidades y referencias versionadas
-
-**Dónde aparece**
-
-En cuanto el modelo incorpora `CREATE ENTITY` y `VERSIONED FOREIGN KEY`, cualquier cambio en tablas, relaciones o fronteras agregadas deja de sentirse como una migración SQL ordinaria.
-
-**Por qué es fricción de ASQL**
-
-En ASQL, el shape del esquema no afecta solo a escrituras y lecturas actuales.
-También afecta a cómo se capturan referencias, cómo se reconstruye historia y cómo se interpretan snapshots futuros.
-
-**Impacto en adopción**
-
-- más cautela al evolucionar el modelo,
-- mayor coste de revisar migraciones porque la semántica temporal puede cambiar sin que el SQL parezca dramáticamente distinto,
-- dificultad para responder con confianza qué cambios son seguros para historia, replay y explicabilidad.
-
-**Oportunidad de producto**
-
-- guardrails específicos para evolución de entidades y referencias versionadas,
-- checklist de migración con impacto temporal explícito,
-- validaciones que alerten cuando una migración cambia de facto la semántica histórica observable.
-
-**Prioridad**: P1
+**Priority**: P1
 
 ---
 
-### 11. Los errores de modelado todavía no siempre se convierten en diagnósticos de adopción suficientemente guiados
+### 8. The ASQL mental model demands more explicit responsibility and raises the initial adoption bar
 
-**Dónde aparece**
+**Where it appears**
 
-Cuando una referencia versionada no resuelve como se esperaba, cuando un `CROSS DOMAIN` parece excesivo, o cuando una entidad está mal delimitada, el equipo suele necesitar bastante interpretación manual para entender el problema real.
+The app has to decide:
 
-**Por qué es fricción de ASQL**
+- which domains participate,
+- which tables should be entities,
+- which snapshot a reference should capture,
+- which state should be explained with row history and which with entity version,
+- which temporal inspections belong in operational workflows.
 
-El onboarding de ASQL depende mucho de aprender su modelo mental.
-Si los errores se expresan solo como fallos técnicos puntuales y no como feedback de modelado, el aprendizaje se ralentiza mucho.
+**Why this is ASQL friction**
 
-**Impacto en adopción**
+This is the natural cost of an engine that prioritizes determinism, history, and visible boundaries.
+It is not the same as friction 1, which is about the specific transactional boundary, nor friction 7, which is about the lack of reusable helpers and patterns.
+The issue here is the full mental-model shift the team must internalize.
 
-- más ensayo y error del necesario,
-- mayor dependencia de expertos internos o revisión manual,
-- más riesgo de que el equipo atribuya el problema a “comportamiento raro del motor” en lugar de a una decisión de modelado corregible.
+**Adoption impact**
 
-**Oportunidad de producto**
+- slower onboarding than with a traditional relational database,
+- more need for architectural coaching,
+- risk of disappointment if the team expected only “Postgres with extras.”
 
-- errores con contexto más pedagógico,
-- diagnósticos que sugieran revisar `ROOT`, `INCLUDES`, alcance transaccional o tipo de referencia temporal,
-- validaciones de schema y fixture pensadas explícitamente para onboarding.
+**Product opportunity**
 
-**Prioridad**: P1
+- a clearer narrative about the mental-model shift,
+- adoption-specific training,
+- deep reference apps like this one kept subordinate to the getting-started flow.
 
-## Lo que no debe resolverse metiendo lógica pharma en ASQL
+**Priority**: P0
 
-Estas fricciones no justifican mover al motor:
+---
 
-- significado regulatorio de una firma,
-- taxonomías de desviaciones o CAPA,
-- políticas GMP/GAMP específicas,
-- semántica de Qualified Person,
-- workflows de aprobación o evidencia propios de una organización.
+### 9. Adoption observability still needs to close the loop better between modeling and runtime
 
-La mejora debe ir a:
+**Where it appears**
 
-- ergonomía general,
-- documentación,
-- validación,
-- observabilidad,
+The sample raises useful questions that still require manual investigation, for example:
+
+- how many transactions cross too many domains,
+- which versioned references capture more changes than expected,
+- which entities generate the most versions per unit of work,
+- where `AS OF LSN` and `FOR HISTORY` queries concentrate.
+
+**Why this is ASQL friction**
+
+These are key signals for knowing whether a team is using the engine model well, not only for operating the runtime.
+
+**Adoption impact**
+
+- slow feedback on bad modeling decisions,
+- difficulty improving integrations iteratively,
+- more dependence on manual code and fixture review.
+
+**Product opportunity**
+
+- temporal-adoption and cross-domain usage metrics,
+- admin views oriented to modeling,
+- diagnostics that connect schema shape with runtime patterns.
+
+**Priority**: P2
+
+---
+
+### 10. Schema evolution becomes more delicate when the design already includes history, entities, and versioned references
+
+**Where it appears**
+
+As soon as the model includes `CREATE ENTITY` and `VERSIONED FOREIGN KEY`, any change in tables, relationships, or aggregate boundaries stops feeling like an ordinary SQL migration.
+
+**Why this is ASQL friction**
+
+In ASQL, schema shape affects not only current writes and reads.
+It also affects how references are captured, how history is reconstructed, and how future snapshots are interpreted.
+
+**Adoption impact**
+
+- more caution when evolving the model,
+- higher migration-review cost because temporal semantics can change even when the SQL does not look dramatically different,
+- difficulty answering confidently which changes are safe for history, replay, and explainability.
+
+**Product opportunity**
+
+- specific guardrails for entity and versioned-reference evolution,
+- migration checklists with explicit temporal impact,
+- validations that warn when a migration effectively changes observable historical semantics.
+
+**Priority**: P1
+
+---
+
+### 11. Modeling mistakes do not yet always turn into adoption diagnostics that are guided enough
+
+**Where it appears**
+
+When a versioned reference does not resolve as expected, when a `CROSS DOMAIN` looks excessive, or when an entity is poorly bounded, the team often needs a lot of manual interpretation to understand the real problem.
+
+**Why this is ASQL friction**
+
+ASQL onboarding depends heavily on learning its mental model.
+If errors are expressed only as local technical failures instead of modeling feedback, learning slows down significantly.
+
+**Adoption impact**
+
+- more trial and error than necessary,
+- greater dependence on internal experts or manual review,
+- higher risk that the team blames the issue on “strange engine behavior” instead of a fixable modeling decision.
+
+**Product opportunity**
+
+- errors with more pedagogical context,
+- diagnostics that suggest reviewing `ROOT`, `INCLUDES`, transactional scope, or the type of temporal reference,
+- schema and fixture validations designed explicitly for onboarding.
+
+**Priority**: P1
+
+## What should not be solved by pushing pharma logic into ASQL
+
+These frictions do not justify moving into the engine:
+
+- the regulatory meaning of a signature,
+- deviation or CAPA taxonomies,
+- specific GMP/GAMP policies,
+- Qualified Person semantics,
+- organization-specific approval or evidence workflows.
+
+Improvements should go into:
+
+- general ergonomics,
+- documentation,
+- validation,
+- observability,
 - tooling,
-- SDKs y patrones de integración.
+- SDKs and integration patterns.
 
-## Conclusión
+## Conclusion
 
-La muestra confirma que ASQL aporta un valor diferencial fuerte cuando una aplicación necesita:
+The sample confirms that ASQL brings strong differentiated value when an application needs:
 
-- fronteras explícitas,
-- snapshots reproducibles,
-- referencias temporales estables,
-- historia consultable,
-- y una explicación determinista de cómo un estado llegó a existir.
+- explicit boundaries,
+- reproducible snapshots,
+- stable temporal references,
+- queryable history,
+- and a deterministic explanation of how a state came to exist.
 
-La fricción principal no está en pharma manufacturing.
-Está en el salto de modelo mental y en la ergonomía necesaria para que un equipo use rápido las primitivas del motor sin tener que inventar demasiada infraestructura de integración.
+The main friction is not pharma manufacturing itself.
+It is the mental-model shift and the ergonomics needed for a team to use engine primitives quickly without inventing too much integration infrastructure.
 
-La prioridad debería ser reducir fricción de adopción sin debilitar las propiedades centrales de ASQL.
+The priority should be to reduce adoption friction without weakening ASQL's core properties.
 
-## Resumen ejecutivo
+## Executive summary
 
-Si hubiera que agrupar este log en pocas líneas para priorización de producto, la lectura sería:
+If this log had to be compressed into a small set of product-prioritization points, the reading would be:
 
-- **P0**: hacer más adoptables las fronteras explícitas, el esquema temporal y la compatibilidad pgwire real.
-- **P1**: reducir el coste de modelar entidades, explicar historia, evolucionar schema temporal y construir capas de integración repetibles.
-- **P2**: cerrar el bucle de observabilidad de adopción para que el runtime también ayude a mejorar el modelado.
+- **P0**: make explicit boundaries, temporal schema design, and real pgwire compatibility easier to adopt.
+- **P1**: reduce the cost of modeling entities, explaining history, evolving temporal schema, and building repeatable integration layers.
+- **P2**: close the adoption-observability loop so the runtime also helps improve modeling.
 
-La tesis general se mantiene:
+The general thesis remains:
 
-- ASQL ya tiene primitivas potentes,
-- el mayor trabajo pendiente está en ergonomía, diagnósticos, patrones y narrativa de adopción,
-- y ese trabajo debe seguir siendo generalista, no sectorial.
+- ASQL already has strong primitives,
+- the biggest remaining work is in ergonomics, diagnostics, patterns, and adoption narrative,
+- and that work should stay general-purpose, not sector-specific.

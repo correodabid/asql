@@ -91,7 +91,7 @@ Conclusion:
 - Deterministic replay is already a real capability.
 - Remaining work is **broader fault models, soak tests, and release gating**.
 
-### 5) "Cross-domain transactions ... spec'd pero no implementadas"
+### 5) "Cross-domain transactions ... spec'd but not implemented"
 
 **Assessment:** outdated.
 
@@ -104,7 +104,7 @@ Conclusion:
 - Cross-domain transactions already exist as an internal deterministic coordinator protocol.
 - Future work is **observability, UX, and stronger recovery semantics across replicated clusters**.
 
-### 6) "Time-travel queries con índice sobre LSN→timestamp"
+### 6) "Time-travel queries with an index over LSN→timestamp"
 
 **Assessment:** now true in a narrow, targeted form.
 

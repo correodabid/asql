@@ -1,136 +1,136 @@
 # Pharma Manufacturing App on ASQL
 
-Aplicación de referencia para explorar la adopción de ASQL en un entorno de pharma manufacturing con trazabilidad y evidencias de cumplimiento.
+Reference application for exploring ASQL adoption in a pharma manufacturing setting with strong traceability and compliance evidence.
 
-Esta app no intenta convertir ASQL en un producto vertical.
-Debe leerse como una extensión práctica de [docs/getting-started/README.md](../docs/getting-started/README.md), especialmente después de los capítulos 04–09.
+This app does not try to turn ASQL into a vertical product.
+It should be read as a practical extension of [docs/getting-started/README.md](../docs/getting-started/README.md), especially after chapters 04–09.
 
-El objetivo es forzar una adopción profunda de primitivas propias de ASQL en un caso donde la trazabilidad importa mucho:
+The goal is to force a deep adoption path over core ASQL primitives in a case where traceability matters a lot:
 
-- dominios explícitos,
-- transacciones `DOMAIN` y `CROSS DOMAIN`,
-- entidades y versionado,
+- explicit domains,
+- `DOMAIN` and `CROSS DOMAIN` transactions,
+- entities and versioning,
 - `VERSIONED FOREIGN KEY`,
-- consultas `AS OF LSN`,
+- `AS OF LSN` queries,
 - `FOR HISTORY`,
-- helpers temporales como `current_lsn()`, `row_lsn(...)`, `entity_version(...)`, `entity_version_lsn(...)` y `resolve_reference(...)`,
-- fixtures deterministas,
-- integración Go vía pgwire con `pgx`.
+- temporal helpers such as `current_lsn()`, `row_lsn(...)`, `entity_version(...)`, `entity_version_lsn(...)`, and `resolve_reference(...)`,
+- deterministic fixtures,
+- Go integration via pgwire with `pgx`.
 
-Además, la muestra modela explícitamente un caso app-owned donde el equipo necesita representar:
+In addition, the sample explicitly models an app-owned case where the team needs to represent:
 
-- controles de cumplimiento inspirados en 21 CFR Part 11, ALCOA+ y revisión eBR,
-- jerarquía ISA-88 (`master recipe -> unit procedure -> operation -> phase`),
-- jerarquía ISA-95 (`site -> area -> process cell -> unit -> equipment`).
+- compliance controls inspired by 21 CFR Part 11, ALCOA+, and eBR review,
+- ISA-88 hierarchy (`master recipe -> unit procedure -> operation -> phase`),
+- ISA-95 hierarchy (`site -> area -> process cell -> unit -> equipment`).
 
 ## Responsibility boundary
 
-- **Engine-owned concern**: fronteras explícitas, referencias versionadas, historia, replay-safe snapshots, fixtures deterministas, observabilidad temporal.
-- **App-owned concern**: significado regulatorio de firmas, clasificación de desviaciones, semántica de revisión QA, políticas GxP, modelado ISA-88/ISA-95 y vocabulario de cumplimiento.
-- **Recommended integration pattern**: usar la muestra para aprender a componer primitivas de ASQL, no para empujar semántica farmacéutica al motor.
+- **Engine-owned concern**: explicit boundaries, versioned references, history, replay-safe snapshots, deterministic fixtures, temporal observability.
+- **App-owned concern**: regulatory meaning of signatures, deviation classification, QA review semantics, GxP policies, ISA-88/ISA-95 modeling, and compliance vocabulary.
+- **Recommended integration pattern**: use the sample to learn how to compose ASQL primitives, not to push pharmaceutical semantics into the engine.
 
-## Qué incluye
+## What it includes
 
-- [main.go](main.go): ejecutable Go que crea esquema, carga escenario y lanza inspección temporal.
-- [scenario.go](scenario.go): definición determinista del escenario.
-- [tx_helpers.go](tx_helpers.go): patrón Go de helper para `DOMAIN` y `CROSS DOMAIN` sin esconder la frontera transaccional.
-- [fixtures/pharma-manufacturing-demo-v1.json](fixtures/pharma-manufacturing-demo-v1.json): fixture reproducible para validar y cargar con `asqlctl`.
-- [FRICTION_LOG.md](FRICTION_LOG.md): documento de fricciones tecnológicas encontradas al adoptar ASQL.
+- [main.go](main.go): Go executable that creates the schema, loads the scenario, and runs temporal inspection.
+- [scenario.go](scenario.go): deterministic scenario definition.
+- [tx_helpers.go](tx_helpers.go): Go helper pattern for `DOMAIN` and `CROSS DOMAIN` without hiding the transactional boundary.
+- [fixtures/pharma-manufacturing-demo-v1.json](fixtures/pharma-manufacturing-demo-v1.json): reproducible fixture for validation and loading with `asqlctl`.
+- [FRICTION_LOG.md](FRICTION_LOG.md): document describing the technology frictions encountered while adopting ASQL.
 
-## Cómo usar esta app dentro del onboarding
+## How to use this app in the onboarding flow
 
-Orden recomendado:
+Recommended order:
 
-1. recorrer [docs/getting-started/04-domains-and-transactions.md](../docs/getting-started/04-domains-and-transactions.md),
-2. recorrer [docs/getting-started/05-time-travel-and-history.md](../docs/getting-started/05-time-travel-and-history.md),
-3. recorrer [docs/getting-started/06-entities-and-versioned-references.md](../docs/getting-started/06-entities-and-versioned-references.md),
-4. recorrer [docs/getting-started/07-fixtures-and-seeding.md](../docs/getting-started/07-fixtures-and-seeding.md),
-5. recorrer [docs/getting-started/09-go-sdk-and-integration.md](../docs/getting-started/09-go-sdk-and-integration.md),
-6. usar esta app como ejemplo profundo que combina todo lo anterior.
+1. read [docs/getting-started/04-domains-and-transactions.md](../docs/getting-started/04-domains-and-transactions.md),
+2. read [docs/getting-started/05-time-travel-and-history.md](../docs/getting-started/05-time-travel-and-history.md),
+3. read [docs/getting-started/06-entities-and-versioned-references.md](../docs/getting-started/06-entities-and-versioned-references.md),
+4. read [docs/getting-started/07-fixtures-and-seeding.md](../docs/getting-started/07-fixtures-and-seeding.md),
+5. read [docs/getting-started/09-go-sdk-and-integration.md](../docs/getting-started/09-go-sdk-and-integration.md),
+6. use this app as a deeper example that combines everything above.
 
-## Dominios usados
+## Domains used
 
-- `recipe`: master recipes, operaciones y parámetros de proceso.
-- `operations`: modelo físico ISA-95 de site, area, process cell, unit y equipment.
-- `inventory`: lotes de materiales y reservas.
-- `execution`: process orders, pasos de batch y materiales consumidos.
-- `quality`: desviaciones y revisiones QA.
-- `compliance`: firmas, atestaciones y revisiones eBR asociadas a snapshots versionados.
+- `recipe`: master recipes, operations, and process parameters.
+- `operations`: ISA-95 physical model of site, area, process cell, unit, and equipment.
+- `inventory`: material lots and reservations.
+- `execution`: process orders, batch steps, and consumed materials.
+- `quality`: deviations and QA reviews.
+- `compliance`: signatures, attestations, and eBR reviews associated with versioned snapshots.
 
-## Flujo que se ejercita
+## Flow exercised
 
-1. alta de una master recipe versionada con jerarquía ISA-88 en `recipe`,
-2. carga del modelo físico ISA-95 en `operations`,
-3. carga de lotes liberados en `inventory`,
-4. creación de un batch order que captura la versión exacta de la recipe, el `LSN` visible de la unidad ISA-95 y los lotes reservados,
-5. arranque del batch con firma de fase y apertura del eBR en `compliance`,
-6. apertura de una desviación ligada a una phase record y puesta en hold del batch,
-7. revisión posterior de la recipe para demostrar separación entre la versión capturada por el batch y la versión actual,
-8. cierre de desviación, revisión final eBR y liberación del batch con nuevas atestaciones.
+1. create a versioned master recipe with ISA-88 hierarchy in `recipe`,
+2. load the ISA-95 physical model in `operations`,
+3. load released lots in `inventory`,
+4. create a batch order that captures the exact recipe version, the visible `LSN` of the ISA-95 unit, and the reserved lots,
+5. start the batch with a phase signature and open the eBR in `compliance`,
+6. open a deviation linked to a phase record and place the batch on hold,
+7. revise the recipe later to demonstrate the separation between the version captured by the batch and the current version,
+8. close the deviation, perform final eBR review, and release the batch with new attestations.
 
-## Arranque local
+## Local startup
 
-### 1. Levantar ASQL
+### 1. Start ASQL
 
-Desde la raíz del repositorio:
+From the repository root:
 
 ```bash
 go run ./cmd/asqld -addr :5433 -data-dir .asql-pharmaapp
 ```
 
-### 2. Ejecutar la aplicación
+### 2. Run the application
 
-En otra terminal:
+In another terminal:
 
 ```bash
 go run ./pharmaapp -pgwire 127.0.0.1:5433 -mode all
 ```
 
-`-mode all` hace tres cosas:
+`-mode all` does three things:
 
-- aplica el esquema,
-- ejecuta el escenario,
-- imprime lecturas actuales e históricas.
+- applies the schema,
+- executes the scenario,
+- prints current and historical reads.
 
-También puedes usar:
+You can also use:
 
 - `-mode schema`
 - `-mode scenario`
 - `-mode inspect`
 - `-mode print-sql`
 
-Importante: `schema` y `all` están pensados para un `data-dir` fresco.
+Important: `schema` and `all` are intended for a fresh `data-dir`.
 
-## Flujo fixture-first
+## Fixture-first flow
 
-Validar fixture:
+Validate the fixture:
 
 ```bash
 go run ./cmd/asqlctl -command fixture-validate -fixture-file pharmaapp/fixtures/pharma-manufacturing-demo-v1.json
 ```
 
-Cargar fixture:
+Load the fixture:
 
 ```bash
 go run ./cmd/asqlctl -command fixture-load -pgwire 127.0.0.1:5433 -fixture-file pharmaapp/fixtures/pharma-manufacturing-demo-v1.json
 ```
 
-## Qué observar
+## What to observe
 
-Tras ejecutar `-mode all`, conviene fijarse en:
+After running `-mode all`, pay attention to:
 
-- la obligación de declarar los dominios antes de cada unidad de trabajo,
-- las columnas de captura temporal (`recipe_version`, `lot_version`, `batch_version`, `deviation_version`),
-- la diferencia entre captura por versión de entidad (`recipe_version`, `batch_version`, `lot_version`) y captura por row-head `LSN` en ISA-95 (`unit_lsn`, `equipment_lsn`),
-- que `manufacturing_model_entity` se usa solo para la jerarquía alta del site (`site -> area -> process cell`), mientras `unit` y `equipment` se referencian como filas directas para no forzar semánticas de aggregate equivocadas,
-- la separación entre recipe ISA-88 vigente y la recipe/version realmente capturada por el batch,
-- la relación entre phase execution (`batch_phase_records`) y equipment físico (`operations.equipment_assets`),
-- la diferencia entre la recipe actual y la recipe capturada por el batch,
-- el uso de `FOR HISTORY` para explicar estados de batch, recipe y deviation,
-- cómo `resolve_reference(...)` devuelve el token temporal actual de una fila o entidad,
-- cómo la app necesita helpers propios para convertir primitivas temporales en explicaciones de negocio y evidencias de cumplimiento.
+- the need to declare domains before each unit of work,
+- the temporal capture columns (`recipe_version`, `lot_version`, `batch_version`, `deviation_version`),
+- the difference between entity-version capture (`recipe_version`, `batch_version`, `lot_version`) and row-head `LSN` capture in ISA-95 (`unit_lsn`, `equipment_lsn`),
+- the fact that `manufacturing_model_entity` is used only for the top site hierarchy (`site -> area -> process cell`), while `unit` and `equipment` are referenced as direct rows so ASQL does not force the wrong aggregate semantics,
+- the separation between the current ISA-88 recipe and the recipe/version actually captured by the batch,
+- the relationship between phase execution (`batch_phase_records`) and physical equipment (`operations.equipment_assets`),
+- the difference between the current recipe and the recipe captured by the batch,
+- the use of `FOR HISTORY` to explain batch, recipe, and deviation states,
+- how `resolve_reference(...)` returns the current temporal token for a row or entity,
+- how the app still needs its own helpers to turn temporal primitives into business explanations and compliance evidence.
 
-## Consultas manuales útiles
+## Useful manual queries
 
 ```sql
 SELECT current_lsn();
@@ -146,7 +146,7 @@ SELECT * FROM execution.batch_phase_records FOR HISTORY WHERE id = 'phase-rec-00
 SELECT * FROM recipe.master_recipes AS OF LSN 8 WHERE id = 'recipe-001';
 ```
 
-## Lectura recomendada
+## Recommended reading
 
 - [docs/getting-started/04-domains-and-transactions.md](../docs/getting-started/04-domains-and-transactions.md)
 - [docs/getting-started/05-time-travel-and-history.md](../docs/getting-started/05-time-travel-and-history.md)
@@ -154,4 +154,4 @@ SELECT * FROM recipe.master_recipes AS OF LSN 8 WHERE id = 'recipe-001';
 - [docs/getting-started/07-fixtures-and-seeding.md](../docs/getting-started/07-fixtures-and-seeding.md)
 - [docs/getting-started/09-go-sdk-and-integration.md](../docs/getting-started/09-go-sdk-and-integration.md)
 
-Si el equipo duda sobre `ROOT` e `INCLUDES`, revisar el checklist en [docs/getting-started/06-entities-and-versioned-references.md](../docs/getting-started/06-entities-and-versioned-references.md).
+If the team is unsure about `ROOT` and `INCLUDES`, review the checklist in [docs/getting-started/06-entities-and-versioned-references.md](../docs/getting-started/06-entities-and-versioned-references.md).

@@ -1,120 +1,120 @@
 # BankApp – ASQL Friction Log
 
-## Objetivo
+## Objective
 
-Este documento recoge fricciones detectadas al construir una aplicación de referencia que usa ASQL de forma intensa.
+This document captures frictions observed while building a reference application that uses ASQL intensively.
 
-El foco es exclusivamente tecnológico:
+The focus is strictly technological:
 
-- fricciones del motor,
-- de su modelo mental,
-- de su superficie SQL/pgwire,
-- de su ergonomía de integración,
-- y de su workflow operativo.
+- engine friction,
+- mental-model friction,
+- SQL/pgwire surface friction,
+- integration ergonomics,
+- and operational workflow friction.
 
-No se consideran fricciones propias del dominio bancario.
+Banking-domain friction is intentionally out of scope.
 
-## Qué se forzó en la muestra
+## What the sample deliberately forced
 
-La muestra usa deliberadamente:
+The sample deliberately uses:
 
-- 4 dominios explícitos,
-- transacciones `BEGIN DOMAIN ...` y `BEGIN CROSS DOMAIN ...`,
-- entidades (`CREATE ENTITY`),
+- 4 explicit domains,
+- `BEGIN DOMAIN ...` and `BEGIN CROSS DOMAIN ...` transactions,
+- entities (`CREATE ENTITY`),
 - `VERSIONED FOREIGN KEY`,
-- helpers temporales,
+- temporal helpers,
 - `FOR HISTORY`,
 - `AS OF LSN`,
-- fixture determinista,
-- integración Go vía pgwire con `pgx`.
+- deterministic fixtures,
+- Go integration via pgwire with `pgx`.
 
-Eso hace visible dónde un equipo sufrirá durante las primeras semanas de adopción.
+That makes it visible where a team will struggle during the first weeks of adoption.
 
-## Fricciones observadas
+## Observed frictions
 
-### 1. La selección de dominio entra en el código de aplicación muy pronto
+### 1. Domain selection enters application code very early
 
-**Dónde aparece**
+**Where it appears**
 
-En cuanto se implementa el primer caso con más de una frontera (`identity`, `ledger`, `payments`, `risk`), la aplicación tiene que decidir en cada operación si usa `DOMAIN` o `CROSS DOMAIN`.
+As soon as the first use case spans more than one boundary (`identity`, `ledger`, `payments`, `risk`), the application must decide on every operation whether it uses `DOMAIN` or `CROSS DOMAIN`.
 
-**Por qué es fricción de ASQL**
+**Why this is ASQL friction**
 
-No es una molestia del ejemplo. Es parte del contrato central de ASQL: las fronteras no son implícitas.
+This is not a quirk of the sample. It is part of ASQL's central contract: boundaries are not implicit.
 
-**Impacto en adopción**
+**Adoption impact**
 
-- obliga a crear helpers de transacción desde el inicio,
-- rompe repositorios o servicios que asumían transacciones invisibles,
-- empuja a rediseñar la capa de aplicación antes de que el equipo domine el resto de capacidades.
+- forces teams to create transaction helpers from the beginning,
+- breaks repositories or services that assumed invisible transactions,
+- pushes application-layer redesign before the team masters the rest of the capabilities.
 
-**Oportunidad de producto**
+**Product opportunity**
 
-- patrones oficiales para helpers de transacción por dominio,
-- diagnóstico de sobreuso de `CROSS DOMAIN`,
-- guía corta para descubrir fronteras correctas.
+- official patterns for per-domain transaction helpers,
+- diagnostics for `CROSS DOMAIN` overuse,
+- a short guide for discovering the right boundaries.
 
-**Prioridad**: P0
-
----
-
-### 2. El modelo temporal exige conceptos nuevos en el esquema, no solo en las consultas
-
-**Dónde aparece**
-
-Para usar referencias versionadas hay que añadir columnas explícitas como `customer_version`, `source_account_version` o `transfer_version`.
-
-**Por qué es fricción de ASQL**
-
-La capacidad temporal no vive solo en runtime. Afecta al diseño físico de tablas y a las migraciones.
-
-**Impacto en adopción**
-
-- el equipo debe aprender cuándo almacenar `LSN` y cuándo versión de entidad,
-- aparecen columnas técnicas que no existen en esquemas SQL convencionales,
-- cuesta explicar a equipos de producto por qué hay campos “extra” que el motor gestiona indirectamente.
-
-**Oportunidad de producto**
-
-- plantillas de esquema para referencias versionadas,
-- guía comparativa: fila normal vs entidad vs referencia versionada,
-- validaciones o sugerencias al definir `VERSIONED FOREIGN KEY`.
-
-**Prioridad**: P0
+**Priority**: P0
 
 ---
 
-### 3. `CREATE ENTITY` aporta mucho valor, pero exige modelado previo muy claro
+### 2. The temporal model introduces new schema concepts, not only new queries
 
-**Dónde aparece**
+**Where it appears**
 
-La aplicación necesita decidir qué tabla es `ROOT` y qué tablas entran en `INCLUDES` antes de capturar versiones de forma útil.
+Versioned references require explicit columns such as `customer_version`, `source_account_version`, or `transfer_version`.
 
-**Por qué es fricción de ASQL**
+**Why this is ASQL friction**
 
-ASQL ofrece una capa de agregados potente, pero no hay un camino trivial para equipos que vienen de modelado puramente relacional.
+The temporal capability does not live only at runtime. It affects physical table design and migrations.
 
-**Impacto en adopción**
+**Adoption impact**
 
-- puede retrasar la adopción de entidades hasta demasiado tarde,
-- o provocar entidades mal definidas que después contaminan la semántica temporal,
-- introduce una decisión arquitectónica fuerte en una fase temprana.
+- the team must learn when to store `LSN` versus entity version,
+- technical columns appear that do not exist in conventional SQL schemas,
+- it becomes harder to explain to product teams why there are “extra” fields that the engine manages indirectly.
 
-**Oportunidad de producto**
+**Product opportunity**
 
-- guía de modelado de entidades con ejemplos multi-industria,
-- checklist para decidir cuándo una tabla debe ser `ROOT`,
-- tooling o validaciones para entidades sospechosamente grandes o vacías.
+- schema templates for versioned references,
+- comparative guidance: ordinary row vs entity vs versioned reference,
+- validations or suggestions when defining `VERSIONED FOREIGN KEY`.
 
-**Prioridad**: P1
+**Priority**: P0
 
 ---
 
-### 4. La depuración temporal es muy potente, pero todavía demasiado artesanal
+### 3. `CREATE ENTITY` adds a lot of value, but demands clear upfront modeling
 
-**Dónde aparece**
+**Where it appears**
 
-La muestra necesita combinar manualmente:
+The application must decide which table is `ROOT` and which tables belong in `INCLUDES` before version capture becomes useful.
+
+**Why this is ASQL friction**
+
+ASQL offers a strong aggregate layer, but teams coming from purely relational modeling do not have an easy transition path.
+
+**Adoption impact**
+
+- can delay entity adoption for too long,
+- or produce badly defined entities that later contaminate temporal semantics,
+- introduces a strong architectural decision very early.
+
+**Product opportunity**
+
+- entity-modeling guidance with multi-industry examples,
+- a checklist for deciding when a table should be `ROOT`,
+- tooling or validations for suspiciously large or empty entities.
+
+**Priority**: P1
+
+---
+
+### 4. Temporal debugging is powerful, but still too manual
+
+**Where it appears**
+
+The sample has to combine manually:
 
 - `current_lsn()`,
 - `row_lsn(...)`,
@@ -123,168 +123,168 @@ La muestra necesita combinar manualmente:
 - `AS OF LSN`,
 - `FOR HISTORY`.
 
-**Por qué es fricción de ASQL**
+**Why this is ASQL friction**
 
-Todas estas piezas pertenecen al valor central del producto, pero hoy la composición recae casi por completo en quien integra.
+All of these pieces belong to the core product value, but composition still falls almost entirely on the integrator.
 
-**Impacto en adopción**
+**Adoption impact**
 
-- aumenta el tiempo hasta que los equipos obtienen el beneficio real de replay/historia,
-- dificulta estandarizar playbooks de incidentes,
-- hace que equipos nuevos perciban la capacidad temporal como “experta” en vez de “normal”.
+- increases the time until teams get the real benefit of replay/history,
+- makes it harder to standardize incident playbooks,
+- makes new teams perceive temporal capability as “expert-only” instead of normal.
 
-**Oportunidad de producto**
+**Product opportunity**
 
-- cookbook con patrones de “estado actual + explicación histórica”,
-- helpers SDK para snapshot, history y resolución de versiones,
-- ejemplos más prescriptivos en el onboarding.
+- a cookbook with “current state + historical explanation” patterns,
+- SDK helpers for snapshot, history, and version resolution,
+- more prescriptive onboarding examples.
 
-**Prioridad**: P1
-
----
-
-### 5. El flujo fixture-first es correcto, pero su autoría sigue siendo costosa
-
-**Dónde aparece**
-
-La fixture de la muestra es explícita, ordenada y útil, pero escribirla a mano requiere mucho detalle.
-
-**Por qué es fricción de ASQL**
-
-ASQL exige determinismo real. Eso endurece el formato y elimina atajos comunes de seeds ad hoc.
-
-**Impacto en adopción**
-
-- mantener fixtures grandes puede sentirse caro,
-- la transición desde scripts SQL o seeds ORM es brusca,
-- el equipo necesita aprender una disciplina adicional para tests y demos.
-
-**Oportunidad de producto**
-
-- mejores herramientas para derivar fixtures desde entornos locales controlados,
-- mensajes de validación más orientados a aprendizaje,
-- starter packs fixture-first para nuevos proyectos.
-
-**Prioridad**: P1
+**Priority**: P1
 
 ---
 
-### 6. La compatibilidad pgwire es útil, pero la superficie soportada todavía requiere vigilancia activa
+### 5. The fixture-first flow is correct, but fixture authoring is still expensive
 
-**Dónde aparece**
+**Where it appears**
 
-La integración Go funciona bien con `pgx`, pero obliga a pensar en la compatibilidad real del subconjunto PostgreSQL y en detalles como `simple_protocol`.
+The sample fixture is explicit, ordered, and useful, but writing it by hand requires a lot of detail.
 
-**Por qué es fricción de ASQL**
+**Why this is ASQL friction**
 
-La expectativa natural de un equipo será “si habla pgwire, mi stack PostgreSQL debería funcionar”. En la práctica, el ajuste fino depende del subconjunto soportado.
+ASQL requires real determinism. That hardens the format and removes common shortcuts from ad hoc seeds.
 
-**Impacto en adopción**
+**Adoption impact**
 
-- dudas tempranas sobre qué cliente, ORM o patrón SQL será seguro,
-- necesidad de descubrir sorpresas por ensayo y error,
-- mayor coste de integración para stacks no Go.
+- large fixtures can feel expensive to maintain,
+- the transition from SQL scripts or ORM seeds is abrupt,
+- the team must learn an additional discipline for tests and demos.
 
-**Oportunidad de producto**
+**Product opportunity**
 
-- matriz de compatibilidad más accionable,
-- guía por tipo de cliente,
-- guardrails y errores con recomendaciones concretas.
+- better tooling to derive fixtures from controlled local environments,
+- validation messages aimed more clearly at learning,
+- fixture-first starter packs for new projects.
 
-**Prioridad**: P0
-
----
-
-### 7. El valor de ASQL aparece cuando la app asume responsabilidad explícita, y eso eleva la barra inicial
-
-**Dónde aparece**
-
-La aplicación tiene que decidir:
-
-- qué dominios participan,
-- qué mutaciones van juntas,
-- qué snapshots conservar mentalmente,
-- qué tablas merecen entidad,
-- qué datos se observan con historia y cuáles con auditoría propia.
-
-**Por qué es fricción de ASQL**
-
-No es un fallo del ejemplo. Es la consecuencia directa de un motor que hace visibles fronteras, determinismo e historia.
-
-**Impacto en adopción**
-
-- onboarding más lento que en una base de datos relacional tradicional,
-- mayor necesidad de coaching arquitectónico,
-- riesgo de rechazo temprano si el equipo esperaba “Postgres con extras”.
-
-**Oportunidad de producto**
-
-- mejor narrativa de responsabilidad motor vs aplicación,
-- material de training para mental model,
-- ejemplo app de referencia subordinada al getting-started.
-
-**Prioridad**: P0
+**Priority**: P1
 
 ---
 
-### 8. Falta una capa intermedia de ergonomía entre SQL crudo y capacidades avanzadas
+### 6. Pgwire compatibility is useful, but the supported surface still requires active vigilance
 
-**Dónde aparece**
+**Where it appears**
 
-Para explotar bien ASQL, la aplicación termina teniendo utilidades propias para:
+Go integration works well with `pgx`, but it still forces teams to think about the real PostgreSQL subset and details such as `simple_protocol`.
 
-- iniciar transacciones correctas,
-- registrar checkpoints de `LSN`,
-- lanzar consultas temporales,
-- convertir historia en explicaciones legibles.
+**Why this is ASQL friction**
 
-**Por qué es fricción de ASQL**
+The natural expectation will be “if it speaks pgwire, my PostgreSQL stack should work.” In practice, the final fit depends on the supported subset.
 
-El motor expone bien los primitives, pero todavía deja mucho ensamblaje repetitivo a cada equipo.
+**Adoption impact**
 
-**Impacto en adopción**
+- early uncertainty about which client, ORM, or SQL pattern is safe,
+- a need to discover surprises through trial and error,
+- higher integration cost for non-Go stacks.
 
-- duplicación de helpers entre proyectos,
-- inconsistencia entre equipos,
-- más tiempo hasta llegar a una integración “idiomática”.
+**Product opportunity**
 
-**Oportunidad de producto**
+- a more actionable compatibility matrix,
+- guidance per client type,
+- guardrails and errors with concrete recommendations.
 
-- helpers SDK genéricos,
-- paquetes de referencia no verticales,
-- convenios recomendados para IDs, timestamps, auditoría y lectura temporal.
+**Priority**: P0
 
-**Prioridad**: P1
+---
 
-## Lo que no debe resolverse metiendo lógica bancaria en ASQL
+### 7. ASQL shows its value when the app takes explicit responsibility, and that raises the initial bar
 
-Estas fricciones no justifican mover al motor:
+**Where it appears**
 
-- reglas de scoring de riesgo,
-- semántica de cumplimiento normativo,
-- workflow de aprobación bancaria,
-- catálogos de eventos del negocio,
-- modelos de actor, rol o expediente.
+The application must decide:
 
-La mejora debe ir a:
+- which domains participate,
+- which mutations belong together,
+- which snapshots to retain mentally,
+- which tables deserve entities,
+- which data should be observed through history and which through app-owned auditing.
 
-- ergonomía general,
-- documentación,
-- validación,
-- observabilidad,
+**Why this is ASQL friction**
+
+This is not a flaw in the sample. It is the direct consequence of an engine that makes boundaries, determinism, and history explicit.
+
+**Adoption impact**
+
+- slower onboarding than with a traditional relational database,
+- more need for architectural coaching,
+- risk of early rejection if the team expected “Postgres with extras”.
+
+**Product opportunity**
+
+- a clearer narrative around engine responsibility vs app responsibility,
+- training material for the mental model,
+- reference apps that stay subordinate to the getting-started flow.
+
+**Priority**: P0
+
+---
+
+### 8. There is still no ergonomic middle layer between raw SQL and advanced capabilities
+
+**Where it appears**
+
+To use ASQL well, the application ends up building its own utilities to:
+
+- start the right transactions,
+- record `LSN` checkpoints,
+- run temporal queries,
+- turn history into readable explanations.
+
+**Why this is ASQL friction**
+
+The engine exposes the primitives well, but still leaves too much repetitive assembly to each team.
+
+**Adoption impact**
+
+- helper duplication across projects,
+- inconsistency between teams,
+- more time before integrations feel idiomatic.
+
+**Product opportunity**
+
+- generic SDK helpers,
+- non-vertical reference packages,
+- recommended conventions for IDs, timestamps, auditing, and temporal reads.
+
+**Priority**: P1
+
+## What should not be solved by pushing banking logic into ASQL
+
+These frictions do not justify moving into the engine:
+
+- risk scoring rules,
+- regulatory compliance semantics,
+- banking approval workflows,
+- business event catalogs,
+- actor, role, or case models.
+
+The improvements should go into:
+
+- general ergonomics,
+- documentation,
+- validation,
+- observability,
 - tooling,
-- SDKs y patrones de integración.
+- SDKs and integration patterns.
 
-## Conclusión
+## Conclusion
 
-La muestra confirma que ASQL sí ofrece un valor diferencial real cuando una aplicación necesita:
+The sample confirms that ASQL offers real differentiated value when an application needs:
 
-- fronteras explícitas,
-- snapshots reproducibles,
-- historia consultable,
-- referencias temporales,
-- y debugging determinista.
+- explicit boundaries,
+- reproducible snapshots,
+- queryable history,
+- temporal references,
+- and deterministic debugging.
 
-La fricción principal no está en el caso bancario. Está en el salto de modelo mental y en la ergonomía necesaria para que un equipo llegue rápido a usar esas capacidades sin tener que reinventar patrones en cada proyecto.
+The main friction is not the banking case itself. It is the mental-model shift and the ergonomics required for a team to use these capabilities quickly without reinventing patterns in every project.
 
-La prioridad debería ser reducir fricción de adopción sin debilitar las propiedades centrales del motor.
+The priority should be to reduce adoption friction without weakening the engine's core properties.
