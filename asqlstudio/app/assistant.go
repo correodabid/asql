@@ -69,7 +69,7 @@ func (a *App) AssistQuery(req assistantQueryRequest) (*assistantQueryResponse, e
 	}
 
 	if req.LLM != nil && req.LLM.Enabled {
-		return a.assistQueryWithLLM(ctx, question, domains, snapshot, *req.LLM)
+		return a.assistQueryWithLLM(ctx, question, domains, snapshot, req.History, *req.LLM)
 	}
 
 	return buildAssistantQueryPlan(question, domains, snapshot)

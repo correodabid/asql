@@ -23,6 +23,28 @@ export namespace httpapi {
 
 export namespace studioapp {
 	
+	export class assistantChatMessage {
+	    role: string;
+	    content?: string;
+	    sql?: string;
+	    summary?: string;
+	    status?: string;
+	    validation_error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new assistantChatMessage(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.role = source["role"];
+	        this.content = source["content"];
+	        this.sql = source["sql"];
+	        this.summary = source["summary"];
+	        this.status = source["status"];
+	        this.validation_error = source["validation_error"];
+	    }
+	}
 	export class assistantLLMModelCatalog {
 	    id: string;
 	    label?: string;
@@ -171,6 +193,7 @@ export namespace studioapp {
 	export class assistantQueryRequest {
 	    question: string;
 	    domains: string[];
+	    history?: assistantChatMessage[];
 	    llm?: assistantLLMSettings;
 	
 	    static createFrom(source: any = {}) {
@@ -181,6 +204,7 @@ export namespace studioapp {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.question = source["question"];
 	        this.domains = source["domains"];
+	        this.history = this.convertValues(source["history"], assistantChatMessage);
 	        this.llm = this.convertValues(source["llm"], assistantLLMSettings);
 	    }
 	
@@ -212,6 +236,7 @@ export namespace studioapp {
 	    model?: string;
 	    summary: string;
 	    sql: string;
+	    validation_error?: string;
 	    primary_table?: string;
 	    matched_tables?: string[];
 	    matched_columns?: string[];
@@ -234,6 +259,7 @@ export namespace studioapp {
 	        this.model = source["model"];
 	        this.summary = source["summary"];
 	        this.sql = source["sql"];
+	        this.validation_error = source["validation_error"];
 	        this.primary_table = source["primary_table"];
 	        this.matched_tables = source["matched_tables"];
 	        this.matched_columns = source["matched_columns"];

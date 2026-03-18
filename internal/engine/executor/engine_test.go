@@ -5724,6 +5724,23 @@ func TestCTEMultiple(t *testing.T) {
 	}
 }
 
+func TestCTECountAll(t *testing.T) {
+	engine := setupJoinEngine(t)
+	ctx := context.Background()
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx,
+		"WITH big_orders AS (SELECT id, user_id, amount FROM orders WHERE amount >= 150) SELECT COUNT(*) AS total FROM big_orders",
+		[]string{"store"}, 8192)
+	if err != nil {
+		t.Fatalf("CTE count all: %v", err)
+	}
+	if len(result.Rows) != 1 {
+		t.Fatalf("expected 1 row, got %d: %+v", len(result.Rows), result.Rows)
+	}
+	if got, want := result.Rows[0]["total"].NumberValue, int64(2); got != want {
+		t.Fatalf("expected total=%d, got %+v", want, result.Rows[0])
+	}
+}
+
 func TestDerivedTableWithWindowJoin(t *testing.T) {
 	engine := setupJoinEngine(t)
 	ctx := context.Background()

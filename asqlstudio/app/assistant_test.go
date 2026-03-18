@@ -208,6 +208,119 @@ func TestAppAssistQueryUsesLLMWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestAppAssistQueryPassesConversationHistoryToLLM(t *testing.T) {
+	fakeSchema := &fakeSchemaInvoker{schema: &api.SchemaSnapshotResponse{
+		Status: "SNAPSHOT",
+		Domains: []api.SchemaSnapshotDomain{{
+			Name: "default",
+			Tables: []api.SchemaSnapshotTable{{
+				Name: "sites",
+				Columns: []api.SchemaSnapshotColumn{
+					{Name: "id", Type: "INT", PrimaryKey: true},
+					{Name: "area_id", Type: "INT"},
+					{Name: "name", Type: "TEXT"},
+				},
+			}},
+		}},
+	}}
+	fakeLLM := &fakeAssistantLLMClient{plan: &assistantLLMPlanEnvelope{
+		SQL:     "SELECT id, name FROM sites LIMIT 5;",
+		Summary: "Return a few sites.",
+	}}
+	app := &App{schemaInvoker: fakeSchema, assistantLLM: fakeLLM}
+	provider := mustAssistantProvider(t, "llm request without mandatory api key", func(provider assistantLLMProviderCatalog) bool {
+		return provider.APIKeyMode != assistantLLMAPIKeyModeRequired && provider.DefaultBaseURL != ""
+	})
+
+	_, err := app.AssistQuery(assistantQueryRequest{
+		Question: "fix the previous query",
+		Domains:  []string{"default"},
+		History: []assistantChatMessage{
+			{Role: "user", Content: "can you join sites and areas?"},
+			{Role: "assistant", Summary: "Initial join attempt.", SQL: "SELECT sites.name JOIN areas ON sites.area_id = areas.id;", Status: "INVALID", ValidationError: "generated SQL did not parse as supported ASQL: invalid sql statement: SELECT requires FROM"},
+		},
+		LLM: &assistantLLMSettings{
+			Enabled:  true,
+			Provider: provider.ID,
+			BaseURL:  provider.DefaultBaseURL,
+			Model:    mustAssistantProviderModel(t, provider),
+		},
+	})
+	if err != nil {
+		t.Fatalf("AssistQuery: %v", err)
+	}
+	if len(fakeLLM.seen) != 1 {
+		t.Fatalf("expected one llm call, got %d", len(fakeLLM.seen))
+	}
+	if len(fakeLLM.seen[0].History) != 2 {
+		t.Fatalf("expected history to be forwarded, got %d messages", len(fakeLLM.seen[0].History))
+	}
+	if got := fakeLLM.seen[0].History[1].ValidationError; !strings.Contains(got, "SELECT requires FROM") {
+		t.Fatalf("expected validation error in history, got %q", got)
+	}
+}
+
+func TestAppAssistQueryReturnsStructuredInvalidLLMPlan(t *testing.T) {
+	fakeSchema := &fakeSchemaInvoker{schema: &api.SchemaSnapshotResponse{
+		Status: "SNAPSHOT",
+		Domains: []api.SchemaSnapshotDomain{{
+			Name: "default",
+			Tables: []api.SchemaSnapshotTable{{
+				Name: "sites",
+				Columns: []api.SchemaSnapshotColumn{
+					{Name: "id", Type: "INT", PrimaryKey: true},
+					{Name: "area_id", Type: "INT"},
+					{Name: "name", Type: "TEXT"},
+				},
+			}, {
+				Name: "areas",
+				Columns: []api.SchemaSnapshotColumn{
+					{Name: "id", Type: "INT", PrimaryKey: true},
+					{Name: "name", Type: "TEXT"},
+				},
+			}},
+		}},
+	}}
+	fakeLLM := &fakeAssistantLLMClient{plan: &assistantLLMPlanEnvelope{
+		SQL:     "SELECT sites.name, areas.name AS area_name JOIN areas ON sites.area_id = areas.id;",
+		Summary: "Join sites with areas.",
+		Mode:    "read",
+	}}
+	app := &App{schemaInvoker: fakeSchema, assistantLLM: fakeLLM}
+	provider := mustAssistantProvider(t, "llm request without mandatory api key", func(provider assistantLLMProviderCatalog) bool {
+		return provider.APIKeyMode != assistantLLMAPIKeyModeRequired && provider.DefaultBaseURL != ""
+	})
+
+	resp, err := app.AssistQuery(assistantQueryRequest{
+		Question: "can you join sites and areas?",
+		Domains:  []string{"default"},
+		LLM: &assistantLLMSettings{
+			Enabled:  true,
+			Provider: provider.ID,
+			BaseURL:  provider.DefaultBaseURL,
+			Model:    mustAssistantProviderModel(t, provider),
+		},
+	})
+	if err != nil {
+		t.Fatalf("AssistQuery: %v", err)
+	}
+	if resp.Status != "INVALID" {
+		t.Fatalf("unexpected status: %q", resp.Status)
+	}
+	if !strings.Contains(resp.ValidationError, "SELECT requires FROM") {
+		t.Fatalf("unexpected validation error: %q", resp.ValidationError)
+	}
+	if got, want := resp.SQL, "SELECT sites.name, areas.name AS area_name JOIN areas ON sites.area_id = areas.id;"; got != want {
+		t.Fatalf("unexpected sql:\n got: %s\nwant: %s", got, want)
+	}
+	if resp.Confidence != "low" {
+		t.Fatalf("unexpected confidence: %q", resp.Confidence)
+	}
+	if len(resp.Warnings) == 0 {
+		t.Fatal("expected warnings on invalid llm response")
+	}
+}
+
 func TestAppAssistQueryFallsBackWhenLLMUnavailable(t *testing.T) {
 	fakeSchema := &fakeSchemaInvoker{schema: &api.SchemaSnapshotResponse{
 		Status: "SNAPSHOT",
@@ -346,10 +459,35 @@ func TestBuildAssistantLLMPromptsDescribeASQLSubset(t *testing.T) {
 		"OR/AND inside JOIN ON predicates",
 		"GROUP BY must list raw columns",
 		"UNION/UNION ALL",
+		"standard SQL clause order",
+		"FROM before any JOIN",
+		"previous SQL, and ASQL validation errors",
 	}
 	for _, check := range checks {
 		if !strings.Contains(system, check) {
 			t.Fatalf("expected system prompt to mention %q, got:\n%s", check, system)
+		}
+	}
+}
+
+func TestBuildAssistantLLMPromptsIncludeConversationHistory(t *testing.T) {
+	_, user := buildAssistantLLMPrompts(assistantLLMPlanRequest{
+		Question: "fix the previous query",
+		Domains:  []string{"default"},
+		History: []assistantChatMessage{
+			{Role: "user", Content: "can you join sites and areas?"},
+			{Role: "assistant", Summary: "Initial attempt.", SQL: "SELECT sites.name JOIN areas ON sites.area_id = areas.id;", Status: "INVALID", ValidationError: "generated SQL did not parse as supported ASQL: invalid sql statement: SELECT requires FROM"},
+		},
+	})
+	checks := []string{
+		"Conversation so far:",
+		"can you join sites and areas?",
+		"SELECT requires FROM",
+		"sql: SELECT sites.name JOIN areas ON sites.area_id = areas.id;",
+	}
+	for _, check := range checks {
+		if !strings.Contains(user, check) {
+			t.Fatalf("expected user prompt to mention %q, got:\n%s", check, user)
 		}
 	}
 }
@@ -384,5 +522,52 @@ func TestValidateAssistantGeneratedSQLRejectsComputedGroupBy(t *testing.T) {
 func TestValidateAssistantGeneratedSQLRejectsWrites(t *testing.T) {
 	if _, err := (&App{}).validateAssistantGeneratedSQL(context.Background(), "DELETE FROM users;", []string{"default"}); err == nil {
 		t.Fatal("expected DELETE to be rejected")
+	}
+}
+
+func TestDecodeAssistantLLMEnvelopeTrimsTrailingProseAfterSQL(t *testing.T) {
+	envelope, err := decodeAssistantLLMEnvelope(`{"sql":"SELECT id, amount FROM orders ORDER BY created_at DESC LIMIT 3;\nThis returns the latest orders.","summary":"latest orders"}`)
+	if err != nil {
+		t.Fatalf("decodeAssistantLLMEnvelope: %v", err)
+	}
+	if got, want := envelope.SQL, "SELECT id, amount FROM orders ORDER BY created_at DESC LIMIT 3;"; got != want {
+		t.Fatalf("unexpected sql:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestDecodeAssistantLLMEnvelopeRecoversSQLFromFenceWithoutTrailingExplanation(t *testing.T) {
+	envelope, err := decodeAssistantLLMEnvelope("```sql\nSELECT email FROM users WHERE email = 'alice@example.com' LIMIT 100;\n```\nSummary: fetch the matching user.")
+	if err != nil {
+		t.Fatalf("decodeAssistantLLMEnvelope: %v", err)
+	}
+	if got, want := envelope.SQL, "SELECT email FROM users WHERE email = 'alice@example.com' LIMIT 100;"; got != want {
+		t.Fatalf("unexpected sql:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestDecodeAssistantLLMEnvelopeKeepsMultipleStatementsForValidationRejection(t *testing.T) {
+	envelope, err := decodeAssistantLLMEnvelope(`{"sql":"SELECT * FROM users; SELECT * FROM orders;"}`)
+	if err != nil {
+		t.Fatalf("decodeAssistantLLMEnvelope: %v", err)
+	}
+	if got, want := envelope.SQL, "SELECT * FROM users; SELECT * FROM orders;"; got != want {
+		t.Fatalf("unexpected sql:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestDecodeAssistantLLMEnvelopePreservesLeadingWithClause(t *testing.T) {
+	envelope, err := decodeAssistantLLMEnvelope(`{"sql":"WITH batch_info AS (SELECT id, status FROM batch_orders) SELECT id, status FROM batch_info LIMIT 100;"}`)
+	if err != nil {
+		t.Fatalf("decodeAssistantLLMEnvelope: %v", err)
+	}
+	if got, want := envelope.SQL, "WITH batch_info AS (SELECT id, status FROM batch_orders) SELECT id, status FROM batch_info LIMIT 100;"; got != want {
+		t.Fatalf("unexpected sql:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestExtractAssistantSQLPrefersWithBeforeInnerSelect(t *testing.T) {
+	raw := "Here is the query:\nWITH batch_info AS (SELECT id, status FROM batch_orders) SELECT id, status FROM batch_info LIMIT 100;"
+	if got, want := extractAssistantSQL(raw), "WITH batch_info AS (SELECT id, status FROM batch_orders) SELECT id, status FROM batch_info LIMIT 100;"; got != want {
+		t.Fatalf("unexpected sql:\n got: %s\nwant: %s", got, want)
 	}
 }

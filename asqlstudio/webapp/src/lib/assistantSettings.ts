@@ -3,6 +3,7 @@ export type AssistantLLMPreferences = {
   provider: string
   base_url: string
   model: string
+  api_key: string
   allow_fallback: boolean
 }
 
@@ -13,6 +14,7 @@ const DEFAULT_SETTINGS: AssistantLLMPreferences = {
   provider: '',
   base_url: '',
   model: '',
+  api_key: '',
   allow_fallback: true,
 }
 
@@ -27,6 +29,7 @@ export function readAssistantLLMPreferences(): AssistantLLMPreferences {
       provider,
       base_url: typeof parsed.base_url === 'string' ? parsed.base_url.trim() : DEFAULT_SETTINGS.base_url,
       model: typeof parsed.model === 'string' ? parsed.model.trim() : '',
+      api_key: typeof parsed.api_key === 'string' ? parsed.api_key.trim() : '',
       allow_fallback: parsed.allow_fallback !== false,
     }
   } catch {

@@ -107,12 +107,22 @@ export type AssistantQueryPlan = {
   model?: string
   summary: string
   sql: string
+  validation_error?: string
   primary_table?: string
   matched_tables?: string[]
   matched_columns?: string[]
   assumptions?: string[]
   warnings?: string[]
   confidence?: 'high' | 'medium' | 'low' | string
+}
+
+export type AssistantChatMessage = {
+  role: 'user' | 'assistant' | 'system' | string
+  content?: string
+  sql?: string
+  summary?: string
+  status?: string
+  validation_error?: string
 }
 
 export type AssistantLLMRequest = {
@@ -122,6 +132,13 @@ export type AssistantLLMRequest = {
   model?: string
   api_key?: string
   allow_fallback?: boolean
+}
+
+export type AssistantQueryRequest = {
+  question: string
+  domains: string[]
+  history?: AssistantChatMessage[]
+  llm?: AssistantLLMRequest
 }
 
 export type AssistantLLMModelOption = {

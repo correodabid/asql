@@ -19,9 +19,10 @@ import (
 )
 
 var (
-	assistantReadOnlyPrefixPattern = regexp.MustCompile(`(?is)^\s*(select|with)\b`)
-	assistantWriteKeywordPattern   = regexp.MustCompile(`(?i)\b(insert|update|delete|create|alter|drop|truncate|begin|commit|rollback)\b`)
-	assistantFromJoinPattern       = regexp.MustCompile(`(?i)\b(?:from|join)\s+([a-zA-Z_][a-zA-Z0-9_\.]*)`)
+	assistantReadOnlyPrefixPattern  = regexp.MustCompile(`(?is)^\s*(select|with)\b`)
+	assistantStatementPrefixPattern = regexp.MustCompile(`(?is)^\s*(select|with|insert|update|delete|create|alter|drop|truncate|begin|commit|rollback|explain)\b`)
+	assistantWriteKeywordPattern    = regexp.MustCompile(`(?i)\b(insert|update|delete|create|alter|drop|truncate|begin|commit|rollback)\b`)
+	assistantFromJoinPattern        = regexp.MustCompile(`(?i)\b(?:from|join)\s+([a-zA-Z_][a-zA-Z0-9_\.]*)`)
 )
 
 type assistantLLMClient interface {
@@ -32,6 +33,7 @@ type assistantLLMPlanRequest struct {
 	Settings       assistantLLMSettings
 	Question       string
 	Domains        []string
+	History        []assistantChatMessage
 	SchemaOverview string
 	FallbackSQL    string
 	FallbackMode   string
@@ -50,7 +52,7 @@ type httpAssistantLLMClient struct {
 	httpClient *http.Client
 }
 
-func (a *App) assistQueryWithLLM(ctx context.Context, question string, domains []string, snapshot *api.SchemaSnapshotResponse, raw assistantLLMSettings) (*assistantQueryResponse, error) {
+func (a *App) assistQueryWithLLM(ctx context.Context, question string, domains []string, snapshot *api.SchemaSnapshotResponse, history []assistantChatMessage, raw assistantLLMSettings) (*assistantQueryResponse, error) {
 	fallbackPlan, fallbackErr := buildAssistantQueryPlan(question, domains, snapshot)
 	settings, err := normalizeAssistantLLMSettings(raw)
 	if err != nil {
@@ -80,6 +82,7 @@ func (a *App) assistQueryWithLLM(ctx context.Context, question string, domains [
 		Settings:       settings,
 		Question:       question,
 		Domains:        domains,
+		History:        append([]assistantChatMessage(nil), history...),
 		SchemaOverview: buildAssistantSchemaOverview(question, domains, snapshot),
 		FallbackSQL:    fallbackSQL,
 		FallbackMode:   fallbackMode,
@@ -99,7 +102,7 @@ func (a *App) assistQueryWithLLM(ctx context.Context, question string, domains [
 			fallbackPlan.Warnings = uniqueStrings(append(fallbackPlan.Warnings, fmt.Sprintf("Model SQL was rejected by the read-only guards; returned the deterministic plan instead. Detail: %v", err)))
 			return fallbackPlan, nil
 		}
-		return nil, err
+		return buildInvalidAssistantLLMResponse(question, domains, settings, envelope, err), nil
 	}
 
 	meta := summarizeAssistantSQL(validatedSQL)
@@ -145,6 +148,48 @@ func (a *App) assistQueryWithLLM(ctx context.Context, question string, domains [
 		Warnings:       warnings,
 		Confidence:     confidence,
 	}, nil
+}
+
+func buildInvalidAssistantLLMResponse(question string, domains []string, settings assistantLLMSettings, envelope *assistantLLMPlanEnvelope, validationErr error) *assistantQueryResponse {
+	if envelope == nil {
+		envelope = &assistantLLMPlanEnvelope{}
+	}
+	trimmedSQL := strings.TrimSpace(envelope.SQL)
+	if trimmedSQL != "" && !strings.HasSuffix(trimmedSQL, ";") {
+		trimmedSQL += ";"
+	}
+	meta := summarizeAssistantSQL(trimmedSQL)
+	mode := strings.TrimSpace(envelope.Mode)
+	if mode == "" {
+		mode = meta.Mode
+	}
+	if mode == "" {
+		mode = "read"
+	}
+	summary := strings.TrimSpace(envelope.Summary)
+	if summary == "" {
+		summary = fmt.Sprintf("The model proposed a query for %s, but ASQL rejected it and it needs one more correction.", meta.DomainTableLabel())
+	}
+	warnings := uniqueStrings(append(envelope.Warnings, "ASQL rejected the proposed SQL. Review the validation error and refine the query."))
+	assumptions := uniqueStrings(append(envelope.Assumptions, "The assistant keeps the rejected SQL visible so you can repair or refine it in the next turn."))
+	return &assistantQueryResponse{
+		Status:          "INVALID",
+		Question:        question,
+		Domain:          firstAssistantDomain(meta.PrimaryDomain, domains),
+		Mode:            mode,
+		Planner:         "llm",
+		Provider:        settings.Provider,
+		Model:           settings.Model,
+		Summary:         summary,
+		SQL:             trimmedSQL,
+		ValidationError: validationErr.Error(),
+		PrimaryTable:    meta.PrimaryTable,
+		MatchedTables:   meta.Tables,
+		MatchedColumns:  meta.Columns,
+		Assumptions:     assumptions,
+		Warnings:        warnings,
+		Confidence:      "low",
+	}
 }
 
 func normalizeAssistantLLMSettings(raw assistantLLMSettings) (assistantLLMSettings, error) {
@@ -224,7 +269,10 @@ func buildAssistantLLMPrompts(req assistantLLMPlanRequest) (string, string) {
 	system := strings.Join([]string{
 		"You are the SQL planner inside ASQL Studio.",
 		"Return exactly one read-only ASQL query using only the provided schema.",
+		"You may receive prior conversation turns, previous SQL, and ASQL validation errors. Use them to refine or repair the next query instead of starting over.",
 		"Allowed shape: SELECT or WITH ... SELECT. Never emit INSERT, UPDATE, DELETE, DDL, comments, or multiple statements.",
+		"Use standard SQL clause order only. ASQL does not support pipe syntax or standalone JOIN operators.",
+		"Every table query must use FROM before any JOIN. Valid pattern: SELECT ... FROM sites s JOIN areas a ON s.area_id = a.id.",
 		"Target the current ASQL subset only: SELECT, WITH, WHERE, GROUP BY, HAVING, ORDER BY, LIMIT, OFFSET, UNION/UNION ALL, and JOIN/CROSS JOIN/LEFT JOIN/RIGHT JOIN.",
 		"JOIN rules are strict: use exactly one equality in each ON clause (example: a.id = b.a_id). Do not use FULL OUTER JOIN, NATURAL JOIN, LATERAL, USING, or OR/AND inside JOIN ON predicates.",
 		"GROUP BY must list raw columns already available in the row shape. Do not GROUP BY computed expressions such as COALESCE(...), CASE ..., arithmetic, or function calls.",
@@ -237,6 +285,10 @@ func buildAssistantLLMPrompts(req assistantLLMPlanRequest) (string, string) {
 	var user strings.Builder
 	user.WriteString("Question:\n")
 	user.WriteString(req.Question)
+	if len(req.History) > 0 {
+		user.WriteString("\n\nConversation so far:\n")
+		user.WriteString(formatAssistantConversationHistory(req.History))
+	}
 	user.WriteString("\n\nSelected domains:\n")
 	user.WriteString(strings.Join(req.Domains, ", "))
 	user.WriteString("\n\nSchema:\n")
@@ -254,6 +306,35 @@ func buildAssistantLLMPrompts(req assistantLLMPlanRequest) (string, string) {
 		user.WriteString(strings.Join(req.FallbackNotes, "\n- "))
 	}
 	return system, user.String()
+}
+
+func formatAssistantConversationHistory(history []assistantChatMessage) string {
+	lines := make([]string, 0, len(history)*4)
+	for _, message := range history {
+		role := strings.TrimSpace(message.Role)
+		if role == "" {
+			role = "message"
+		}
+		content := strings.TrimSpace(message.Content)
+		if content != "" {
+			lines = append(lines, fmt.Sprintf("- %s: %s", role, content))
+		} else {
+			lines = append(lines, fmt.Sprintf("- %s", role))
+		}
+		if summary := strings.TrimSpace(message.Summary); summary != "" {
+			lines = append(lines, fmt.Sprintf("  summary: %s", summary))
+		}
+		if sql := strings.TrimSpace(message.SQL); sql != "" {
+			lines = append(lines, fmt.Sprintf("  sql: %s", sql))
+		}
+		if validationError := strings.TrimSpace(message.ValidationError); validationError != "" {
+			lines = append(lines, fmt.Sprintf("  validation_error: %s", validationError))
+		}
+		if status := strings.TrimSpace(message.Status); status != "" {
+			lines = append(lines, fmt.Sprintf("  status: %s", status))
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (c *httpAssistantLLMClient) planWithProvider(ctx context.Context, provider assistantLLMProviderCatalog, settings assistantLLMSettings, systemPrompt, userPrompt string) (string, error) {
@@ -473,6 +554,7 @@ func decodeAssistantLLMEnvelope(raw string) (*assistantLLMPlanEnvelope, error) {
 	if jsonBlock := extractAssistantJSONObject(trimmed); jsonBlock != "" {
 		var envelope assistantLLMPlanEnvelope
 		if err := json.Unmarshal([]byte(jsonBlock), &envelope); err == nil {
+			envelope.SQL = extractAssistantSQL(envelope.SQL)
 			return &envelope, nil
 		}
 	}
@@ -541,28 +623,73 @@ func extractAssistantSQL(raw string) string {
 		parts := strings.Split(trimmed, "```")
 		for _, part := range parts {
 			candidate := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(part, "sql"), "SQL"))
-			if startsWithAssistantSQL(candidate) {
-				return candidate
+			if sql := extractAssistantSQLCandidate(candidate); sql != "" {
+				return sql
 			}
 		}
 	}
-	if startsWithAssistantSQL(trimmed) {
-		return trimmed
+	if sql := extractAssistantSQLCandidate(trimmed); sql != "" {
+		return sql
 	}
-	upper := strings.ToUpper(trimmed)
-	idx := strings.Index(upper, "SELECT ")
-	if idx < 0 {
-		idx = strings.Index(upper, "WITH ")
-	}
+	idx := assistantFirstSQLStart(trimmed)
 	if idx < 0 {
 		return ""
 	}
-	return strings.TrimSpace(trimmed[idx:])
+	return trimAssistantTrailingText(strings.TrimSpace(trimmed[idx:]))
+}
+
+func assistantFirstSQLStart(value string) int {
+	upper := strings.ToUpper(value)
+	selectIdx := strings.Index(upper, "SELECT ")
+	withIdx := strings.Index(upper, "WITH ")
+	if withIdx >= 0 && (selectIdx < 0 || withIdx < selectIdx) {
+		return withIdx
+	}
+	return selectIdx
+}
+
+func extractAssistantSQLCandidate(value string) string {
+	trimmed := strings.TrimSpace(value)
+	if !startsWithAssistantSQL(trimmed) {
+		return ""
+	}
+	return trimAssistantTrailingText(trimmed)
 }
 
 func startsWithAssistantSQL(value string) bool {
 	upper := strings.ToUpper(strings.TrimSpace(value))
 	return strings.HasPrefix(upper, "SELECT ") || strings.HasPrefix(upper, "WITH ")
+}
+
+func trimAssistantTrailingText(value string) string {
+	trimmed := strings.TrimSpace(value)
+	inString := false
+	for i := 0; i < len(trimmed); i++ {
+		ch := trimmed[i]
+		if ch == '\'' {
+			if inString && i+1 < len(trimmed) && trimmed[i+1] == '\'' {
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		if ch != ';' {
+			continue
+		}
+		remainder := strings.TrimSpace(trimmed[i+1:])
+		if remainder == "" {
+			return strings.TrimSpace(trimmed[:i+1])
+		}
+		if assistantStatementPrefixPattern.MatchString(strings.TrimLeft(remainder, "`")) {
+			return trimmed
+		}
+		return strings.TrimSpace(trimmed[:i+1])
+	}
+	return trimmed
 }
 
 func (a *App) validateAssistantGeneratedSQL(ctx context.Context, sql string, domains []string) (string, error) {

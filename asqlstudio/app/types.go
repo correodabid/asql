@@ -90,9 +90,19 @@ type explainRequest struct {
 }
 
 type assistantQueryRequest struct {
-	Question string                `json:"question"`
-	Domains  []string              `json:"domains"`
-	LLM      *assistantLLMSettings `json:"llm,omitempty"`
+	Question string                 `json:"question"`
+	Domains  []string               `json:"domains"`
+	History  []assistantChatMessage `json:"history,omitempty"`
+	LLM      *assistantLLMSettings  `json:"llm,omitempty"`
+}
+
+type assistantChatMessage struct {
+	Role            string `json:"role"`
+	Content         string `json:"content,omitempty"`
+	SQL             string `json:"sql,omitempty"`
+	Summary         string `json:"summary,omitempty"`
+	Status          string `json:"status,omitempty"`
+	ValidationError string `json:"validation_error,omitempty"`
 }
 
 type assistantLLMSettings struct {
@@ -107,21 +117,22 @@ type assistantLLMSettings struct {
 }
 
 type assistantQueryResponse struct {
-	Status         string   `json:"status"`
-	Question       string   `json:"question"`
-	Domain         string   `json:"domain"`
-	Mode           string   `json:"mode"`
-	Planner        string   `json:"planner,omitempty"`
-	Provider       string   `json:"provider,omitempty"`
-	Model          string   `json:"model,omitempty"`
-	Summary        string   `json:"summary"`
-	SQL            string   `json:"sql"`
-	PrimaryTable   string   `json:"primary_table,omitempty"`
-	MatchedTables  []string `json:"matched_tables,omitempty"`
-	MatchedColumns []string `json:"matched_columns,omitempty"`
-	Assumptions    []string `json:"assumptions,omitempty"`
-	Warnings       []string `json:"warnings,omitempty"`
-	Confidence     string   `json:"confidence,omitempty"`
+	Status          string   `json:"status"`
+	Question        string   `json:"question"`
+	Domain          string   `json:"domain"`
+	Mode            string   `json:"mode"`
+	Planner         string   `json:"planner,omitempty"`
+	Provider        string   `json:"provider,omitempty"`
+	Model           string   `json:"model,omitempty"`
+	Summary         string   `json:"summary"`
+	SQL             string   `json:"sql"`
+	ValidationError string   `json:"validation_error,omitempty"`
+	PrimaryTable    string   `json:"primary_table,omitempty"`
+	MatchedTables   []string `json:"matched_tables,omitempty"`
+	MatchedColumns  []string `json:"matched_columns,omitempty"`
+	Assumptions     []string `json:"assumptions,omitempty"`
+	Warnings        []string `json:"warnings,omitempty"`
+	Confidence      string   `json:"confidence,omitempty"`
 }
 
 type clusterGroupStatus struct {
