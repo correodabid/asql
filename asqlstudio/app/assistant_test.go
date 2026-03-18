@@ -210,6 +210,64 @@ func TestAppAssistQueryFallsBackWhenLLMUnavailable(t *testing.T) {
 	}
 }
 
+func TestAssistantLLMCatalogLoadsProvidersFromJSON(t *testing.T) {
+	catalog, err := loadAssistantLLMCatalog()
+	if err != nil {
+		t.Fatalf("loadAssistantLLMCatalog: %v", err)
+	}
+	if catalog.DefaultProvider != assistantLLMProviderOllama {
+		t.Fatalf("unexpected default provider: %q", catalog.DefaultProvider)
+	}
+	ollama, ok := catalog.providerByID(assistantLLMProviderOllama)
+	if !ok {
+		t.Fatal("expected ollama provider in catalog")
+	}
+	if ollama.Transport != assistantLLMTransportOllamaChat {
+		t.Fatalf("unexpected ollama transport: %q", ollama.Transport)
+	}
+	if len(ollama.Models) == 0 {
+		t.Fatal("expected ollama models to be loaded from catalog")
+	}
+	openAI, ok := catalog.providerByID(assistantLLMProviderOpenAI)
+	if !ok {
+		t.Fatal("expected openai provider in catalog")
+	}
+	if openAI.APIKeyMode != assistantLLMAPIKeyModeRequired {
+		t.Fatalf("unexpected openai api key mode: %q", openAI.APIKeyMode)
+	}
+}
+
+func TestNormalizeAssistantLLMSettingsUsesCatalogDefaults(t *testing.T) {
+	settings, err := normalizeAssistantLLMSettings(assistantLLMSettings{
+		Enabled:  true,
+		Provider: assistantLLMProviderOllama,
+		Model:    "llama3.2",
+	})
+	if err != nil {
+		t.Fatalf("normalizeAssistantLLMSettings: %v", err)
+	}
+	if settings.BaseURL != "http://127.0.0.1:11434" {
+		t.Fatalf("unexpected default base url: %q", settings.BaseURL)
+	}
+	if settings.Transport != assistantLLMTransportOllamaChat {
+		t.Fatalf("unexpected transport: %q", settings.Transport)
+	}
+}
+
+func TestNormalizeAssistantLLMSettingsRequiresCatalogConfiguredAPIKey(t *testing.T) {
+	_, err := normalizeAssistantLLMSettings(assistantLLMSettings{
+		Enabled:  true,
+		Provider: assistantLLMProviderOpenAI,
+		Model:    "gpt-4.1-mini",
+	})
+	if err == nil {
+		t.Fatal("expected missing api key to be rejected")
+	}
+	if !strings.Contains(err.Error(), "api key is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestValidateAssistantGeneratedSQLRejectsWrites(t *testing.T) {
 	if _, err := (&App{}).validateAssistantGeneratedSQL(context.Background(), "DELETE FROM users;", []string{"default"}); err == nil {
 		t.Fatal("expected DELETE to be rejected")

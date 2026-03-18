@@ -1,0 +1,39 @@
+{
+  "default_provider": "ollama",
+  "providers": [
+    {
+      "id": "ollama",
+      "label": "Ollama",
+      "transport": "ollama-chat",
+      "default_base_url": "http://127.0.0.1:11434",
+      "supports_custom_base_url": true,
+      "supports_custom_model": true,
+      "model_placeholder": "llama3.2",
+      "api_key_mode": "optional",
+      "api_key_label": "API key (opt.)",
+      "api_key_placeholder": "empty = local",
+      "models": [
+        { "id": "llama3.2", "label": "Llama 3.2" },
+        { "id": "qwen2.5-coder", "label": "Qwen 2.5 Coder" },
+        { "id": "deepseek-r1", "label": "DeepSeek R1" }
+      ]
+    },
+    {
+      "id": "openai",
+      "label": "OpenAI-compatible",
+      "transport": "openai-chat",
+      "default_base_url": "https://api.openai.com/v1",
+      "supports_custom_base_url": true,
+      "supports_custom_model": true,
+      "model_placeholder": "gpt-4.1-mini",
+      "api_key_mode": "required",
+      "api_key_label": "API key (session)",
+      "api_key_placeholder": "sk-...",
+      "models": [
+        { "id": "gpt-4.1-mini", "label": "GPT-4.1 mini" },
+        { "id": "gpt-4.1", "label": "GPT-4.1" },
+        { "id": "gpt-5-mini", "label": "GPT-5 mini" }
+      ]
+    }
+  ]
+}

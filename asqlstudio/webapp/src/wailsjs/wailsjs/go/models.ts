@@ -23,6 +23,104 @@ export namespace httpapi {
 
 export namespace studioapp {
 	
+	export class assistantLLMModelCatalog {
+	    id: string;
+	    label?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new assistantLLMModelCatalog(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	    }
+	}
+	export class assistantLLMProviderCatalog {
+	    id: string;
+	    label: string;
+	    transport: string;
+	    default_base_url?: string;
+	    supports_custom_base_url?: boolean;
+	    supports_custom_model?: boolean;
+	    model_placeholder?: string;
+	    api_key_mode?: string;
+	    api_key_label?: string;
+	    api_key_placeholder?: string;
+	    models?: assistantLLMModelCatalog[];
+	
+	    static createFrom(source: any = {}) {
+	        return new assistantLLMProviderCatalog(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.label = source["label"];
+	        this.transport = source["transport"];
+	        this.default_base_url = source["default_base_url"];
+	        this.supports_custom_base_url = source["supports_custom_base_url"];
+	        this.supports_custom_model = source["supports_custom_model"];
+	        this.model_placeholder = source["model_placeholder"];
+	        this.api_key_mode = source["api_key_mode"];
+	        this.api_key_label = source["api_key_label"];
+	        this.api_key_placeholder = source["api_key_placeholder"];
+	        this.models = this.convertValues(source["models"], assistantLLMModelCatalog);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class assistantLLMCatalog {
+	    default_provider: string;
+	    providers: assistantLLMProviderCatalog[];
+	
+	    static createFrom(source: any = {}) {
+	        return new assistantLLMCatalog(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.default_provider = source["default_provider"];
+	        this.providers = this.convertValues(source["providers"], assistantLLMProviderCatalog);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	
 	export class assistantLLMSettings {
 	    enabled?: boolean;
 	    provider?: string;

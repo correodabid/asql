@@ -151,6 +151,11 @@ func (a *App) assistQueryWithLLM(ctx context.Context, question string, domains [
 }
 
 func normalizeAssistantLLMSettings(raw assistantLLMSettings) (assistantLLMSettings, error) {
+	catalog, err := loadAssistantLLMCatalog()
+	if err != nil {
+		return assistantLLMSettings{}, err
+	}
+
 	settings := raw
 	settings.Provider = strings.ToLower(strings.TrimSpace(settings.Provider))
 	settings.BaseURL = strings.TrimSpace(settings.BaseURL)
@@ -161,7 +166,7 @@ func normalizeAssistantLLMSettings(raw assistantLLMSettings) (assistantLLMSettin
 		settings.Provider = strings.ToLower(strings.TrimSpace(os.Getenv("ASQL_STUDIO_LLM_PROVIDER")))
 	}
 	if settings.Provider == "" {
-		settings.Provider = assistantLLMProviderOllama
+		settings.Provider = catalog.DefaultProvider
 	}
 	if settings.BaseURL == "" {
 		settings.BaseURL = strings.TrimSpace(os.Getenv("ASQL_STUDIO_LLM_BASE_URL"))
@@ -176,27 +181,25 @@ func normalizeAssistantLLMSettings(raw assistantLLMSettings) (assistantLLMSettin
 		settings.Temperature = 0.1
 	}
 
-	switch settings.Provider {
-	case assistantLLMProviderOllama:
-		if settings.BaseURL == "" {
-			settings.BaseURL = "http://127.0.0.1:11434"
-		}
-	case assistantLLMProviderOpenAI:
-		if settings.BaseURL == "" {
-			settings.BaseURL = "https://api.openai.com/v1"
-		}
-		if settings.APIKey == "" {
-			return assistantLLMSettings{}, fmt.Errorf("api key is required for provider %q", settings.Provider)
-		}
-	default:
+	provider, ok := catalog.providerByID(settings.Provider)
+	if !ok {
 		return assistantLLMSettings{}, fmt.Errorf("unsupported LLM provider %q", settings.Provider)
+	}
+	settings.Transport = provider.Transport
+	if settings.BaseURL == "" {
+		settings.BaseURL = provider.DefaultBaseURL
+	}
+	if provider.APIKeyMode == assistantLLMAPIKeyModeRequired && settings.APIKey == "" {
+		return assistantLLMSettings{}, fmt.Errorf("api key is required for provider %q", settings.Provider)
 	}
 
 	if settings.Model == "" {
 		return assistantLLMSettings{}, fmt.Errorf("model is required when LLM planning is enabled")
 	}
 
-	settings.BaseURL = strings.TrimRight(settings.BaseURL, "/")
+	if settings.BaseURL != "" {
+		settings.BaseURL = strings.TrimRight(settings.BaseURL, "/")
+	}
 	return settings, nil
 }
 
@@ -208,13 +211,13 @@ func (c *httpAssistantLLMClient) Plan(ctx context.Context, req assistantLLMPlanR
 	systemPrompt, userPrompt := buildAssistantLLMPrompts(req)
 	var raw string
 	var err error
-	switch req.Settings.Provider {
-	case assistantLLMProviderOllama:
+	switch req.Settings.Transport {
+	case assistantLLMTransportOllamaChat:
 		raw, err = c.planWithOllama(ctx, req.Settings, systemPrompt, userPrompt)
-	case assistantLLMProviderOpenAI:
+	case assistantLLMTransportOpenAIChat:
 		raw, err = c.planWithOpenAI(ctx, req.Settings, systemPrompt, userPrompt)
 	default:
-		return nil, fmt.Errorf("unsupported LLM provider %q", req.Settings.Provider)
+		return nil, fmt.Errorf("unsupported LLM transport %q for provider %q", req.Settings.Transport, req.Settings.Provider)
 	}
 	if err != nil {
 		return nil, err

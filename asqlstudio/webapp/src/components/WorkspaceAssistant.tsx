@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { api } from '../lib/api'
-import { defaultAssistantBaseURL, readAssistantLLMPreferences, writeAssistantLLMPreferences } from '../lib/assistantSettings'
-import type { AssistantLLMRequest, AssistantQueryPlan } from '../types/workspace'
+import { readAssistantLLMPreferences, writeAssistantLLMPreferences } from '../lib/assistantSettings'
+import type { AssistantLLMCatalog, AssistantLLMProviderOption, AssistantLLMRequest, AssistantQueryPlan } from '../types/workspace'
 import { IconAlertTriangle, IconChevronDown, IconCode, IconCpu, IconKey, IconPlay, IconX } from './Icons'
 
 type Props = {
@@ -12,12 +12,26 @@ type Props = {
   onClose: () => void
 }
 
+const CUSTOM_MODEL_SENTINEL = '__custom_model__'
+
+function findProvider(catalog: AssistantLLMCatalog | null, providerId: string): AssistantLLMProviderOption | null {
+  if (!catalog) return null
+  return catalog.providers.find((provider) => provider.id === providerId) ?? null
+}
+
+function fallbackProvider(catalog: AssistantLLMCatalog | null): AssistantLLMProviderOption | null {
+  if (!catalog || catalog.providers.length === 0) return null
+  return findProvider(catalog, catalog.default_provider) ?? catalog.providers[0] ?? null
+}
+
 export function WorkspaceAssistant({ domain, busy, onInsertSQL, onRunSQL, onClose }: Props) {
   const initialLLM = readAssistantLLMPreferences()
   const [question, setQuestion] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [plan, setPlan] = useState<AssistantQueryPlan | null>(null)
+  const [catalog, setCatalog] = useState<AssistantLLMCatalog | null>(null)
+  const [catalogError, setCatalogError] = useState('')
   const [useLLM, setUseLLM] = useState(initialLLM.enabled)
   const [provider, setProvider] = useState(initialLLM.provider)
   const [baseURL, setBaseURL] = useState(initialLLM.base_url)
@@ -25,6 +39,12 @@ export function WorkspaceAssistant({ domain, busy, onInsertSQL, onRunSQL, onClos
   const [apiKey, setAPIKey] = useState('')
   const [allowFallback, setAllowFallback] = useState(initialLLM.allow_fallback)
   const [showConfig, setShowConfig] = useState(false)
+  const [customModel, setCustomModel] = useState(false)
+
+  const activeProvider = useMemo(() => findProvider(catalog, provider) ?? fallbackProvider(catalog), [catalog, provider])
+  const apiKeyRequired = activeProvider?.api_key_mode === 'required'
+  const activeProviderModels = activeProvider?.models ?? []
+  const selectedModelValue = customModel ? CUSTOM_MODEL_SENTINEL : model
 
   useEffect(() => {
     setPlan(null)
@@ -32,16 +52,61 @@ export function WorkspaceAssistant({ domain, busy, onInsertSQL, onRunSQL, onClos
   }, [domain])
 
   useEffect(() => {
+    let cancelled = false
+    void api<AssistantLLMCatalog>('/api/assistant/catalog')
+      .then((response) => {
+        if (cancelled) return
+        setCatalog(response)
+        setCatalogError('')
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setCatalog(null)
+        setCatalogError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!catalog) return
+    const nextProvider = findProvider(catalog, provider) ?? fallbackProvider(catalog)
+    if (!nextProvider) return
+    if (provider !== nextProvider.id) {
+      setProvider(nextProvider.id)
+      if (!baseURL.trim()) {
+        setBaseURL(nextProvider.default_base_url ?? '')
+      }
+      return
+    }
+    if (!baseURL.trim() && nextProvider.default_base_url) {
+      setBaseURL(nextProvider.default_base_url)
+    }
+  }, [baseURL, catalog, provider])
+
+  useEffect(() => {
+    if (!activeProvider) return
+    if (activeProviderModels.length === 0) {
+      setCustomModel(true)
+      return
+    }
+    const hasKnownModel = activeProviderModels.some((option) => option.id === model)
+    setCustomModel(model.trim().length > 0 && !hasKnownModel)
+  }, [activeProvider, activeProviderModels, model])
+
+  useEffect(() => {
+    if (!catalog || !activeProvider) return
     writeAssistantLLMPreferences({
       enabled: useLLM,
-      provider,
-      base_url: baseURL.trim() || defaultAssistantBaseURL(provider),
+      provider: activeProvider.id,
+      base_url: baseURL.trim() || activeProvider.default_base_url || '',
       model: model.trim(),
       allow_fallback: allowFallback,
     })
-  }, [allowFallback, baseURL, model, provider, useLLM])
+  }, [activeProvider, allowFallback, baseURL, catalog, model, useLLM])
 
-  const llmReady = !useLLM || (model.trim().length > 0 && (provider !== 'openai' || apiKey.trim().length > 0))
+  const llmReady = !useLLM || (!!activeProvider && model.trim().length > 0 && (!apiKeyRequired || apiKey.trim().length > 0))
 
   const handleAsk = async () => {
     const prompt = question.trim()
@@ -49,10 +114,14 @@ export function WorkspaceAssistant({ domain, busy, onInsertSQL, onRunSQL, onClos
 
     let llm: AssistantLLMRequest | undefined
     if (useLLM) {
+      if (!activeProvider) {
+        setError(catalogError || 'No LLM provider catalog is available right now.')
+        return
+      }
       llm = {
         enabled: true,
-        provider,
-        base_url: baseURL.trim() || defaultAssistantBaseURL(provider),
+        provider: activeProvider.id,
+        base_url: baseURL.trim() || activeProvider.default_base_url || undefined,
         model: model.trim(),
         api_key: apiKey.trim() || undefined,
         allow_fallback: allowFallback,
@@ -188,7 +257,7 @@ export function WorkspaceAssistant({ domain, busy, onInsertSQL, onRunSQL, onClos
         <div className="ws-assistant-config-section">
           <button className={`ws-assistant-config-toggle ${showConfig ? 'open' : ''}`} onClick={() => setShowConfig(!showConfig)}>
             <IconChevronDown />
-            <span>{useLLM ? `LLM: ${provider}${model ? ' / ' + model : ''}` : 'Deterministic planner'}</span>
+            <span>{useLLM ? `LLM: ${activeProvider?.label || provider || 'unconfigured'}${model ? ' / ' + model : ''}` : 'Deterministic planner'}</span>
           </button>
 
           {showConfig && (
@@ -202,27 +271,90 @@ export function WorkspaceAssistant({ domain, busy, onInsertSQL, onRunSQL, onClos
                 <>
                   <label className="ws-assistant-config-label">
                     <span>Provider</span>
-                    <select className="ws-assistant-field" value={provider} onChange={(e) => { setProvider(e.target.value); setBaseURL(defaultAssistantBaseURL(e.target.value)) }} disabled={isBusy}>
-                      <option value="ollama">Ollama</option>
-                      <option value="openai">OpenAI-compatible</option>
+                    <select
+                      className="ws-assistant-field"
+                      value={activeProvider?.id || provider}
+                      onChange={(e) => {
+                        const nextProvider = findProvider(catalog, e.target.value)
+                        setProvider(e.target.value)
+                        setBaseURL(nextProvider?.default_base_url ?? '')
+                      }}
+                      disabled={isBusy || !catalog || catalog.providers.length === 0}
+                    >
+                      {(catalog?.providers ?? []).map((option) => (
+                        <option key={option.id} value={option.id}>{option.label}</option>
+                      ))}
                     </select>
                   </label>
 
                   <label className="ws-assistant-config-label">
                     <span>Model</span>
-                    <input className="ws-assistant-field" value={model} onChange={(e) => setModel(e.target.value)} placeholder={provider === 'openai' ? 'gpt-4.1-mini' : 'llama3.2'} spellCheck={false} disabled={isBusy} />
+                    <>
+                      <select
+                        className="ws-assistant-field"
+                        value={selectedModelValue}
+                        onChange={(e) => {
+                          const nextValue = e.target.value
+                          if (nextValue === CUSTOM_MODEL_SENTINEL) {
+                            setCustomModel(true)
+                            if (!model.trim()) {
+                              setModel(activeProvider?.model_placeholder || '')
+                            }
+                            return
+                          }
+                          setCustomModel(false)
+                          setModel(nextValue)
+                        }}
+                        disabled={isBusy || !activeProvider}
+                      >
+                        {activeProviderModels.length === 0 && (
+                          <option value="">No catalog models</option>
+                        )}
+                        {activeProviderModels.map((option) => (
+                          <option key={option.id} value={option.id}>{option.label || option.id}</option>
+                        ))}
+                        {activeProvider?.supports_custom_model !== false && (
+                          <option value={CUSTOM_MODEL_SENTINEL}>Custom model…</option>
+                        )}
+                      </select>
+                      {customModel && activeProvider?.supports_custom_model !== false && (
+                        <input
+                          className="ws-assistant-field"
+                          value={model}
+                          onChange={(e) => setModel(e.target.value)}
+                          placeholder={activeProvider?.model_placeholder || 'model-id'}
+                          spellCheck={false}
+                          disabled={isBusy || !activeProvider}
+                        />
+                      )}
+                    </>
                   </label>
 
                   <label className="ws-assistant-config-label">
                     <span>Base URL</span>
-                    <input className="ws-assistant-field" value={baseURL} onChange={(e) => setBaseURL(e.target.value)} placeholder={defaultAssistantBaseURL(provider)} spellCheck={false} disabled={isBusy} />
+                    <input
+                      className="ws-assistant-field"
+                      value={baseURL}
+                      onChange={(e) => setBaseURL(e.target.value)}
+                      placeholder={activeProvider?.default_base_url || ''}
+                      spellCheck={false}
+                      disabled={isBusy || !activeProvider}
+                    />
                   </label>
 
                   <label className="ws-assistant-config-label">
-                    <span>{provider === 'openai' ? 'API key (session)' : 'API key (opt.)'}</span>
+                    <span>{activeProvider?.api_key_label || 'API key'}</span>
                     <div className="ws-assistant-secret-field">
                       <IconKey />
-                      <input className="ws-assistant-field" type="password" value={apiKey} onChange={(e) => setAPIKey(e.target.value)} placeholder={provider === 'openai' ? 'sk-...' : 'empty = local'} spellCheck={false} disabled={isBusy} />
+                      <input
+                        className="ws-assistant-field"
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setAPIKey(e.target.value)}
+                        placeholder={activeProvider?.api_key_placeholder || ''}
+                        spellCheck={false}
+                        disabled={isBusy || !activeProvider || activeProvider.api_key_mode === 'none'}
+                      />
                     </div>
                   </label>
 
@@ -233,9 +365,15 @@ export function WorkspaceAssistant({ domain, busy, onInsertSQL, onRunSQL, onClos
                 </>
               )}
 
+              {useLLM && catalogError && (
+                <div className="ws-assistant-footnote">
+                  {catalogError}
+                </div>
+              )}
+
               {useLLM && !llmReady && (
                 <div className="ws-assistant-footnote">
-                  Configure a model{provider === 'openai' ? ' and API key' : ''} to enable LLM planning.
+                  Configure a model{apiKeyRequired ? ' and API key' : ''} to enable LLM planning.
                 </div>
               )}
             </div>

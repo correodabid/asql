@@ -103,6 +103,7 @@ type assistantLLMSettings struct {
 	APIKey        string  `json:"api_key,omitempty"`
 	Temperature   float64 `json:"temperature,omitempty"`
 	AllowFallback bool    `json:"allow_fallback,omitempty"`
+	Transport     string  `json:"-"`
 }
 
 type assistantQueryResponse struct {

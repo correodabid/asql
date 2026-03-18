@@ -6,6 +6,10 @@ export function AssistQuery(arg1) {
   return window['go']['studioapp']['App']['AssistQuery'](arg1);
 }
 
+export function AssistantLLMCatalog() {
+  return window['go']['studioapp']['App']['AssistantLLMCatalog']();
+}
+
 export function Begin(arg1) {
   return window['go']['studioapp']['App']['Begin'](arg1);
 }

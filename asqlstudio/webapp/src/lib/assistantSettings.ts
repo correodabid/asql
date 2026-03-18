@@ -1,6 +1,6 @@
 export type AssistantLLMPreferences = {
   enabled: boolean
-  provider: 'ollama' | 'openai' | string
+  provider: string
   base_url: string
   model: string
   allow_fallback: boolean
@@ -10,14 +10,10 @@ const STORAGE_KEY = 'asql-assistant-llm-settings-v1'
 
 const DEFAULT_SETTINGS: AssistantLLMPreferences = {
   enabled: false,
-  provider: 'ollama',
-  base_url: 'http://127.0.0.1:11434',
+  provider: '',
+  base_url: '',
   model: '',
   allow_fallback: true,
-}
-
-export function defaultAssistantBaseURL(provider: string) {
-  return provider === 'openai' ? 'https://api.openai.com/v1' : 'http://127.0.0.1:11434'
 }
 
 export function readAssistantLLMPreferences(): AssistantLLMPreferences {
@@ -29,7 +25,7 @@ export function readAssistantLLMPreferences(): AssistantLLMPreferences {
     return {
       enabled: parsed.enabled === true,
       provider,
-      base_url: typeof parsed.base_url === 'string' && parsed.base_url.trim() ? parsed.base_url.trim() : defaultAssistantBaseURL(provider),
+      base_url: typeof parsed.base_url === 'string' ? parsed.base_url.trim() : DEFAULT_SETTINGS.base_url,
       model: typeof parsed.model === 'string' ? parsed.model.trim() : '',
       allow_fallback: parsed.allow_fallback !== false,
     }

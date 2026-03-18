@@ -123,3 +123,27 @@ export type AssistantLLMRequest = {
   api_key?: string
   allow_fallback?: boolean
 }
+
+export type AssistantLLMModelOption = {
+  id: string
+  label?: string
+}
+
+export type AssistantLLMProviderOption = {
+  id: string
+  label: string
+  transport: string
+  default_base_url?: string
+  supports_custom_base_url?: boolean
+  supports_custom_model?: boolean
+  model_placeholder?: string
+  api_key_mode?: 'required' | 'optional' | 'none' | string
+  api_key_label?: string
+  api_key_placeholder?: string
+  models?: AssistantLLMModelOption[]
+}
+
+export type AssistantLLMCatalog = {
+  default_provider: string
+  providers: AssistantLLMProviderOption[]
+}
