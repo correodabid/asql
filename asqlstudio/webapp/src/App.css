@@ -14999,3 +14999,347 @@ tr:hover .te-expand-btn { opacity: 1; }
     align-items: stretch;
   }
 }
+
+/* ── Workspace assistant ────────────────────────────────── */
+
+/* ─── Assistant Side Panel ─────────────────────────────────── */
+
+.ws-assistant {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg-sidebar);
+  overflow: hidden;
+}
+
+.ws-assistant-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  min-height: 38px;
+}
+
+.ws-assistant-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent);
+}
+
+.ws-assistant-title-group svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.ws-assistant-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.ws-assistant-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 12px 14px;
+}
+
+.ws-assistant-domain {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+  background: rgba(56, 189, 248, 0.06);
+  border: 1px solid rgba(56, 189, 248, 0.15);
+  align-self: flex-start;
+}
+
+.ws-assistant-input {
+  width: 100%;
+  min-height: 52px;
+  resize: vertical;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.55);
+  color: var(--text-primary);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  outline: none;
+}
+
+.ws-assistant-input:focus {
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3);
+}
+
+.ws-assistant-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ws-assistant-gen-btn {
+  width: 100%;
+  justify-content: center;
+}
+
+.ws-assistant-action-row {
+  display: flex;
+  gap: 6px;
+}
+
+.ws-assistant-action-row .toolbar-btn {
+  flex: 1;
+  justify-content: center;
+  font-size: 11px;
+}
+
+.ws-assistant-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ws-assistant-chip {
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.45);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 10px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.ws-assistant-chip:hover {
+  color: var(--text-primary);
+  border-color: rgba(56, 189, 248, 0.4);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+.ws-assistant-feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(248, 113, 113, 0.25);
+  background: rgba(127, 29, 29, 0.18);
+  color: #fecaca;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.ws-assistant-feedback svg {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+}
+
+.ws-assistant-result {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border);
+  background: rgba(2, 6, 23, 0.45);
+}
+
+.ws-assistant-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.ws-assistant-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  border-radius: 999px;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.ws-assistant-badge.high {
+  background: rgba(16, 185, 129, 0.12);
+  color: #6ee7b7;
+}
+
+.ws-assistant-badge.medium {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fcd34d;
+}
+
+.ws-assistant-badge.low {
+  background: rgba(248, 113, 113, 0.12);
+  color: #fca5a5;
+}
+
+.ws-assistant-badge.neutral {
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text-secondary);
+}
+
+.ws-assistant-summary {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.ws-assistant-sql {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text-primary);
+  font-size: 11px;
+  line-height: 1.5;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-x: auto;
+}
+
+.ws-assistant-list-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.35);
+}
+
+.ws-assistant-list-block.warning {
+  border-color: rgba(245, 158, 11, 0.3);
+  background: rgba(120, 53, 15, 0.18);
+}
+
+.ws-assistant-list-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ws-assistant-list-block ul {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.ws-assistant-list-block li + li {
+  margin-top: 3px;
+}
+
+.ws-assistant-footnote {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* Config section — collapsible at bottom */
+
+.ws-assistant-config-section {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
+}
+
+.ws-assistant-config-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.ws-assistant-config-toggle:hover {
+  color: var(--text-secondary);
+}
+
+.ws-assistant-config-toggle svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  transition: transform 0.15s ease;
+}
+
+.ws-assistant-config-toggle.open svg {
+  transform: rotate(180deg);
+}
+
+.ws-assistant-config {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 0 0;
+}
+
+.ws-assistant-config-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.ws-assistant-field {
+  width: 100%;
+  min-height: 30px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: rgba(15, 23, 42, 0.6);
+  color: var(--text-primary);
+  padding: 6px 8px;
+  font-size: 11px;
+  outline: none;
+}
+
+.ws-assistant-field:focus {
+  border-color: rgba(56, 189, 248, 0.55);
+  box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.3);
+}
+
+.ws-assistant-secret-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ws-assistant-secret-field svg {
+  width: 12px;
+  height: 12px;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.ws-assistant-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}

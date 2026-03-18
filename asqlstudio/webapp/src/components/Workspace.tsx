@@ -17,6 +17,7 @@ import { QueryBuilder } from './QueryBuilder'
 import { DetailPanel } from './DetailPanel'
 import { ContextMenu } from './ContextMenu'
 import { ResizeHandle } from './ResizeHandle'
+import { WorkspaceAssistant } from './WorkspaceAssistant'
 import type { HistoryEntry, TableInfo } from '../types/workspace'
 
 type Props = {
@@ -32,8 +33,10 @@ export function Workspace({ domain }: Props) {
   const [showImport, setShowImport] = useState(false)
   const [showSaved, setShowSaved] = useState(false)
   const [showBuilder, setShowBuilder] = useState(false)
+  const [showAssistant, setShowAssistant] = useState(false)
 
   const sidebarResize = useResizable({ key: 'ws-sidebar', initial: 200, min: 140, max: 400, direction: 'horizontal' })
+  const assistantResize = useResizable({ key: 'ws-assistant', initial: 340, min: 260, max: 520, direction: 'horizontal' })
   const detailResize = useResizable({ key: 'ws-detail', initial: 320, min: 250, max: 600, direction: 'horizontal' })
   const historyResize = useResizable({ key: 'ws-history', initial: 200, min: 140, max: 360, direction: 'horizontal' })
 
@@ -82,7 +85,7 @@ export function Workspace({ domain }: Props) {
     <div
       className="workspace-layout"
       style={{
-        gridTemplateColumns: `${sidebarResize.size}px auto 1fr ${detailOpen ? `auto ${detailResize.size}px` : ''} ${showHistory ? `auto ${historyResize.size}px` : ''}`,
+        gridTemplateColumns: `${sidebarResize.size}px auto 1fr ${showAssistant ? `auto ${assistantResize.size}px` : ''} ${detailOpen ? `auto ${detailResize.size}px` : ''} ${showHistory ? `auto ${historyResize.size}px` : ''}`,
       }}
     >
       {/* Left: Table Sidebar */}
@@ -113,12 +116,14 @@ export function Workspace({ domain }: Props) {
           sql={tab.sql}
           explainEnabled={tab.explainEnabled}
           txState={workspace.txState}
+          showAssistant={showAssistant}
           onRun={() => workspace.executeTab(tab.id)}
           onToggleExplain={(enabled) => workspace.setTabExplainEnabled(tab.id, enabled)}
           onFormat={() => workspace.setTabSql(tab.id, formatSQL(tab.sql))}
           onBegin={workspace.beginTransaction}
           onCommit={workspace.commitTransaction}
           onRollback={workspace.rollbackTransaction}
+          onToggleAssistant={() => setShowAssistant((current) => !current)}
           showHistory={showHistory}
           onToggleHistory={() => setShowHistory(!showHistory)}
           onImport={() => setShowImport(true)}
@@ -209,6 +214,29 @@ export function Workspace({ domain }: Props) {
           />
         )}
       </div>
+
+      {/* Right: Assistant Panel */}
+      {showAssistant && (
+        <>
+          <ResizeHandle direction="horizontal" onMouseDown={assistantResize.startDragInverse} />
+          <WorkspaceAssistant
+            domain={domain}
+            busy={tab.loading}
+            onInsertSQL={(sql) => workspace.setTabSql(tab.id, sql)}
+            onRunSQL={(sql, primaryTable) => {
+              if (primaryTable) {
+                workspace.navigateToQuery(sql, primaryTable)
+                return
+              }
+              workspace.setTabSql(tab.id, sql)
+              setTimeout(() => {
+                void workspace.executeTab(tab.id)
+              }, 0)
+            }}
+            onClose={() => setShowAssistant(false)}
+          />
+        </>
+      )}
 
       {/* Right: Detail Panel */}
       {detailOpen && tab.tableName && (

@@ -96,3 +96,30 @@ export type TableInfo = {
   name: string
   pk_columns: string[]
 }
+
+export type AssistantQueryPlan = {
+  status: string
+  question: string
+  domain: string
+  mode: string
+  planner?: 'deterministic' | 'llm' | string
+  provider?: string
+  model?: string
+  summary: string
+  sql: string
+  primary_table?: string
+  matched_tables?: string[]
+  matched_columns?: string[]
+  assumptions?: string[]
+  warnings?: string[]
+  confidence?: 'high' | 'medium' | 'low' | string
+}
+
+export type AssistantLLMRequest = {
+  enabled: boolean
+  provider: string
+  base_url?: string
+  model?: string
+  api_key?: string
+  allow_fallback?: boolean
+}

@@ -3,6 +3,8 @@
 import {studioapp} from '../models';
 import {httpapi} from '../models';
 
+export function AssistQuery(arg1:studioapp.assistantQueryRequest):Promise<studioapp.assistantQueryResponse>;
+
 export function Begin(arg1:studioapp.beginRequest):Promise<Record<string, any>>;
 
 export function ClusterDiagnostics():Promise<Record<string, any>>;

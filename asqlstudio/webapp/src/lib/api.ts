@@ -46,6 +46,8 @@ export async function api<T>(path: string, _method = 'GET', body?: unknown): Pro
       return App.TemporalLookup(b) as Promise<T>
     case '/api/explain':
       return App.Explain(b) as Promise<T>
+    case '/api/assistant/query':
+      return App.AssistQuery(b) as Promise<T>
     // ── Fixtures ───────────────────────────────────
     case '/api/fixtures/pick-file':
       return App.PickFixtureFile() as Promise<T>

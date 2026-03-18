@@ -1,11 +1,12 @@
 import type { TxState } from '../types/workspace'
-import { IconCheck, IconCode, IconFormat, IconHistory, IconKey, IconLayers, IconPlay, IconRefresh, IconUpload } from './Icons'
+import { IconCheck, IconCode, IconCpu, IconFormat, IconHistory, IconKey, IconLayers, IconPlay, IconRefresh, IconUpload } from './Icons'
 
 type Props = {
   loading: boolean
   sql: string
   explainEnabled: boolean
   txState: TxState | null
+  showAssistant: boolean
   showHistory: boolean
   onRun: () => void
   onToggleExplain: (enabled: boolean) => void
@@ -13,6 +14,7 @@ type Props = {
   onBegin: () => void
   onCommit: () => void
   onRollback: () => void
+  onToggleAssistant: () => void
   onToggleHistory: () => void
   onImport: () => void
   onSaved: () => void
@@ -24,6 +26,7 @@ export function WorkspaceToolbar({
   sql,
   explainEnabled,
   txState,
+  showAssistant,
   showHistory,
   onRun,
   onToggleExplain,
@@ -31,6 +34,7 @@ export function WorkspaceToolbar({
   onBegin,
   onCommit,
   onRollback,
+  onToggleAssistant,
   onToggleHistory,
   onImport,
   onSaved,
@@ -118,6 +122,13 @@ export function WorkspaceToolbar({
       <div className="toolbar-separator" />
 
       <div className="toolbar-group">
+        <button
+          className={`toolbar-btn ${showAssistant ? 'active' : ''}`}
+          onClick={onToggleAssistant}
+          title="Ask your data"
+        >
+          <IconCpu /> Ask
+        </button>
         <button
           className={`toolbar-btn ${showHistory ? 'active' : ''}`}
           onClick={onToggleHistory}
