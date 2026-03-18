@@ -2685,7 +2685,14 @@ func TestMainstreamToolStartupFlows(t *testing.T) {
 	// during connection initialization.
 	t.Run("dbeaver_datagrip_startup", func(t *testing.T) {
 		exec(t, "BEGIN DOMAIN compliance")
+		exec(t, "CREATE TABLE reviewers (id INT PRIMARY KEY, name TEXT)")
 		exec(t, "CREATE TABLE ebr_reviews (id INT PRIMARY KEY, reviewer TEXT, decision TEXT)")
+		exec(t, "CREATE TABLE review_links (id INT PRIMARY KEY, review_id INT REFERENCES ebr_reviews(id))")
+		exec(t, "COMMIT")
+		exec(t, "BEGIN DOMAIN compliance")
+		exec(t, "INSERT INTO reviewers (id, name) VALUES (1, 'alice')")
+		exec(t, "INSERT INTO ebr_reviews (id, reviewer, decision) VALUES (1, 'alice', 'approve')")
+		exec(t, "INSERT INTO review_links (id, review_id) VALUES (1, 1)")
 		exec(t, "COMMIT")
 
 		// SET commands (no-op acceptance)
@@ -2771,6 +2778,67 @@ func TestMainstreamToolStartupFlows(t *testing.T) {
 			t.Fatal("jdbc-style table metadata query did not expose compliance.ebr_reviews")
 		}
 
+		namespaceRows, err := conn.Query(ctx, `SELECT oid, nspname, nspowner, description, nspacl FROM pg_catalog.pg_namespace ORDER BY nspname`)
+		if err != nil {
+			t.Fatalf("raw pg_namespace query: %v", err)
+		}
+		defer namespaceRows.Close()
+
+		var complianceNamespaceOID int64
+		for namespaceRows.Next() {
+			var oid, owner int64
+			var name, description, acl string
+			if err := namespaceRows.Scan(&oid, &name, &owner, &description, &acl); err != nil {
+				t.Fatalf("scan raw pg_namespace row: %v", err)
+			}
+			if name == "compliance" {
+				complianceNamespaceOID = oid
+			}
+		}
+		if err := namespaceRows.Err(); err != nil {
+			t.Fatalf("iterate raw pg_namespace rows: %v", err)
+		}
+		if complianceNamespaceOID == 0 {
+			t.Fatal("raw pg_namespace query did not expose compliance schema oid")
+		}
+
+		rawTableRows, err := conn.Query(ctx, fmt.Sprintf(`
+			SELECT c.oid,c.*,d.description
+			FROM pg_catalog.pg_class c
+			LEFT OUTER JOIN pg_catalog.pg_description d ON d.objoid=c.oid AND d.objsubid=0 AND d.classoid='pg_class'::regclass
+			WHERE c.relnamespace=%d AND c.relkind not in ('i','I','c')
+			ORDER BY relname`, complianceNamespaceOID))
+		if err != nil {
+			t.Fatalf("raw pg_class schema query: %v", err)
+		}
+		defer rawTableRows.Close()
+
+		var complianceTableOID int64
+		for rawTableRows.Next() {
+			var oid, relnamespace, relowner, reltablespace int64
+			var relname, relkind, relacl, reloptions, relpersistence, description string
+			var reltuples float64
+			var relispartition, relhassubclass, relrowsecurity bool
+			if err := rawTableRows.Scan(
+				&oid, &relname, &relnamespace, &relkind, &reltuples, &relowner, &relacl, &reloptions,
+				&relispartition, &relpersistence, &reltablespace, &relhassubclass, &relrowsecurity, &description,
+			); err != nil {
+				t.Fatalf("scan raw pg_class schema row: %v", err)
+			}
+			if relname == "ebr_reviews" {
+				complianceTableOID = oid
+				if relnamespace != complianceNamespaceOID {
+					t.Fatalf("unexpected relnamespace for compliance.ebr_reviews: got %d want %d", relnamespace, complianceNamespaceOID)
+				}
+			}
+		}
+		if err := rawTableRows.Err(); err != nil {
+			t.Fatalf("iterate raw pg_class schema rows: %v", err)
+		}
+		if complianceTableOID == 0 {
+			t.Fatal("raw pg_class schema query did not expose compliance.ebr_reviews oid")
+		}
+
 		columnRows, err := conn.Query(ctx, `
 			SELECT current_database() AS TABLE_CAT,
 			       n.nspname AS TABLE_SCHEM,
@@ -2849,6 +2917,116 @@ func TestMainstreamToolStartupFlows(t *testing.T) {
 		}
 		if gotColumns[2].name != "decision" || gotColumns[2].pos != 3 {
 			t.Fatalf("unexpected third jdbc-style column: %+v", gotColumns[2])
+		}
+
+		rawColumnRows, err := conn.Query(ctx, fmt.Sprintf(`
+			SELECT c.relname,a.*,pg_catalog.pg_get_expr(ad.adbin, ad.adrelid, true) as def_value,dsc.description
+			FROM pg_catalog.pg_attribute a
+			INNER JOIN pg_catalog.pg_class c ON (a.attrelid=c.oid)
+			LEFT OUTER JOIN pg_catalog.pg_attrdef ad ON (a.attrelid=ad.adrelid AND a.attnum = ad.adnum)
+			LEFT OUTER JOIN pg_catalog.pg_description dsc ON (c.oid=dsc.objoid AND a.attnum = dsc.objsubid)
+			WHERE NOT a.attisdropped AND c.oid=%d
+			ORDER BY a.attnum`, complianceTableOID))
+		if err != nil {
+			t.Fatalf("raw pg_attribute table query: %v", err)
+		}
+		defer rawColumnRows.Close()
+
+		gotRawColumns := make([]columnInfo, 0, 3)
+		for rawColumnRows.Next() {
+			var relname string
+			var relnamespace, attrelid, atttypid, attnum, atttypmod, attlen, attndims, attinhcount, attcollation, objid int64
+			var attname, attstorage, attidentity, attacl, attfdwoptions, defValue, description string
+			var attnotnull, atthasdef, attisdropped, attislocal bool
+			if err := rawColumnRows.Scan(
+				&relname, &relnamespace, &attrelid, &attname, &atttypid, &attnum, &attnotnull, &atthasdef, &attisdropped,
+				&atttypmod, &attlen, &attndims, &attinhcount, &attislocal, &attstorage, &attidentity,
+				&attcollation, &attacl, &attfdwoptions, &defValue, &description, &objid,
+			); err != nil {
+				t.Fatalf("scan raw pg_attribute row: %v", err)
+			}
+			if relname == "ebr_reviews" {
+				gotRawColumns = append(gotRawColumns, columnInfo{name: attname, pos: attnum})
+			}
+		}
+		if err := rawColumnRows.Err(); err != nil {
+			t.Fatalf("iterate raw pg_attribute rows: %v", err)
+		}
+		if len(gotRawColumns) != 3 {
+			t.Fatalf("unexpected raw pg_attribute column count for compliance.ebr_reviews: %+v", gotRawColumns)
+		}
+		if gotRawColumns[0].name != "id" || gotRawColumns[0].pos != 1 {
+			t.Fatalf("unexpected first raw pg_attribute column: %+v", gotRawColumns[0])
+		}
+		if gotRawColumns[1].name != "reviewer" || gotRawColumns[1].pos != 2 {
+			t.Fatalf("unexpected second raw pg_attribute column: %+v", gotRawColumns[1])
+		}
+		if gotRawColumns[2].name != "decision" || gotRawColumns[2].pos != 3 {
+			t.Fatalf("unexpected third raw pg_attribute column: %+v", gotRawColumns[2])
+		}
+
+		constraintRows, err := conn.Query(ctx, fmt.Sprintf(`
+			SELECT c.oid,c.*,t.relname as tabrelname,rt.relnamespace as refnamespace,d.description, null as consrc_copy
+			FROM pg_catalog.pg_constraint c
+			INNER JOIN pg_catalog.pg_class t ON t.oid=c.conrelid
+			LEFT OUTER JOIN pg_catalog.pg_class rt ON rt.oid=c.confrelid
+			LEFT OUTER JOIN pg_catalog.pg_description d ON d.objoid=c.oid AND d.objsubid=0 AND d.classoid='pg_constraint'::regclass
+			WHERE t.relnamespace=%d
+			ORDER BY c.oid`, complianceNamespaceOID))
+		if err != nil {
+			t.Fatalf("raw pg_constraint schema query: %v", err)
+		}
+		defer constraintRows.Close()
+
+		foundReviewLinkFK := false
+		for constraintRows.Next() {
+			var oid, connamespace, conrelid, contypid, conindid, conparentid, confrelid, coninhcount, refnamespace int64
+			var conname, contype, confupdtype, confdeltype, confmatchtype, conkey, confkey string
+			var condeferrable, condeferred, convalidated, conislocal, connoinherit bool
+			var conpfeqop, conppeqop, conffeqop, confdelsetcols, conexclop, conbin, tabrelname, description, consrcCopy string
+			if err := constraintRows.Scan(
+				&oid, &conname, &connamespace, &contype, &condeferrable, &condeferred, &convalidated,
+				&conrelid, &contypid, &conindid, &conparentid, &confrelid, &confupdtype, &confdeltype,
+				&confmatchtype, &conislocal, &coninhcount, &connoinherit, &conkey, &confkey,
+				&conpfeqop, &conppeqop, &conffeqop, &confdelsetcols, &conexclop, &conbin,
+				&tabrelname, &refnamespace, &description, &consrcCopy,
+			); err != nil {
+				t.Fatalf("scan raw pg_constraint row: %v", err)
+			}
+			if tabrelname == "review_links" && contype == "f" {
+				foundReviewLinkFK = true
+				if confkey != "{1}" || conkey != "{2}" {
+					t.Fatalf("unexpected review_links FK key mapping: conkey=%q confkey=%q", conkey, confkey)
+				}
+				if refnamespace != complianceNamespaceOID {
+					t.Fatalf("unexpected review_links FK refnamespace: got %d want %d", refnamespace, complianceNamespaceOID)
+				}
+			}
+		}
+		if err := constraintRows.Err(); err != nil {
+			t.Fatalf("iterate raw pg_constraint rows: %v", err)
+		}
+		if !foundReviewLinkFK {
+			t.Fatal("raw pg_constraint schema query did not expose compliance.review_links foreign key")
+		}
+
+		dataRows, err := conn.Query(ctx, `SELECT "id", "reviewer", "decision" FROM "compliance"."ebr_reviews" ORDER BY "id" LIMIT 10`)
+		if err != nil {
+			t.Fatalf("quoted schema-qualified data query: %v", err)
+		}
+		if !dataRows.Next() {
+			dataRows.Close()
+			t.Fatal("quoted schema-qualified data query returned no rows")
+		}
+		var reviewID int64
+		var reviewer, decision string
+		if err := dataRows.Scan(&reviewID, &reviewer, &decision); err != nil {
+			dataRows.Close()
+			t.Fatalf("scan quoted schema-qualified data row: %v", err)
+		}
+		dataRows.Close()
+		if reviewID != 1 || reviewer != "alice" || decision != "approve" {
+			t.Fatalf("unexpected quoted schema-qualified data row: id=%d reviewer=%q decision=%q", reviewID, reviewer, decision)
 		}
 
 		// Privilege check

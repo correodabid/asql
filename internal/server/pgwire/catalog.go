@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"net"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -46,6 +47,11 @@ var reCurrentSetting = regexp.MustCompile(`(?i)current_setting\s*\(\s*'([^']+)'\
 // reSetConfig matches  SELECT set_config('param', 'value', false/true)
 var reSetConfig = regexp.MustCompile(`(?i)set_config\s*\(\s*'([^']+)'\s*,\s*'([^']*)'\s*,\s*(?:false|true)\s*\)`)
 var reHasPrivilegeFunction = regexp.MustCompile(`(?is)^select\s+(has_(?:schema|table|database)_privilege)\s*\((.*)\)\s*(?:as\s+[a-z_][a-z0-9_]*)?\s*$`)
+var reCatalogRelnamespaceFilter = regexp.MustCompile(`(?i)\bc\.relnamespace\s*=\s*([0-9]+)`)
+var reCatalogClassOIDFilter = regexp.MustCompile(`(?i)\bc\.oid\s*=\s*([0-9]+)`)
+var reCatalogRelnameFilter = regexp.MustCompile(`(?i)\brelname\s*=\s*'([^']+)'`)
+var reCatalogConstraintRelIDFilter = regexp.MustCompile(`(?i)\bc\.conrelid\s*=\s*([0-9]+)`)
+var reCatalogConstraintNamespaceFilter = regexp.MustCompile(`(?i)\bt\.relnamespace\s*=\s*([0-9]+)`)
 
 var reRowLSN = regexp.MustCompile(`(?is)^select\s+row_lsn\s*\(\s*'((?:[^']|'')+)'\s*,\s*'((?:[^']|'')*)'\s*\)\s*(?:as\s+row_lsn)?\s*$`)
 var reEntityVersion = regexp.MustCompile(`(?is)^select\s+entity_version\s*\(\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'\s*,\s*'((?:[^']|'')*)'\s*\)\s*(?:as\s+entity_version)?\s*$`)
@@ -225,6 +231,12 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 		return server.catalogJDBCTables()
 	case isJDBCColumnsMetadataQuery(lower):
 		return server.catalogJDBCColumns()
+	case isPostgreSchemaTablesQuery(lower):
+		return server.catalogPostgreSchemaTables(trimmed)
+	case isPostgreSchemaColumnsQuery(lower):
+		return server.catalogPostgreSchemaColumns(trimmed)
+	case isPostgreConstraintQuery(lower):
+		return server.catalogPostgreConstraints(trimmed)
 
 	// ── pg_catalog.pg_tables / information_schema.tables ────────────────
 	case strings.Contains(lower, "pg_catalog.pg_tables"),
@@ -284,14 +296,7 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 			"indoption", "indexprs", "indpred",
 		)
 	case strings.Contains(lower, "pg_constraint"):
-		return emptyResultWithColumns(
-			"oid", "conname", "connamespace", "contype", "condeferrable",
-			"condeferred", "convalidated", "conrelid", "contypid", "conindid",
-			"conparentid", "confrelid", "confupdtype", "confdeltype",
-			"confmatchtype", "conislocal", "coninhcount", "connoinherit",
-			"conkey", "confkey", "conpfeqop", "conppeqop", "conffeqop",
-			"confdelsetcols", "conexclop", "conbin",
-		)
+		return server.catalogConstraints()
 	case strings.Contains(lower, "pg_proc"):
 		return emptyResultWithColumns(
 			"oid", "proname", "pronamespace", "proowner", "prolang", "procost",
@@ -1271,17 +1276,23 @@ func (server *Server) catalogTables() (interceptResult, bool) {
 
 func (server *Server) catalogNamespaces() (interceptResult, bool) {
 	snap := server.engine.SchemaSnapshot(nil)
-	columns := []string{"nspname", "nspowner"}
+	columns := []string{"oid", "nspname", "nspowner", "description", "nspacl"}
 	rows := []map[string]ast.Literal{
 		{
-			"nspname":  {Kind: ast.LiteralString, StringValue: "public"},
-			"nspowner": {Kind: ast.LiteralNumber, NumberValue: 10},
+			"oid":         lit(syntheticNamespaceOID(-1)),
+			"nspname":     {Kind: ast.LiteralString, StringValue: "public"},
+			"nspowner":    {Kind: ast.LiteralNumber, NumberValue: 10},
+			"description": litS(""),
+			"nspacl":      litS(""),
 		},
 	}
 	for i, d := range snap.Domains {
 		rows = append(rows, map[string]ast.Literal{
-			"nspname":  {Kind: ast.LiteralString, StringValue: d.Name},
-			"nspowner": {Kind: ast.LiteralNumber, NumberValue: int64(100 + i)},
+			"oid":         lit(syntheticNamespaceOID(i)),
+			"nspname":     {Kind: ast.LiteralString, StringValue: d.Name},
+			"nspowner":    {Kind: ast.LiteralNumber, NumberValue: int64(100 + i)},
+			"description": litS(""),
+			"nspacl":      litS(""),
 		})
 	}
 	return interceptResult{
@@ -1292,15 +1303,26 @@ func (server *Server) catalogNamespaces() (interceptResult, bool) {
 
 func (server *Server) catalogClasses() (interceptResult, bool) {
 	snap := server.engine.SchemaSnapshot(nil)
-	columns := []string{"relname", "relnamespace", "relkind", "reltuples"}
+	columns := []string{"oid", "relname", "relnamespace", "relkind", "reltuples", "relowner", "relacl", "reloptions", "relispartition", "relpersistence", "reltablespace", "relhassubclass", "relrowsecurity", "description"}
 	rows := make([]map[string]ast.Literal, 0)
 	for i, d := range snap.Domains {
-		for _, t := range d.Tables {
+		namespaceOID := syntheticNamespaceOID(i)
+		for j, t := range d.Tables {
 			rows = append(rows, map[string]ast.Literal{
-				"relname":      {Kind: ast.LiteralString, StringValue: t.Name},
-				"relnamespace": {Kind: ast.LiteralNumber, NumberValue: int64(100 + i)},
-				"relkind":      {Kind: ast.LiteralString, StringValue: "r"}, // ordinary table
-				"reltuples":    {Kind: ast.LiteralFloat, FloatValue: 0},
+				"oid":           lit(syntheticRelationOID(i, j)),
+				"relname":       {Kind: ast.LiteralString, StringValue: t.Name},
+				"relnamespace":  lit(namespaceOID),
+				"relkind":       {Kind: ast.LiteralString, StringValue: "r"},
+				"reltuples":     {Kind: ast.LiteralFloat, FloatValue: 0},
+				"relowner":      lit(10),
+				"relacl":        litS(""),
+				"reloptions":    litS(""),
+				"relispartition": litB(false),
+				"relpersistence": litS("p"),
+				"reltablespace":  lit(int64(0)),
+				"relhassubclass": litB(false),
+				"relrowsecurity": litB(false),
+				"description":    litS(""),
 			})
 		}
 	}
@@ -1312,11 +1334,11 @@ func (server *Server) catalogClasses() (interceptResult, bool) {
 
 func (server *Server) catalogAttributes() (interceptResult, bool) {
 	snap := server.engine.SchemaSnapshot(nil)
-	columns := []string{"attrelid", "attname", "atttypid", "attnum", "attnotnull", "atthasdef"}
+	columns := []string{"attrelid", "attname", "atttypid", "attnum", "attnotnull", "atthasdef", "attisdropped", "atttypmod", "attlen", "attndims", "attinhcount", "attislocal", "attstorage", "attidentity", "attcollation", "attacl", "attfdwoptions", "description", "def_value", "objid"}
 	rows := make([]map[string]ast.Literal, 0)
-	relID := int64(1000)
-	for _, d := range snap.Domains {
-		for _, t := range d.Tables {
+	for i, d := range snap.Domains {
+		for j, t := range d.Tables {
+			relID := syntheticRelationOID(i, j)
 			ordinal := int64(1)
 			for _, c := range t.Columns {
 				if strings.HasPrefix(c.Name, "_") {
@@ -1329,10 +1351,23 @@ func (server *Server) catalogAttributes() (interceptResult, bool) {
 					"attnum":     {Kind: ast.LiteralNumber, NumberValue: ordinal},
 					"attnotnull": {Kind: ast.LiteralBoolean, BoolValue: c.PrimaryKey},
 					"atthasdef":  {Kind: ast.LiteralBoolean, BoolValue: false},
+					"attisdropped": litB(false),
+					"atttypmod":   lit(int64(-1)),
+					"attlen":      lit(typeLengthForOID(schemaTypeToOID(c.Type))),
+					"attndims":    lit(int64(0)),
+					"attinhcount": lit(int64(0)),
+					"attislocal":  litB(true),
+					"attstorage":  litS(""),
+					"attidentity": litS(""),
+					"attcollation": lit(int64(0)),
+					"attacl":       litS(""),
+					"attfdwoptions": litS(""),
+					"description":   litS(""),
+					"def_value":     litS(""),
+					"objid":         lit(int64(0)),
 				})
 				ordinal++
 			}
-			relID++
 		}
 	}
 	return interceptResult{
@@ -1427,6 +1462,372 @@ func isJDBCColumnsMetadataQuery(lower string) bool {
 		strings.Contains(lower, "table_name") &&
 		((strings.Contains(lower, "pg_attribute") && strings.Contains(lower, "pg_class")) ||
 			strings.Contains(lower, "information_schema.columns"))
+}
+
+func isPostgreSchemaTablesQuery(lower string) bool {
+	return strings.Contains(lower, "from pg_catalog.pg_class c") &&
+		strings.Contains(lower, "where c.relnamespace=")
+}
+
+func isPostgreSchemaColumnsQuery(lower string) bool {
+	return strings.Contains(lower, "from pg_catalog.pg_attribute a") &&
+		strings.Contains(lower, "a.attrelid=c.oid") &&
+		strings.Contains(lower, "where not a.attisdropped")
+}
+
+func isPostgreConstraintQuery(lower string) bool {
+	return strings.Contains(lower, "from pg_catalog.pg_constraint c") &&
+		strings.Contains(lower, "t.oid=c.conrelid")
+}
+
+func (server *Server) catalogPostgreSchemaTables(sql string) (interceptResult, bool) {
+	rows := server.catalogClassesRows()
+	if namespaceOID, ok := parseCatalogInt64Filter(sql, reCatalogRelnamespaceFilter); ok {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row["relnamespace"].NumberValue != namespaceOID {
+				continue
+			}
+			if row["relkind"].StringValue == "i" || row["relkind"].StringValue == "I" || row["relkind"].StringValue == "c" {
+				continue
+			}
+			filtered = append(filtered, row)
+		}
+		rows = filtered
+	}
+	if relname, ok := parseCatalogStringFilter(sql, reCatalogRelnameFilter); ok {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if !strings.EqualFold(row["relname"].StringValue, relname) {
+				continue
+			}
+			filtered = append(filtered, row)
+		}
+		rows = filtered
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		return rows[i]["relname"].StringValue < rows[j]["relname"].StringValue
+	})
+	return interceptResult{result: executor.Result{Status: "OK", Rows: rows}, columns: []string{"oid", "relname", "relnamespace", "relkind", "reltuples", "relowner", "relacl", "reloptions", "relispartition", "relpersistence", "reltablespace", "relhassubclass", "relrowsecurity", "description"}}, true
+}
+
+func (server *Server) catalogPostgreSchemaColumns(sql string) (interceptResult, bool) {
+	rows := server.catalogPostgreSchemaColumnRows()
+	if classOID, ok := parseCatalogInt64Filter(sql, reCatalogClassOIDFilter); ok {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row["attrelid"].NumberValue != classOID {
+				continue
+			}
+			filtered = append(filtered, row)
+		}
+		rows = filtered
+	} else if namespaceOID, ok := parseCatalogInt64Filter(sql, reCatalogRelnamespaceFilter); ok {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row["relnamespace"].NumberValue != namespaceOID {
+				continue
+			}
+			filtered = append(filtered, row)
+		}
+		rows = filtered
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if rows[i]["relname"].StringValue == rows[j]["relname"].StringValue {
+			return rows[i]["attnum"].NumberValue < rows[j]["attnum"].NumberValue
+		}
+		return rows[i]["relname"].StringValue < rows[j]["relname"].StringValue
+	})
+	return interceptResult{result: executor.Result{Status: "OK", Rows: rows}, columns: []string{"relname", "relnamespace", "attrelid", "attname", "atttypid", "attnum", "attnotnull", "atthasdef", "attisdropped", "atttypmod", "attlen", "attndims", "attinhcount", "attislocal", "attstorage", "attidentity", "attcollation", "attacl", "attfdwoptions", "description", "def_value", "objid"}}, true
+}
+
+func (server *Server) catalogConstraints() (interceptResult, bool) {
+	rows := server.catalogConstraintRows()
+	return interceptResult{result: executor.Result{Status: "OK", Rows: rows}, columns: []string{"oid", "conname", "connamespace", "contype", "condeferrable", "condeferred", "convalidated", "conrelid", "contypid", "conindid", "conparentid", "confrelid", "confupdtype", "confdeltype", "confmatchtype", "conislocal", "coninhcount", "connoinherit", "conkey", "confkey", "conpfeqop", "conppeqop", "conffeqop", "confdelsetcols", "conexclop", "conbin"}}, true
+}
+
+func (server *Server) catalogPostgreConstraints(sql string) (interceptResult, bool) {
+	rows := server.catalogConstraintRows()
+	if relID, ok := parseCatalogInt64Filter(sql, reCatalogConstraintRelIDFilter); ok {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row["conrelid"].NumberValue != relID {
+				continue
+			}
+			filtered = append(filtered, row)
+		}
+		rows = filtered
+	} else if namespaceOID, ok := parseCatalogInt64Filter(sql, reCatalogConstraintNamespaceFilter); ok {
+		filtered := rows[:0]
+		for _, row := range rows {
+			if row["connamespace"].NumberValue != namespaceOID {
+				continue
+			}
+			filtered = append(filtered, row)
+		}
+		rows = filtered
+	}
+	sort.SliceStable(rows, func(i, j int) bool {
+		return rows[i]["oid"].NumberValue < rows[j]["oid"].NumberValue
+	})
+	return interceptResult{result: executor.Result{Status: "OK", Rows: rows}, columns: []string{"oid", "conname", "connamespace", "contype", "condeferrable", "condeferred", "convalidated", "conrelid", "contypid", "conindid", "conparentid", "confrelid", "confupdtype", "confdeltype", "confmatchtype", "conislocal", "coninhcount", "connoinherit", "conkey", "confkey", "conpfeqop", "conppeqop", "conffeqop", "confdelsetcols", "conexclop", "conbin", "tabrelname", "refnamespace", "description", "consrc_copy"}}, true
+}
+
+func (server *Server) catalogClassesRows() []map[string]ast.Literal {
+	snap := server.engine.SchemaSnapshot(nil)
+	rows := make([]map[string]ast.Literal, 0)
+	for i, d := range snap.Domains {
+		namespaceOID := syntheticNamespaceOID(i)
+		for j, t := range d.Tables {
+			rows = append(rows, map[string]ast.Literal{
+				"oid":            lit(syntheticRelationOID(i, j)),
+				"relname":        litS(t.Name),
+				"relnamespace":   lit(namespaceOID),
+				"relkind":        litS("r"),
+				"reltuples":      litF(0),
+				"relowner":       lit(int64(10)),
+				"relacl":         litS(""),
+				"reloptions":     litS(""),
+				"relispartition": litB(false),
+				"relpersistence": litS("p"),
+				"reltablespace":  lit(int64(0)),
+				"relhassubclass": litB(false),
+				"relrowsecurity": litB(false),
+				"description":    litS(""),
+			})
+		}
+	}
+	return rows
+}
+
+func (server *Server) catalogPostgreSchemaColumnRows() []map[string]ast.Literal {
+	snap := server.engine.SchemaSnapshot(nil)
+	rows := make([]map[string]ast.Literal, 0)
+	for i, d := range snap.Domains {
+		namespaceOID := syntheticNamespaceOID(i)
+		for j, t := range d.Tables {
+			relationOID := syntheticRelationOID(i, j)
+			ordinal := int64(1)
+			for _, c := range t.Columns {
+				if strings.HasPrefix(c.Name, "_") {
+					continue
+				}
+				rows = append(rows, map[string]ast.Literal{
+					"relname":       litS(t.Name),
+					"relnamespace":  lit(namespaceOID),
+					"attrelid":      lit(relationOID),
+					"attname":       litS(c.Name),
+					"atttypid":      lit(schemaTypeToOID(c.Type)),
+					"attnum":        lit(ordinal),
+					"attnotnull":    litB(c.PrimaryKey),
+					"atthasdef":     litB(false),
+					"attisdropped":  litB(false),
+					"atttypmod":     lit(int64(-1)),
+					"attlen":        lit(typeLengthForOID(schemaTypeToOID(c.Type))),
+					"attndims":      lit(int64(0)),
+					"attinhcount":   lit(int64(0)),
+					"attislocal":    litB(true),
+					"attstorage":    litS(""),
+					"attidentity":   litS(""),
+					"attcollation":  lit(int64(0)),
+					"attacl":        litS(""),
+					"attfdwoptions": litS(""),
+					"description":   litS(""),
+					"def_value":     litS(""),
+					"objid":         lit(int64(0)),
+				})
+				ordinal++
+			}
+		}
+	}
+	return rows
+}
+
+func (server *Server) catalogConstraintRows() []map[string]ast.Literal {
+	snap := server.engine.SchemaSnapshot(nil)
+	rows := make([]map[string]ast.Literal, 0)
+	for domainIndex, d := range snap.Domains {
+		namespaceOID := syntheticNamespaceOID(domainIndex)
+		tableOrdinals := make(map[string]map[string]int64, len(d.Tables))
+		tableIndexes := make(map[string]int, len(d.Tables))
+		for tableIndex, t := range d.Tables {
+			tableIndexes[t.Name] = tableIndex
+			ordinals := make(map[string]int64, len(t.Columns))
+			ordinal := int64(1)
+			for _, c := range t.Columns {
+				if strings.HasPrefix(c.Name, "_") {
+					continue
+				}
+				ordinals[c.Name] = ordinal
+				ordinal++
+			}
+			tableOrdinals[t.Name] = ordinals
+		}
+
+		constraintIndex := 0
+		for tableIndex, t := range d.Tables {
+			relationOID := syntheticRelationOID(domainIndex, tableIndex)
+			ordinals := tableOrdinals[t.Name]
+			if pkColumn := primaryKeyColumn(t.Columns); pkColumn != "" {
+				constraintIndex++
+				rows = append(rows, buildConstraintRow(
+					syntheticConstraintOID(domainIndex, tableIndex, constraintIndex),
+					fmt.Sprintf("%s_pkey", t.Name), namespaceOID, "p", relationOID, 0,
+					arrayLiteralFromOrdinals(ordinals[pkColumn]), "{}", t.Name, 0,
+				))
+			}
+			for _, c := range t.Columns {
+				if strings.HasPrefix(c.Name, "_") {
+					continue
+				}
+				if c.Unique && !c.PrimaryKey {
+					constraintIndex++
+					rows = append(rows, buildConstraintRow(
+						syntheticConstraintOID(domainIndex, tableIndex, constraintIndex),
+						fmt.Sprintf("%s_%s_key", t.Name, c.Name), namespaceOID, "u", relationOID, 0,
+						arrayLiteralFromOrdinals(ordinals[c.Name]), "{}", t.Name, 0,
+					))
+				}
+				if c.ReferencesTable == "" || c.ReferencesColumn == "" {
+					continue
+				}
+				refTableIndex, ok := tableIndexes[c.ReferencesTable]
+				if !ok {
+					continue
+				}
+				refOrdinals := tableOrdinals[c.ReferencesTable]
+				refOrdinal, ok := refOrdinals[c.ReferencesColumn]
+				if !ok {
+					continue
+				}
+				constraintIndex++
+				rows = append(rows, buildConstraintRow(
+					syntheticConstraintOID(domainIndex, tableIndex, constraintIndex),
+					fmt.Sprintf("%s_%s_fkey", t.Name, c.Name), namespaceOID, "f", relationOID,
+					syntheticRelationOID(domainIndex, refTableIndex),
+					arrayLiteralFromOrdinals(ordinals[c.Name]), arrayLiteralFromOrdinals(refOrdinal),
+					t.Name, namespaceOID,
+				))
+			}
+		}
+	}
+	return rows
+}
+
+func buildConstraintRow(oid int64, name string, namespaceOID int64, contype string, conrelid int64, confrelid int64, conkey string, confkey string, tableName string, refNamespace int64) map[string]ast.Literal {
+	row := map[string]ast.Literal{
+		"oid":            lit(oid),
+		"conname":        litS(name),
+		"connamespace":   lit(namespaceOID),
+		"contype":        litS(contype),
+		"condeferrable":  litB(false),
+		"condeferred":    litB(false),
+		"convalidated":   litB(true),
+		"conrelid":       lit(conrelid),
+		"contypid":       lit(int64(0)),
+		"conindid":       lit(int64(0)),
+		"conparentid":    lit(int64(0)),
+		"confrelid":      lit(confrelid),
+		"confupdtype":    litS("a"),
+		"confdeltype":    litS("a"),
+		"confmatchtype":  litS("s"),
+		"conislocal":     litB(true),
+		"coninhcount":    lit(int64(0)),
+		"connoinherit":   litB(false),
+		"conkey":         litS(conkey),
+		"confkey":        litS(confkey),
+		"conpfeqop":      litS(""),
+		"conppeqop":      litS(""),
+		"conffeqop":      litS(""),
+		"confdelsetcols": litS(""),
+		"conexclop":      litS(""),
+		"conbin":         litS(""),
+		"tabrelname":     litS(tableName),
+		"refnamespace":   lit(refNamespace),
+		"description":    litS(""),
+		"consrc_copy":    litS(""),
+	}
+	if confrelid == 0 {
+		row["confkey"] = litS("{}")
+		row["refnamespace"] = lit(int64(0))
+	}
+	return row
+}
+
+func primaryKeyColumn(columns []executor.SchemaColumn) string {
+	for _, c := range columns {
+		if c.PrimaryKey {
+			return c.Name
+		}
+	}
+	return ""
+}
+
+func arrayLiteralFromOrdinals(ordinals ...int64) string {
+	if len(ordinals) == 0 {
+		return "{}"
+	}
+	parts := make([]string, 0, len(ordinals))
+	for _, ordinal := range ordinals {
+		if ordinal <= 0 {
+			continue
+		}
+		parts = append(parts, strconv.FormatInt(ordinal, 10))
+	}
+	if len(parts) == 0 {
+		return "{}"
+	}
+	return "{" + strings.Join(parts, ",") + "}"
+}
+
+func parseCatalogInt64Filter(sql string, re *regexp.Regexp) (int64, bool) {
+	match := re.FindStringSubmatch(sql)
+	if len(match) != 2 {
+		return 0, false
+	}
+	value, err := strconv.ParseInt(match[1], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return value, true
+}
+
+func parseCatalogStringFilter(sql string, re *regexp.Regexp) (string, bool) {
+	match := re.FindStringSubmatch(sql)
+	if len(match) != 2 {
+		return "", false
+	}
+	return strings.ToLower(strings.TrimSpace(match[1])), true
+}
+
+func syntheticNamespaceOID(index int) int64 {
+	if index < 0 {
+		return 11
+	}
+	return 100 + int64(index)
+}
+
+func syntheticRelationOID(domainIndex, tableIndex int) int64 {
+	return 1000 + int64(domainIndex*100) + int64(tableIndex) + 1
+}
+
+func syntheticConstraintOID(domainIndex, tableIndex, constraintIndex int) int64 {
+	return 100000 + int64(domainIndex*1000) + int64(tableIndex*50) + int64(constraintIndex)
+}
+
+func typeLengthForOID(oid int64) int64 {
+	switch oid {
+	case 16:
+		return 1
+	case 20, 701, 1114:
+		return 8
+	case 21:
+		return 2
+	case 23:
+		return 4
+	default:
+		return -1
+	}
 }
 
 func (server *Server) catalogJDBCTables() (interceptResult, bool) {

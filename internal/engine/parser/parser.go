@@ -2755,6 +2755,30 @@ func canonicalIdentifier(identifier string) string {
 		return ""
 	}
 
+	if strings.Contains(trimmed, `"`) {
+		var result strings.Builder
+		result.Grow(len(trimmed))
+		inDoubleQuote := false
+		for i := 0; i < len(trimmed); i++ {
+			ch := trimmed[i]
+			if ch == '"' {
+				if inDoubleQuote && i+1 < len(trimmed) && trimmed[i+1] == '"' {
+					result.WriteByte('"')
+					i++
+					continue
+				}
+				inDoubleQuote = !inDoubleQuote
+				continue
+			}
+			if inDoubleQuote {
+				result.WriteByte(asciiLower(ch))
+				continue
+			}
+			result.WriteByte(asciiLower(ch))
+		}
+		return strings.TrimSpace(result.String())
+	}
+
 	// Fast path: if identifier has no quotes and is already lowercase, return as-is.
 	needsWork := false
 	for i := 0; i < len(trimmed); i++ {
