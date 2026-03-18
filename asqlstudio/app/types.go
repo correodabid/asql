@@ -90,8 +90,8 @@ type explainRequest struct {
 }
 
 type assistantQueryRequest struct {
-	Question string   `json:"question"`
-	Domains  []string `json:"domains"`
+	Question string                `json:"question"`
+	Domains  []string              `json:"domains"`
 	LLM      *assistantLLMSettings `json:"llm,omitempty"`
 }
 
