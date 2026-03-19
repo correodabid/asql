@@ -29,6 +29,17 @@ func TestLoadFileAndValidateDemoFixture(t *testing.T) {
 	}
 }
 
+func TestLoadFileAndValidateEcommerceLargeFixture(t *testing.T) {
+	fixture, err := LoadFile(filepath.Join("..", "..", "fixtures", "ecommerce-large-demo-v1.json"))
+	if err != nil {
+		t.Fatalf("load fixture: %v", err)
+	}
+
+	if err := ValidateDryRun(context.Background(), fixture); err != nil {
+		t.Fatalf("dry-run validate fixture: %v", err)
+	}
+}
+
 func TestValidateSpecRejectsNondeterministicStatements(t *testing.T) {
 	fixture := &File{
 		Version: CurrentVersion,
