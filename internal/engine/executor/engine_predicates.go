@@ -256,7 +256,7 @@ func evaluatePredicate3VL(row map[string]ast.Literal, predicate *ast.Predicate, 
 }
 
 func resolvePredicateOperand(row map[string]ast.Literal, expression string) (ast.Literal, bool) {
-	trimmed := strings.TrimSpace(expression)
+	trimmed := normalizeExpressionSyntax(expression)
 	if trimmed == "" {
 		return ast.Literal{}, false
 	}
@@ -270,6 +270,10 @@ func resolvePredicateOperand(row map[string]ast.Literal, expression string) (ast
 	canonical := strings.ToLower(trimmed)
 	if value, exists := row[canonical]; exists {
 		return value, true
+	}
+
+	if val, ok := evaluateCast(trimmed, row); ok {
+		return val, true
 	}
 
 	// Row-level functions: COALESCE, NULLIF.
@@ -1134,6 +1138,13 @@ func evaluateRowFunction(expr string, row map[string]ast.Literal) (ast.Literal, 
 			truncated = time.Date(ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), 0, 0, time.UTC)
 		case "second":
 			truncated = time.Date(ts.Year(), ts.Month(), ts.Day(), ts.Hour(), ts.Minute(), ts.Second(), 0, time.UTC)
+		case "week":
+			weekday := int(ts.Weekday())
+			if weekday == 0 {
+				weekday = 7
+			}
+			startOfWeek := ts.AddDate(0, 0, -(weekday - 1))
+			truncated = time.Date(startOfWeek.Year(), startOfWeek.Month(), startOfWeek.Day(), 0, 0, 0, 0, time.UTC)
 		default:
 			return ast.Literal{Kind: ast.LiteralNull}, true
 		}
@@ -1435,13 +1446,14 @@ func evaluateBetween(row map[string]ast.Literal, predicate *ast.Predicate, negat
 // Returns the cast result and true if the expression is a valid CAST, or
 // zero value and false otherwise.
 func evaluateCast(expr string, row map[string]ast.Literal) (ast.Literal, bool) {
-	upper := strings.ToUpper(strings.TrimSpace(expr))
+	normalized := normalizeExpressionSyntax(expr)
+	upper := strings.ToUpper(strings.TrimSpace(normalized))
 	if !strings.HasPrefix(upper, "CAST(") || !strings.HasSuffix(upper, ")") {
 		return ast.Literal{}, false
 	}
 
 	// Extract inner: expr AS type
-	inner := strings.TrimSpace(expr[5 : len(expr)-1]) // strip "CAST(" and ")"
+	inner := strings.TrimSpace(normalized[5 : len(normalized)-1]) // strip "CAST(" and ")"
 	asIdx := -1
 	innerUpper := strings.ToUpper(inner)
 	// Find the last " AS " to split (handles cases like column names containing "as")
@@ -1522,10 +1534,137 @@ func evaluateCast(expr string, row map[string]ast.Literal) (ast.Literal, bool) {
 			}
 			return ast.Literal{Kind: ast.LiteralBoolean, BoolValue: false}, true
 		}
+	case "DATE":
+		ts, ok := literalAsTime(val)
+		if !ok {
+			return ast.Literal{Kind: ast.LiteralNull}, true
+		}
+		dateOnly := time.Date(ts.Year(), ts.Month(), ts.Day(), 0, 0, 0, 0, time.UTC)
+		return ast.Literal{Kind: ast.LiteralTimestamp, NumberValue: dateOnly.UnixMicro()}, true
+	case "TIMESTAMP", "DATETIME":
+		ts, ok := literalAsTime(val)
+		if !ok {
+			return ast.Literal{Kind: ast.LiteralNull}, true
+		}
+		return ast.Literal{Kind: ast.LiteralTimestamp, NumberValue: ts.UnixMicro()}, true
 	}
 
 	// Unsupported cast — return NULL.
 	return ast.Literal{Kind: ast.LiteralNull}, true
+}
+
+func normalizeExpressionSyntax(expr string) string {
+	trimmed := strings.TrimSpace(expr)
+	if trimmed == "" {
+		return trimmed
+	}
+	trimmed = collapsePostgresCastSpacing(trimmed)
+	for {
+		rewritten, changed := rewriteTopLevelPostgresCast(trimmed)
+		if !changed {
+			return trimmed
+		}
+		trimmed = rewritten
+	}
+}
+
+func collapsePostgresCastSpacing(expr string) string {
+	var b strings.Builder
+	b.Grow(len(expr))
+	inString := false
+	for i := 0; i < len(expr); i++ {
+		ch := expr[i]
+		if ch == '\'' {
+			if inString && i+1 < len(expr) && expr[i+1] == '\'' {
+				b.WriteByte(ch)
+				b.WriteByte(ch)
+				i++
+				continue
+			}
+			inString = !inString
+			b.WriteByte(ch)
+			continue
+		}
+		if !inString && ch == ':' {
+			j := i + 1
+			for j < len(expr) && expr[j] == ' ' {
+				j++
+			}
+			if j < len(expr) && expr[j] == ':' {
+				b.WriteString("::")
+				i = j
+				for i+1 < len(expr) && expr[i+1] == ' ' {
+					i++
+				}
+				continue
+			}
+		}
+		b.WriteByte(ch)
+	}
+	return b.String()
+}
+
+func rewriteTopLevelPostgresCast(expr string) (string, bool) {
+	depth := 0
+	inString := false
+	castIdx := -1
+	for i := 0; i+1 < len(expr); i++ {
+		ch := expr[i]
+		if ch == '\'' {
+			if inString && i+1 < len(expr) && expr[i+1] == '\'' {
+				i++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if inString {
+			continue
+		}
+		switch ch {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ':':
+			if depth == 0 && expr[i+1] == ':' {
+				castIdx = i
+			}
+		}
+	}
+	if castIdx < 0 {
+		return expr, false
+	}
+	left := strings.TrimSpace(expr[:castIdx])
+	right := strings.TrimSpace(expr[castIdx+2:])
+	if left == "" || right == "" {
+		return expr, false
+	}
+	return fmt.Sprintf("CAST(%s AS %s)", left, right), true
+}
+
+func literalAsTime(val ast.Literal) (time.Time, bool) {
+	switch val.Kind {
+	case ast.LiteralTimestamp:
+		return time.UnixMicro(val.NumberValue).UTC(), true
+	case ast.LiteralString:
+		layouts := []string{
+			time.RFC3339Nano,
+			time.RFC3339,
+			"2006-01-02 15:04:05",
+			"2006-01-02T15:04:05",
+			"2006-01-02",
+		}
+		for _, layout := range layouts {
+			parsed, err := time.Parse(layout, val.StringValue)
+			if err == nil {
+				return parsed.UTC(), true
+			}
+		}
+	}
+	return time.Time{}, false
 }
 
 // ── Helper functions for string / math row-level functions ──────────────

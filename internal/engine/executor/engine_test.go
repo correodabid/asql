@@ -11138,6 +11138,89 @@ func TestDateTimeFunctions(t *testing.T) {
 		}
 	})
 
+	t.Run("DATE_TRUNC week", func(t *testing.T) {
+		engine := setup(t)
+		r, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT DATE_TRUNC('week', ts) AS w FROM events WHERE id = 1", []string{"dt"}, 8192)
+		if err != nil {
+			t.Fatal(err)
+		}
+		v := r.Rows[0]["w"]
+		if v.Kind != ast.LiteralTimestamp {
+			t.Fatalf("expected timestamp kind, got %s", v.Kind)
+		}
+		expected := time.Date(2024, 3, 11, 0, 0, 0, 0, time.UTC).UnixMicro()
+		if v.NumberValue != expected {
+			t.Errorf("expected %d, got %d", expected, v.NumberValue)
+		}
+	})
+
+	t.Run("weekly rollup from text dates", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "orders-weekly.wal")
+		store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+		if err != nil {
+			t.Fatalf("new store: %v", err)
+		}
+		defer store.Close()
+		engine, err := New(ctx, store, "")
+		if err != nil {
+			t.Fatalf("new engine: %v", err)
+		}
+		session := engine.NewSession()
+		exec := func(sql string) {
+			t.Helper()
+			if _, err := engine.Execute(ctx, session, sql); err != nil {
+				t.Fatalf("exec %q: %v", sql, err)
+			}
+		}
+		exec("BEGIN DOMAIN sales")
+		exec("CREATE TABLE orders (id INT, ordered_day TEXT, grand_total_cents INT, subtotal_cents INT, discount_cents INT, shipping_cents INT, tax_cents INT)")
+		exec("INSERT INTO orders (id, ordered_day, grand_total_cents, subtotal_cents, discount_cents, shipping_cents, tax_cents) VALUES (1, '2026-01-05', 1000, 800, 50, 100, 150)")
+		exec("INSERT INTO orders (id, ordered_day, grand_total_cents, subtotal_cents, discount_cents, shipping_cents, tax_cents) VALUES (2, '2026-01-06', 2000, 1700, 100, 50, 350)")
+		exec("INSERT INTO orders (id, ordered_day, grand_total_cents, subtotal_cents, discount_cents, shipping_cents, tax_cents) VALUES (3, '2026-01-13', 1500, 1200, 75, 80, 295)")
+		exec("COMMIT")
+
+		query := "SELECT DATE_TRUNC('week', ordered_day :: date) AS week_start, COUNT(*) AS total_orders, SUM(grand_total_cents) AS total_sales_cents, SUM(subtotal_cents) AS total_subtotal_cents, SUM(discount_cents) AS total_discount_cents, SUM(shipping_cents) AS total_shipping_cents, SUM(tax_cents) AS total_tax_cents FROM orders GROUP BY week_start ORDER BY week_start DESC LIMIT 100"
+		r, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"sales"}, 8192)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(r.Rows) != 2 {
+			t.Fatalf("expected 2 rows, got %d", len(r.Rows))
+		}
+		firstWeek := time.Date(2026, 1, 12, 0, 0, 0, 0, time.UTC).UnixMicro()
+		if got := r.Rows[0]["week_start"]; got.Kind != ast.LiteralTimestamp || got.NumberValue != firstWeek {
+			t.Fatalf("unexpected first week_start: %+v", got)
+		}
+		if got := r.Rows[0]["total_orders"]; got.NumberValue != 1 {
+			t.Fatalf("expected first total_orders=1, got %+v", got)
+		}
+		if got := r.Rows[0]["total_sales_cents"]; got.NumberValue != 1500 {
+			t.Fatalf("expected first total_sales_cents=1500, got %+v", got)
+		}
+		secondWeek := time.Date(2026, 1, 5, 0, 0, 0, 0, time.UTC).UnixMicro()
+		if got := r.Rows[1]["week_start"]; got.Kind != ast.LiteralTimestamp || got.NumberValue != secondWeek {
+			t.Fatalf("unexpected second week_start: %+v", got)
+		}
+		if got := r.Rows[1]["total_orders"]; got.NumberValue != 2 {
+			t.Fatalf("expected second total_orders=2, got %+v", got)
+		}
+		if got := r.Rows[1]["total_sales_cents"]; got.NumberValue != 3000 {
+			t.Fatalf("expected second total_sales_cents=3000, got %+v", got)
+		}
+		if got := r.Rows[1]["total_subtotal_cents"]; got.NumberValue != 2500 {
+			t.Fatalf("expected second total_subtotal_cents=2500, got %+v", got)
+		}
+		if got := r.Rows[1]["total_discount_cents"]; got.NumberValue != 150 {
+			t.Fatalf("expected second total_discount_cents=150, got %+v", got)
+		}
+		if got := r.Rows[1]["total_shipping_cents"]; got.NumberValue != 150 {
+			t.Fatalf("expected second total_shipping_cents=150, got %+v", got)
+		}
+		if got := r.Rows[1]["total_tax_cents"]; got.NumberValue != 500 {
+			t.Fatalf("expected second total_tax_cents=500, got %+v", got)
+		}
+	})
+
 	t.Run("NOW deterministic", func(t *testing.T) {
 		engine := setup(t)
 		r1, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT NOW() AS n FROM events WHERE id = 1", []string{"dt"}, 8192)

@@ -101,6 +101,8 @@ and current privilege semantics, see
 | `LEFT JOIN`, `RIGHT JOIN`, `CROSS JOIN` | Supported | Covered in executor tests for current join shapes. |
 | Simple `WITH` / CTE shapes | Supported | Covered in executor tests for current non-recursive shapes. |
 | `ILIKE` / `NOT ILIKE` | Supported | Covered in executor tests. |
+| `CAST(... AS DATE/TIMESTAMP)` and PostgreSQL-style `::date` / `::timestamp` in current read expressions | Supported | Covered for current projection and grouping read shapes; temporal casts normalize to timestamp values in the current engine. |
+| `DATE_TRUNC('day'|'month'|'week'|...)` for current timestamp-compatible expressions | Supported | Covered in executor tests for current temporal bucketing shapes, including weekly rollups. |
 | `INSERT ... RETURNING ...` | Supported | Current `RETURNING` support is insert-focused; with durable principals enabled, current DML requires `ADMIN`. |
 | `INSERT ... ON CONFLICT ...` | Supported | `DO NOTHING` and current `DO UPDATE` shapes are covered in executor tests. |
 | `TRUNCATE TABLE ...` | Supported | Covered in parser and executor tests; with durable principals enabled, current schema/data-destructive mutations require `ADMIN`. |
@@ -113,6 +115,7 @@ and current privilege semantics, see
 | Temporal helpers like `current_lsn()` / `row_lsn(...)` | Supported | ASQL-native surface over SQL/pgwire. |
 | `AS OF LSN` / `AS OF TIMESTAMP` / `FOR HISTORY` with durable-principal authz | Supported | Requires explicit `SELECT_HISTORY`; authorization is evaluated against the current principal/grant state, not a historical grant snapshot. |
 | `LIMIT ... OFFSET ...` pagination | Supported | Supported in the current SQL subset; keyset pagination is still recommended for large scans. |
+| `GROUP BY` using a select-list alias in the same current query block | Supported | Covered for current aggregate read shapes such as temporal bucket aliases. |
 | PostgreSQL role/user SQL such as `CREATE ROLE`, `CREATE USER`, `ALTER ROLE`, `ALTER USER`, `DROP ROLE`, `DROP USER` | Unsupported | Durable-principal lifecycle is not managed through SQL role DDL today; use Studio, `asqlctl`, or admin HTTP security endpoints. |
 | PostgreSQL role-membership SQL such as `GRANT role TO user` / `REVOKE role FROM user` | Unsupported | Use the durable-principal admin workflows instead of PostgreSQL role SQL. |
 | PostgreSQL privilege SQL for the ASQL durable-principal surface such as `GRANT SELECT_HISTORY ...` / `REVOKE SELECT_HISTORY ...` | Unsupported | Use `asqlctl security grant history` / `revoke history`, Studio security flows, or the admin API. |

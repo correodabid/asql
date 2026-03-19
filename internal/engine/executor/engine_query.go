@@ -443,12 +443,14 @@ func aggregateRows(rows []map[string]ast.Literal, plan planner.Plan, state *read
 		}
 	}
 
-	groupBySet := make(map[string]struct{}, len(plan.GroupBy))
-	for _, column := range plan.GroupBy {
+	groupByExpressions := resolveGroupByExpressions(plan.GroupBy, plan.Columns, aggregateSpecs)
+
+	groupBySet := make(map[string]struct{}, len(groupByExpressions))
+	for _, column := range groupByExpressions {
 		groupBySet[column] = struct{}{}
 	}
 
-	if len(plan.GroupBy) == 0 && !hasAggregate {
+	if len(groupByExpressions) == 0 && !hasAggregate {
 		return nil, errors.New("HAVING/GROUP BY requires aggregate projection")
 	}
 
@@ -458,7 +460,7 @@ func aggregateRows(rows []map[string]ast.Literal, plan planner.Plan, state *read
 				continue
 			}
 			expr, _ := stripColumnAlias(column)
-			if len(plan.GroupBy) == 0 {
+			if len(groupByExpressions) == 0 {
 				return nil, fmt.Errorf("non-aggregated column %s requires GROUP BY", expr)
 			}
 			if _, ok := groupBySet[expr]; !ok {
@@ -473,16 +475,16 @@ func aggregateRows(rows []map[string]ast.Literal, plan planner.Plan, state *read
 	}
 
 	groups := make(map[string]*groupState)
-	if len(plan.GroupBy) == 0 {
+	if len(groupByExpressions) == 0 {
 		groups["__all__"] = &groupState{rows: rows, groupValue: make(map[string]ast.Literal)}
 	} else {
 		for _, row := range rows {
-			key := buildGroupKey(row, plan.GroupBy)
+			key := buildGroupKey(row, groupByExpressions)
 			group := groups[key]
 			if group == nil {
-				values := make(map[string]ast.Literal, len(plan.GroupBy))
-				for _, column := range plan.GroupBy {
-					values[column] = valueOrNull(row, column)
+				values := make(map[string]ast.Literal, len(groupByExpressions))
+				for _, column := range groupByExpressions {
+					values[column] = evaluateGroupByValue(row, column)
 				}
 				group = &groupState{rows: make([]map[string]ast.Literal, 0), groupValue: values}
 				groups[key] = group
@@ -513,7 +515,7 @@ func aggregateRows(rows []map[string]ast.Literal, plan planner.Plan, state *read
 				continue
 			}
 
-			if len(plan.GroupBy) > 0 {
+			if len(groupByExpressions) > 0 {
 				projected[alias] = group.groupValue[expr]
 				continue
 			}
@@ -535,6 +537,40 @@ func aggregateRows(rows []map[string]ast.Literal, plan planner.Plan, state *read
 	return result, nil
 }
 
+func resolveGroupByExpressions(groupBy []string, columns []string, aggregateSpecs map[string]aggregateSelectSpec) []string {
+	if len(groupBy) == 0 {
+		return nil
+	}
+	aliasToExpr := make(map[string]string, len(columns))
+	for _, column := range columns {
+		if _, isAggregate := aggregateSpecs[column]; isAggregate {
+			continue
+		}
+		expr, alias := stripColumnAlias(column)
+		aliasKey := strings.ToLower(strings.TrimSpace(alias))
+		if aliasKey != "" {
+			aliasToExpr[aliasKey] = expr
+		}
+	}
+	resolved := make([]string, 0, len(groupBy))
+	for _, column := range groupBy {
+		key := strings.ToLower(strings.TrimSpace(column))
+		if expr, ok := aliasToExpr[key]; ok {
+			resolved = append(resolved, expr)
+			continue
+		}
+		resolved = append(resolved, column)
+	}
+	return resolved
+}
+
+func evaluateGroupByValue(row map[string]ast.Literal, column string) ast.Literal {
+	if value, ok := resolvePredicateOperand(row, column); ok {
+		return value
+	}
+	return valueOrNull(row, column)
+}
+
 func buildGroupKey(row map[string]ast.Literal, groupBy []string) string {
 	if len(groupBy) == 0 {
 		return "__all__"
@@ -542,7 +578,7 @@ func buildGroupKey(row map[string]ast.Literal, groupBy []string) string {
 
 	parts := make([]string, 0, len(groupBy))
 	for _, column := range groupBy {
-		parts = append(parts, column+"="+literalKey(valueOrNull(row, column)))
+		parts = append(parts, column+"="+literalKey(evaluateGroupByValue(row, column)))
 	}
 
 	return strings.Join(parts, "|")
