@@ -1,6 +1,9 @@
 package studioapp
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestNormalizeExplainSQL(t *testing.T) {
 	tests := []struct {
@@ -20,5 +23,39 @@ func TestNormalizeExplainSQL(t *testing.T) {
 				t.Fatalf("normalizeExplainSQL(%q) = %q, want %q", tt.sql, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestPreprocessImportedReadSQLRewritesImportToCTE(t *testing.T) {
+	domains, sql, err := preprocessImportedReadSQL(
+		[]string{"sales"},
+		"IMPORT customers.customers AS customer; SELECT customer.id FROM orders JOIN customer ON orders.customer_id = customer.id",
+	)
+	if err != nil {
+		t.Fatalf("preprocessImportedReadSQL: %v", err)
+	}
+	if !reflect.DeepEqual(domains, []string{"sales", "customers"}) {
+		t.Fatalf("unexpected domains: %#v", domains)
+	}
+	want := "WITH customer AS (SELECT * FROM customers.customers) SELECT customer.id FROM orders JOIN customer ON orders.customer_id = customer.id"
+	if sql != want {
+		t.Fatalf("unexpected rewritten sql:\n got: %s\nwant: %s", sql, want)
+	}
+}
+
+func TestPreprocessImportedReadSQLMergesWithExistingWithClause(t *testing.T) {
+	domains, sql, err := preprocessImportedReadSQL(
+		[]string{"sales"},
+		"IMPORT customers.customers AS customer; WITH top_orders AS (SELECT * FROM orders) SELECT * FROM top_orders JOIN customer ON top_orders.customer_id = customer.id",
+	)
+	if err != nil {
+		t.Fatalf("preprocessImportedReadSQL: %v", err)
+	}
+	if !reflect.DeepEqual(domains, []string{"sales", "customers"}) {
+		t.Fatalf("unexpected domains: %#v", domains)
+	}
+	want := "WITH customer AS (SELECT * FROM customers.customers), top_orders AS (SELECT * FROM orders) SELECT * FROM top_orders JOIN customer ON top_orders.customer_id = customer.id"
+	if sql != want {
+		t.Fatalf("unexpected rewritten sql:\n got: %s\nwant: %s", sql, want)
 	}
 }

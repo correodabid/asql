@@ -103,6 +103,7 @@ and current privilege semantics, see
 | `ILIKE` / `NOT ILIKE` | Supported | Covered in executor tests. |
 | `CAST(... AS DATE/TIMESTAMP)` and PostgreSQL-style `::date` / `::timestamp` in current read expressions | Supported | Covered for current projection and grouping read shapes; temporal casts normalize to timestamp values in the current engine. |
 | `DATE_TRUNC('day'|'month'|'week'|...)` for current timestamp-compatible expressions | Supported | Covered in executor tests for current temporal bucketing shapes, including weekly rollups. |
+| Aggregate projections using `COUNT(DISTINCT ...)` and arithmetic over aggregate outputs such as `SUM(amount) / 100.0` | Supported | Covered for current grouped read shapes, including qualified-column rollups and aliased aggregate outputs. |
 | `INSERT ... RETURNING ...` | Supported | Current `RETURNING` support is insert-focused; with durable principals enabled, current DML requires `ADMIN`. |
 | `INSERT ... ON CONFLICT ...` | Supported | `DO NOTHING` and current `DO UPDATE` shapes are covered in executor tests. |
 | `TRUNCATE TABLE ...` | Supported | Covered in parser and executor tests; with durable principals enabled, current schema/data-destructive mutations require `ADMIN`. |

@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"asql/internal/engine/parser"
 	"asql/pkg/fixtures"
 
 	"github.com/jackc/pgx/v5"
@@ -264,6 +265,11 @@ func (c *engineClient) queryWithDomains(ctx context.Context, domains []string, s
 }
 
 func (c *engineClient) queryWithDomainsMode(ctx context.Context, domains []string, sql string, options ...any) ([]map[string]interface{}, error) {
+	domains, sql, err := preprocessImportedReadSQL(domains, sql)
+	if err != nil {
+		return nil, err
+	}
+
 	conn, err := c.acquireConn(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("open connection: %w", err)
@@ -288,6 +294,44 @@ func (c *engineClient) queryWithDomainsMode(ctx context.Context, domains []strin
 		return nil, err
 	}
 	return pgxRowsToMaps(rows)
+}
+
+func preprocessImportedReadSQL(domains []string, sql string) ([]string, string, error) {
+	imports, selectSQL, err := parser.ExtractImports(sql)
+	if err != nil {
+		return nil, "", fmt.Errorf("extract imports: %w", err)
+	}
+	if len(imports) == 0 {
+		return domains, sql, nil
+	}
+
+	mergedDomains := append([]string(nil), domains...)
+	seenDomains := make(map[string]struct{}, len(mergedDomains))
+	for _, domain := range mergedDomains {
+		seenDomains[strings.ToLower(strings.TrimSpace(domain))] = struct{}{}
+	}
+
+	cteDefs := make([]string, 0, len(imports))
+	for _, imp := range imports {
+		alias := imp.Alias
+		if alias == "" {
+			alias = imp.SourceTable
+		}
+		cteDefs = append(cteDefs, fmt.Sprintf("%s AS (SELECT * FROM %s.%s)", alias, imp.SourceDomain, imp.SourceTable))
+		if _, exists := seenDomains[imp.SourceDomain]; !exists {
+			mergedDomains = append(mergedDomains, imp.SourceDomain)
+			seenDomains[imp.SourceDomain] = struct{}{}
+		}
+	}
+
+	trimmed := strings.TrimSpace(selectSQL)
+	if strings.HasPrefix(strings.ToUpper(trimmed), "WITH ") {
+		trimmed = "WITH " + strings.Join(cteDefs, ", ") + ", " + strings.TrimSpace(trimmed[len("WITH "):])
+	} else {
+		trimmed = "WITH " + strings.Join(cteDefs, ", ") + " " + trimmed
+	}
+
+	return mergedDomains, trimmed, nil
 }
 
 func (c *engineClient) TimeTravelQuery(ctx context.Context, req *api.TimeTravelQueryRequest) (*api.TimeTravelQueryResponse, error) {

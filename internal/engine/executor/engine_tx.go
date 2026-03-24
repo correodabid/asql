@@ -312,8 +312,13 @@ func (engine *Engine) validateWriteConflicts(state *readableState, tx *transacti
 }
 
 func (engine *Engine) rollback(session *Session) Result {
+	tx := session.activeTx
 	session.activeTx = nil
-	engine.perf.recordRollback()
+	if tx != nil && len(tx.statements) > 0 {
+		engine.perf.recordRollback()
+	} else {
+		engine.perf.recordEndTx()
+	}
 	return Result{Status: "ROLLBACK"}
 }
 

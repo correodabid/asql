@@ -205,6 +205,54 @@ func TestExecuteRollbackDropsPendingChanges(t *testing.T) {
 	}
 }
 
+func TestExecuteRollbackAfterReadOnlyTransactionDoesNotCountAsRollback(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "rollback-readonly.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	if _, err := engine.Execute(ctx, session, "BEGIN DOMAIN accounts"); err != nil {
+		t.Fatalf("setup begin domain: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE users (id INT PRIMARY KEY)"); err != nil {
+		t.Fatalf("setup create table: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "INSERT INTO users (id) VALUES (1)"); err != nil {
+		t.Fatalf("setup insert row: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "COMMIT"); err != nil {
+		t.Fatalf("setup commit: %v", err)
+	}
+
+	if _, err := engine.Execute(ctx, session, "BEGIN DOMAIN accounts"); err != nil {
+		t.Fatalf("begin domain: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "SELECT id FROM users WHERE id = 1"); err != nil {
+		t.Fatalf("select in tx: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "ROLLBACK"); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+
+	snap := engine.PerfStats()
+	if snap.TotalRollbacks != 0 {
+		t.Fatalf("expected 0 counted rollbacks for read-only cleanup, got %d", snap.TotalRollbacks)
+	}
+	if snap.ActiveTransactions != 0 {
+		t.Fatalf("expected 0 active tx after cleanup rollback, got %d", snap.ActiveTransactions)
+	}
+}
+
 func TestExecuteSavepointRollbackToKeepsPriorStatements(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "savepoint-rollback-to.wal")
@@ -2850,6 +2898,78 @@ func TestCountDistinctAggregate(t *testing.T) {
 	// 10 + 20 + 30 = 60
 	if got := result.Rows[0]["total"].NumberValue; got != 60 {
 		t.Fatalf("SUM(DISTINCT n): got %d want 60", got)
+	}
+}
+
+func TestAggregateArithmeticProjectionWithQualifiedColumns(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "aggregate-arithmetic-projection.wal")
+
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new file log store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+
+	session := engine.NewSession()
+	if _, err := engine.Execute(ctx, session, "BEGIN DOMAIN sales"); err != nil {
+		t.Fatalf("begin domain: %v", err)
+	}
+	if _, err := engine.Execute(ctx, session, "CREATE TABLE orders (id INT PRIMARY KEY, ordered_day TEXT, order_status TEXT, grand_total_cents INT)"); err != nil {
+		t.Fatalf("create orders table: %v", err)
+	}
+	for _, sql := range []string{
+		"INSERT INTO orders (id, ordered_day, order_status, grand_total_cents) VALUES (1, '2026-01-11', 'completed', 1000)",
+		"INSERT INTO orders (id, ordered_day, order_status, grand_total_cents) VALUES (2, '2026-01-11', 'completed', 2500)",
+		"INSERT INTO orders (id, ordered_day, order_status, grand_total_cents) VALUES (3, '2026-01-10', 'cancelled', 9000)",
+		"INSERT INTO orders (id, ordered_day, order_status, grand_total_cents) VALUES (4, '2026-01-10', 'completed', 500)",
+	} {
+		if _, err := engine.Execute(ctx, session, sql); err != nil {
+			t.Fatalf("insert row: %v", err)
+		}
+	}
+	if _, err := engine.Execute(ctx, session, "COMMIT"); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	query := "SELECT o.ordered_day, SUM(o.grand_total_cents) / 100.0 AS total_sales_usd, COUNT(DISTINCT o.id) AS total_orders, AVG(o.grand_total_cents) / 100.0 AS avg_order_value_usd FROM orders o WHERE o.order_status = 'completed' GROUP BY o.ordered_day ORDER BY o.ordered_day DESC LIMIT 100"
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, query, []string{"sales"}, 8192)
+	if err != nil {
+		t.Fatalf("aggregate arithmetic projection query: %v", err)
+	}
+	if len(result.Rows) != 2 {
+		t.Fatalf("unexpected row count: got %d want 2", len(result.Rows))
+	}
+	first := result.Rows[0]
+	if got := first["o.ordered_day"].StringValue; got != "2026-01-11" {
+		t.Fatalf("unexpected first ordered_day: %q", got)
+	}
+	if got := first["total_sales_usd"].FloatValue; got != 35.0 {
+		t.Fatalf("unexpected first total_sales_usd: %v", got)
+	}
+	if got := first["total_orders"].NumberValue; got != 2 {
+		t.Fatalf("unexpected first total_orders: %d", got)
+	}
+	if got := first["avg_order_value_usd"].FloatValue; got != 17.5 {
+		t.Fatalf("unexpected first avg_order_value_usd: %v", got)
+	}
+	second := result.Rows[1]
+	if got := second["o.ordered_day"].StringValue; got != "2026-01-10" {
+		t.Fatalf("unexpected second ordered_day: %q", got)
+	}
+	if got := second["total_sales_usd"].FloatValue; got != 5.0 {
+		t.Fatalf("unexpected second total_sales_usd: %v", got)
+	}
+	if got := second["total_orders"].NumberValue; got != 1 {
+		t.Fatalf("unexpected second total_orders: %d", got)
+	}
+	if got := second["avg_order_value_usd"].FloatValue; got != 5.0 {
+		t.Fatalf("unexpected second avg_order_value_usd: %v", got)
 	}
 }
 

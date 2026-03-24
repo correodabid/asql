@@ -435,11 +435,17 @@ func requiresAggregation(plan planner.Plan) bool {
 
 func aggregateRows(rows []map[string]ast.Literal, plan planner.Plan, state *readableState, engine *Engine) ([]map[string]ast.Literal, error) {
 	aggregateSpecs := make(map[string]aggregateSelectSpec)
+	aggregateExpressionSpecs := make(map[string][]aggregateSelectSpec)
 	hasAggregate := false
 	for _, column := range plan.Columns {
 		if spec, ok := parseAggregateSelectColumn(column); ok {
 			hasAggregate = true
 			aggregateSpecs[column] = spec
+			continue
+		}
+		if specs, ok := extractAggregateExpressionSpecs(column); ok {
+			hasAggregate = true
+			aggregateExpressionSpecs[column] = specs
 		}
 	}
 
@@ -457,6 +463,9 @@ func aggregateRows(rows []map[string]ast.Literal, plan planner.Plan, state *read
 	if hasAggregate {
 		for _, column := range plan.Columns {
 			if _, isAggregate := aggregateSpecs[column]; isAggregate {
+				continue
+			}
+			if _, isAggregateExpr := aggregateExpressionSpecs[column]; isAggregateExpr {
 				continue
 			}
 			expr, _ := stripColumnAlias(column)
@@ -512,6 +521,25 @@ func aggregateRows(rows []map[string]ast.Literal, plan planner.Plan, state *read
 					return nil, err
 				}
 				projected[spec.OutputColumn] = value
+				continue
+			}
+			if specs, ok := aggregateExpressionSpecs[column]; ok {
+				evalRow := make(map[string]ast.Literal, len(group.groupValue)+len(specs))
+				for key, value := range group.groupValue {
+					evalRow[key] = value
+				}
+				for _, spec := range specs {
+					value, err := computeAggregate(spec, group.rows)
+					if err != nil {
+						return nil, err
+					}
+					evalRow[strings.ToLower(strings.TrimSpace(spec.OutputColumn))] = value
+				}
+				value, err := evaluateNumericExpression(strings.ToLower(strings.TrimSpace(expr)), evalRow)
+				if err != nil {
+					return nil, err
+				}
+				projected[alias] = value
 				continue
 			}
 
@@ -582,6 +610,35 @@ func buildGroupKey(row map[string]ast.Literal, groupBy []string) string {
 	}
 
 	return strings.Join(parts, "|")
+}
+
+func extractAggregateExpressionSpecs(column string) ([]aggregateSelectSpec, bool) {
+	expr, _ := stripColumnAlias(column)
+	tokens, err := tokenizeArithmeticExpression(strings.TrimSpace(expr))
+	if err != nil {
+		return nil, false
+	}
+	specs := make([]aggregateSelectSpec, 0, len(tokens))
+	seen := make(map[string]struct{})
+	for _, token := range tokens {
+		if isArithmeticOperator(token) {
+			continue
+		}
+		spec, ok := parseAggregateSelectColumn(token)
+		if !ok {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(spec.OutputColumn))
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		specs = append(specs, spec)
+	}
+	if len(specs) == 0 {
+		return nil, false
+	}
+	return specs, true
 }
 
 func parseAggregateSelectColumn(column string) (aggregateSelectSpec, bool) {
