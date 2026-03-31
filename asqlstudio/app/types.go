@@ -65,6 +65,19 @@ type entityVersionHistoryRequest struct {
 	RootPK     string `json:"root_pk"`
 }
 
+type entityChangeStreamStartRequest struct {
+	Domain     string `json:"domain"`
+	EntityName string `json:"entity_name"`
+	RootPK     string `json:"root_pk,omitempty"`
+	FromLSN    uint64 `json:"from_lsn,omitempty"`
+	ToLSN      uint64 `json:"to_lsn,omitempty"`
+	Limit      uint64 `json:"limit,omitempty"`
+}
+
+type entityChangeStreamStopRequest struct {
+	StreamID string `json:"stream_id"`
+}
+
 type temporalLookupRequest struct {
 	Domain       string `json:"domain"`
 	TableName    string `json:"table_name"`

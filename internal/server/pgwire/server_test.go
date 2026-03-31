@@ -1161,6 +1161,132 @@ func TestPGWireForHistoryContract(t *testing.T) {
 	}
 }
 
+func TestPGWireTailEntityChangesContract(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dataDir := filepath.Join(t.TempDir(), "entity-tail-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: dataDir,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	connectionString := "postgres://asql@" + listener.Addr().String() + "/asql?sslmode=disable&default_query_exec_mode=simple_protocol"
+	connection, err := pgx.Connect(ctx, connectionString)
+	if err != nil {
+		t.Fatalf("connect pgx: %v", err)
+	}
+	t.Cleanup(func() { _ = connection.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN introspect",
+		"CREATE TABLE items (id INT PRIMARY KEY, status TEXT)",
+		"CREATE TABLE item_steps (id INT PRIMARY KEY, item_id INT REFERENCES items(id), label TEXT)",
+		"CREATE ENTITY item_aggregate (ROOT items, INCLUDES item_steps)",
+		"COMMIT",
+		"BEGIN DOMAIN introspect",
+		"INSERT INTO items (id, status) VALUES (1, 'draft')",
+		"COMMIT",
+		"BEGIN DOMAIN introspect",
+		"INSERT INTO item_steps (id, item_id, label) VALUES (11, 1, 'mix')",
+		"COMMIT",
+		"BEGIN DOMAIN introspect",
+		"UPDATE items SET status = 'published' WHERE id = 1",
+		"COMMIT",
+	} {
+		if _, err := connection.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	type entityChangeRow struct {
+		CommitLSN     int64
+		CommitTS      time.Time
+		Domain        string
+		Entity        string
+		RootPK        string
+		EntityVersion int64
+		TablesJSON    string
+	}
+
+	rows, err := connection.Query(ctx, "TAIL ENTITY CHANGES introspect.item_aggregate FOR '1'")
+	if err != nil {
+		t.Fatalf("tail entity changes query: %v", err)
+	}
+
+	var got []entityChangeRow
+	for rows.Next() {
+		var row entityChangeRow
+		if err := rows.Scan(&row.CommitLSN, &row.CommitTS, &row.Domain, &row.Entity, &row.RootPK, &row.EntityVersion, &row.TablesJSON); err != nil {
+			rows.Close()
+			t.Fatalf("scan tail row: %v", err)
+		}
+		got = append(got, row)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		t.Fatalf("tail entity changes rows: %v", err)
+	}
+	rows.Close()
+
+	if len(got) != 3 {
+		t.Fatalf("expected 3 tail rows, got %d", len(got))
+	}
+	if got[0].CommitTS.IsZero() || got[1].CommitTS.IsZero() || got[2].CommitTS.IsZero() {
+		t.Fatalf("expected non-zero commit timestamps, got %#v", got)
+	}
+	if got[0].EntityVersion != 1 || got[0].TablesJSON != `["items"]` {
+		t.Fatalf("unexpected first tail row: %#v", got[0])
+	}
+	if got[1].EntityVersion != 2 || got[1].TablesJSON != `["item_steps"]` {
+		t.Fatalf("unexpected second tail row: %#v", got[1])
+	}
+	if got[2].EntityVersion != 3 || got[2].TablesJSON != `["items"]` {
+		t.Fatalf("unexpected third tail row: %#v", got[2])
+	}
+	if !(got[0].CommitLSN < got[1].CommitLSN && got[1].CommitLSN < got[2].CommitLSN) {
+		t.Fatalf("expected ascending commit LSNs, got %#v", got)
+	}
+
+	filteredSQL := fmt.Sprintf("TAIL ENTITY CHANGES introspect.item_aggregate FOR '1' FROM LSN %d LIMIT 1", got[1].CommitLSN)
+	var filtered entityChangeRow
+	if err := connection.QueryRow(ctx, filteredSQL).Scan(&filtered.CommitLSN, &filtered.CommitTS, &filtered.Domain, &filtered.Entity, &filtered.RootPK, &filtered.EntityVersion, &filtered.TablesJSON); err != nil {
+		t.Fatalf("tail entity changes filtered query: %v", err)
+	}
+	if filtered.EntityVersion != 2 || filtered.CommitTS.IsZero() {
+		t.Fatalf("expected filtered tail to start at version 2, got %#v", filtered)
+	}
+}
+
 func TestPGWireCurrentLSNFunction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -3818,5 +3944,361 @@ func TestShowUnknownParamFallbackWorksOnExtendedProtocol(t *testing.T) {
 
 	if err := conn.QueryRow(ctx, "SHOW asql_unknown_param").Scan(&value); err == nil {
 		t.Fatal("expected unknown asql_* SHOW param to remain an error")
+	}
+}
+
+func TestTailEntityChangesWorksOnExtendedProtocol(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	walPath := filepath.Join(t.TempDir(), "tail-extended-data")
+	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: walPath,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.ServeOnListener(ctx, listener) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire shutdown")
+		}
+	})
+
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN test",
+		"CREATE TABLE items (id INT PRIMARY KEY, status TEXT)",
+		"CREATE ENTITY item_aggregate (ROOT items)",
+		"COMMIT",
+		"BEGIN DOMAIN test",
+		"INSERT INTO items (id, status) VALUES (1, 'draft')",
+		"COMMIT",
+	} {
+		if _, err := conn.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	var commitLSN int64
+	var commitTS time.Time
+	var domain string
+	var entity string
+	var rootPK string
+	var version int64
+	var tablesJSON string
+	if err := conn.QueryRow(ctx, "TAIL ENTITY CHANGES test.item_aggregate FOR 1").Scan(&commitLSN, &commitTS, &domain, &entity, &rootPK, &version, &tablesJSON); err != nil {
+		t.Fatalf("TAIL ENTITY CHANGES extended query: %v", err)
+	}
+	if commitLSN <= 0 || commitTS.IsZero() || domain != "test" || entity != "item_aggregate" || rootPK != "1" || version != 1 || tablesJSON != `["items"]` {
+		t.Fatalf("unexpected extended tail row: lsn=%d ts=%v domain=%q entity=%q root=%q version=%d tables=%q", commitLSN, commitTS, domain, entity, rootPK, version, tablesJSON)
+	}
+}
+
+func TestPGWireTailEntityChangesFollowStreamsNewCommits(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dataDir := filepath.Join(t.TempDir(), "entity-tail-follow-data")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: dataDir,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+	addr := listener.Addr().String()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+	setupConn, err := pgx.Connect(ctx, "postgres://asql@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect setup: %v", err)
+	}
+	t.Cleanup(func() { _ = setupConn.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN test",
+		"CREATE TABLE items (id INT PRIMARY KEY, status TEXT)",
+		"CREATE TABLE item_steps (id INT PRIMARY KEY, item_id INT REFERENCES items(id), label TEXT)",
+		"CREATE ENTITY item_aggregate (ROOT items, INCLUDES item_steps)",
+		"COMMIT",
+	} {
+		if _, err := setupConn.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	readerConn, err := pgx.Connect(ctx, "postgres://asql@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect reader: %v", err)
+	}
+	defer func() { _ = readerConn.Close(context.Background()) }()
+
+	writerConn, err := pgx.Connect(ctx, "postgres://asql@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect writer: %v", err)
+	}
+	t.Cleanup(func() { _ = writerConn.Close(ctx) })
+
+	followCtx, followCancel := context.WithCancel(ctx)
+	defer followCancel()
+	rows, err := readerConn.Query(followCtx, "TAIL ENTITY CHANGES test.item_aggregate FOR '1' LIMIT 2 FOLLOW")
+	if err != nil {
+		t.Fatalf("start follow query: %v", err)
+	}
+
+	type followRow struct {
+		CommitLSN int64
+		CommitTS  time.Time
+		Version   int64
+		Tables    string
+	}
+	readCh := make(chan []followRow, 1)
+	errReadCh := make(chan error, 1)
+	go func() {
+		result := make([]followRow, 0, 2)
+		for rows.Next() {
+			var row followRow
+			var domain, entity, rootPK string
+			if err := rows.Scan(&row.CommitLSN, &row.CommitTS, &domain, &entity, &rootPK, &row.Version, &row.Tables); err != nil {
+				errReadCh <- err
+				return
+			}
+			result = append(result, row)
+		}
+		if err := rows.Err(); err != nil {
+			errReadCh <- err
+			return
+		}
+		readCh <- result
+	}()
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN test",
+		"INSERT INTO items (id, status) VALUES (1, 'draft')",
+		"COMMIT",
+	} {
+		if _, err := writerConn.Exec(ctx, sql); err != nil {
+			rows.Close()
+			t.Fatalf("writer exec %q: %v", sql, err)
+		}
+	}
+	for _, sql := range []string{
+		"BEGIN DOMAIN test",
+		"INSERT INTO item_steps (id, item_id, label) VALUES (10, 1, 'mix')",
+		"COMMIT",
+	} {
+		if _, err := writerConn.Exec(ctx, sql); err != nil {
+			rows.Close()
+			t.Fatalf("writer exec %q: %v", sql, err)
+		}
+	}
+
+	select {
+	case got := <-readCh:
+		if len(got) != 2 {
+			rows.Close()
+			t.Fatalf("expected 2 follow rows, got %#v", got)
+		}
+		if got[0].CommitTS.IsZero() || got[0].Version != 1 || got[0].Tables != `["items"]` {
+			rows.Close()
+			t.Fatalf("unexpected first follow row: %#v", got[0])
+		}
+		if got[1].CommitTS.IsZero() || got[1].Version != 2 || got[1].Tables != `["item_steps"]` {
+			rows.Close()
+			t.Fatalf("unexpected second follow row: %#v", got[1])
+		}
+	case err := <-errReadCh:
+		rows.Close()
+		t.Fatalf("read follow rows: %v", err)
+	case <-time.After(3 * time.Second):
+		rows.Close()
+		t.Fatal("timeout waiting for follow rows")
+	}
+}
+
+func TestPGWireTailEntityChangesFollowWorksOnExtendedProtocol(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dataDir := filepath.Join(t.TempDir(), "entity-tail-follow-extended-data")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: dataDir,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen for test: %v", err)
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- server.ServeOnListener(ctx, listener)
+	}()
+	addr := listener.Addr().String()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+
+	setupConn, err := pgx.Connect(ctx, "postgres://asql@"+addr+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect setup: %v", err)
+	}
+	t.Cleanup(func() { _ = setupConn.Close(ctx) })
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN test",
+		"CREATE TABLE items (id INT PRIMARY KEY, status TEXT)",
+		"CREATE TABLE item_steps (id INT PRIMARY KEY, item_id INT REFERENCES items(id), label TEXT)",
+		"CREATE ENTITY item_aggregate (ROOT items, INCLUDES item_steps)",
+		"COMMIT",
+	} {
+		if _, err := setupConn.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+
+	readerConn, err := pgx.Connect(ctx, "postgres://asql@"+addr+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect reader: %v", err)
+	}
+	defer func() { _ = readerConn.Close(context.Background()) }()
+
+	writerConn, err := pgx.Connect(ctx, "postgres://asql@"+addr+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatalf("connect writer: %v", err)
+	}
+	t.Cleanup(func() { _ = writerConn.Close(ctx) })
+
+	followCtx, followCancel := context.WithCancel(ctx)
+	defer followCancel()
+	rows, err := readerConn.Query(followCtx, "TAIL ENTITY CHANGES test.item_aggregate FOR '1' LIMIT 2 FOLLOW")
+	if err != nil {
+		t.Fatalf("start extended follow query: %v", err)
+	}
+
+	type followRow struct {
+		CommitLSN int64
+		CommitTS  time.Time
+		Version   int64
+		Tables    string
+	}
+
+	readCh := make(chan []followRow, 1)
+	errReadCh := make(chan error, 1)
+	go func() {
+		result := make([]followRow, 0, 2)
+		for rows.Next() {
+			var row followRow
+			var domain, entity, rootPK string
+			if err := rows.Scan(&row.CommitLSN, &row.CommitTS, &domain, &entity, &rootPK, &row.Version, &row.Tables); err != nil {
+				errReadCh <- err
+				return
+			}
+			result = append(result, row)
+		}
+		if err := rows.Err(); err != nil {
+			errReadCh <- err
+			return
+		}
+		readCh <- result
+	}()
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN test",
+		"INSERT INTO items (id, status) VALUES (1, 'draft')",
+		"COMMIT",
+		"BEGIN DOMAIN test",
+		"INSERT INTO item_steps (id, item_id, label) VALUES (10, 1, 'mix')",
+		"COMMIT",
+	} {
+		if _, err := writerConn.Exec(ctx, sql); err != nil {
+			rows.Close()
+			t.Fatalf("writer exec %q: %v", sql, err)
+		}
+	}
+
+	select {
+	case got := <-readCh:
+		if len(got) != 2 {
+			rows.Close()
+			t.Fatalf("expected 2 extended follow rows, got %#v", got)
+		}
+		if got[0].CommitTS.IsZero() || got[0].Version != 1 || got[0].Tables != `["items"]` {
+			rows.Close()
+			t.Fatalf("unexpected first extended follow row: %#v", got[0])
+		}
+		if got[1].CommitTS.IsZero() || got[1].Version != 2 || got[1].Tables != `["item_steps"]` {
+			rows.Close()
+			t.Fatalf("unexpected second extended follow row: %#v", got[1])
+		}
+	case err := <-errReadCh:
+		rows.Close()
+		t.Fatalf("read extended follow rows: %v", err)
+	case <-time.After(3 * time.Second):
+		rows.Close()
+		t.Fatal("timeout waiting for extended follow rows")
 	}
 }

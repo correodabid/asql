@@ -306,6 +306,40 @@ export namespace studioapp {
 	        this.data_dir = source["data_dir"];
 	    }
 	}
+	export class entityChangeStreamStartRequest {
+	    domain: string;
+	    entity_name: string;
+	    root_pk?: string;
+	    from_lsn?: number;
+	    to_lsn?: number;
+	    limit?: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new entityChangeStreamStartRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.domain = source["domain"];
+	        this.entity_name = source["entity_name"];
+	        this.root_pk = source["root_pk"];
+	        this.from_lsn = source["from_lsn"];
+	        this.to_lsn = source["to_lsn"];
+	        this.limit = source["limit"];
+	    }
+	}
+	export class entityChangeStreamStopRequest {
+	    stream_id: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new entityChangeStreamStopRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.stream_id = source["stream_id"];
+	    }
+	}
 	export class entityVersionHistoryRequest {
 	    domain: string;
 	    entity_name: string;

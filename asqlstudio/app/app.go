@@ -47,6 +47,8 @@ type App struct {
 	dataDir          string
 	txMu             sync.Mutex
 	txClients        map[string]*engineClient
+	streamMu         sync.Mutex
+	streamCancels    map[string]context.CancelFunc
 	assistantLLM     assistantLLMClient
 }
 
@@ -69,6 +71,7 @@ func newApp(engine *engineClient, pgwireEndpoint string, follower *engineClient,
 		adminToken:       strings.TrimSpace(adminToken),
 		dataDir:          strings.TrimSpace(dataDir),
 		txClients:        make(map[string]*engineClient),
+		streamCancels:    make(map[string]context.CancelFunc),
 		assistantLLM:     &httpAssistantLLMClient{httpClient: &http.Client{Timeout: 45 * time.Second}},
 	}
 }
@@ -832,6 +835,8 @@ func (a *App) ConnectionInfo() (map[string]interface{}, error) {
 // SwitchConnection swaps Studio over to a new runtime pgwire/admin connection
 // target without requiring the desktop application to be relaunched.
 func (a *App) SwitchConnection(req connectionSwitchRequest) (map[string]interface{}, error) {
+	a.stopAllEntityChangeStreams()
+
 	pgwireEndpoint := strings.TrimSpace(req.PgwireEndpoint)
 	if pgwireEndpoint == "" {
 		return nil, fmt.Errorf("pgwire endpoint is required")

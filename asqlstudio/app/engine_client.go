@@ -11,14 +11,20 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/engine/parser"
 	"asql/pkg/fixtures"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	api "asql/pkg/adminapi"
 )
+
+	type importedReadDirective struct {
+		SourceDomain string
+		SourceTable  string
+		Alias        string
+	}
 
 // engineInvoker abstracts pgwire engine calls used by schema_apply.go and the studio handlers.
 type engineInvoker interface {
@@ -150,18 +156,22 @@ func pgxRowsToMaps(rows pgx.Rows) ([]map[string]interface{}, error) {
 	fds := rows.FieldDescriptions()
 	var result []map[string]interface{}
 	for rows.Next() {
-		raw := rows.RawValues()
-		row := make(map[string]interface{}, len(fds))
-		for i, fd := range fds {
-			if i >= len(raw) || raw[i] == nil {
-				row[string(fd.Name)] = nil
-				continue
-			}
-			row[string(fd.Name)] = string(raw[i])
-		}
+		row := decodeRawPGXRow(fds, rows.RawValues())
 		result = append(result, row)
 	}
 	return result, rows.Err()
+}
+
+func decodeRawPGXRow(fds []pgconn.FieldDescription, raw [][]byte) map[string]interface{} {
+	row := make(map[string]interface{}, len(fds))
+	for i, fd := range fds {
+		if i >= len(raw) || raw[i] == nil {
+			row[string(fd.Name)] = nil
+			continue
+		}
+		row[string(fd.Name)] = string(raw[i])
+	}
+	return row
 }
 
 // randomID generates a short random hex string suitable for use as a tx_id.
@@ -296,8 +306,54 @@ func (c *engineClient) queryWithDomainsMode(ctx context.Context, domains []strin
 	return pgxRowsToMaps(rows)
 }
 
+func (c *engineClient) streamQueryWithDomains(ctx context.Context, domains []string, sql string, onRow func(map[string]interface{}) error) error {
+	domains, sql, err := preprocessImportedReadSQL(domains, sql)
+	if err != nil {
+		return err
+	}
+
+	conn, err := c.acquireConn(ctx)
+	if err != nil {
+		return fmt.Errorf("open connection: %w", err)
+	}
+	defer conn.Release()
+
+	if len(domains) > 0 {
+		var beginSQL string
+		if len(domains) == 1 {
+			beginSQL = "BEGIN DOMAIN " + domains[0]
+		} else {
+			beginSQL = "BEGIN CROSS DOMAIN " + strings.Join(domains, ", ")
+		}
+		if _, err := conn.Exec(ctx, beginSQL); err != nil {
+			return fmt.Errorf("set domain context: %w", err)
+		}
+		defer func() { _, _ = conn.Exec(context.Background(), "ROLLBACK") }()
+	}
+
+	rows, err := conn.Query(ctx, sql, pgx.QueryExecModeSimpleProtocol)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+
+	fds := rows.FieldDescriptions()
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := onRow(decodeRawPGXRow(fds, rows.RawValues())); err != nil {
+			return err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	return ctx.Err()
+}
+
 func preprocessImportedReadSQL(domains []string, sql string) ([]string, string, error) {
-	imports, selectSQL, err := parser.ExtractImports(sql)
+	imports, selectSQL, err := extractImportedReadSQL(sql)
 	if err != nil {
 		return nil, "", fmt.Errorf("extract imports: %w", err)
 	}
@@ -332,6 +388,87 @@ func preprocessImportedReadSQL(domains []string, sql string) ([]string, string, 
 	}
 
 	return mergedDomains, trimmed, nil
+}
+
+func extractImportedReadSQL(sql string) ([]importedReadDirective, string, error) {
+	trimmed := strings.TrimSpace(sql)
+	upper := strings.ToUpper(trimmed)
+	if !strings.HasPrefix(upper, "IMPORT ") {
+		return nil, sql, nil
+	}
+
+	segments := splitSQLSemicolons(trimmed)
+	imports := make([]importedReadDirective, 0)
+	selectIdx := -1
+	for i, segment := range segments {
+		segment = strings.TrimSpace(segment)
+		if !strings.HasPrefix(strings.ToUpper(segment), "IMPORT ") {
+			selectIdx = i
+			break
+		}
+		parsed, err := parseImportedReadDirective(segment)
+		if err != nil {
+			return nil, "", err
+		}
+		imports = append(imports, parsed)
+	}
+	if selectIdx == -1 {
+		return nil, "", fmt.Errorf("import requires a SELECT statement after the import directives")
+	}
+	remaining := strings.TrimSpace(strings.Join(segments[selectIdx:], ";"))
+	return imports, remaining, nil
+}
+
+func parseImportedReadDirective(sql string) (importedReadDirective, error) {
+	trimmed := strings.TrimSpace(sql)
+	upper := strings.ToUpper(trimmed)
+	if !strings.HasPrefix(upper, "IMPORT ") {
+		return importedReadDirective{}, fmt.Errorf("expected IMPORT directive, got %q", trimmed)
+	}
+
+	rest := strings.TrimSpace(trimmed[len("IMPORT "):])
+	alias := ""
+	if idx := strings.Index(strings.ToUpper(rest), " AS "); idx >= 0 {
+		alias = strings.ToLower(strings.TrimSpace(rest[idx+4:]))
+		rest = strings.TrimSpace(rest[:idx])
+	}
+	parts := strings.SplitN(rest, ".", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
+		return importedReadDirective{}, fmt.Errorf("import requires qualified name domain.table, got %q", rest)
+	}
+	return importedReadDirective{
+		SourceDomain: strings.ToLower(strings.TrimSpace(parts[0])),
+		SourceTable:  strings.ToLower(strings.TrimSpace(parts[1])),
+		Alias:        alias,
+	}, nil
+}
+
+func splitSQLSemicolons(sql string) []string {
+	segments := make([]string, 0, 4)
+	var current strings.Builder
+	inString := false
+	for i := 0; i < len(sql); i++ {
+		ch := sql[i]
+		if ch == '\'' {
+			if inString && i+1 < len(sql) && sql[i+1] == '\'' {
+				current.WriteByte(ch)
+				current.WriteByte(ch)
+				i++
+				continue
+			}
+			inString = !inString
+		}
+		if ch == ';' && !inString {
+			segments = append(segments, current.String())
+			current.Reset()
+			continue
+		}
+		current.WriteByte(ch)
+	}
+	if current.Len() > 0 {
+		segments = append(segments, current.String())
+	}
+	return segments
 }
 
 func (c *engineClient) TimeTravelQuery(ctx context.Context, req *api.TimeTravelQueryRequest) (*api.TimeTravelQueryResponse, error) {

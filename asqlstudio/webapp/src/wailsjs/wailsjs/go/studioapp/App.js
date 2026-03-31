@@ -242,6 +242,14 @@ export function SecuritySetPassword(arg1, arg2) {
   return window['go']['studioapp']['App']['SecuritySetPassword'](arg1, arg2);
 }
 
+export function StartEntityChangeStream(arg1) {
+  return window['go']['studioapp']['App']['StartEntityChangeStream'](arg1);
+}
+
+export function StopEntityChangeStream(arg1) {
+  return window['go']['studioapp']['App']['StopEntityChangeStream'](arg1);
+}
+
 export function SwitchConnection(arg1) {
   return window['go']['studioapp']['App']['SwitchConnection'](arg1);
 }

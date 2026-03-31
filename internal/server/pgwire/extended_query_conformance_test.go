@@ -285,6 +285,105 @@ func TestExtendedQueryPortalResumesAcrossExecuteCalls(t *testing.T) {
 	}
 }
 
+func TestExtendedQueryTailEntityChangesFollowResumesAcrossExecuteCalls(t *testing.T) {
+	addr, cleanup := startConformanceServer(t)
+	defer cleanup()
+
+	client := newRawProtoClient(t, addr)
+	defer client.close()
+
+	writer := newRawProtoClient(t, addr)
+	defer writer.close()
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN test",
+		"CREATE TABLE items (id INT PRIMARY KEY, status TEXT)",
+		"CREATE TABLE item_steps (id INT PRIMARY KEY, item_id INT REFERENCES items(id), label TEXT)",
+		"CREATE ENTITY item_aggregate (ROOT items, INCLUDES item_steps)",
+		"COMMIT",
+		"BEGIN DOMAIN test",
+		"INSERT INTO items (id, status) VALUES (1, 'draft')",
+		"COMMIT",
+	} {
+		writer.simpleQuery(sql)
+	}
+
+	client.send(
+		&pgproto3.Parse{Name: "tail_follow", Query: "TAIL ENTITY CHANGES test.item_aggregate FOR '1' LIMIT 2 FOLLOW"},
+		&pgproto3.Bind{DestinationPortal: "tail_follow_portal", PreparedStatement: "tail_follow"},
+		&pgproto3.Describe{ObjectType: 'P', Name: "tail_follow_portal"},
+		&pgproto3.Execute{Portal: "tail_follow_portal", MaxRows: 1},
+		&pgproto3.Sync{},
+	)
+	firstMessages := client.receiveUntilReady()
+
+	var firstRows [][]string
+	var firstSuspended, firstComplete int
+	for _, raw := range firstMessages {
+		switch msg := raw.(type) {
+		case *pgproto3.DataRow:
+			values := make([]string, len(msg.Values))
+			for i, value := range msg.Values {
+				values[i] = string(value)
+			}
+			firstRows = append(firstRows, values)
+		case *pgproto3.PortalSuspended:
+			firstSuspended++
+		case *pgproto3.CommandComplete:
+			firstComplete++
+		}
+	}
+	if len(firstRows) != 1 {
+		t.Fatalf("expected first execute to return one row, got %#v", firstRows)
+	}
+	if firstRows[0][5] != "1" || firstRows[0][6] != `["items"]` {
+		t.Fatalf("unexpected first execute row: %#v", firstRows[0])
+	}
+	if firstSuspended != 1 || firstComplete != 0 {
+		t.Fatalf("unexpected first execute status: suspended=%d complete=%d", firstSuspended, firstComplete)
+	}
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN test",
+		"INSERT INTO item_steps (id, item_id, label) VALUES (10, 1, 'mix')",
+		"COMMIT",
+	} {
+		writer.simpleQuery(sql)
+	}
+
+	client.send(
+		&pgproto3.Execute{Portal: "tail_follow_portal", MaxRows: 1},
+		&pgproto3.Sync{},
+	)
+	secondMessages := client.receiveUntilReady()
+
+	var secondRows [][]string
+	var secondSuspended, secondComplete int
+	for _, raw := range secondMessages {
+		switch msg := raw.(type) {
+		case *pgproto3.DataRow:
+			values := make([]string, len(msg.Values))
+			for i, value := range msg.Values {
+				values[i] = string(value)
+			}
+			secondRows = append(secondRows, values)
+		case *pgproto3.PortalSuspended:
+			secondSuspended++
+		case *pgproto3.CommandComplete:
+			secondComplete++
+		}
+	}
+	if len(secondRows) != 1 {
+		t.Fatalf("expected second execute to return one row, got %#v", secondRows)
+	}
+	if secondRows[0][5] != "2" || secondRows[0][6] != `["item_steps"]` {
+		t.Fatalf("unexpected second execute row: %#v", secondRows[0])
+	}
+	if secondSuspended != 0 || secondComplete != 1 {
+		t.Fatalf("unexpected second execute status: suspended=%d complete=%d", secondSuspended, secondComplete)
+	}
+}
+
 func TestExtendedQueryDiscardsMessagesUntilSyncAfterError(t *testing.T) {
 	addr, cleanup := startConformanceServer(t)
 	defer cleanup()

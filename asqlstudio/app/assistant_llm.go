@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"asql/internal/engine/parser"
 	api "asql/pkg/adminapi"
 )
 
@@ -712,7 +711,7 @@ func (a *App) validateAssistantGeneratedSQL(ctx context.Context, sql string, dom
 	if err := validateAssistantSQLSubset(trimmed); err != nil {
 		return "", err
 	}
-	if _, err := parser.Parse(trimmed); err != nil {
+	if err := validateAssistantBasicSyntax(trimmed); err != nil {
 		return "", fmt.Errorf("generated SQL did not parse as supported ASQL: %w", err)
 	}
 	client := a.getLeaderClient()
@@ -725,6 +724,15 @@ func (a *App) validateAssistantGeneratedSQL(ctx context.Context, sql string, dom
 		}
 	}
 	return trimmed, nil
+}
+
+func validateAssistantBasicSyntax(sql string) error {
+	trimmed := strings.TrimSpace(sql)
+	upper := strings.ToUpper(trimmed)
+	if strings.HasPrefix(upper, "SELECT ") && assistantFindTopLevelLiteral(upper, 0, " FROM ") < 0 {
+		return fmt.Errorf("invalid sql statement: SELECT requires FROM")
+	}
+	return nil
 }
 
 func validateAssistantSQLSubset(sql string) error {

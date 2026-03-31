@@ -3,11 +3,12 @@ import { ClusterPanel } from './components/ClusterPanel'
 import { CommandPalette } from './components/CommandPalette'
 import { ConnectionDialog, type ConnectionConfig, type ConnectionSwitchRequest } from './components/ConnectionDialog'
 import { Dashboard } from './components/Dashboard'
+import { EntityChangeDebugger } from './components/EntityChangeDebugger'
 import { EntityExplorer } from './components/EntityExplorer'
 import { DesignerWorkbench } from './components/DesignerWorkbench'
 import { ERDiagram } from './components/ERDiagram'
 import { FixturePanel } from './components/FixturePanel'
-import { IconDatabase, IconDownload, IconGrid, IconKey, IconLayers, IconMoon, IconRefresh, IconSchema, IconShield, IconSQLDoc, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
+import { IconActivity, IconDatabase, IconDownload, IconGrid, IconKey, IconLayers, IconMoon, IconRefresh, IconSchema, IconShield, IconSQLDoc, IconSun, IconTerminal, IconTimeline, IconZap } from './components/Icons'
 import { KeyboardShortcuts } from './components/KeyboardShortcuts'
 import { RecoveryPanel } from './components/RecoveryPanel'
 import { SecurityPanel } from './components/SecurityPanel'
@@ -37,6 +38,7 @@ const GROUPS: GroupDef[] = [
       { id: 'workspace',     label: 'Workspace',     icon: <IconTerminal /> },
       { id: 'time-explorer', label: 'Time Explorer', icon: <IconTimeline /> },
       { id: 'entities',      label: 'Entities',      icon: <IconLayers /> },
+      { id: 'entity-changes', label: 'Change Stream', icon: <IconActivity /> },
     ],
   },
   {
@@ -116,6 +118,7 @@ class DashboardBoundary extends Component<DashboardBoundaryProps, DashboardBound
 
 function App() {
   const [activeTab, setActiveTab] = useState<TabId>('home')
+  const [entityChangePreset, setEntityChangePreset] = useState<{ entityName: string; rootPK?: string; token: number } | null>(null)
   const [connectionEpoch, setConnectionEpoch] = useState(0)
   const [connectionInfo, setConnectionInfo] = useState<ConnectionConfig | null>(null)
   const [showConnectionDialog, setShowConnectionDialog] = useState(false)
@@ -311,6 +314,11 @@ function App() {
     setShowConnectionDialog(true)
   }
 
+  const openEntityChangeDebugger = (entityName: string, rootPK?: string) => {
+    setEntityChangePreset({ entityName, rootPK, token: Date.now() })
+    setActiveTab('entity-changes')
+  }
+
   const handleConnectionSwitch = async (request: ConnectionSwitchRequest) => {
     setConnectionBusy(true)
     setConnectionError('')
@@ -492,7 +500,11 @@ function App() {
             )}
 
             {activeTab === 'entities' && (
-              <EntityExplorer domain={model.domain || 'default'} />
+              <EntityExplorer domain={model.domain || 'default'} onOpenChangeDebugger={openEntityChangeDebugger} />
+            )}
+
+            {activeTab === 'entity-changes' && (
+              <EntityChangeDebugger domain={model.domain || 'default'} preset={entityChangePreset} />
             )}
 
             {activeTab === 'recovery' && <RecoveryPanel />}

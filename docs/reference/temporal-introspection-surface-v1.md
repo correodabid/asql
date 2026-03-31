@@ -16,6 +16,8 @@ pgwire.
   for a specific visible entity version.
 - `resolve_reference('domain.table', 'pk')` → the token a versioned foreign key
   would auto-capture against the current committed snapshot.
+- `TAIL ENTITY CHANGES domain.entity [FOR '<root_pk>'] [FROM LSN <n>] [TO LSN <n>] [LIMIT <n>] [FOLLOW]`
+  → ASQL-native pgwire/query surface for replay-safe entity backlog inspection.
 
 ## Return semantics
 
@@ -32,3 +34,29 @@ pgwire.
 This surface is intentionally small. It supports debugging, temporal
 introspection, and versioned-reference diagnostics without widening the engine's
 public API more than necessary.
+
+`TAIL ENTITY CHANGES` is not PostgreSQL `LISTEN`/`NOTIFY` compatibility.
+It is an ASQL-native temporal surface over committed entity versions. In this
+first slice it returns a finite backlog ordered by commit `LSN`, with one row
+per committed entity-version transition:
+
+- `commit_lsn`
+- `commit_timestamp`
+- `domain`
+- `entity`
+- `root_pk`
+- `entity_version`
+- `tables` as a JSON array of aggregate tables touched by that committed version
+
+When you add `FOLLOW`, the command keeps the pgwire query open and emits
+additional rows as new matching commits arrive.
+
+It works on both simple query and extended query protocol. In extended query
+mode, a portal can suspend and later resume across repeated `Execute` calls
+without losing the `LSN` cursor.
+
+Use it when you want to answer questions like:
+
+- which aggregate revisions happened after a known `LSN`,
+- which entity versions affected one root instance,
+- which tables participated in a committed aggregate transition.

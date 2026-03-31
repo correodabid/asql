@@ -92,7 +92,8 @@ type portal struct {
 	// values are in the exact positions pgx is expecting based on the OIDs it
 	// cached from RowDescription.  If it is nil the Execute phase falls back to
 	// deriving columns from actual result rows (legacy behaviour).
-	describedColumns []string
+	describedColumns  []string
+	tailEntityChanges *tailEntityChangesPortalState
 }
 
 // ── Message handlers ─────────────────────────────────────────────────────────
@@ -627,6 +628,12 @@ func (server *Server) handleBind(backend *pgproto3.Backend, state *connState, ms
 			columns = []string{paramName}
 		}
 	}
+	if !isSelect {
+		if _, ok, err := parseTailEntityChangesStatement(sql); ok && err == nil {
+			isSelect = true
+			columns = append([]string(nil), tailEntityChangesColumns...)
+		}
+	}
 
 	// Eagerly compute the described column list at Bind time using the same
 	// logic that Describe Statement ('S') and Describe Portal ('P') use.
@@ -653,12 +660,20 @@ func (server *Server) handleBind(backend *pgproto3.Backend, state *connState, ms
 		}
 	}
 
+	var tailState *tailEntityChangesPortalState
+	if isSelect {
+		if tailStmt, ok, err := parseTailEntityChangesStatement(sql); ok && err == nil && tailStmt.Follow {
+			tailState = newTailEntityChangesPortalState(tailStmt)
+		}
+	}
+
 	state.portals[msg.DestinationPortal] = portal{
-		sql:              sql,
-		isSelect:         isSelect,
-		columns:          columns,
-		nextRow:          0,
-		describedColumns: describedColumns,
+		sql:               sql,
+		isSelect:          isSelect,
+		columns:           columns,
+		nextRow:           0,
+		describedColumns:  describedColumns,
+		tailEntityChanges: tailState,
 	}
 	backend.Send(&pgproto3.BindComplete{})
 	_ = backend.Flush()
@@ -791,6 +806,12 @@ func (server *Server) handleExtendedExecute(backend *pgproto3.Backend, state *co
 		return nil
 	}
 
+	if p.tailEntityChanges != nil {
+		_, err := server.streamExtendedTailEntityChanges(ctx, backend, state, state.session, p.tailEntityChanges, msg.MaxRows)
+		state.portals[msg.Portal] = p
+		return err
+	}
+
 	result, columns, err := server.executeSQL(ctx, state.session, p.sql)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -874,6 +895,109 @@ func (server *Server) streamExtendedResult(ctx context.Context, backend *pgproto
 	}
 	backend.Send(&pgproto3.CommandComplete{CommandTag: []byte(tag)})
 	return len(result.Rows), false, backend.Flush()
+}
+
+func (server *Server) streamExtendedTailEntityChanges(ctx context.Context, backend *pgproto3.Backend, state *connState, session *executor.Session, portalState *tailEntityChangesPortalState, maxRows uint32) (bool, error) {
+	if portalState == nil {
+		backend.Send(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 0")})
+		return false, backend.Flush()
+	}
+	if portalState.completed {
+		backend.Send(&pgproto3.CommandComplete{CommandTag: []byte(fmt.Sprintf("SELECT %d", portalState.totalRows))})
+		return false, backend.Flush()
+	}
+	if err := server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "entity_changes_follow", targetKind: "history_stream"}); err != nil {
+		server.extendedError(backend, state, err.Error(), mapErrorToSQLState(err))
+		return false, nil
+	}
+
+	sent := uint32(0)
+	for {
+		batchLimit := 0
+		if portalState.remaining > 0 {
+			batchLimit = portalState.remaining
+		}
+		if maxRows > 0 {
+			allowed := int(maxRows - sent)
+			if allowed <= 0 {
+				backend.Send(&pgproto3.PortalSuspended{})
+				return true, backend.Flush()
+			}
+			if batchLimit == 0 || allowed < batchLimit {
+				batchLimit = allowed
+			}
+		}
+
+		ch := server.walStore.Subscribe()
+		events, err := server.engine.EntityChanges(ctx, executor.EntityChangesRequest{
+			Domain:  portalState.statement.Domain,
+			Entity:  portalState.statement.Entity,
+			RootPK:  portalState.statement.RootPK,
+			FromLSN: portalState.nextFrom,
+			ToLSN:   portalState.statement.ToLSN,
+			Limit:   batchLimit,
+		})
+		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				server.extendedError(backend, state, "query canceled", "57014")
+				return false, nil
+			}
+			server.extendedError(backend, state, err.Error(), mapErrorToSQLState(err))
+			return false, nil
+		}
+		if len(events) > 0 {
+			for _, event := range events {
+				runPgwireStreamHook()
+				if err := ctx.Err(); err != nil {
+					server.extendedError(backend, state, "query canceled", "57014")
+					return false, nil
+				}
+				values, valueErr := entityChangeEventValues(event)
+				if valueErr != nil {
+					server.extendedError(backend, state, valueErr.Error(), "XX000")
+					return false, nil
+				}
+				backend.Send(&pgproto3.DataRow{Values: values})
+				sent++
+				portalState.totalRows++
+			}
+			if err := backend.Flush(); err != nil {
+				return false, err
+			}
+			portalState.nextFrom = events[len(events)-1].CommitLSN + 1
+			if portalState.remaining > 0 {
+				portalState.remaining -= len(events)
+				if portalState.remaining <= 0 {
+					portalState.completed = true
+					backend.Send(&pgproto3.CommandComplete{CommandTag: []byte(fmt.Sprintf("SELECT %d", portalState.totalRows))})
+					return false, backend.Flush()
+				}
+			}
+			if portalState.statement.ToLSN > 0 && portalState.nextFrom > portalState.statement.ToLSN {
+				portalState.completed = true
+				backend.Send(&pgproto3.CommandComplete{CommandTag: []byte(fmt.Sprintf("SELECT %d", portalState.totalRows))})
+				return false, backend.Flush()
+			}
+			if maxRows > 0 && sent >= maxRows {
+				backend.Send(&pgproto3.PortalSuspended{})
+				return true, backend.Flush()
+			}
+			continue
+		}
+		if !portalState.statement.Follow || (portalState.statement.ToLSN > 0 && portalState.nextFrom > portalState.statement.ToLSN) {
+			portalState.completed = true
+			backend.Send(&pgproto3.CommandComplete{CommandTag: []byte(fmt.Sprintf("SELECT %d", portalState.totalRows))})
+			return false, backend.Flush()
+		}
+		if err := server.waitForTailEntityChangesWake(ctx, ch); err != nil {
+			if errors.Is(err, context.Canceled) {
+				server.extendedError(backend, state, "query canceled", "57014")
+				return false, nil
+			}
+			server.extendedError(backend, state, err.Error(), "57P01")
+			return false, nil
+		}
+	}
 }
 
 // handleCloseMessage closes a named statement or portal.
@@ -1063,6 +1187,9 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 			DataTypeSize: -1,
 			TypeModifier: -1,
 		}}
+	}
+	if _, ok, err := parseTailEntityChangesStatement(trimmed); ok && err == nil {
+		return tailEntityChangesFields()
 	}
 
 	if _, isExplain := stripExplainSQLPrefix(trimmed); isExplain {

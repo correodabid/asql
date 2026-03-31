@@ -11,7 +11,10 @@ type VersionEntry = { version: number; commit_lsn: number; tables: string[] }
 
 type SnapTable = { name: string; columns: string[]; rows: Record<string, unknown>[] }
 
-type Props = { domain: string }
+type Props = {
+  domain: string
+  onOpenChangeDebugger?: (entityName: string, rootPK?: string) => void
+}
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -64,7 +67,7 @@ function diffSnapTable(prev: SnapTable, curr: SnapTable): TableDiff {
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
-export function EntityExplorer({ domain }: Props) {
+export function EntityExplorer({ domain, onOpenChangeDebugger }: Props) {
   // Entity list
   const [entities, setEntities]         = useState<EntityDef[]>([])
   const [loadingEntities, setLoadingEntities] = useState(false)
@@ -419,6 +422,14 @@ export function EntityExplorer({ domain }: Props) {
                 <span className="ee-modal-pk mono" title={selectedPK}>pk: {truncate(selectedPK, 48)}</span>
               </div>
               <div className="ee-modal-header-right">
+                <button
+                  className="toolbar-btn"
+                  onClick={() => onOpenChangeDebugger?.(selectedEntity.name, selectedPK)}
+                  title="Open change stream debugger for this entity root"
+                >
+                  <IconLayers />
+                  Stream Debugger
+                </button>
                 {!loadingSnap && selectedVersion && prevSnapTables.length > 0 && (() => {
                   const added   = [...snapDiff.values()].reduce((n, td) => n + [...td.values()].filter((v) => v === 'added').length, 0)
                   const deleted = [...snapDiff.values()].reduce((n, td) => n + [...td.values()].filter((v) => v === 'deleted').length, 0)

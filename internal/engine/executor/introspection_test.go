@@ -3,6 +3,7 @@ package executor
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"asql/internal/storage/wal"
@@ -224,5 +225,79 @@ func TestResolveReferenceMatchesCurrentVFKCaptureSemantics(t *testing.T) {
 
 	if _, _, err := engine.ResolveReference("test.item_steps", "11"); err == nil {
 		t.Fatal("expected resolve_reference() on child entity table to fail")
+	}
+}
+
+func TestEntityChangesReturnsDeterministicEntityBacklog(t *testing.T) {
+	ctx := context.Background()
+	store, err := wal.NewSegmentedLogStore(filepath.Join(t.TempDir(), "entity-changes.wal"), wal.AlwaysSync{})
+	if err != nil {
+		t.Fatalf("new store: %v", err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+
+	engine, err := New(ctx, store, "")
+	if err != nil {
+		t.Fatalf("new engine: %v", err)
+	}
+	session := engine.NewSession()
+
+	for _, sql := range []string{
+		"BEGIN DOMAIN history",
+		"CREATE TABLE items (id INT PRIMARY KEY, status TEXT)",
+		"CREATE TABLE item_steps (id INT PRIMARY KEY, item_id INT REFERENCES items(id), label TEXT)",
+		"CREATE ENTITY item_aggregate (ROOT items, INCLUDES item_steps)",
+		"COMMIT",
+		"BEGIN DOMAIN history",
+		"INSERT INTO items (id, status) VALUES (1, 'draft')",
+		"COMMIT",
+		"BEGIN DOMAIN history",
+		"INSERT INTO item_steps (id, item_id, label) VALUES (10, 1, 'mix')",
+		"COMMIT",
+		"BEGIN DOMAIN history",
+		"UPDATE items SET status = 'published' WHERE id = 1",
+		"COMMIT",
+	} {
+		mustExecIntrospection(t, ctx, engine, session, sql)
+	}
+
+	events, err := engine.EntityChanges(ctx, EntityChangesRequest{Domain: "history", Entity: "item_aggregate"})
+	if err != nil {
+		t.Fatalf("EntityChanges(): %v", err)
+	}
+	if len(events) != 3 {
+		t.Fatalf("expected 3 entity change events, got %d", len(events))
+	}
+	if events[0].Timestamp == 0 || events[1].Timestamp == 0 || events[2].Timestamp == 0 {
+		t.Fatalf("expected non-zero timestamps, got %#v", events)
+	}
+
+	if events[0].RootPK != "1" || events[0].Version != 1 || !reflect.DeepEqual(events[0].Tables, []string{"items"}) {
+		t.Fatalf("unexpected first event: %#v", events[0])
+	}
+	if events[1].RootPK != "1" || events[1].Version != 2 || !reflect.DeepEqual(events[1].Tables, []string{"item_steps"}) {
+		t.Fatalf("unexpected second event: %#v", events[1])
+	}
+	if events[2].RootPK != "1" || events[2].Version != 3 || !reflect.DeepEqual(events[2].Tables, []string{"items"}) {
+		t.Fatalf("unexpected third event: %#v", events[2])
+	}
+	if !(events[0].CommitLSN < events[1].CommitLSN && events[1].CommitLSN < events[2].CommitLSN) {
+		t.Fatalf("expected ascending commit LSNs, got %#v", events)
+	}
+
+	fromSecond, err := engine.EntityChanges(ctx, EntityChangesRequest{Domain: "history", Entity: "item_aggregate", FromLSN: events[1].CommitLSN})
+	if err != nil {
+		t.Fatalf("EntityChanges(from second): %v", err)
+	}
+	if len(fromSecond) != 2 {
+		t.Fatalf("expected 2 entity change events from second commit, got %d", len(fromSecond))
+	}
+
+	rootOnly, err := engine.EntityChanges(ctx, EntityChangesRequest{Domain: "history", Entity: "item_aggregate", RootPK: "1", Limit: 1})
+	if err != nil {
+		t.Fatalf("EntityChanges(root filter): %v", err)
+	}
+	if len(rootOnly) != 1 || rootOnly[0].Version != 1 {
+		t.Fatalf("expected limited root-filtered first version, got %#v", rootOnly)
 	}
 }

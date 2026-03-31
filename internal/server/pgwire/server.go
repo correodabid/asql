@@ -1201,6 +1201,15 @@ func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connSt
 		return err
 	}
 
+	if tailStmt, ok, err := parseTailEntityChangesStatement(trimmed); ok && tailStmt.Follow {
+		if err != nil {
+			return sendErrorAndReady(backend, err.Error(), session)
+		}
+		ctx, finish := state.beginQuery()
+		defer finish()
+		return server.handleTailEntityChangesFollowQuery(ctx, backend, session, tailStmt)
+	}
+
 	ctx, finish := state.beginQuery()
 	defer finish()
 
@@ -1379,6 +1388,38 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 		return result, append([]string(nil), explainResultColumns...), nil
 	}
 
+	if tailStmt, ok, err := parseTailEntityChangesStatement(stripped); ok {
+		if err != nil {
+			return executor.Result{}, nil, err
+		}
+		if tailStmt.Follow {
+			return executor.Result{}, nil, fmt.Errorf("TAIL ENTITY CHANGES FOLLOW requires the pgwire streaming execution path")
+		}
+		if err := server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "entity_changes", targetKind: "history_stream"}); err != nil {
+			return executor.Result{}, nil, err
+		}
+		events, err := server.engine.EntityChanges(ctx, executor.EntityChangesRequest{
+			Domain:  tailStmt.Domain,
+			Entity:  tailStmt.Entity,
+			RootPK:  tailStmt.RootPK,
+			FromLSN: tailStmt.FromLSN,
+			ToLSN:   tailStmt.ToLSN,
+			Limit:   tailStmt.Limit,
+		})
+		if err != nil {
+			return executor.Result{}, nil, err
+		}
+		rows := make([]map[string]ast.Literal, 0, len(events))
+		for _, event := range events {
+			row, rowErr := entityChangeEventRow(event)
+			if rowErr != nil {
+				return executor.Result{}, nil, rowErr
+			}
+			rows = append(rows, row)
+		}
+		return executor.Result{Status: "TAIL ENTITY CHANGES", Rows: rows}, append([]string(nil), tailEntityChangesColumns...), nil
+	}
+
 	statement, parseErr := parser.Parse(stripped)
 	if parseErr == nil {
 		if selectStatement, isSelect := statement.(ast.SelectStatement); isSelect {
@@ -1443,6 +1484,102 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 	}
 
 	return result, nil, nil
+}
+
+func (server *Server) handleTailEntityChangesFollowQuery(ctx context.Context, backend *pgproto3.Backend, session *executor.Session, stmt tailEntityChangesStatement) error {
+	if err := server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "entity_changes_follow", targetKind: "history_stream"}); err != nil {
+		return sendErrorAndReady(backend, err.Error(), session)
+	}
+	fields := tailEntityChangesFields()
+	backend.Send(&pgproto3.RowDescription{Fields: fields})
+	if err := backend.Flush(); err != nil {
+		return err
+	}
+
+	nextFrom := stmt.FromLSN
+	remaining := stmt.Limit
+	totalRows := 0
+	for {
+		ch := server.walStore.Subscribe()
+		batchLimit := 0
+		if remaining > 0 {
+			batchLimit = remaining
+		}
+		events, err := server.engine.EntityChanges(ctx, executor.EntityChangesRequest{
+			Domain:  stmt.Domain,
+			Entity:  stmt.Entity,
+			RootPK:  stmt.RootPK,
+			FromLSN: nextFrom,
+			ToLSN:   stmt.ToLSN,
+			Limit:   batchLimit,
+		})
+		if err != nil {
+			return sendErrorAndReady(backend, err.Error(), session)
+		}
+		if len(events) > 0 {
+			for _, event := range events {
+				runPgwireStreamHook()
+				if err := ctx.Err(); err != nil {
+					return sendErrorAndReadyCode(backend, "query canceled", "57014", session)
+				}
+				values, valueErr := entityChangeEventValues(event)
+				if valueErr != nil {
+					return sendErrorAndReady(backend, valueErr.Error(), session)
+				}
+				backend.Send(&pgproto3.DataRow{Values: values})
+				totalRows++
+			}
+			if err := backend.Flush(); err != nil {
+				return err
+			}
+			if remaining > 0 {
+				remaining -= len(events)
+				if remaining <= 0 {
+					break
+				}
+			}
+			nextFrom = events[len(events)-1].CommitLSN + 1
+			if stmt.ToLSN > 0 && nextFrom > stmt.ToLSN {
+				break
+			}
+			continue
+		}
+		if !stmt.Follow || (stmt.ToLSN > 0 && nextFrom > stmt.ToLSN) {
+			break
+		}
+		if err := server.waitForTailEntityChangesWake(ctx, ch); err != nil {
+			if errors.Is(err, context.Canceled) {
+				return sendErrorAndReadyCode(backend, "query canceled", "57014", session)
+			}
+			return sendErrorAndReady(backend, err.Error(), session)
+		}
+	}
+	backend.Send(&pgproto3.CommandComplete{CommandTag: []byte(fmt.Sprintf("SELECT %d", totalRows))})
+	backend.Send(&pgproto3.ReadyForQuery{TxStatus: txStatus(session)})
+	return backend.Flush()
+}
+
+func (server *Server) waitForTailEntityChangesWake(ctx context.Context, ch <-chan struct{}) error {
+	if server.engine.HeadLSN() < server.walStore.LastLSN() {
+		timer := time.NewTimer(2 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-server.closeCh:
+			return fmt.Errorf("server shutting down")
+		case <-timer.C:
+			return nil
+		}
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-server.closeCh:
+		return fmt.Errorf("server shutting down")
+	case <-ch:
+		return nil
+	}
 }
 
 func deriveColumns(statement ast.Statement, rows []map[string]ast.Literal) []string {

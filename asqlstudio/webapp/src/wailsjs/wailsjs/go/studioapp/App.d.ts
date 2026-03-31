@@ -123,6 +123,10 @@ export function SecurityRevokeRole(arg1:string,arg2:string):Promise<Record<strin
 
 export function SecuritySetPassword(arg1:string,arg2:string):Promise<Record<string, any>>;
 
+export function StartEntityChangeStream(arg1:studioapp.entityChangeStreamStartRequest):Promise<Record<string, any>>;
+
+export function StopEntityChangeStream(arg1:studioapp.entityChangeStreamStopRequest):Promise<Record<string, any>>;
+
 export function SwitchConnection(arg1:studioapp.connectionSwitchRequest):Promise<Record<string, any>>;
 
 export function TemporalLookup(arg1:studioapp.temporalLookupRequest):Promise<Record<string, any>>;
