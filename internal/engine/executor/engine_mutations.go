@@ -966,7 +966,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			columnDefinitions[column.Name] = column
 			if column.PrimaryKey {
 				if primaryKey != "" {
-					return fmt.Errorf("%w: multiple PRIMARY KEY columns are not supported", errConstraint)
+					return fmt.Errorf("%w: multiple PRIMARY KEY columns are not supported", errConstraintGeneric)
 				}
 				primaryKey = column.Name
 				uniqueColumns[column.Name] = struct{}{}
@@ -977,7 +977,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 
 			if column.ReferencesTable != "" || column.ReferencesColumn != "" {
 				if column.ReferencesTable == "" || column.ReferencesColumn == "" {
-					return fmt.Errorf("%w: invalid foreign key definition on column %s", errConstraint, column.Name)
+					return fmt.Errorf("%w: invalid foreign key definition on column %s", errConstraintGeneric, column.Name)
 				}
 				foreignKeys = append(foreignKeys, foreignKeyConstraint{
 					column:           column.Name,
@@ -1006,15 +1006,15 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		for _, vfk := range plan.VersionedForeignKeys {
 			// Validate FK column exists.
 			if _, exists := columnDefinitions[vfk.Column]; !exists {
-				return fmt.Errorf("%w: versioned foreign key column %q not found in table definition", errConstraint, vfk.Column)
+				return fmt.Errorf("%w: versioned foreign key column %q not found in table definition", errConstraintGeneric, vfk.Column)
 			}
 			// Validate LSN column exists and is INT.
 			lsnDef, lsnExists := columnDefinitions[vfk.LSNColumn]
 			if !lsnExists {
-				return fmt.Errorf("%w: versioned foreign key LSN column %q not found in table definition", errConstraint, vfk.LSNColumn)
+				return fmt.Errorf("%w: versioned foreign key LSN column %q not found in table definition", errConstraintGeneric, vfk.LSNColumn)
 			}
 			if lsnDef.Type != ast.DataTypeInt {
-				return fmt.Errorf("%w: versioned foreign key LSN column %q must be INT", errConstraint, vfk.LSNColumn)
+				return fmt.Errorf("%w: versioned foreign key LSN column %q must be INT", errConstraintGeneric, vfk.LSNColumn)
 			}
 			// Resolve reference domain: if empty, use the table's own domain.
 			refDomain := vfk.ReferencesDomain
@@ -1024,16 +1024,16 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			// Validate referenced domain/table exist.
 			refDomainState, refDomainExists := state.domains[refDomain]
 			if !refDomainExists {
-				return fmt.Errorf("%w: versioned foreign key references domain %q which does not exist", errConstraint, refDomain)
+				return fmt.Errorf("%w: versioned foreign key references domain %q which does not exist", errConstraintGeneric, refDomain)
 			}
 			refTable, refTableExists := refDomainState.tables[vfk.ReferencesTable]
 			if !refTableExists {
-				return fmt.Errorf("%w: versioned foreign key references table %s.%s which does not exist", errConstraint, refDomain, vfk.ReferencesTable)
+				return fmt.Errorf("%w: versioned foreign key references table %s.%s which does not exist", errConstraintGeneric, refDomain, vfk.ReferencesTable)
 			}
 			// Validate referenced column is PK or UNIQUE.
 			if refTable.primaryKey != vfk.ReferencesColumn {
 				if _, isUnique := refTable.uniqueColumns[vfk.ReferencesColumn]; !isUnique {
-					return fmt.Errorf("%w: versioned foreign key referenced column %s.%s(%s) must be PRIMARY KEY or UNIQUE", errConstraint, refDomain, vfk.ReferencesTable, vfk.ReferencesColumn)
+					return fmt.Errorf("%w: versioned foreign key referenced column %s.%s(%s) must be PRIMARY KEY or UNIQUE", errConstraintGeneric, refDomain, vfk.ReferencesTable, vfk.ReferencesColumn)
 				}
 			}
 			versionedFKs = append(versionedFKs, versionedForeignKeyConstraint{
@@ -1148,7 +1148,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			backfillValue = plan.AlterColumn.DefaultValue.Value
 		}
 		if plan.AlterColumn.NotNull && len(table.rows) > 0 && backfillValue.Kind == ast.LiteralNull {
-			return fmt.Errorf("%w: ADD COLUMN %s requires a non-null DEFAULT for existing rows", errConstraint, column)
+			return fmt.Errorf("%w: ADD COLUMN %s requires a non-null DEFAULT for existing rows", errConstraintNotNull, column)
 		}
 
 		// COW: clone only if not already cloned in this transaction.
@@ -1820,7 +1820,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 				for _, fk := range otherTable.foreignKeys {
 					if fk.referencesTable == plan.TableName {
 						return fmt.Errorf("%w: table %s is referenced by foreign key on %s(%s)",
-							errConstraint, plan.TableName, otherName, fk.column)
+							errConstraintGeneric, plan.TableName, otherName, fk.column)
 					}
 				}
 			}
@@ -1832,7 +1832,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 				if entityTable == plan.TableName {
 					if !plan.Cascade {
 						return fmt.Errorf("%w: table %s is part of entity %s",
-							errConstraint, plan.TableName, entityName)
+							errConstraintGeneric, plan.TableName, entityName)
 					}
 					// CASCADE: remove entity that references this table.
 					delete(domainState.entities, entityName)

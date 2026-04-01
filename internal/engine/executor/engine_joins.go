@@ -1012,9 +1012,11 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 			pipelinePrefix, pipelineBareCol, pipelineOK := splitQualifiedColumnRef(pipelineColKey)
 			if pipelineOK {
 				// Resolve alias to real table name.
+				// Skip domain-qualified keys (e.g. "accounts.users") — they
+				// are reverse-lookup entries, not alias→table mappings.
 				leftRealTable := pipelinePrefix
 				for tbl, prefix := range aliasMap {
-					if prefix == pipelinePrefix && tbl != prefix {
+					if prefix == pipelinePrefix && tbl != prefix && !strings.Contains(tbl, ".") {
 						leftRealTable = tbl
 						break
 					}

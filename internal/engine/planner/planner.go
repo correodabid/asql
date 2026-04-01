@@ -1,17 +1,17 @@
 package planner
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 
 	"asql/internal/engine/parser/ast"
+	"asql/internal/engine/sqlerr"
 )
 
 var (
-	errUnsupportedStatement = errors.New("unsupported statement for planner")
-	errDomainAccessDenied   = errors.New("domain access denied")
-	errInvalidTableRef      = errors.New("invalid table reference")
+	errUnsupportedStatement = sqlerr.New("0A000", "unsupported statement for planner")
+	errDomainAccessDenied   = sqlerr.New("42501", "domain access denied")
+	errInvalidTableRef      = sqlerr.New("42P01", "invalid table reference")
 )
 
 type Operation string

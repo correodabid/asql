@@ -34,13 +34,13 @@ func validateInsertRow(domainState *domainState, table *tableState, row map[stri
 	if table.primaryKey != "" {
 		value, exists := row[table.primaryKey]
 		if !exists || value.Kind == ast.LiteralNull {
-			return fmt.Errorf("%w: primary key %s cannot be null", errConstraint, table.primaryKey)
+			return fmt.Errorf("%w: primary key %s cannot be null", errConstraintPKNull, table.primaryKey)
 		}
 		if !skipPKUnique {
 			if idxName, ok := table.indexedColumns[table.primaryKey]; ok {
 				if idx, has := table.indexes[idxName]; has && idx.kind == "hash" {
 					if idx.hasBucket(literalKey(value)) {
-						return fmt.Errorf("%w: primary key %s duplicate value %s", errConstraint, table.primaryKey, literalKey(value))
+						return fmt.Errorf("%w: primary key %s duplicate value %s", errConstraintPKDup, table.primaryKey, literalKey(value))
 					}
 				}
 			}
@@ -56,7 +56,7 @@ func validateInsertRow(domainState *domainState, table *tableState, row map[stri
 		if idxName, ok := table.indexedColumns[col]; ok {
 			if idx, has := table.indexes[idxName]; has && idx.kind == "hash" {
 				if idx.hasBucket(literalKey(value)) {
-					return fmt.Errorf("%w: unique %s duplicate value %s", errConstraint, col, literalKey(value))
+					return fmt.Errorf("%w: unique %s duplicate value %s", errConstraintUniqueDup, col, literalKey(value))
 				}
 			}
 		}
@@ -80,10 +80,10 @@ func validateInsertRow(domainState *domainState, table *tableState, row map[stri
 		}
 		parent, ok := domainState.tables[fk.referencesTable]
 		if !ok {
-			return fmt.Errorf("%w: referenced table %s not found", errConstraint, fk.referencesTable)
+			return fmt.Errorf("%w: referenced table %s not found", errConstraintFK, fk.referencesTable)
 		}
 		if !tableContainsValue(parent, fk.referencesColumn, value) {
-			return fmt.Errorf("%w: foreign key %s references missing %s(%s)", errConstraint, fk.column, fk.referencesTable, fk.referencesColumn)
+			return fmt.Errorf("%w: foreign key %s references missing %s(%s)", errConstraintFK, fk.column, fk.referencesTable, fk.referencesColumn)
 		}
 		// Cache positive result for subsequent rows in the same batch.
 		if fkValCache != nil {
@@ -97,7 +97,7 @@ func validateInsertRow(domainState *domainState, table *tableState, row map[stri
 			continue
 		}
 		if !checkConstraintSatisfied(row, check.predicate) {
-			return fmt.Errorf("%w: check constraint on %s failed", errConstraint, check.column)
+			return fmt.Errorf("%w: check constraint on %s failed", errConstraintCheck, check.column)
 		}
 	}
 
@@ -105,7 +105,7 @@ func validateInsertRow(domainState *domainState, table *tableState, row map[stri
 	for _, colName := range table.notNullColumns {
 		value, exists := row[colName]
 		if !exists || value.Kind == ast.LiteralNull {
-			return fmt.Errorf("%w: column %s cannot be null", errConstraint, colName)
+			return fmt.Errorf("%w: column %s cannot be null", errConstraintNotNull, colName)
 		}
 	}
 
@@ -190,16 +190,16 @@ func validateVersionedForeignKeys(state *readableState, engine *Engine, table *t
 			// Auto-capture: validate against current state, fill version/LSN.
 			refDomainState, domainExists := state.domains[vfk.referencesDomain]
 			if !domainExists {
-				return fmt.Errorf("%w: versioned FK domain %q not found", errConstraint, vfk.referencesDomain)
+				return fmt.Errorf("%w: versioned FK domain %q not found", errConstraintGeneric, vfk.referencesDomain)
 			}
 			refTable, tableExists := refDomainState.tables[vfk.referencesTable]
 			if !tableExists {
-				return fmt.Errorf("%w: versioned FK table %s.%s not found", errConstraint, vfk.referencesDomain, vfk.referencesTable)
+				return fmt.Errorf("%w: versioned FK table %s.%s not found", errConstraintGeneric, vfk.referencesDomain, vfk.referencesTable)
 			}
 			refRow, found := lookupUniqueRow(refTable, vfk.referencesColumn, fkValue)
 			if !found {
 				return fmt.Errorf("%w: versioned FK %s references missing %s.%s(%s) [lookup=%v rows=%d headLSN=%d]",
-					errConstraint, vfk.column, vfk.referencesDomain, vfk.referencesTable, vfk.referencesColumn,
+					errConstraintGeneric, vfk.column, vfk.referencesDomain, vfk.referencesTable, vfk.referencesColumn,
 					fkValue.StringValue, len(refTable.rows), state.headLSN)
 			}
 			// Check if referenced table belongs to an entity.
@@ -210,12 +210,12 @@ func validateVersionedForeignKeys(state *readableState, engine *Engine, table *t
 				if vfk.referencesTable != entity.rootTable {
 					// VPK references a child table — for now, error out.
 					return fmt.Errorf("%w: versioned FK %s references child table %s of entity %q; must reference root table %s",
-						errConstraint, vfk.column, vfk.referencesTable, entityName, entity.rootTable)
+						errConstraintGeneric, vfk.column, vfk.referencesTable, entityName, entity.rootTable)
 				}
 				version, ok := visibleEntityVersion(refDomainState, entityName, rootPK, pendingEntityVersions)
 				if !ok {
 					return fmt.Errorf("%w: versioned FK %s: entity %q has no committed version for root PK %s; commit the entity first",
-						errConstraint, vfk.column, entityName, rootPK)
+						errConstraintGeneric, vfk.column, entityName, rootPK)
 				}
 				row[vfk.lsnColumn] = ast.Literal{Kind: ast.LiteralNumber, NumberValue: int64(version)}
 			} else {
@@ -223,14 +223,14 @@ func validateVersionedForeignKeys(state *readableState, engine *Engine, table *t
 				refLSN, ok := refRow["_lsn"]
 				if !ok || refLSN.Kind != ast.LiteralNumber {
 					return fmt.Errorf("%w: versioned FK %s references %s.%s(%s) but row has no visible _lsn",
-						errConstraint, vfk.column, vfk.referencesDomain, vfk.referencesTable, vfk.referencesColumn)
+						errConstraintGeneric, vfk.column, vfk.referencesDomain, vfk.referencesTable, vfk.referencesColumn)
 				}
 				row[vfk.lsnColumn] = refLSN
 			}
 		} else {
 			// Explicit value provided: validate accordingly.
 			if lsnValue.Kind != ast.LiteralNumber {
-				return fmt.Errorf("%w: versioned FK LSN column %s must be an integer", errConstraint, vfk.lsnColumn)
+				return fmt.Errorf("%w: versioned FK LSN column %s must be an integer", errConstraintGeneric, vfk.lsnColumn)
 			}
 
 			refDomainState := state.domains[vfk.referencesDomain]
@@ -247,18 +247,18 @@ func validateVersionedForeignKeys(state *readableState, engine *Engine, table *t
 				}
 				if !ok {
 					return fmt.Errorf("%w: versioned FK %s: entity %q version %d not found for root PK %s",
-						errConstraint, vfk.column, entityName, version, rootPK)
+						errConstraintGeneric, vfk.column, entityName, version, rootPK)
 				}
 			} else {
 				// No entity — raw LSN (current behavior).
 				targetLSN := uint64(lsnValue.NumberValue)
 				found, err := engine.tableContainsValueAtLSN(state, vfk.referencesDomain, vfk.referencesTable, vfk.referencesColumn, fkValue, targetLSN)
 				if err != nil {
-					return fmt.Errorf("%w: versioned FK validation error: %w", errConstraint, err)
+					return fmt.Errorf("%w: versioned FK validation error: %w", errConstraintGeneric, err)
 				}
 				if !found {
 					return fmt.Errorf("%w: versioned FK %s references missing %s.%s(%s) at LSN %d",
-						errConstraint, vfk.column, vfk.referencesDomain, vfk.referencesTable, vfk.referencesColumn, targetLSN)
+						errConstraintGeneric, vfk.column, vfk.referencesDomain, vfk.referencesTable, vfk.referencesColumn, targetLSN)
 				}
 			}
 		}
@@ -725,12 +725,12 @@ func validateConstraints(domainState *domainState, table *tableState, rows []map
 		for rowID, row := range rows {
 			value, exists := row[table.primaryKey]
 			if !exists || value.Kind == ast.LiteralNull {
-				return fmt.Errorf("%w: primary key %s cannot be null", errConstraint, table.primaryKey)
+				return fmt.Errorf("%w: primary key %s cannot be null", errConstraintPKNull, table.primaryKey)
 			}
 
 			key := literalKey(value)
 			if previousRowID, ok := seen[key]; ok {
-				return fmt.Errorf("%w: primary key %s duplicate between rows %d and %d", errConstraint, table.primaryKey, previousRowID, rowID)
+				return fmt.Errorf("%w: primary key %s duplicate between rows %d and %d", errConstraintPKDup, table.primaryKey, previousRowID, rowID)
 			}
 			seen[key] = rowID
 		}
@@ -759,7 +759,7 @@ func validateConstraints(domainState *domainState, table *tableState, rows []map
 
 			key := literalKey(value)
 			if previousRowID, ok := seen[key]; ok {
-				return fmt.Errorf("%w: unique %s duplicate between rows %d and %d", errConstraint, column, previousRowID, rowID)
+				return fmt.Errorf("%w: unique %s duplicate between rows %d and %d", errConstraintUniqueDup, column, previousRowID, rowID)
 			}
 			seen[key] = rowID
 		}
@@ -768,7 +768,7 @@ func validateConstraints(domainState *domainState, table *tableState, rows []map
 	for _, foreignKey := range table.foreignKeys {
 		parent, exists := domainState.tables[foreignKey.referencesTable]
 		if !exists {
-			return fmt.Errorf("%w: referenced table %s not found", errConstraint, foreignKey.referencesTable)
+			return fmt.Errorf("%w: referenced table %s not found", errConstraintFK, foreignKey.referencesTable)
 		}
 
 		for rowID, row := range rows {
@@ -778,7 +778,7 @@ func validateConstraints(domainState *domainState, table *tableState, rows []map
 			}
 
 			if !tableContainsValue(parent, foreignKey.referencesColumn, value) {
-				return fmt.Errorf("%w: foreign key %s references missing %s(%s) for row %d", errConstraint, foreignKey.column, foreignKey.referencesTable, foreignKey.referencesColumn, rowID)
+				return fmt.Errorf("%w: foreign key %s references missing %s(%s) for row %d", errConstraintFK, foreignKey.column, foreignKey.referencesTable, foreignKey.referencesColumn, rowID)
 			}
 		}
 	}
@@ -789,7 +789,7 @@ func validateConstraints(domainState *domainState, table *tableState, rows []map
 		}
 		for rowID, row := range rows {
 			if !checkConstraintSatisfied(row, check.predicate) {
-				return fmt.Errorf("%w: check constraint on %s failed at row %d", errConstraint, check.column, rowID)
+				return fmt.Errorf("%w: check constraint on %s failed at row %d", errConstraintCheck, check.column, rowID)
 			}
 		}
 	}
@@ -805,7 +805,7 @@ func validateConstraints(domainState *domainState, table *tableState, rows []map
 		for rowID, row := range rows {
 			value, exists := row[colName]
 			if !exists || value.Kind == ast.LiteralNull {
-				return fmt.Errorf("%w: column %s cannot be null at row %d", errConstraint, colName, rowID)
+				return fmt.Errorf("%w: column %s cannot be null at row %d", errConstraintNotNull, colName, rowID)
 			}
 		}
 	}
@@ -857,23 +857,23 @@ func validateForeignKeyDefinitions(domainState *domainState, tableName string, u
 	for _, foreignKey := range foreignKeys {
 		if foreignKey.referencesTable == tableName {
 			if _, unique := uniqueColumns[foreignKey.referencesColumn]; !unique {
-				return fmt.Errorf("%w: self-referenced column %s(%s) must be PRIMARY KEY or UNIQUE", errConstraint, foreignKey.referencesTable, foreignKey.referencesColumn)
+				return fmt.Errorf("%w: self-referenced column %s(%s) must be PRIMARY KEY or UNIQUE", errConstraintGeneric, foreignKey.referencesTable, foreignKey.referencesColumn)
 			}
 			continue
 		}
 
 		referencedTable, exists := domainState.tables[foreignKey.referencesTable]
 		if !exists {
-			return fmt.Errorf("%w: referenced table %s not found", errConstraint, foreignKey.referencesTable)
+			return fmt.Errorf("%w: referenced table %s not found", errConstraintFK, foreignKey.referencesTable)
 		}
 
 		if !tableHasColumn(referencedTable, foreignKey.referencesColumn) {
-			return fmt.Errorf("%w: referenced column %s.%s not found", errConstraint, foreignKey.referencesTable, foreignKey.referencesColumn)
+			return fmt.Errorf("%w: referenced column %s.%s not found", errConstraintGeneric, foreignKey.referencesTable, foreignKey.referencesColumn)
 		}
 
 		if referencedTable.primaryKey != foreignKey.referencesColumn {
 			if _, unique := referencedTable.uniqueColumns[foreignKey.referencesColumn]; !unique {
-				return fmt.Errorf("%w: referenced column %s.%s must be PRIMARY KEY or UNIQUE", errConstraint, foreignKey.referencesTable, foreignKey.referencesColumn)
+				return fmt.Errorf("%w: referenced column %s.%s must be PRIMARY KEY or UNIQUE", errConstraintGeneric, foreignKey.referencesTable, foreignKey.referencesColumn)
 			}
 		}
 	}

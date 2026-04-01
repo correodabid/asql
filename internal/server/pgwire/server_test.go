@@ -206,12 +206,23 @@ func TestPGWireCatalogAdminAndHistoryQueriesRespectPrincipalGrants(t *testing.T)
 	}
 	t.Cleanup(func() { _ = analystConn.Close(ctx) })
 
-	if _, err := analystConn.Query(ctx, "SELECT * FROM asql_admin.engine_stats"); err == nil {
-		t.Fatal("expected analyst admin view query to fail")
-	} else {
-		pgErr := requirePGErrorCode(t, err, "42501")
-		if !strings.Contains(pgErr.Message, "ADMIN privilege required") {
-			t.Fatalf("unexpected analyst engine_stats denial message: %q", pgErr.Message)
+	{
+		rows, err := analystConn.Query(ctx, "SELECT * FROM asql_admin.engine_stats")
+		if err != nil {
+			pgErr := requirePGErrorCode(t, err, "42501")
+			if !strings.Contains(pgErr.Message, "ADMIN privilege required") {
+				t.Fatalf("unexpected analyst engine_stats denial message: %q", pgErr.Message)
+			}
+		} else {
+			rows.Close()
+			if rowsErr := rows.Err(); rowsErr == nil {
+				t.Fatal("expected analyst admin view query to fail")
+			} else {
+				pgErr := requirePGErrorCode(t, rowsErr, "42501")
+				if !strings.Contains(pgErr.Message, "ADMIN privilege required") {
+					t.Fatalf("unexpected analyst engine_stats denial message: %q", pgErr.Message)
+				}
+			}
 		}
 	}
 
@@ -224,12 +235,23 @@ func TestPGWireCatalogAdminAndHistoryQueriesRespectPrincipalGrants(t *testing.T)
 		}
 	}
 
-	if _, err := analystConn.Query(ctx, "SELECT * FROM asql_admin.row_history WHERE sql = 'SELECT * FROM items FOR HISTORY WHERE id = 1'"); err == nil {
-		t.Fatal("expected analyst row_history query to fail")
-	} else {
-		pgErr := requirePGErrorCode(t, err, "42501")
-		if !strings.Contains(pgErr.Message, "SELECT_HISTORY privilege required") {
-			t.Fatalf("unexpected analyst row_history denial message: %q", pgErr.Message)
+	{
+		rows, err := analystConn.Query(ctx, "SELECT * FROM asql_admin.row_history WHERE sql = 'SELECT * FROM items FOR HISTORY WHERE id = 1'")
+		if err != nil {
+			pgErr := requirePGErrorCode(t, err, "42501")
+			if !strings.Contains(pgErr.Message, "SELECT_HISTORY privilege required") {
+				t.Fatalf("unexpected analyst row_history denial message: %q", pgErr.Message)
+			}
+		} else {
+			rows.Close()
+			if rowsErr := rows.Err(); rowsErr == nil {
+				t.Fatal("expected analyst row_history query to fail")
+			} else {
+				pgErr := requirePGErrorCode(t, rowsErr, "42501")
+				if !strings.Contains(pgErr.Message, "SELECT_HISTORY privilege required") {
+					t.Fatalf("unexpected analyst row_history denial message: %q", pgErr.Message)
+				}
+			}
 		}
 	}
 
@@ -3175,9 +3197,9 @@ func TestMainstreamToolStartupFlows(t *testing.T) {
 			aliasedRows.Close()
 			t.Fatal("aliased schema-qualified data query returned no rows")
 		}
-		var aliasedID int64
-		var aliasedReviewer, aliasedDecision string
-		if err := aliasedRows.Scan(&aliasedID, &aliasedReviewer, &aliasedDecision); err != nil {
+		var aliasedLSN, aliasedID int64
+		var aliasedDecision, aliasedReviewer string
+		if err := aliasedRows.Scan(&aliasedLSN, &aliasedID, &aliasedDecision, &aliasedReviewer); err != nil {
 			aliasedRows.Close()
 			t.Fatalf("scan aliased schema-qualified data row: %v", err)
 		}

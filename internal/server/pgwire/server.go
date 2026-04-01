@@ -765,7 +765,7 @@ func (server *Server) handleConnection(conn net.Conn) error {
 		case *pgproto3.Terminate:
 			return nil
 		default:
-			if err := sendErrorAndReady(backend, fmt.Sprintf("unsupported frontend message %T", typed), state.session); err != nil {
+			if err := sendErrorAndReadyCode(backend, fmt.Sprintf("unsupported frontend message %T", typed), "XX000", state.session); err != nil {
 				return err
 			}
 		}
@@ -1147,7 +1147,7 @@ func (server *Server) resolveShowParam(_ *executor.Session, param string) (strin
 func (server *Server) handleShowParam(backend *pgproto3.Backend, session *executor.Session, param string) error {
 	value, ok := server.resolveShowParam(session, param)
 	if !ok {
-		return sendErrorAndReady(backend, fmt.Sprintf("unrecognized configuration parameter %q", param), session)
+		return sendErrorAndReadyCode(backend, fmt.Sprintf("unrecognized configuration parameter %q", param), "42704", session)
 	}
 
 	backend.Send(&pgproto3.RowDescription{Fields: []pgproto3.FieldDescription{{
@@ -1181,7 +1181,7 @@ func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connSt
 		ctx, finish := state.beginQuery()
 		if err := server.authorizeCatalogQuery(session.Principal(), trimmed, true); err != nil {
 			finish()
-			return sendErrorAndReady(backend, err.Error(), session)
+			return sendErrorAndReady(backend, err, session)
 		}
 		if intercepted, ok := server.interceptCatalog(ctx, trimmed, session.ActiveDomains(), session.Principal()); ok {
 			finish()
@@ -1203,7 +1203,7 @@ func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connSt
 
 	if tailStmt, ok, err := parseTailEntityChangesStatement(trimmed); ok && tailStmt.Follow {
 		if err != nil {
-			return sendErrorAndReady(backend, err.Error(), session)
+			return sendErrorAndReady(backend, err, session)
 		}
 		ctx, finish := state.beginQuery()
 		defer finish()
@@ -1218,7 +1218,7 @@ func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connSt
 		if errors.Is(err, context.Canceled) {
 			return sendErrorAndReadyCode(backend, "query canceled", "57014", session)
 		}
-		return sendErrorAndReady(backend, err.Error(), session)
+		return sendErrorAndReady(backend, err, session)
 	}
 
 	if len(columns) > 0 {
@@ -1488,7 +1488,7 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 
 func (server *Server) handleTailEntityChangesFollowQuery(ctx context.Context, backend *pgproto3.Backend, session *executor.Session, stmt tailEntityChangesStatement) error {
 	if err := server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "entity_changes_follow", targetKind: "history_stream"}); err != nil {
-		return sendErrorAndReady(backend, err.Error(), session)
+		return sendErrorAndReady(backend, err, session)
 	}
 	fields := tailEntityChangesFields()
 	backend.Send(&pgproto3.RowDescription{Fields: fields})
@@ -1514,7 +1514,7 @@ func (server *Server) handleTailEntityChangesFollowQuery(ctx context.Context, ba
 			Limit:   batchLimit,
 		})
 		if err != nil {
-			return sendErrorAndReady(backend, err.Error(), session)
+			return sendErrorAndReady(backend, err, session)
 		}
 		if len(events) > 0 {
 			for _, event := range events {
@@ -1524,7 +1524,7 @@ func (server *Server) handleTailEntityChangesFollowQuery(ctx context.Context, ba
 				}
 				values, valueErr := entityChangeEventValues(event)
 				if valueErr != nil {
-					return sendErrorAndReady(backend, valueErr.Error(), session)
+					return sendErrorAndReady(backend, valueErr, session)
 				}
 				backend.Send(&pgproto3.DataRow{Values: values})
 				totalRows++
@@ -1551,7 +1551,7 @@ func (server *Server) handleTailEntityChangesFollowQuery(ctx context.Context, ba
 			if errors.Is(err, context.Canceled) {
 				return sendErrorAndReadyCode(backend, "query canceled", "57014", session)
 			}
-			return sendErrorAndReady(backend, err.Error(), session)
+			return sendErrorAndReady(backend, err, session)
 		}
 	}
 	backend.Send(&pgproto3.CommandComplete{CommandTag: []byte(fmt.Sprintf("SELECT %d", totalRows))})
@@ -1687,8 +1687,8 @@ func commandTag(result executor.Result) string {
 	return status
 }
 
-func sendErrorAndReady(backend *pgproto3.Backend, message string, session *executor.Session) error {
-	return sendErrorAndReadyCode(backend, message, sqlStateFromMessage(message), session)
+func sendErrorAndReady(backend *pgproto3.Backend, err error, session *executor.Session) error {
+	return sendErrorAndReadyCode(backend, err.Error(), mapErrorToSQLState(err), session)
 }
 
 func sendErrorAndReadyCode(backend *pgproto3.Backend, message, code string, session *executor.Session) error {

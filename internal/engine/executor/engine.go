@@ -2,7 +2,6 @@ package executor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -16,6 +15,7 @@ import (
 	"asql/internal/engine/parser/ast"
 	"asql/internal/engine/planner"
 	"asql/internal/engine/ports"
+	"asql/internal/engine/sqlerr"
 	"asql/internal/storage/wal"
 )
 
@@ -27,22 +27,31 @@ const (
 )
 
 var (
-	errSessionRequired    = errors.New("session is required")
-	errTxRequired         = errors.New("active transaction required")
-	errTxActive           = errors.New("transaction already active")
-	errTxDomainMissing    = errors.New("domain is required")
-	errExplainSQLRequired = errors.New("explain sql is required")
-	errSavepointName      = errors.New("savepoint name is required")
-	errSavepointMissing   = errors.New("savepoint not found")
-	errTableExists        = errors.New("table already exists")
-	errTableNotFound      = errors.New("table not found")
-	errColumnExists       = errors.New("column already exists")
-	errIndexExists        = errors.New("index already exists")
-	errConstraint         = errors.New("constraint violation")
-	errWriteConflict      = errors.New("write conflict detected")
-	errEntityExists       = errors.New("entity already exists")
-	errEntityTableMissing = errors.New("entity references table that does not exist")
-	errEntityFKPath       = errors.New("entity table is not FK-connected to root")
+	errSessionRequired    = sqlerr.New("25000", "session is required")
+	errTxRequired         = sqlerr.New("25P01", "active transaction required")
+	errTxActive           = sqlerr.New("25001", "transaction already active")
+	errTxDomainMissing    = sqlerr.New("25000", "domain is required")
+	errExplainSQLRequired = sqlerr.New("42601", "explain sql is required")
+	errSavepointName      = sqlerr.New("42601", "savepoint name is required")
+	errSavepointMissing   = sqlerr.New("3B001", "savepoint not found")
+	errTableExists        = sqlerr.New("42P07", "table already exists")
+	errTableNotFound      = sqlerr.New("42P01", "table not found")
+	errColumnExists       = sqlerr.New("42701", "column already exists")
+	errIndexExists        = sqlerr.New("42P07", "index already exists")
+	errWriteConflict      = sqlerr.New("40001", "write conflict detected")
+	errEntityExists       = sqlerr.New("42P07", "entity already exists")
+	errEntityTableMissing = sqlerr.New("42P01", "entity references table that does not exist")
+	errEntityFKPath       = sqlerr.New("42830", "entity table is not FK-connected to root")
+
+	// Constraint sub-sentinels — each carries the specific SQLSTATE for
+	// the constraint class it represents.
+	errConstraintPKNull    = sqlerr.New("23502", "constraint violation")
+	errConstraintPKDup     = sqlerr.New("23505", "constraint violation")
+	errConstraintUniqueDup = sqlerr.New("23505", "constraint violation")
+	errConstraintFK        = sqlerr.New("23503", "constraint violation")
+	errConstraintCheck     = sqlerr.New("23514", "constraint violation")
+	errConstraintNotNull   = sqlerr.New("23502", "constraint violation")
+	errConstraintGeneric   = sqlerr.New("23000", "constraint violation")
 )
 
 // maxIndexOverlayDepth bounds the overlay chain length. When depth

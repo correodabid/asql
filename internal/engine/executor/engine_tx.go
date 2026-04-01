@@ -256,7 +256,6 @@ func (engine *Engine) commit(ctx context.Context, session *Session) (Result, err
 		resultCh:    make(chan commitJobResult, 1),
 	}
 
-	engine.perf.recordBegin()
 	result := engine.commitQ.submit(job)
 	if result.err != nil {
 		return Result{}, result.err
@@ -314,12 +313,23 @@ func (engine *Engine) validateWriteConflicts(state *readableState, tx *transacti
 func (engine *Engine) rollback(session *Session) Result {
 	tx := session.activeTx
 	session.activeTx = nil
-	if tx != nil && len(tx.statements) > 0 {
+	if tx != nil && txHasMutations(tx) {
 		engine.perf.recordRollback()
 	} else {
 		engine.perf.recordEndTx()
 	}
 	return Result{Status: "ROLLBACK"}
+}
+
+// txHasMutations reports whether the transaction contains any write statements.
+// Read-only transactions (only SELECTs) are not counted as rollbacks.
+func txHasMutations(tx *transaction) bool {
+	for _, p := range tx.plans {
+		if p.Operation != planner.OperationSelect && p.Operation != planner.OperationSetOp {
+			return true
+		}
+	}
+	return false
 }
 
 func (engine *Engine) prepareMutations(tx *transaction) ([]preparedMutation, error) {

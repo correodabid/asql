@@ -1689,7 +1689,8 @@ func (server *Server) resolveTableColumns(tableName string) []string {
 }
 
 func isHiddenProjectionColumn(columnName string) bool {
-	return strings.HasPrefix(strings.TrimSpace(columnName), "_")
+	name := strings.TrimSpace(columnName)
+	return strings.HasPrefix(name, "__")
 }
 
 // ── Parameter substitution ────────────────────────────────────────────────────

@@ -2,7 +2,10 @@ package pgwire
 
 import (
 	"errors"
+	"fmt"
 	"testing"
+
+	"asql/internal/engine/sqlerr"
 )
 
 func TestSQLStateFromMessageMappings(t *testing.T) {
@@ -55,5 +58,36 @@ func TestMapErrorToSQLState(t *testing.T) {
 	err := errors.New("duplicate key value violates unique constraint users_pkey")
 	if got := mapErrorToSQLState(err); got != "23505" {
 		t.Fatalf("mapErrorToSQLState(err) = %s, want 23505", got)
+	}
+}
+
+func TestMapErrorToSQLState_TypedError(t *testing.T) {
+	sentinel := sqlerr.New("42P01", "table not found")
+	if got := mapErrorToSQLState(sentinel); got != "42P01" {
+		t.Fatalf("mapErrorToSQLState(typed) = %s, want 42P01", got)
+	}
+}
+
+func TestMapErrorToSQLState_WrappedTypedError(t *testing.T) {
+	sentinel := sqlerr.New("23505", "constraint violation")
+	wrapped := fmt.Errorf("%w: unique index on users.email", sentinel)
+	if got := mapErrorToSQLState(wrapped); got != "23505" {
+		t.Fatalf("mapErrorToSQLState(wrapped) = %s, want 23505", got)
+	}
+}
+
+func TestMapErrorToSQLState_DoubleWrappedTypedError(t *testing.T) {
+	sentinel := sqlerr.New("40001", "write conflict detected")
+	inner := fmt.Errorf("%w: table orders changed at ts=5", sentinel)
+	outer := fmt.Errorf("execute mutation: %w", inner)
+	if got := mapErrorToSQLState(outer); got != "40001" {
+		t.Fatalf("mapErrorToSQLState(double-wrapped) = %s, want 40001", got)
+	}
+}
+
+func TestMapErrorToSQLState_PlainErrorFallsBackToStringMatch(t *testing.T) {
+	plain := errors.New("division by zero")
+	if got := mapErrorToSQLState(plain); got != "22012" {
+		t.Fatalf("mapErrorToSQLState(plain) = %s, want 22012", got)
 	}
 }

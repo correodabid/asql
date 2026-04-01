@@ -177,7 +177,7 @@ func (server *Server) startCopyIn(backend *pgproto3.Backend, state *connState, s
 	if !state.session.InTransaction() {
 		if _, err := server.engine.Execute(ctx, state.session, fmt.Sprintf("BEGIN DOMAIN %s", stmt.Domain)); err != nil {
 			finish()
-			return sendErrorAndReady(backend, err.Error(), state.session)
+			return sendErrorAndReady(backend, err, state.session)
 		}
 		startedTx = true
 	}
@@ -186,7 +186,7 @@ func (server *Server) startCopyIn(backend *pgproto3.Backend, state *connState, s
 			_, _ = server.engine.Execute(ctx, state.session, "ROLLBACK")
 		}
 		finish()
-		return sendErrorAndReady(backend, err.Error(), state.session)
+		return sendErrorAndReady(backend, err, state.session)
 	}
 	state.copyIn = &copyInState{
 		statement: stmt,
@@ -209,7 +209,7 @@ func (server *Server) handleCopyTo(backend *pgproto3.Backend, state *connState, 
 		if errors.Is(err, context.Canceled) {
 			return sendErrorAndReadyCode(backend, "query canceled", "57014", state.session)
 		}
-		return sendErrorAndReady(backend, err.Error(), state.session)
+		return sendErrorAndReady(backend, err, state.session)
 	}
 	if len(stmt.Columns) > 0 {
 		columns = stmt.Columns
@@ -222,7 +222,7 @@ func (server *Server) handleCopyTo(backend *pgproto3.Backend, state *connState, 
 		}
 		line, err := encodeCopyOutRow(columns, row, stmt.Format)
 		if err != nil {
-			return sendErrorAndReady(backend, err.Error(), state.session)
+			return sendErrorAndReady(backend, err, state.session)
 		}
 		backend.Send(&pgproto3.CopyData{Data: line})
 	}
@@ -279,7 +279,7 @@ func (server *Server) handleCopyDone(backend *pgproto3.Backend, state *connState
 	if copyState.startedTx {
 		if _, err := server.engine.Execute(copyState.ctx, state.session, "COMMIT"); err != nil {
 			copyState.finish()
-			return sendErrorAndReady(backend, err.Error(), state.session)
+			return sendErrorAndReady(backend, err, state.session)
 		}
 	}
 	copyState.finish()

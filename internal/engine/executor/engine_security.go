@@ -13,6 +13,7 @@ import (
 	"asql/internal/engine/parser"
 	"asql/internal/engine/planner"
 	"asql/internal/engine/ports"
+	"asql/internal/engine/sqlerr"
 )
 
 // PrincipalKind identifies the kind of durable database principal.
@@ -32,21 +33,21 @@ const (
 )
 
 var (
-	errPrincipalExists              = errors.New("principal already exists")
-	errPrincipalNotFound            = errors.New("principal not found")
-	errPrincipalDisabled            = errors.New("principal is disabled")
-	errPrincipalAuthFailed          = errors.New("principal authentication failed")
-	errPrincipalCatalogBootstrapped = errors.New("principal catalog already initialized")
-	errRoleRequired                 = errors.New("role principal is required")
-	errUserRequired                 = errors.New("user principal is required")
-	errInvalidPrincipalName         = errors.New("principal name is required")
-	errPasswordRequired             = errors.New("password is required")
-	errPrincipalHistoryDenied       = errors.New("SELECT_HISTORY privilege required")
-	errPrincipalDeleteEnabled       = errors.New("principal must be disabled before deletion")
-	errPrincipalDeleteLastPrincipal = errors.New("cannot delete the last principal in the catalog")
-	errPrincipalDeleteNotEmpty      = errors.New("principal still has direct roles or privileges")
-	errPrincipalDeleteReferenced    = errors.New("principal is still granted to other principals")
-	errPrincipalAuthzRequired       = errors.New("permission denied: authenticated principal required")
+	errPrincipalExists              = sqlerr.New("42710", "principal already exists")
+	errPrincipalNotFound            = sqlerr.New("28000", "principal not found")
+	errPrincipalDisabled            = sqlerr.New("28000", "principal is disabled")
+	errPrincipalAuthFailed          = sqlerr.New("28P01", "principal authentication failed")
+	errPrincipalCatalogBootstrapped = sqlerr.New("55000", "principal catalog already initialized")
+	errRoleRequired                 = sqlerr.New("42601", "role principal is required")
+	errUserRequired                 = sqlerr.New("42601", "user principal is required")
+	errInvalidPrincipalName         = sqlerr.New("42601", "principal name is required")
+	errPasswordRequired             = sqlerr.New("42601", "password is required")
+	errPrincipalHistoryDenied       = sqlerr.New("42501", "SELECT_HISTORY privilege required")
+	errPrincipalDeleteEnabled       = sqlerr.New("55000", "principal must be disabled before deletion")
+	errPrincipalDeleteLastPrincipal = sqlerr.New("55000", "cannot delete the last principal in the catalog")
+	errPrincipalDeleteNotEmpty      = sqlerr.New("2BP01", "principal still has direct roles or privileges")
+	errPrincipalDeleteReferenced    = sqlerr.New("2BP01", "principal is still granted to other principals")
+	errPrincipalAuthzRequired       = sqlerr.New("42501", "permission denied: authenticated principal required")
 )
 
 type principalState struct {

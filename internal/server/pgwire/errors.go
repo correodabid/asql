@@ -5,10 +5,12 @@ package pgwire
 // Reference: https://www.postgresql.org/docs/current/errcodes-appendix.html
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 
 	"asql/internal/engine/executor"
+	"asql/internal/engine/sqlerr"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -20,6 +22,10 @@ import (
 func mapErrorToSQLState(err error) string {
 	if err == nil {
 		return "00000"
+	}
+	var sqlErr *sqlerr.SQLError
+	if errors.As(err, &sqlErr) {
+		return sqlErr.Code
 	}
 	return sqlStateFromMessage(err.Error())
 }

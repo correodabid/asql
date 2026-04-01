@@ -2,18 +2,18 @@ package parser
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 
 	"asql/internal/engine/parser/ast"
+	"asql/internal/engine/sqlerr"
 )
 
 var (
-	errUnsupportedSQL = errors.New("unsupported sql statement")
-	errInvalidSQL     = errors.New("invalid sql statement")
+	errUnsupportedSQL = sqlerr.New("0A000", "unsupported sql statement")
+	errInvalidSQL     = sqlerr.New("42601", "invalid sql statement")
 )
 
 // hasPrefixFold checks if s starts with prefix, case-insensitively,
