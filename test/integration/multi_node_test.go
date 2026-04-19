@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/cluster/coordinator"
-	"asql/internal/engine/executor"
-	"asql/internal/engine/parser/ast"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/cluster/coordinator"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 // TestMultiNodeReplicationConsistency verifies that a follower node replaying

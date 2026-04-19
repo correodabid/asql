@@ -8,9 +8,9 @@ import (
 	"sort"
 	"time"
 
-	"asql/internal/engine/domains"
-	"asql/internal/engine/planner"
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/domains"
+	"github.com/correodabid/asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 var errSnapshotWALMismatch = errors.New("snapshot and wal are inconsistent")

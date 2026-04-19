@@ -7,8 +7,8 @@ import (
 	"sync"
 	"time"
 
-	asqlv1 "asql/api/proto/asql/v1"
-	"asql/internal/cluster/raft"
+	asqlv1 "github.com/correodabid/asql/api/proto/asql/v1"
+	"github.com/correodabid/asql/internal/cluster/raft"
 
 	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

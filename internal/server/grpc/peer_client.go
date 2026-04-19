@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/cluster/heartbeat"
+	"github.com/correodabid/asql/internal/cluster/heartbeat"
 
 	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"

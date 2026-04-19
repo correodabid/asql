@@ -3,8 +3,8 @@ package grpc
 import (
 	"strings"
 
-	"asql/internal/cluster/coordinator"
-	"asql/internal/cluster/raft"
+	"github.com/correodabid/asql/internal/cluster/coordinator"
+	"github.com/correodabid/asql/internal/cluster/raft"
 )
 
 type clusterAuthority interface {

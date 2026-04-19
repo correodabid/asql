@@ -3,7 +3,7 @@ package wal
 import (
 	"testing"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 func TestRecentReadCacheSlidingWindowPreservesTail(t *testing.T) {

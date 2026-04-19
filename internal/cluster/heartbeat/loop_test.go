@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/cluster/coordinator"
+	"github.com/correodabid/asql/internal/cluster/coordinator"
 )
 
 // ---------- test helpers ----------

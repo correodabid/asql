@@ -12,10 +12,10 @@ import (
 	"sort"
 	"strings"
 
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/ports"
-	"asql/internal/platform/datadir"
-	auditstore "asql/internal/storage/audit"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/platform/datadir"
+	auditstore "github.com/correodabid/asql/internal/storage/audit"
 )
 
 type auditCommandOptions struct {

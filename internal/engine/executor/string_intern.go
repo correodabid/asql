@@ -4,7 +4,7 @@ import (
 	"strings"
 	"sync"
 
-	"asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
 // stringInterner deduplicates backing strings for LiteralString row values.

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"asql/internal/engine/sqlerr"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 )
 
 func TestSQLStateFromMessageMappings(t *testing.T) {

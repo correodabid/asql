@@ -34,10 +34,10 @@ func TestStudioPackageDoesNotImportPrivateEngineOrServerPackages(t *testing.T) {
 		}
 		for _, imported := range file.Imports {
 			value := strings.Trim(imported.Path.Value, "\"")
-			if strings.HasPrefix(value, "asql/internal/engine/") {
+			if strings.HasPrefix(value, "github.com/correodabid/asql/internal/engine/") {
 				t.Fatalf("%s imports forbidden engine-private package %s", filepath.Base(path), value)
 			}
-			if strings.HasPrefix(value, "asql/internal/server/") {
+			if strings.HasPrefix(value, "github.com/correodabid/asql/internal/server/") {
 				t.Fatalf("%s imports forbidden server-private package %s", filepath.Base(path), value)
 			}
 		}

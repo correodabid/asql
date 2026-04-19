@@ -10,13 +10,13 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"asql/internal/engine/domains"
-	"asql/internal/engine/parser"
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/planner"
-	"asql/internal/engine/ports"
-	"asql/internal/engine/sqlerr"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/domains"
+	"github.com/correodabid/asql/internal/engine/parser"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 const (

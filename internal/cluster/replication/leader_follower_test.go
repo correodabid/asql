@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"asql/internal/engine/executor"
-	grpcapi "asql/internal/server/grpc"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/executor"
+	grpcapi "github.com/correodabid/asql/internal/server/grpc"
+	"github.com/correodabid/asql/internal/storage/wal"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

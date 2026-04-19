@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 func BenchmarkRawCommit(b *testing.B) {

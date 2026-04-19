@@ -9,9 +9,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"asql/internal/engine/parser"
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/parser"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/planner"
 )
 
 func (engine *Engine) beginDomain(session *Session, sql string) (Result, error) {

@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 func BenchmarkFileLogStoreAppend(b *testing.B) {

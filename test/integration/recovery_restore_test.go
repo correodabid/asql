@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"asql/internal/engine/executor"
-	"asql/internal/platform/datadir"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/platform/datadir"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 func TestBaseBackupRestoreToLSNAndTimestamp(t *testing.T) {

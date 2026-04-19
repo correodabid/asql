@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"asql/internal/engine/parser"
-	"asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/parser"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
 func compareLiteralByOperator(left ast.Literal, operator string, right ast.Literal) bool {

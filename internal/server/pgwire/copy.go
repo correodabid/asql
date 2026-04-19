@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/executor"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )

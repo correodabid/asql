@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/executor"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

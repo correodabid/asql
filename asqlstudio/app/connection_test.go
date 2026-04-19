@@ -4,14 +4,12 @@ import (
 	"context"
 	"io"
 	"log/slog"
-	"net"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	pgwireserver "asql/internal/server/pgwire"
-	api "asql/pkg/adminapi"
+	api "github.com/correodabid/asql/pkg/adminapi"
+	"github.com/correodabid/asql/pkg/servertest"
 
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -216,41 +214,6 @@ func TestTxLeaderChangeErrorExplainsRestart(t *testing.T) {
 
 func startStudioPGWireServer(t *testing.T, authToken string) string {
 	t.Helper()
-
-	ctx, cancel := context.WithCancel(context.Background())
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server, err := pgwireserver.New(pgwireserver.Config{
-		Address:     "127.0.0.1:0",
-		DataDirPath: filepath.Join(t.TempDir(), "data"),
-		Logger:      logger,
-		AuthToken:   authToken,
-	})
-	if err != nil {
-		t.Fatalf("new pgwire server: %v", err)
-	}
-	t.Cleanup(server.Stop)
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen pgwire test server: %v", err)
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- server.ServeOnListener(ctx, listener)
-	}()
-
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case err := <-errCh:
-			if err != nil {
-				t.Fatalf("pgwire server exited with error: %v", err)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("timeout waiting for pgwire test server shutdown")
-		}
-	})
-
-	return listener.Addr().String()
+	srv := servertest.StartForTesting(t, servertest.Options{AuthToken: authToken})
+	return srv.Addr
 }

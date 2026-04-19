@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 func mustExecIntrospection(t *testing.T, ctx context.Context, engine *Engine, session *Session, sql string) {

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	api "asql/pkg/adminapi"
+	api "github.com/correodabid/asql/pkg/adminapi"
 )
 
 type schemaLoadBaselineRequest struct {

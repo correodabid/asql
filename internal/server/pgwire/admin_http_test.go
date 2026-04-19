@@ -14,10 +14,10 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/cluster/coordinator"
-	"asql/internal/cluster/raft"
-	"asql/internal/engine/executor"
-	api "asql/pkg/adminapi"
+	"github.com/correodabid/asql/internal/cluster/coordinator"
+	"github.com/correodabid/asql/internal/cluster/raft"
+	"github.com/correodabid/asql/internal/engine/executor"
+	api "github.com/correodabid/asql/pkg/adminapi"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -298,7 +298,7 @@ func TestAdminHTTPSecurityPrincipalManagementFlow(t *testing.T) {
 	if status != http.StatusOK {
 		t.Fatalf("unexpected bootstrap status: got %d want %d", status, http.StatusOK)
 	}
-	if bootstrap.Principal == nil || bootstrap.Principal.Name != "admin" || bootstrap.Principal.Kind != executor.PrincipalKindUser {
+	if bootstrap.Principal == nil || bootstrap.Principal.Name != "admin" || bootstrap.Principal.Kind != api.PrincipalKindUser {
 		t.Fatalf("unexpected bootstrap response: %+v", bootstrap)
 	}
 

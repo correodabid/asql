@@ -6,8 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"asql/internal/engine/executor"
-	api "asql/pkg/adminapi"
+	api "github.com/correodabid/asql/pkg/adminapi"
 )
 
 func TestSecurityListPrincipalsUsesAdminAuthToken(t *testing.T) {
@@ -114,9 +113,9 @@ func TestSecurityMutationsPostJSON(t *testing.T) {
 			if principal != "history_readers" && principal != "analyst" {
 				t.Fatalf("unexpected grant privilege principal: %+v", payload)
 			}
-			kind := executor.PrincipalKindRole
+			kind := api.PrincipalKindRole
 			if principal == "analyst" {
-				kind = executor.PrincipalKindUser
+				kind = api.PrincipalKindUser
 			}
 			_ = json.NewEncoder(w).Encode(api.SecurityMutationResponse{Status: "ok", Principal: &api.PrincipalRecord{Name: principal, Kind: kind, Enabled: true}})
 		case "/api/v1/security/roles/grant":

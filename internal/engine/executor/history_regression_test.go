@@ -7,8 +7,8 @@ import (
 	"sort"
 	"testing"
 
-	"asql/internal/engine/parser/ast"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 type historyShapeSnapshot struct {

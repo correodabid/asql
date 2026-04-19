@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"io"
 
-	"asql/internal/engine/ports"
-	grpcapi "asql/internal/server/grpc"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/ports"
+	grpcapi "github.com/correodabid/asql/internal/server/grpc"
+	"github.com/correodabid/asql/internal/storage/wal"
 
 	grpcgo "google.golang.org/grpc"
 )

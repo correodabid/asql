@@ -1,16 +1,30 @@
 package adminapi
 
-import "asql/internal/engine/executor"
+// PrincipalKind identifies the kind of durable database principal.
+type PrincipalKind string
+
+const (
+	PrincipalKindUser PrincipalKind = "USER"
+	PrincipalKindRole PrincipalKind = "ROLE"
+)
+
+// PrincipalPrivilege is a named privilege granted to a principal.
+type PrincipalPrivilege string
+
+const (
+	PrincipalPrivilegeAdmin         PrincipalPrivilege = "ADMIN"
+	PrincipalPrivilegeSelectHistory PrincipalPrivilege = "SELECT_HISTORY"
+)
 
 type PrincipalRecord struct {
-	Name                string                        `json:"name"`
-	Kind                executor.PrincipalKind        `json:"kind"`
-	Enabled             bool                          `json:"enabled"`
-	Roles               []string                      `json:"roles,omitempty"`
-	EffectiveRoles      []string                      `json:"effective_roles,omitempty"`
-	ReferencedBy        []string                      `json:"referenced_by,omitempty"`
-	Privileges          []executor.PrincipalPrivilege `json:"privileges,omitempty"`
-	EffectivePrivileges []executor.PrincipalPrivilege `json:"effective_privileges,omitempty"`
+	Name                string               `json:"name"`
+	Kind                PrincipalKind        `json:"kind"`
+	Enabled             bool                 `json:"enabled"`
+	Roles               []string             `json:"roles,omitempty"`
+	EffectiveRoles      []string             `json:"effective_roles,omitempty"`
+	ReferencedBy        []string             `json:"referenced_by,omitempty"`
+	Privileges          []PrincipalPrivilege `json:"privileges,omitempty"`
+	EffectivePrivileges []PrincipalPrivilege `json:"effective_privileges,omitempty"`
 }
 
 type ListPrincipalsResponse struct {

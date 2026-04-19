@@ -11,13 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"asql/pkg/fixtures"
+	"github.com/correodabid/asql/pkg/fixtures"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	api "asql/pkg/adminapi"
+	api "github.com/correodabid/asql/pkg/adminapi"
 )
 
 	type importedReadDirective struct {

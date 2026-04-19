@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/cluster/coordinator"
-	"asql/internal/engine/executor"
-	api "asql/pkg/adminapi"
+	"github.com/correodabid/asql/internal/cluster/coordinator"
+	"github.com/correodabid/asql/internal/engine/executor"
+	api "github.com/correodabid/asql/pkg/adminapi"
 )
 
 const maxFailoverHistoryEntries = 64
@@ -1146,18 +1146,27 @@ func toAdminPrincipalRecords(principals []executor.PrincipalInfo) []api.Principa
 }
 
 func toAdminPrincipalRecord(principal executor.PrincipalInfo) *api.PrincipalRecord {
-	roles := append([]string(nil), principal.Roles...)
-	privileges := append([]executor.PrincipalPrivilege(nil), principal.Privileges...)
 	return &api.PrincipalRecord{
 		Name:                principal.Name,
-		Kind:                principal.Kind,
+		Kind:                api.PrincipalKind(principal.Kind),
 		Enabled:             principal.Enabled,
-		Roles:               roles,
+		Roles:               append([]string(nil), principal.Roles...),
 		EffectiveRoles:      append([]string(nil), principal.EffectiveRoles...),
 		ReferencedBy:        append([]string(nil), principal.ReferencedBy...),
-		Privileges:          privileges,
-		EffectivePrivileges: append([]executor.PrincipalPrivilege(nil), principal.EffectivePrivileges...),
+		Privileges:          toAdminPrivileges(principal.Privileges),
+		EffectivePrivileges: toAdminPrivileges(principal.EffectivePrivileges),
 	}
+}
+
+func toAdminPrivileges(privileges []executor.PrincipalPrivilege) []api.PrincipalPrivilege {
+	if len(privileges) == 0 {
+		return nil
+	}
+	out := make([]api.PrincipalPrivilege, len(privileges))
+	for i, p := range privileges {
+		out[i] = api.PrincipalPrivilege(p)
+	}
+	return out
 }
 
 func writeMetricHelp(buf *bytes.Buffer, name, help, typ string) {

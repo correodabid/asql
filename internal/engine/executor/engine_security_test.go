@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"asql/internal/engine/planner"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 func TestAuthorizePlanUsesAuthenticatedReadAndAdminMutationModel(t *testing.T) {

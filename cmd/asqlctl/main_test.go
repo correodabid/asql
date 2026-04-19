@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/engine/executor"
-	"asql/internal/platform/datadir"
-	grpcserver "asql/internal/server/grpc"
-	pgwire "asql/internal/server/pgwire"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/platform/datadir"
+	grpcserver "github.com/correodabid/asql/internal/server/grpc"
+	pgwire "github.com/correodabid/asql/internal/server/pgwire"
+	"github.com/correodabid/asql/internal/storage/wal"
 
 	"github.com/jackc/pgx/v5"
 )

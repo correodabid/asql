@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 func BenchmarkEngineWriteCommit(b *testing.B) {

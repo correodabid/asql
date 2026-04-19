@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"math"
 
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/ports"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 const auditPayloadVersion byte = 0x01

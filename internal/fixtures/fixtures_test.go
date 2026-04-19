@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/engine/executor"
-	"asql/internal/engine/parser/ast"
-	pgwire "asql/internal/server/pgwire"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	pgwire "github.com/correodabid/asql/internal/server/pgwire"
+	"github.com/correodabid/asql/internal/storage/wal"
 
 	"github.com/jackc/pgx/v5"
 )

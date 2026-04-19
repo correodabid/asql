@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
 func TestParseCreateTableSnapshot(t *testing.T) {

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"asql/internal/engine/executor"
-	"asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
 var reAsOfComment = regexp.MustCompile(`(?i)/\*\s*as-of-(lsn|ts):\s*\d+\s*\*/`)

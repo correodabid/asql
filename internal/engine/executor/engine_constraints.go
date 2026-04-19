@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"asql/internal/engine/domains"
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/domains"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/planner"
 )
 
 // validateInsertRow performs O(1) constraint validation for a single new row

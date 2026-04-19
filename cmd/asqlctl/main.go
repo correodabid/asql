@@ -15,10 +15,10 @@ import (
 	"strings"
 	"time"
 
-	"asql/internal/engine/executor"
-	api "asql/internal/server/grpc"
-	adminapi "asql/pkg/adminapi"
-	"asql/pkg/fixtures"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/fixtures"
+	api "github.com/correodabid/asql/internal/server/grpc"
+	adminapi "github.com/correodabid/asql/pkg/adminapi"
 
 	"github.com/jackc/pgx/v5"
 	grpcgo "google.golang.org/grpc"
@@ -560,7 +560,7 @@ func runAdminSecurityCommand(ctx context.Context, out io.Writer, adminHTTPAddr, 
 		filtered := make([]adminapi.PrincipalRecord, 0)
 		for _, record := range response.Principals {
 			for _, granted := range record.EffectivePrivileges {
-				if granted == executor.PrincipalPrivilegeSelectHistory {
+				if granted == adminapi.PrincipalPrivilegeSelectHistory {
 					filtered = append(filtered, record)
 					break
 				}

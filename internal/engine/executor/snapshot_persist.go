@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/engine/domains"
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/ports"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/domains"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/storage/wal"
 
 	"github.com/klauspost/compress/zstd"
 )

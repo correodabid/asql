@@ -3,8 +3,8 @@ package executor
 import (
 	"testing"
 
-	"asql/internal/engine/planner"
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 func TestAppendWALRecordCacheAppendsSmallCache(t *testing.T) {

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 const commitCatchUpDebounce = 2 * time.Millisecond

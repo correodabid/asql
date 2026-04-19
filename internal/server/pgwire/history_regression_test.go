@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/executor"
 
 	"github.com/jackc/pgx/v5"
 )

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/engine/ports"
-	"asql/internal/platform/clock"
+	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/platform/clock"
 )
 
 type heartbeatTestWALStore struct {

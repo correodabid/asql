@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/engine/domains"
+	"github.com/correodabid/asql/internal/engine/domains"
 )
 
 // snapshotInterval controls how many WAL records are processed between

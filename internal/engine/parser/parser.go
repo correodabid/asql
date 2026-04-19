@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/sqlerr"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 )
 
 var (

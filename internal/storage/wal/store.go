@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 // syncWithRetry attempts fsync up to maxSyncRetries times with exponential backoff.

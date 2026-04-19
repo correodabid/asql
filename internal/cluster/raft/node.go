@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────

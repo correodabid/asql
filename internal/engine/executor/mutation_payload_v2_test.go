@@ -4,8 +4,8 @@ import (
 	"reflect"
 	"testing"
 
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/planner"
 )
 
 // roundTrip encodes then decodes a plan and returns the decoded domain+plan.

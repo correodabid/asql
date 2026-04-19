@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 // TestConcurrentReadsDoNotBlock verifies that multiple goroutines can execute

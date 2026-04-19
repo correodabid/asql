@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"sort"
 
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/planner"
 )
 
 // rebuildEntityTablesSet rebuilds the domain-level entityTables set

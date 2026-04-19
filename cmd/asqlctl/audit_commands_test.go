@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/engine/executor"
-	"asql/internal/platform/datadir"
-	auditstore "asql/internal/storage/audit"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/platform/datadir"
+	auditstore "github.com/correodabid/asql/internal/storage/audit"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 func TestRunLocalAuditCommandReport(t *testing.T) {

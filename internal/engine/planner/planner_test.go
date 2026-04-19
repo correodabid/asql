@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"asql/internal/engine/parser"
+	"github.com/correodabid/asql/internal/engine/parser"
 )
 
 func TestBuildCreateTablePlanSnapshot(t *testing.T) {

@@ -1,4 +1,4 @@
-module asql
+module github.com/correodabid/asql
 
 go 1.24.0
 

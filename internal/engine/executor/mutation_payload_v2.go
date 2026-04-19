@@ -92,9 +92,9 @@ import (
 	"math"
 	"strings"
 
-	"asql/internal/engine/parser"
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/parser"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/planner"
 )
 
 // payloadVersion is the leading byte of every v2 payload.

@@ -10,11 +10,11 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/cluster/coordinator"
-	"asql/internal/cluster/heartbeat"
-	"asql/internal/engine/executor"
-	"asql/internal/engine/parser/ast"
-	"asql/internal/platform/sysinfo"
+	"github.com/correodabid/asql/internal/cluster/coordinator"
+	"github.com/correodabid/asql/internal/cluster/heartbeat"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/platform/sysinfo"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/encoding"

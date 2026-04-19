@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	pgwireserver "asql/internal/server/pgwire"
+	pgwireserver "github.com/correodabid/asql/internal/server/pgwire"
 )
 
 func main() {

@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/cluster/coordinator"
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/cluster/coordinator"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 const (

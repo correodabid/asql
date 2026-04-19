@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	grpcapi "asql/internal/server/grpc"
-	"asql/internal/storage/wal"
+	grpcapi "github.com/correodabid/asql/internal/server/grpc"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 func TestApplyBatchDetectsDivergence(t *testing.T) {

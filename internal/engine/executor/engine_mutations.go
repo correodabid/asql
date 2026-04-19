@@ -7,10 +7,10 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/engine/domains"
-	"asql/internal/engine/parser"
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/domains"
+	"github.com/correodabid/asql/internal/engine/parser"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/planner"
 )
 
 var insertMutationPerf struct {

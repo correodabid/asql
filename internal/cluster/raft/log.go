@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sync"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 // Entry is a single Raft log entry, mirroring a WAL record with Raft metadata.

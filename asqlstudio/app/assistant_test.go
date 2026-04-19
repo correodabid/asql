@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	api "asql/pkg/adminapi"
+	api "github.com/correodabid/asql/pkg/adminapi"
 )
 
 type fakeAssistantLLMClient struct {

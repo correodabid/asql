@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	auditstore "asql/internal/storage/audit"
-	"asql/internal/storage/wal"
+	auditstore "github.com/correodabid/asql/internal/storage/audit"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 func TestRowHistoryUsesAuditStoreForQualifiedStringPKAcrossRestart(t *testing.T) {

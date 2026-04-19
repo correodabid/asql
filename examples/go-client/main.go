@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	api "asql/internal/server/grpc"
+	api "github.com/correodabid/asql/internal/server/grpc"
 
 	grpcgo "google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"

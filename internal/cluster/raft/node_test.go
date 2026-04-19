@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/cluster/raft"
-	"asql/internal/engine/ports"
-	"asql/internal/platform/clock"
+	"github.com/correodabid/asql/internal/cluster/raft"
+	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/platform/clock"
 )
 
 // ──────────────────────────────────────────────────────────────────────────────

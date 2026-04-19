@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	pgwire "asql/internal/server/pgwire"
+	pgwire "github.com/correodabid/asql/internal/server/pgwire"
 
 	"github.com/jackc/pgx/v5"
 )

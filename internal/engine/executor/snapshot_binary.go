@@ -11,8 +11,8 @@ import (
 	"sort"
 	"unsafe"
 
-	"asql/internal/engine/domains"
-	"asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/domains"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
 // Binary snapshot format (version 12).

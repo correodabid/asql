@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 func TestWALLogMatchEntriesPrefixSkipsWholeMatchingRanges(t *testing.T) {

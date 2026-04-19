@@ -17,13 +17,13 @@ import (
 	"sync"
 	"time"
 
-	"asql/pkg/fixtures"
+	"github.com/correodabid/asql/pkg/fixtures"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
-	api "asql/pkg/adminapi"
+	api "github.com/correodabid/asql/pkg/adminapi"
 )
 
 // App is the Wails application struct. All exported methods become IPC endpoints
@@ -2431,15 +2431,14 @@ func (a *App) PickFixtureExportFile(suggestedName string) (string, error) {
 	return path, nil
 }
 
-// FixtureValidate validates a fixture file, including a deterministic dry run.
+// FixtureValidate validates a fixture file's structure. Deep validation
+// against a live engine must be performed by the leader.
 func (a *App) FixtureValidate(path string) (map[string]interface{}, error) {
 	fixture, err := fixtures.LoadFile(strings.TrimSpace(path))
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := a.reqCtx()
-	defer cancel()
-	if err := fixtures.ValidateDryRun(ctx, fixture); err != nil {
+	if err := fixtures.ValidateSpec(fixture); err != nil {
 		return nil, err
 	}
 	return map[string]interface{}{
@@ -2456,11 +2455,11 @@ func (a *App) FixtureLoad(path string) (map[string]interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	ctx, cancel := a.reqCtx()
-	defer cancel()
-	if err := fixtures.ValidateDryRun(ctx, fixture); err != nil {
+	if err := fixtures.ValidateSpec(fixture); err != nil {
 		return nil, err
 	}
+	ctx, cancel := a.reqCtx()
+	defer cancel()
 	if err := a.applyFixtureOnLeader(ctx, fixture); err != nil {
 		return nil, err
 	}

@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

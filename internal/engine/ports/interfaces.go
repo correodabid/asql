@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
 // Clock provides deterministic-safe time access for the engine core.

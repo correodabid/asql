@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"asql/internal/engine/ports"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 // TestSnapshotPersistRoundTrip verifies that a persisted snapshot on disk

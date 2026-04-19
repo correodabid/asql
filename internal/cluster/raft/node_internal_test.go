@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"asql/internal/platform/clock"
+	"github.com/correodabid/asql/internal/platform/clock"
 )
 
 type stubLog struct {

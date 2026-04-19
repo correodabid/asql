@@ -6,9 +6,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"asql/internal/engine/domains"
-	"asql/internal/engine/parser/ast"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/engine/domains"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 func TestCaptureSnapshotWithCatalogStripsChangeLogAndClonesRows(t *testing.T) {

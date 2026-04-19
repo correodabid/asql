@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 func TestBackupAndRestoreFileWithIntegrityCheck(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"strings"
 
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/planner"
 )
 
 // Scan cost estimation constants. These factors tune the cost model

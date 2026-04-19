@@ -12,11 +12,11 @@ import (
 	"os"
 	"time"
 
-	"asql/internal/cluster/coordinator"
-	"asql/internal/engine/executor"
-	"asql/internal/platform/clock"
-	"asql/internal/platform/datadir"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/cluster/coordinator"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/platform/clock"
+	"github.com/correodabid/asql/internal/platform/datadir"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 const defaultLeadershipLeaseTTL = 5 * time.Second

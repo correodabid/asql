@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 // groupSyncer batches WAL fsync calls across concurrent commits.

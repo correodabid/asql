@@ -21,8 +21,8 @@ import (
 	"strings"
 	"time"
 
-	"asql/internal/engine/executor"
-	"asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
 // interceptResult bundles the synthetic result set and its ordered column list.

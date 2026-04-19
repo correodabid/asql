@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"asql/internal/cluster/coordinator"
-	"asql/internal/engine/executor"
-	"asql/internal/engine/ports"
-	"asql/internal/platform/sysinfo"
+	"github.com/correodabid/asql/internal/cluster/coordinator"
+	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/platform/sysinfo"
 )
 
 // auditBufSize is the capacity of the async audit log channel.

@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
 func rowIDsForPredicate(index *indexState, predicate *ast.Predicate) []int {

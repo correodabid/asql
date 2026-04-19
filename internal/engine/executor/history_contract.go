@@ -1,6 +1,6 @@
 package executor
 
-import "asql/internal/engine/parser/ast"
+import "github.com/correodabid/asql/internal/engine/parser/ast"
 
 const (
 	// HistoryOperationColumnName is the canonical metadata column exposed by

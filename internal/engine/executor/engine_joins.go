@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strings"
 
-	"asql/internal/engine/parser/ast"
-	"asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/planner"
 )
 
 // applyImports clones the readable state and injects imported tables from

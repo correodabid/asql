@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/cluster/coordinator"
+	"github.com/correodabid/asql/internal/cluster/coordinator"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"

@@ -1,6 +1,6 @@
 package main
 
-import studioapp "asql/asqlstudio/app"
+import studioapp "github.com/correodabid/asql/asqlstudio/app"
 
 func main() {
 	studioapp.Main()

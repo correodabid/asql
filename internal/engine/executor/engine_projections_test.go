@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 // mustExecProj is a helper that fatals on execution errors.

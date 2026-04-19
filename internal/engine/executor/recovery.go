@@ -13,8 +13,8 @@ import (
 	"sort"
 	"strings"
 
-	"asql/internal/platform/datadir"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/platform/datadir"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 const (

@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"asql/internal/engine/parser"
-	"asql/internal/engine/planner"
-	"asql/internal/engine/ports"
-	"asql/internal/engine/sqlerr"
+	"github.com/correodabid/asql/internal/engine/parser"
+	"github.com/correodabid/asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 )
 
 // PrincipalKind identifies the kind of durable database principal.

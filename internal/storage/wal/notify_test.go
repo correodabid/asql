@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 // TestSubscribeNotifiesOnAppend verifies that the notification channel returned

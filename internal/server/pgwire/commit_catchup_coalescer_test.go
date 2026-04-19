@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 func TestCommitCatchUpCoalescerCoalescesBackgroundRequests(t *testing.T) {

@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"asql/internal/platform/datadir"
-	"asql/internal/storage/wal"
+	"github.com/correodabid/asql/internal/platform/datadir"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 // SnapshotCatalogEntry describes one persisted checkpoint file available in a data directory.

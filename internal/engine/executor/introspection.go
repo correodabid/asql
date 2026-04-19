@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
 // RowLSN returns the current visible row-head LSN for a row identified by its
