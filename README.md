@@ -5,7 +5,7 @@
 Canonical runtime path:
 - `cmd/asqld` for the server,
 - pgwire for application access,
-- `asqlstudio -pgwire-endpoint ...` for the desktop workflow.
+- [asqlstudio](https://github.com/correodabid/asqlstudio) (separate repo) for the desktop workflow.
 
 Compatibility stance:
 - ASQL exposes a pragmatic PostgreSQL-compatible subset over pgwire.
@@ -64,9 +64,17 @@ SELECT * FROM users;
 
 ### 4. Launch ASQL Studio
 
+ASQL Studio lives in a separate repository:
+[github.com/correodabid/asqlstudio](https://github.com/correodabid/asqlstudio).
+Clone it next to this one and run:
+
 ```bash
-go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
+cd ../asqlstudio
+wails dev
 ```
+
+Studio connects to a running `asqld` over pgwire and its admin HTTP
+surfaces.
 
 ### 5. Validate and load a deterministic fixture
 
@@ -401,19 +409,17 @@ Cluster mode extends the single-node runtime. It should not replace the local st
 
 ### ASQL Studio
 
-Desktop Studio for managing ASQL interactively over pgwire.
+Desktop Studio for managing ASQL interactively over pgwire. Lives in a
+separate repository:
+[github.com/correodabid/asqlstudio](https://github.com/correodabid/asqlstudio).
 
-Current first-run path and surfaces:
-
-- guided `Start Here` overview,
-- `Workspace` for SQL queries and transaction controls (`Begin`, `Run`, `Commit`, `Rollback`),
-- `Time Explorer` for temporal history and diffs,
-- `Fixtures` for validate/load/export flows,
-- `Dashboard`, `Cluster`, and `Recovery` panels for engine and cluster visibility,
-- query-plan / scan-strategy inspection and replication-lag monitoring when follower or peer endpoints are configured.
+Surfaces include: guided `Start Here` overview, `Workspace` for SQL and
+transaction control, `Time Explorer` for temporal history/diffs,
+`Fixtures` for validate/load/export, and `Dashboard` / `Cluster` /
+`Recovery` panels for engine and replication visibility.
 
 ```bash
-go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
+cd ../asqlstudio && wails dev
 ```
 
 ### CLI (asqlctl)
@@ -567,7 +573,6 @@ make seed-domains-10x  # 10x scale: 1K recipes, 3K orders
 cmd/
   asqld/              Server binary
   asqlctl/            CLI tool
-  asqlstudio/         Web UI (React + Go HTTP bridge)
 internal/
   engine/
     parser/           SQL parser and AST

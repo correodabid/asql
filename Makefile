@@ -7,7 +7,6 @@ SHELL := /bin/sh
 	bench-append-growth bench-append-growth-single bench-append-growth-cluster bench-append-growth-cluster-guardrail \
 	bench-seed-degradation bench-seed-degradation-single bench-seed-degradation-cluster \
 	run \
-        studio-web-install studio-web-build run-studio \
         dev dev-cluster kill-dev restart-db \
         kill-node-a kill-node-b kill-node-c kill-node-d \
         start-node-a start-node-b start-node-c start-node-d \
@@ -139,31 +138,6 @@ bench-env-cluster: kill-dev restart-db
 run:
 	go run ./cmd/asqld -addr :5433 -data-dir .asql
 
-# ── Studio (desktop) ─────────────────────────────────────────────────────────
-
-studio-web-install:
-	cd ./cmd/asqlstudio/webapp && npm install
-
-studio-web-build:
-	cd ./cmd/asqlstudio/webapp && npm run build
-
-run-studio:
-	@echo "asqld must already be running (make run)"
-	cd ./cmd/asqlstudio && ASQL_PGWIRE_ENDPOINT=127.0.0.1:5433 wails dev
-
-# run-studio-cluster: Studio pre-seeded with all three dev-cluster node endpoints.
-# Survives any single node failure (including the initial leader) without relying
-# on autodiscovery completing before the failure window.
-run-studio-cluster:
-	@echo "dev-cluster must already be running (make dev-cluster)"
-	cd ./cmd/asqlstudio && \
-		ASQL_PGWIRE_ENDPOINT=127.0.0.1:5433 \
-		ASQL_FOLLOWER_ENDPOINT=127.0.0.1:5434 \
-		ASQL_PEER_ENDPOINTS=127.0.0.1:5433,127.0.0.1:5434,127.0.0.1:5435 \
-		ASQL_ADMIN_ENDPOINTS=127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_A)),127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_B)),127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_C)) \
-		ASQL_GROUPS=default \
-		wails dev
-
 # ── Dev environments ─────────────────────────────────────────────────────────
 
 dev:
@@ -180,7 +154,6 @@ dev:
 			sleep 1; \
 		done; \
 		if [ $$OK -eq 0 ]; then echo "asqld timeout"; cat /tmp/asql-dev-node.log; exit 1; fi
-	cd ./cmd/asqlstudio && ASQL_PGWIRE_ENDPOINT=127.0.0.1:5433 wails dev
 
 dev-cluster: kill-dev
 	@sleep 0.5
@@ -227,12 +200,6 @@ dev-cluster: kill-dev
 		done; \
 		if [ $$OK -eq 0 ]; then echo "node-c timeout"; cat /tmp/asql-dev-node-c.log; exit 1; fi
 	@echo "metrics: node-a=http://127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_A)) node-b=http://127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_B)) node-c=http://127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_C))"
-	cd ./asqlstudio && \
-		ASQL_PGWIRE_ENDPOINT=127.0.0.1:5433 \
-		ASQL_PEER_ENDPOINTS=127.0.0.1:5433,127.0.0.1:5434,127.0.0.1:5435 \
-		ASQL_ADMIN_ENDPOINTS=127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_A)),127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_B)),127.0.0.1$$(printf '%s' $(DEV_ADMIN_ADDR_C)) \
-		ASQL_GROUPS=default \
-		wails dev
 
 # fresh-cluster: alias for dev-cluster (always starts with clean data dirs).
 fresh-cluster: dev-cluster

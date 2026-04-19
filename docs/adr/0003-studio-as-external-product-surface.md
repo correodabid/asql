@@ -1,7 +1,14 @@
 # ADR 0003: Treat ASQL Studio as an external product surface, not an engine-internal app
 
-- Status: Implemented
+- Status: Superseded by [ADR 0004](0004-studio-lives-in-a-separate-repository.md)
 - Date: 2026-03-12
+
+> **2026-04-19 update**: Alternative C of this ADR ("Extract Studio into a
+> separate repository") was revisited and adopted. ASQL Studio now lives
+> at [github.com/correodabid/asqlstudio](https://github.com/correodabid/asqlstudio).
+> The decoupling work described below (public `pkg/adminapi`, `pkg/fixtures`,
+> `pkg/servertest`) was completed first and made the extraction mechanical.
+> See ADR 0004 for the full rationale.
 - Decision drivers:
   - reduce coupling between Studio and engine internals
   - make ASQL Studio a clearer product sibling of `asqld` and `asqlctl`
