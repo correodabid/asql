@@ -1,5 +1,8 @@
 # Binaries
 /bin/
+/asqld
+/asqlctl
+/seed_domains
 *.exe
 *.exe~
 *.dll
