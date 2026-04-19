@@ -219,6 +219,7 @@ type Server struct {
 	clusterCancel    context.CancelFunc // cancels heartbeat + replicator goroutines
 
 	listener            net.Listener
+	adminMu             sync.RWMutex // guards adminListener and adminServer
 	adminListener       net.Listener
 	adminServer         *http.Server
 	metrics             *runtimeMetrics
@@ -565,11 +566,15 @@ func (server *Server) ServeOnListener(ctx context.Context, listener net.Listener
 func (server *Server) Stop() {
 	server.closeMux.Do(func() {
 		close(server.closeCh)
-		if server.adminServer != nil {
-			_ = server.adminServer.Close()
+		server.adminMu.RLock()
+		adminServer := server.adminServer
+		adminListener := server.adminListener
+		server.adminMu.RUnlock()
+		if adminServer != nil {
+			_ = adminServer.Close()
 		}
-		if server.adminListener != nil {
-			_ = server.adminListener.Close()
+		if adminListener != nil {
+			_ = adminListener.Close()
 		}
 		if server.listener != nil {
 			_ = server.listener.Close()
@@ -887,10 +892,16 @@ func (server *Server) allocateBackendKey() backendCancelKey {
 // AdminHTTPAddress returns the bound admin HTTP address when the optional
 // admin listener is running.
 func (server *Server) AdminHTTPAddress() string {
-	if server == nil || server.adminListener == nil {
+	if server == nil {
 		return ""
 	}
-	return server.adminListener.Addr().String()
+	server.adminMu.RLock()
+	listener := server.adminListener
+	server.adminMu.RUnlock()
+	if listener == nil {
+		return ""
+	}
+	return listener.Addr().String()
 }
 
 func (server *Server) registerCancelableConnection(key backendCancelKey, state *connState) {

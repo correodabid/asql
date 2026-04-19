@@ -155,11 +155,14 @@ func (server *Server) startAdminHTTP() error {
 	mux.HandleFunc("/api/v1/recovery/snapshot-catalog", server.withAdminAuth(adminScopeRead, server.handleAdminRecoverySnapshotCatalog))
 	mux.HandleFunc("/api/v1/recovery/wal-retention", server.withAdminAuth(adminScopeRead, server.handleAdminRecoveryWALRetention))
 
+	adminServer := &http.Server{Handler: mux}
+	server.adminMu.Lock()
 	server.adminListener = listener
-	server.adminServer = &http.Server{Handler: mux}
+	server.adminServer = adminServer
+	server.adminMu.Unlock()
 
 	go func() {
-		if err := server.adminServer.Serve(listener); err != nil && err != http.ErrServerClosed {
+		if err := adminServer.Serve(listener); err != nil && err != http.ErrServerClosed {
 			server.config.Logger.Warn("admin http server exited", "error", err, "address", listener.Addr().String())
 		}
 	}()

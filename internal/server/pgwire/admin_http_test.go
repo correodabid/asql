@@ -44,8 +44,8 @@ func startAdminSmokeServer(t *testing.T, config Config) (*Server, string, string
 	var adminAddr string
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if server.adminListener != nil {
-			adminAddr = server.adminListener.Addr().String()
+		if addr := server.AdminHTTPAddress(); addr != "" {
+			adminAddr = addr
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
