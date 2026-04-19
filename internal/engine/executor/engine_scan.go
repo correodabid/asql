@@ -1334,9 +1334,9 @@ func (engine *Engine) buildAccessPlan(plan planner.Plan) accessPlanInfo {
 	case planner.OperationInsert, planner.OperationUpdate, planner.OperationDelete:
 		info.Strategy = string(scanStrategyFullScan)
 		if table != nil {
-			if rowIDs, lookupPredicate, strat, ok := candidateRowIDsForPredicate(table, plan.Filter, false); ok {
-				info.Strategy = string(strat)
-				if strat == scanStrategyIndexUnion || strat == scanStrategyIndexNot || strat == scanStrategyIndexInter {
+			if rowIDs, lookupPredicate, start, ok := candidateRowIDsForPredicate(table, plan.Filter, false); ok {
+				info.Strategy = string(start)
+				if start == scanStrategyIndexUnion || start == scanStrategyIndexNot || start == scanStrategyIndexInter {
 					info.EstimatedRows = len(rowIDs)
 				} else if lookupPredicate != nil {
 					if idx, ok := indexForColumn(table, lookupPredicate.Column); ok {

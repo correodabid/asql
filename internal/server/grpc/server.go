@@ -6,10 +6,11 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	asqlv1 "github.com/correodabid/asql/api/proto/asql/v1"
 	"net"
 	"strings"
 	"time"
+
+	asqlv1 "github.com/correodabid/asql/api/proto/asql/v1"
 
 	"github.com/correodabid/asql/internal/cluster/coordinator"
 	"github.com/correodabid/asql/internal/cluster/heartbeat"
@@ -38,8 +39,8 @@ type Server struct {
 	auditStore       *audit.Store
 	engine           *executor.Engine
 	heartbeatLoop    *heartbeat.Loop
-	prober           *GRPCPeerProber              // closed in Stop()
-	streamReplicator *PersistentStreamReplicator  // started in Run()
+	prober           *GRPCPeerProber             // closed in Stop()
+	streamReplicator *PersistentStreamReplicator // started in Run()
 }
 
 // NOTE: this standalone gRPC server still contains a legacy/transitional

@@ -1,6 +1,6 @@
 SHELL := /bin/sh
 
-.PHONY: tidy fmt vet test test-race bench bench-core bench-write bench-wal bench-pgwire \
+.PHONY: tidy fmt vet lint test test-race bench bench-core bench-write bench-wal bench-pgwire \
 	bench-write-scaling-guardrail \
 	bench-env-single bench-env-cluster bench-run-single bench-run-cluster \
 	bench-seed-single bench-seed-cluster bench-matrix-single bench-matrix-cluster \
@@ -429,10 +429,14 @@ bench-matrix-cluster:
 
 # ── CI / Clean ───────────────────────────────────────────────────────────────
 
+lint:
+	golangci-lint run --timeout 5m ./...
+
 ci: tidy
 	@files=$$(gofmt -l .); if [ -n "$$files" ]; then echo "Unformatted:"; echo "$$files"; exit 1; fi
+	golangci-lint run --timeout 5m ./...
 	go vet ./...
-	go test ./...
+	go test -cover ./...
 	go test -race ./...
 
 clean:

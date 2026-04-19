@@ -31,11 +31,16 @@ jobs:
             exit 1
           fi
 
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v2.7.2
+
       - name: Vet
         run: go vet ./...
 
       - name: Test
-        run: go test ./...
+        run: go test -cover ./...
 
   race:
     runs-on: ubuntu-latest

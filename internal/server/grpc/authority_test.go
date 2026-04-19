@@ -98,7 +98,7 @@ type fakeRaftLeaderState struct {
 	leaderID string
 }
 
-func (state fakeRaftLeaderState) IsLeader() bool { return state.isLeader }
+func (state fakeRaftLeaderState) IsLeader() bool   { return state.isLeader }
 func (state fakeRaftLeaderState) LeaderID() string { return state.leaderID }
 
 func TestRaftClusterAuthorityRequiresLocalLeader(t *testing.T) {

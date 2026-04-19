@@ -281,7 +281,7 @@ func TestEntityChangesReturnsDeterministicEntityBacklog(t *testing.T) {
 	if events[2].RootPK != "1" || events[2].Version != 3 || !reflect.DeepEqual(events[2].Tables, []string{"items"}) {
 		t.Fatalf("unexpected third event: %#v", events[2])
 	}
-	if !(events[0].CommitLSN < events[1].CommitLSN && events[1].CommitLSN < events[2].CommitLSN) {
+	if events[0].CommitLSN >= events[1].CommitLSN || events[1].CommitLSN >= events[2].CommitLSN {
 		t.Fatalf("expected ascending commit LSNs, got %#v", events)
 	}
 

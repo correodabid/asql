@@ -67,7 +67,7 @@ type replicationServiceStreamWALServer struct {
 }
 
 func (server *replicationServiceStreamWALServer) Send(response *StreamWALResponse) error {
-	return server.ServerStream.SendMsg(response)
+	return server.SendMsg(response)
 }
 
 func lastLSNHandler(service interface{}, ctx context.Context, decode func(interface{}) error, interceptor grpcgo.UnaryServerInterceptor) (interface{}, error) {

@@ -1,0 +1,31 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+# Conservative ruleset: only linters that pass cleanly on the current tree.
+# Next to enable (each requires a cleanup sweep):
+#   - staticcheck   (~21 findings: deprecated grpc.DialContext, redundant
+#                    assignments, unnecessary t.Helper calls)
+#   - ineffassign   (~17 findings: dead assignments, mostly in hot paths)
+#   - unused        (~34 findings: dead helpers and state methods — review
+#                    each in case they're kept on purpose for parity)
+#   - errcheck      (~27 findings: unchecked fmt.Fprintf, deferred Close,
+#                    connection Close — mostly fine, a few may hide bugs)
+linters:
+  default: none
+  enable:
+    - govet
+    - misspell
+  exclusions:
+    generated: lax
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/correodabid/asql

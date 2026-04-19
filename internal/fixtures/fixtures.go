@@ -25,11 +25,11 @@ import (
 // fixtures import when they also need ValidateDryRun. External clients
 // should prefer github.com/correodabid/asql/pkg/fixtures directly.
 type (
-	File             = pkgfixtures.File
-	Step             = pkgfixtures.Step
-	ExportOptions    = pkgfixtures.ExportOptions
-	SQLExecutor      = pkgfixtures.SQLExecutor
-	ValidationError  = pkgfixtures.ValidationError
+	File            = pkgfixtures.File
+	Step            = pkgfixtures.Step
+	ExportOptions   = pkgfixtures.ExportOptions
+	SQLExecutor     = pkgfixtures.SQLExecutor
+	ValidationError = pkgfixtures.ValidationError
 )
 
 const CurrentVersion = pkgfixtures.CurrentVersion

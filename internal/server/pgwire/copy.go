@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/correodabid/asql/internal/engine/parser/ast"
 	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/parser/ast"
 
 	"github.com/jackc/pgx/v5/pgproto3"
 )
@@ -192,8 +192,8 @@ func (server *Server) startCopyIn(backend *pgproto3.Backend, state *connState, s
 		statement: stmt,
 		savepoint: savepoint,
 		startedTx: startedTx,
-		ctx: ctx,
-		finish: finish,
+		ctx:       ctx,
+		finish:    finish,
 	}
 	backend.Send(&pgproto3.CopyInResponse{OverallFormat: 0, ColumnFormatCodes: []uint16{0}})
 	return backend.Flush()

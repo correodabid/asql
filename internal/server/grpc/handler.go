@@ -271,7 +271,7 @@ func (service *service) validateFencingForCommit(session *executor.Session, requ
 		return nil
 	}
 
-	if !(hasNode && hasToken) {
+	if !hasNode || !hasToken {
 		return status.Error(codes.InvalidArgument, "node_id and fencing_token are required when fencing is enabled")
 	}
 

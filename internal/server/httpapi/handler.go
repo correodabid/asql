@@ -954,7 +954,7 @@ func (svc *service) validateFencingForCommit(session *executor.Session, request 
 		return nil
 	}
 
-	if !(hasNode && hasToken) {
+	if !hasNode || !hasToken {
 		return errors.New("node_id and fencing_token are required when fencing is enabled")
 	}
 

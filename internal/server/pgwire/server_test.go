@@ -1295,7 +1295,7 @@ func TestPGWireTailEntityChangesContract(t *testing.T) {
 	if got[2].EntityVersion != 3 || got[2].TablesJSON != `["items"]` {
 		t.Fatalf("unexpected third tail row: %#v", got[2])
 	}
-	if !(got[0].CommitLSN < got[1].CommitLSN && got[1].CommitLSN < got[2].CommitLSN) {
+	if got[0].CommitLSN >= got[1].CommitLSN || got[1].CommitLSN >= got[2].CommitLSN {
 		t.Fatalf("expected ascending commit LSNs, got %#v", got)
 	}
 

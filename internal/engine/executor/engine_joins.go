@@ -1044,7 +1044,7 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 		pushRightPredicate := rightPredicate != nil && (joinType == ast.JoinInner || (joinType == ast.JoinLeft && predicateRejectsNull(rightPredicate)))
 
 		var reusableRightRows []map[string]ast.Literal
-		if !hasRightIndex && !(hasLeftIndex && leftIndexTable != nil && bestRightPredicate == nil) {
+		if !hasRightIndex && (!hasLeftIndex || leftIndexTable == nil || bestRightPredicate != nil) {
 			reusableRightRows = rowsForPredicate(rightTable, bestRightPredicate, state, engine)
 			if pushRightPredicate {
 				filteredRightRows := reusableRightRows[:0]

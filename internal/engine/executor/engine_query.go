@@ -740,14 +740,15 @@ func computeAggregate(spec aggregateSelectSpec, rows []map[string]ast.Literal) (
 			if value.Kind == ast.LiteralNull {
 				continue
 			}
-			if value.Kind == ast.LiteralFloat {
+			switch value.Kind {
+			case ast.LiteralFloat:
 				hasValue = true
 				hasFloat = true
 				totalFloat += value.FloatValue
-			} else if value.Kind == ast.LiteralNumber {
+			case ast.LiteralNumber:
 				hasValue = true
 				totalInt += value.NumberValue
-			} else {
+			default:
 				return ast.Literal{}, fmt.Errorf("SUM requires numeric column %s", spec.Argument)
 			}
 		}
@@ -768,14 +769,15 @@ func computeAggregate(spec aggregateSelectSpec, rows []map[string]ast.Literal) (
 			if value.Kind == ast.LiteralNull {
 				continue
 			}
-			if value.Kind == ast.LiteralFloat {
+			switch value.Kind {
+			case ast.LiteralFloat:
 				hasFloat = true
 				totalFloat += value.FloatValue
 				count++
-			} else if value.Kind == ast.LiteralNumber {
+			case ast.LiteralNumber:
 				totalInt += value.NumberValue
 				count++
-			} else {
+			default:
 				return ast.Literal{}, fmt.Errorf("AVG requires numeric column %s", spec.Argument)
 			}
 		}

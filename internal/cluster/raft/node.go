@@ -472,13 +472,7 @@ func (n *RaftNode) HandleAppendEntries(ctx context.Context, req AppendEntriesReq
 	if len(req.Entries) > 0 {
 		entries := make([]Entry, len(req.Entries))
 		for i, re := range req.Entries {
-			entries[i] = Entry{
-				Index:   re.Index,
-				Term:    re.Term,
-				TxID:    re.TxID,
-				Type:    re.Type,
-				Payload: re.Payload,
-			}
+			entries[i] = Entry(re)
 		}
 
 		// Skip any overlapping prefix we already have with the same term.
@@ -867,10 +861,7 @@ func (n *RaftNode) sendHeartbeats(ctx context.Context) {
 				if err == nil && len(ents) > 0 {
 					rEntries = make([]RaftEntry, len(ents))
 					for i, e := range ents {
-						rEntries[i] = RaftEntry{
-							Index: e.Index, Term: e.Term,
-							TxID: e.TxID, Type: e.Type, Payload: e.Payload,
-						}
+						rEntries[i] = RaftEntry(e)
 					}
 				}
 				if ni > 1 {
@@ -1011,10 +1002,7 @@ func (n *RaftNode) broadcastAndCommit(ctx context.Context, newIndex uint64) erro
 			}
 			rEntries := make([]RaftEntry, len(entries))
 			for i, e := range entries {
-				rEntries[i] = RaftEntry{
-					Index: e.Index, Term: e.Term,
-					TxID: e.TxID, Type: e.Type, Payload: e.Payload,
-				}
+				rEntries[i] = RaftEntry(e)
 			}
 			req := AppendEntriesRequest{
 				Term:         term,

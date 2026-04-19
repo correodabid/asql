@@ -59,8 +59,8 @@ type Config struct {
 type Cluster struct {
 	mu         sync.RWMutex
 	cfg        Config
-	leaderAddr string       // pgwire address of the current leader
-	peers      []string     // all known pgwire addresses (including self)
+	leaderAddr string        // pgwire address of the current leader
+	peers      []string      // all known pgwire addresses (including self)
 	pool       *pgxpool.Pool // pool always points to the current leader
 	closed     bool
 }

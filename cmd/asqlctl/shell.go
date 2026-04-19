@@ -189,21 +189,21 @@ func (s *shellSession) handleMeta(line string) (quit bool) {
 	}
 	cmd := strings.ToLower(parts[0])
 
-	switch {
-	case cmd == `\q`, cmd == `\quit`:
+	switch cmd {
+	case `\q`, `\quit`:
 		fmt.Fprintln(s.out, "Bye.")
 		return true
 
-	case cmd == `\?`, cmd == `\help`:
+	case `\?`, `\help`:
 		s.printHelp()
 
-	case cmd == `\dt`, cmd == `\d`:
+	case `\dt`, `\d`:
 		s.metaDescribeTables(parts)
 
-	case cmd == `\l`, cmd == `\domains`:
+	case `\l`, `\domains`:
 		s.metaListDomains()
 
-	case cmd == `\timing`:
+	case `\timing`:
 		s.timing = !s.timing
 		if s.timing {
 			fmt.Fprintln(s.out, "Timing is on.")
@@ -211,13 +211,13 @@ func (s *shellSession) handleMeta(line string) (quit bool) {
 			fmt.Fprintln(s.out, "Timing is off.")
 		}
 
-	case cmd == `\cluster`:
+	case `\cluster`:
 		s.metaCluster()
 
-	case cmd == `\conninfo`:
+	case `\conninfo`:
 		fmt.Fprintf(s.out, "Connected to %s as user \"asql\".\n", s.cfg.PgwireAddr)
 
-	case cmd == `\history`:
+	case `\history`:
 		for i, h := range s.history {
 			fmt.Fprintf(s.out, "%4d  %s\n", i+1, h)
 		}
