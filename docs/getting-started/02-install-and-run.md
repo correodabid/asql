@@ -40,11 +40,17 @@ go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
 
 ## Start the desktop Studio
 
-In a second terminal:
+ASQL Studio lives in a separate repository:
+[github.com/correodabid/asqlstudio](https://github.com/correodabid/asqlstudio).
+Clone it next to your asql checkout, then in a second terminal:
 
 ```bash
-go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
+cd ../asqlstudio
+wails dev
 ```
+
+Studio connects to the asqld you already have running on
+`127.0.0.1:5433`.
 
 Use Studio when you want:
 

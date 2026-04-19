@@ -15,12 +15,16 @@ Studio is best for:
 - exploring snapshots and diffs in Time Explorer,
 - fixture validate/load/export workflows.
 
-Treat [asqlstudio](../../asqlstudio) as a public product surface: it consumes pgwire plus stable admin and fixture contracts rather than engine-private packages.
+Studio lives in a separate repository:
+[github.com/correodabid/asqlstudio](https://github.com/correodabid/asqlstudio).
+It consumes pgwire plus the stable admin and fixture contracts from
+`github.com/correodabid/asql/pkg/*`, not engine-private packages.
 
-Start it with:
+Clone it alongside your engine checkout and start it with:
 
 ```bash
-go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql
+cd ../asqlstudio
+wails dev
 ```
 
 If you need to point Studio at a different ASQL node later, use the runtime
