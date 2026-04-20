@@ -21,6 +21,9 @@
       <a href="index.html" class="nav-logo">
         <span class="logo-icon">⚡</span> ASQL
       </a>
+      <button class="nav-toggle" id="navToggle" aria-label="Open menu" aria-expanded="false">
+        <span class="nav-toggle-bars"><span></span><span></span><span></span></span>
+      </button>
       <div class="nav-links">
         <a href="index.html">Engine</a>
         <a href="studio.html">Studio</a>
@@ -89,17 +92,37 @@
 
   <!-- ═══════════════════════════ FOOTER ═══════════════════════════ -->
   <footer class="footer">
-    <div class="container footer-inner">
-      <div class="footer-brand">
-        <span class="logo-icon">⚡</span> ASQL
-        <span class="footer-tagline">Deterministic SQL Engine</span>
+    <div class="container footer-columns">
+      <div class="footer-col footer-col-brand">
+        <div class="footer-brand">
+          <span class="logo-icon">⚡</span> ASQL
+        </div>
+        <p class="footer-tagline">A deterministic SQL engine. Replay any state, query any point in time, over pgwire.</p>
       </div>
-      <div class="footer-links">
+      <div class="footer-col">
+        <h5>Product</h5>
         <a href="index.html">Engine</a>
         <a href="studio.html">Studio</a>
-        <a href="docs.html">Docs</a>
-        <a href="https://github.com/correodabid/asql">GitHub</a>
+        <a href="index.html#compare">vs alternatives</a>
+        <a href="index.html#performance">Performance</a>
       </div>
+      <div class="footer-col">
+        <h5>Learn</h5>
+        <a href="docs.html">Documentation</a>
+        <a href="doc.html?path=getting-started/02-install-and-run.md">Install & run</a>
+        <a href="doc.html?path=reference/postgres-compatibility-surface-v1.md">Compatibility</a>
+        <a href="doc.html?path=architecture/architecture-one-pager-v1.md">Architecture</a>
+      </div>
+      <div class="footer-col">
+        <h5>Community</h5>
+        <a href="https://github.com/correodabid/asql" target="_blank" rel="noopener">GitHub repository</a>
+        <a href="https://github.com/correodabid/asql/issues" target="_blank" rel="noopener">Report an issue</a>
+        <a href="doc.html?path=operations/security-disclosure-policy-v1.md">Security policy</a>
+        <a href="https://github.com/correodabid/asqlstudio" target="_blank" rel="noopener">Studio repo ↗</a>
+      </div>
+    </div>
+    <div class="container footer-meta">
+      <span>© ASQL contributors · Built in Go 1.25 · Not affiliated with PostgreSQL</span>
     </div>
   </footer>
 
@@ -513,6 +536,19 @@
         document.getElementById('docSidebar').classList.toggle('open');
       }
     });
+
+    // Top nav mobile hamburger
+    const topNav = document.getElementById('nav');
+    const navToggle = document.getElementById('navToggle');
+    if (navToggle && topNav) {
+      navToggle.addEventListener('click', () => {
+        const open = topNav.classList.toggle('nav-open');
+        navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.querySelectorAll('.nav-links a').forEach(a =>
+        a.addEventListener('click', () => topNav.classList.remove('nav-open'))
+      );
+    }
   </script>
 </body>
 </html>

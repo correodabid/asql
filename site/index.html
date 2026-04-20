@@ -23,6 +23,9 @@
       <a href="index.html" class="nav-logo">
         <span class="logo-icon">⚡</span> ASQL
       </a>
+      <button class="nav-toggle" id="navToggle" aria-label="Open menu" aria-expanded="false">
+        <span class="nav-toggle-bars"><span></span><span></span><span></span></span>
+      </button>
       <div class="nav-links">
         <a href="#features">Features</a>
         <a href="#compare">vs Others</a>
@@ -40,21 +43,24 @@
   <section class="hero">
     <div class="hero-glow" aria-hidden="true"><span></span></div>
     <div class="container" style="position:relative;z-index:1;">
-      <div class="hero-badge">Open Source · Written in Go · Deterministic by Design</div>
+      <div class="hero-chips">
+        <span class="hero-chip hero-chip-primary">
+          <span class="hero-chip-pulse"></span>
+          Deterministic by design
+        </span>
+        <span class="hero-chip">Open source · Go 1.25</span>
+        <span class="hero-chip">pgwire over PostgreSQL protocol</span>
+      </div>
       <h1 class="hero-title">
         The SQL engine that<br>
         <span class="hero-gradient">remembers everything.</span>
       </h1>
       <p class="hero-sub">
         Deterministic replay. Time-travel queries. Domain isolation.<br>
-        Canonical pgwire path from a single binary to a replicated cluster.
-      </p>
-      <p class="hero-sub" style="margin-top:14px;font-size:1rem;opacity:.82;max-width:760px;">
-        Built for teams that need state they can explain: explicit boundaries, replay-safe history, and operational clarity without giving up practical SQL tooling.
+        State you can explain — from a single binary to a replicated cluster, over the pgwire protocol your tools already speak.
       </p>
       <div class="hero-actions">
-        <a href="#quickstart" class="btn btn-primary">Get Started</a>
-        <a href="docs.html" class="btn btn-ghost">Evaluate Safely →</a>
+        <a href="#quickstart" class="btn btn-primary">Run it in 30 seconds</a>
         <a href="https://github.com/correodabid/asql" class="btn btn-ghost" target="_blank" rel="noopener">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           View on GitHub
@@ -69,12 +75,17 @@
             <span class="terminal-dot green"></span>
             <span class="terminal-title">
               <span id="demo-title">asql — time-travel demo</span>
-              <span class="demo-lsn" id="demo-lsn">LSN 0</span>
+              <span class="demo-lsn" id="demo-lsn">LSN 3</span>
             </span>
           </div>
           <div class="hero-demo-body">
-            <pre class="hero-demo-code" id="demo-code"></pre>
-            <div class="hero-demo-output" id="demo-output" aria-live="polite"></div>
+            <pre class="hero-demo-code" id="demo-code"><span class="c">-- Travel back to LSN 2:</span>
+<span class="k">SELECT</span> * <span class="k">FROM</span> users <span class="k">AS OF LSN</span> <span class="n">2</span>;</pre>
+            <div class="hero-demo-output" id="demo-output" aria-live="polite">
+              <div><span class="out-col">id  name   status</span></div>
+              <div><span class="out-row">1   Alice  <span class="out-diff out-restored">active</span></span></div>
+              <div><span class="out-note">↑ history is addressable, not reconstructed</span></div>
+            </div>
           </div>
         </div>
         <div class="hero-demo-caption">
@@ -648,9 +659,14 @@
             <pre><code>conn, _ := pgx.Connect(ctx,
   "postgres://localhost:5433/asql")
 
-conn.Exec(ctx, "BEGIN DOMAIN app")
-conn.Exec(ctx, "SELECT * FROM users")
-conn.Exec(ctx, "COMMIT")</code></pre>
+conn.Exec(ctx, "BEGIN DOMAIN billing")
+conn.Exec(ctx, `UPDATE invoices SET
+  status = 'paid' WHERE id = 42`)
+conn.Exec(ctx, "COMMIT")
+
+<span class="c">// Same driver. Same SQL. Plus history:</span>
+conn.Query(ctx, `SELECT * FROM invoices
+  AS OF LSN 100`)</code></pre>
           </div>
         </div>
         <div class="deploy-card deploy-card-cluster">
@@ -719,9 +735,11 @@ conn.Exec(ctx, "COMMIT")</code></pre>
         <div class="qs-step">
           <div class="qs-number">4</div>
           <div class="qs-content">
-            <h4>Launch Studio</h4>
-            <pre><code><span class="t-prompt">$</span> go run ./asqlstudio -pgwire-endpoint 127.0.0.1:5433 -data-dir .asql</code></pre>
-            <p class="qs-note">SQL editor, schema browser, ER diagrams, time-travel panel, replication monitoring.</p>
+            <h4>Optional: launch Studio <span class="qs-tag">separate repo</span></h4>
+            <pre><code><span class="t-comment"># Studio lives in its own repository</span>
+<span class="t-prompt">$</span> git clone https://github.com/correodabid/asqlstudio
+<span class="t-prompt">$</span> cd asqlstudio && wails dev</code></pre>
+            <p class="qs-note">SQL editor, schema builder, ER diagrams, time-travel explorer, and cluster dashboard — all connected to your running <code>asqld</code> over pgwire. See <a href="studio.html">studio</a>.</p>
           </div>
         </div>
       </div>
@@ -883,29 +901,33 @@ docker run -p 5433:5433 \
     </div>
   </section>
 
-  <!-- ═══════════════════════════ EVALUATION PATH ══════════════════════════ -->
-  <section class="section" id="evaluation-path">
+  <!-- ═══════════════════════════ GO DEEPER ══════════════════════════ -->
+  <section class="section" id="go-deeper">
     <div class="container">
       <div class="section-header">
-        <h2>Evaluate ASQL with the canonical path</h2>
-        <p class="section-sub">Start with <code>asqld</code> over pgwire, then verify compatibility, benchmarks, and production expectations from the documented surfaces.</p>
+        <h2>Go deeper</h2>
+        <p class="section-sub">Pick the next thing that matches where you are.</p>
       </div>
       <div class="docs-grid docs-grid-compact">
         <a href="docs.html" class="docs-ref-card">
+          <div class="docs-ref-tag">New here</div>
           <h4>Getting Started</h4>
-          <p>The primary onboarding route: local start, first schema, temporal workflows, fixtures, Studio, and integration.</p>
+          <p>From local install to first schema, time-travel queries, fixtures, and Go integration. The recommended onboarding path.</p>
         </a>
         <a href="doc.html?path=reference/postgres-compatibility-surface-v1.md" class="docs-ref-card">
-          <h4>Compatibility Matrix</h4>
-          <p>See the supported PostgreSQL-compatible subset and the flows that work today before assuming parity.</p>
+          <div class="docs-ref-tag">Evaluating</div>
+          <h4>Compatibility matrix</h4>
+          <p>What works today over pgwire, what's intentionally out of scope. Read before assuming Postgres parity.</p>
         </a>
         <a href="doc.html?path=architecture/architecture-one-pager-v1.md" class="docs-ref-card">
-          <h4>Architecture One-Pager</h4>
-          <p>See how the engine, WAL, pgwire transport, and optional cluster tier fit together.</p>
+          <div class="docs-ref-tag">Engineer</div>
+          <h4>Architecture one-pager</h4>
+          <p>Hexagonal layout: engine, WAL as truth, pgwire transport, and how the optional cluster tier plugs in.</p>
         </a>
-        <a href="doc.html?path=operations/release-upgrade-compat-checklist-v1.md" class="docs-ref-card">
-          <h4>Production & Release Gates</h4>
-          <p>Inspect the compatibility, upgrade, and release validation gates that bound ASQL's public claims.</p>
+        <a href="doc.html?path=operations/runbook.md" class="docs-ref-card">
+          <div class="docs-ref-tag">Operator</div>
+          <h4>Production runbook</h4>
+          <p>Everything from first boot to failover, backup, recovery, and the gates around upgrade and compatibility freeze.</p>
         </a>
       </div>
     </div>
@@ -914,32 +936,51 @@ docker run -p 5433:5433 \
   <!-- ═══════════════════════════ CTA ══════════════════════════ -->
   <section class="section section-cta">
     <div class="container">
-      <h2>Ready to try a database that<br>actually remembers?</h2>
-      <p>ASQL is open source. Start with the documented pgwire path, then validate compatibility, benchmark evidence, and operator workflows from the docs.</p>
+      <h2>A database that<br>actually remembers.</h2>
+      <p>Open source. Single binary. Deterministic replay by contract, not by accident. Start small, verify compatibility, scale when you need it.</p>
       <div class="hero-actions">
         <a href="https://github.com/correodabid/asql" class="btn btn-primary" target="_blank" rel="noopener">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           Star on GitHub
         </a>
-        <a href="#quickstart" class="btn btn-ghost">Quickstart Guide</a>
-        <a href="docs.html" class="btn btn-ghost">Docs & Evaluation Pack</a>
+        <a href="#quickstart" class="btn btn-ghost">30-second quickstart</a>
       </div>
     </div>
   </section>
 
   <!-- ═══════════════════════════ FOOTER ══════════════════════════ -->
   <footer class="footer">
-    <div class="container footer-inner">
-      <div class="footer-brand">
-        <span class="logo-icon">⚡</span> ASQL
-        <span class="footer-tagline">Deterministic SQL Engine</span>
+    <div class="container footer-columns">
+      <div class="footer-col footer-col-brand">
+        <div class="footer-brand">
+          <span class="logo-icon">⚡</span> ASQL
+        </div>
+        <p class="footer-tagline">A deterministic SQL engine. Replay any state, query any point in time, over pgwire.</p>
       </div>
-      <div class="footer-links">
+      <div class="footer-col">
+        <h5>Product</h5>
         <a href="index.html">Engine</a>
         <a href="studio.html">Studio</a>
-        <a href="docs.html">Docs</a>
-        <a href="https://github.com/correodabid/asql">GitHub</a>
+        <a href="#compare">vs alternatives</a>
+        <a href="#performance">Performance</a>
       </div>
+      <div class="footer-col">
+        <h5>Learn</h5>
+        <a href="docs.html">Documentation</a>
+        <a href="doc.html?path=getting-started/02-install-and-run.md">Install & run</a>
+        <a href="doc.html?path=reference/postgres-compatibility-surface-v1.md">Compatibility</a>
+        <a href="doc.html?path=architecture/architecture-one-pager-v1.md">Architecture</a>
+      </div>
+      <div class="footer-col">
+        <h5>Community</h5>
+        <a href="https://github.com/correodabid/asql" target="_blank" rel="noopener">GitHub repository</a>
+        <a href="https://github.com/correodabid/asql/issues" target="_blank" rel="noopener">Report an issue</a>
+        <a href="doc.html?path=operations/security-disclosure-policy-v1.md">Security policy</a>
+        <a href="https://github.com/correodabid/asqlstudio" target="_blank" rel="noopener">Studio repo ↗</a>
+      </div>
+    </div>
+    <div class="container footer-meta">
+      <span>© ASQL contributors · Built in Go 1.25 · Not affiliated with PostgreSQL</span>
     </div>
   </footer>
 
@@ -949,6 +990,20 @@ docker run -p 5433:5433 \
     window.addEventListener('scroll', () => {
       nav.classList.toggle('scrolled', window.scrollY > 40);
     });
+
+    // ─── Mobile hamburger ───
+    const navToggle = document.getElementById('navToggle');
+    if (navToggle) {
+      navToggle.addEventListener('click', () => {
+        const open = nav.classList.toggle('nav-open');
+        navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+        navToggle.setAttribute('aria-label', open ? 'Close menu' : 'Open menu');
+      });
+      // Close when a nav link is clicked (mobile)
+      document.querySelectorAll('.nav-links a').forEach(a => {
+        a.addEventListener('click', () => nav.classList.remove('nav-open'));
+      });
+    }
 
     // ─── Smooth scroll for anchor links ───
     document.querySelectorAll('a[href^="#"]').forEach(a => {

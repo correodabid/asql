@@ -19,6 +19,9 @@
       <a href="index.html" class="nav-logo">
         <span class="logo-icon">⚡</span> ASQL
       </a>
+      <button class="nav-toggle" id="navToggle" aria-label="Open menu" aria-expanded="false">
+        <span class="nav-toggle-bars"><span></span><span></span><span></span></span>
+      </button>
       <div class="nav-links">
         <a href="index.html">Engine</a>
         <a href="studio.html">Studio</a>
@@ -185,10 +188,6 @@
           <h4>Go Cookbook</h4>
           <p>Code recipes for common ASQL operations in Go.</p>
         </a>
-        <a href="doc.html?path=reference/examples-packaging-v1.md" class="docs-ref-card">
-          <h4>Examples Packaging</h4>
-          <p>How ASQL examples are grouped by adoption moment and how to use them without fragmenting onboarding.</p>
-        </a>
         <a href="doc.html?path=reference/pgwire-driver-guidance-v1.md" class="docs-ref-card">
           <h4>pgwire Driver Guidance</h4>
           <p>Practical client and driver recommendations.</p>
@@ -265,21 +264,13 @@
           <h4>GA Compatibility Freeze</h4>
           <p>Operational review procedure for freezing and validating GA compatibility claims.</p>
         </a>
-        <a href="doc.html?path=product/launch-narrative-v1.md" class="docs-ref-card">
-          <h4>Launch Narrative</h4>
-          <p>The public positioning story that should stay aligned across the website, docs, and launch materials.</p>
+        <a href="doc.html?path=operations/slo-v1.md" class="docs-ref-card">
+          <h4>SLO Definitions</h4>
+          <p>Service level objectives and the workload boundaries they apply to.</p>
         </a>
-        <a href="doc.html?path=product/technical-launch-post-v1.md" class="docs-ref-card">
-          <h4>Technical Launch Post</h4>
-          <p>The selected long-form post for explaining why ASQL exists and how to evaluate it without overclaiming.</p>
-        </a>
-        <a href="doc.html?path=product/announcement-and-channels-checklist-v1.md" class="docs-ref-card">
-          <h4>Announcement Checklist</h4>
-          <p>A concrete checklist for launch channels, release notes, website updates, and public claim discipline.</p>
-        </a>
-        <a href="doc.html?path=product/release-notes-v1.0.0-rc1.md" class="docs-ref-card">
-          <h4>Release Notes — v1.0.0-rc1</h4>
-          <p>Evaluator-facing summary of the supported path, key value pillars, compatibility boundaries, and release links.</p>
+        <a href="doc.html?path=operations/security-disclosure-policy-v1.md" class="docs-ref-card">
+          <h4>Security Disclosure</h4>
+          <p>How to report vulnerabilities and the disclosure process.</p>
         </a>
       </div>
     </div>
@@ -303,17 +294,37 @@
 
   <!-- ═══════════════════════ FOOTER ═══════════════════════ -->
   <footer class="footer">
-    <div class="container footer-inner">
-      <div class="footer-brand">
-        <span class="logo-icon">⚡</span> ASQL
-        <span class="footer-tagline">Deterministic SQL Engine</span>
+    <div class="container footer-columns">
+      <div class="footer-col footer-col-brand">
+        <div class="footer-brand">
+          <span class="logo-icon">⚡</span> ASQL
+        </div>
+        <p class="footer-tagline">A deterministic SQL engine. Replay any state, query any point in time, over pgwire.</p>
       </div>
-      <div class="footer-links">
+      <div class="footer-col">
+        <h5>Product</h5>
         <a href="index.html">Engine</a>
         <a href="studio.html">Studio</a>
-        <a href="docs.html">Docs</a>
-        <a href="https://github.com/correodabid/asql">GitHub</a>
+        <a href="index.html#compare">vs alternatives</a>
+        <a href="index.html#performance">Performance</a>
       </div>
+      <div class="footer-col">
+        <h5>Learn</h5>
+        <a href="docs.html">Documentation</a>
+        <a href="doc.html?path=getting-started/02-install-and-run.md">Install & run</a>
+        <a href="doc.html?path=reference/postgres-compatibility-surface-v1.md">Compatibility</a>
+        <a href="doc.html?path=architecture/architecture-one-pager-v1.md">Architecture</a>
+      </div>
+      <div class="footer-col">
+        <h5>Community</h5>
+        <a href="https://github.com/correodabid/asql" target="_blank" rel="noopener">GitHub repository</a>
+        <a href="https://github.com/correodabid/asql/issues" target="_blank" rel="noopener">Report an issue</a>
+        <a href="doc.html?path=operations/security-disclosure-policy-v1.md">Security policy</a>
+        <a href="https://github.com/correodabid/asqlstudio" target="_blank" rel="noopener">Studio repo ↗</a>
+      </div>
+    </div>
+    <div class="container footer-meta">
+      <span>© ASQL contributors · Built in Go 1.25 · Not affiliated with PostgreSQL</span>
     </div>
   </footer>
 
@@ -323,6 +334,18 @@
     window.addEventListener('scroll', () => {
       nav.classList.toggle('scrolled', window.scrollY > 40);
     });
+
+    // Mobile hamburger
+    const navToggle = document.getElementById('navToggle');
+    if (navToggle) {
+      navToggle.addEventListener('click', () => {
+        const open = nav.classList.toggle('nav-open');
+        navToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+      });
+      document.querySelectorAll('.nav-links a').forEach(a =>
+        a.addEventListener('click', () => nav.classList.remove('nav-open'))
+      );
+    }
 
     // Smooth scroll
     document.querySelectorAll('a[href^="#"]').forEach(a => {
