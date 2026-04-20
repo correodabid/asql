@@ -54,7 +54,7 @@ Reference:
 
 ```bash
 go run ./cmd/asqlctl -command fixture-validate \
-  -fixture-file fixtures/healthcare-billing-demo-v1.json
+  -fixture-file path/to/your-fixture.json
 ```
 
 Validation includes:
@@ -138,7 +138,7 @@ What to do:
 ```bash
 go run ./cmd/asqlctl -command fixture-load \
   -pgwire 127.0.0.1:5433 \
-  -fixture-file fixtures/healthcare-billing-demo-v1.json
+  -fixture-file path/to/your-fixture.json
 ```
 
 ## Export a fixture
@@ -147,7 +147,7 @@ go run ./cmd/asqlctl -command fixture-load \
 go run ./cmd/asqlctl -command fixture-export \
   -pgwire 127.0.0.1:5433 \
   -domains billing,patients,clinical \
-  -fixture-file fixtures/healthcare-billing-export-v1.json
+  -fixture-file path/to/your-export.json
 ```
 
 ## Studio workflow
@@ -182,8 +182,6 @@ That strictness is part of the product, not a temporary limitation.
 
 Create one fixture per important workflow, not one giant environment dump.
 Small scenarios are easier to reason about, review, replay, and evolve with the schema.
-
-For a deeper fixture-first example that also exercises entities, versioned references, and temporal inspection, see [../../bankapp/README.md](../../bankapp/README.md).
 
 ## Next step
 

@@ -232,4 +232,3 @@ If the team is still carrying SQLite/Postgres/ORM assumptions into the migration
 - `docs/reference/cookbook-go-sdk.md`
 - `docs/operations/release-upgrade-compat-checklist-v1.md`
 - `docs/operations/runbook.md`
-- `docs/product/benchmark-one-pager-v1.md`

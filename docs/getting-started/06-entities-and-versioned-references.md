@@ -268,8 +268,6 @@ SELECT resolve_reference('patients.patients', 'patient-1');
 SELECT resolve_reference('billing.invoices', 'inv-1');
 ```
 
-For a larger example that uses multiple entities and versioned references together, see [../../bankapp/README.md](../../bankapp/README.md).
-
 ## Next step
 
 Continue with [07-fixtures-and-seeding.md](07-fixtures-and-seeding.md).

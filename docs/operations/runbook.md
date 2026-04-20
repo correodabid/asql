@@ -297,8 +297,8 @@ SELECT * FROM users;
 Fixture workflows remain non-interactive via `asqlctl`:
 
 ```bash
-go run ./cmd/asqlctl -command fixture-validate -fixture-file fixtures/healthcare-billing-demo-v1.json
-go run ./cmd/asqlctl -command fixture-load -pgwire 127.0.0.1:5433 -fixture-file fixtures/healthcare-billing-demo-v1.json
+go run ./cmd/asqlctl -command fixture-validate -fixture-file path/to/your-fixture.json
+go run ./cmd/asqlctl -command fixture-load -pgwire 127.0.0.1:5433 -fixture-file path/to/your-fixture.json
 ```
 
 If server auth is enabled, add `-auth-token <token>` to all `asqlctl` commands.

@@ -82,5 +82,5 @@ This keeps execution core free from transport/storage framework coupling.
 
 ## 8) Reference specs
 
-- `docs/ai/02-architecture-blueprint.md`
-- `docs/ai/01-product-vision.md`
+- `docs/adr/` — Architecture Decision Records
+- `docs/reference/` — SQL/pgwire/fixture reference material

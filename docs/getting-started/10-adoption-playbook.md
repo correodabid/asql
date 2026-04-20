@@ -250,29 +250,6 @@ Recommended generic fields:
 2. validate it before wiring handlers,
 3. reuse it in integration tests and demo/debug flows when practical.
 
-## Reference example app: BankApp
-
-The reference app in [../../bankapp/README.md](../../bankapp/README.md) is intended as an adoption-learning example rather than a vertical product template.
-
-Use it when your team needs one concrete flow that exercises several ASQL primitives together:
-
-- explicit domains across more than one bounded context,
-- `BEGIN CROSS DOMAIN ...` transaction decisions in application code,
-- entity definitions and versioned references,
-- fixture-first setup,
-- temporal helpers plus `FOR HISTORY` and `AS OF LSN` inspection.
-
-Read [../../bankapp/FRICTION_LOG.md](../../bankapp/FRICTION_LOG.md) after walking through the example. The point of that log is to separate:
-
-- friction caused by ASQL's technology surface,
-- from friction caused by the chosen business scenario.
-
-## Reference examples
-
-- [../../bankapp/README.md](../../bankapp/README.md)
-- [../../bankapp/FRICTION_LOG.md](../../bankapp/FRICTION_LOG.md)
-- [../product/asql-adoption-friction-prioritized-backlog-v1.md](../product/asql-adoption-friction-prioritized-backlog-v1.md)
-
 ## Next step
 
 Continue with [11-troubleshooting.md](11-troubleshooting.md).

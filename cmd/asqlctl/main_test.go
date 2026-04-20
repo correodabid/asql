@@ -116,7 +116,7 @@ func TestLocalRecoveryCommands(t *testing.T) {
 
 func TestFixtureValidateCommand(t *testing.T) {
 	var output bytes.Buffer
-	err := runFixtureCommand(context.Background(), &output, "fixture-validate", filepath.Join("..", "..", "fixtures", "healthcare-billing-demo-v1.json"), "", "", "")
+	err := runFixtureCommand(context.Background(), &output, "fixture-validate", filepath.Join("testdata", "billing-demo.json"), "", "", "")
 	if err != nil {
 		t.Fatalf("fixture-validate: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestFixtureLoadCommand(t *testing.T) {
 		}
 	})
 
-	fixturePath := filepath.Join("..", "..", "fixtures", "healthcare-billing-demo-v1.json")
+	fixturePath := filepath.Join("testdata", "billing-demo.json")
 	var output bytes.Buffer
 	if err := runFixtureCommand(ctx, &output, "fixture-load", fixturePath, "", listener.Addr().String(), ""); err != nil {
 		t.Fatalf("fixture-load: %v", err)

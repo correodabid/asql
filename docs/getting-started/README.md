@@ -48,7 +48,6 @@ Use this rule from the start:
 - Migrating an existing PostgreSQL-oriented service one workflow at a time? Read [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md).
 - Want reproducible demo/test data? Jump to [07-fixtures-and-seeding.md](07-fixtures-and-seeding.md).
 - Want to understand ASQL's differentiators before coding? Start with [01-overview.md](01-overview.md).
-- Want one deeper example app that forces domains, entities, history, temporal helpers, and fixtures into the same workflow? Study [../../bankapp/README.md](../../bankapp/README.md) after chapters 04–09.
 
 ## Fixture-first onboarding path
 
@@ -57,8 +56,7 @@ For real application adoption, the recommended fast path is often fixture-first:
 1. read [04-domains-and-transactions.md](04-domains-and-transactions.md),
 2. read [06-entities-and-versioned-references.md](06-entities-and-versioned-references.md) if aggregates matter,
 3. validate and load one deterministic fixture with [07-fixtures-and-seeding.md](07-fixtures-and-seeding.md),
-4. only then move into service integration in [09-go-sdk-and-integration.md](09-go-sdk-and-integration.md),
-5. use [../../bankapp/README.md](../../bankapp/README.md) as the deeper multi-domain example.
+4. only then move into service integration in [09-go-sdk-and-integration.md](09-go-sdk-and-integration.md).
 
 This usually exposes modeling and transaction-scope mistakes earlier than jumping straight into handlers or UI code.
 
@@ -78,10 +76,7 @@ Those are the main adoption friction points this guide tries to make explicit.
 
 - [../reference/database-security-model-v1.md](../reference/database-security-model-v1.md)
 - [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
-- [../reference/examples-packaging-v1.md](../reference/examples-packaging-v1.md)
 - [../reference/fixture-format-and-lifecycle-v1.md](../reference/fixture-format-and-lifecycle-v1.md)
 - [../reference/temporal-introspection-surface-v1.md](../reference/temporal-introspection-surface-v1.md)
 - [../reference/aggregate-reference-semantics-v1.md](../reference/aggregate-reference-semantics-v1.md)
 - [10-adoption-playbook.md](10-adoption-playbook.md)
-- [../../bankapp/README.md](../../bankapp/README.md)
-- [../../bankapp/FRICTION_LOG.md](../../bankapp/FRICTION_LOG.md)

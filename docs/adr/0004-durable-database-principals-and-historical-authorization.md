@@ -165,6 +165,5 @@ It may be interesting for specialized audit modes later, but it is not the defau
 
 ## Follow-on work
 
-- implement the `AG-1` and `AH-1` backlog slices in [docs/ai/05-backlog.md](../ai/05-backlog.md#L647-L711)
 - update compatibility docs so database-principal support and remaining unsupported PostgreSQL role-management statements are explicit
 - add tests covering bootstrap, replay, disabled principals, explicit temporal grants, and denied history access

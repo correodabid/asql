@@ -80,11 +80,11 @@ surfaces.
 
 ```bash
 go run ./cmd/asqlctl -command fixture-validate \
-  -fixture-file fixtures/healthcare-billing-demo-v1.json
+  -fixture-file path/to/your-fixture.json
 
 go run ./cmd/asqlctl -command fixture-load \
   -pgwire 127.0.0.1:5433 \
-  -fixture-file fixtures/healthcare-billing-demo-v1.json
+  -fixture-file path/to/your-fixture.json
 ```
 
 For time-travel, entities, fixtures, Studio, and integration patterns, continue with [docs/getting-started/README.md](docs/getting-started/README.md).
@@ -426,8 +426,8 @@ cd ../asqlstudio && wails dev
 
 ```bash
 go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
-go run ./cmd/asqlctl -command fixture-validate -fixture-file fixtures/healthcare-billing-demo-v1.json
-go run ./cmd/asqlctl -command fixture-load -pgwire 127.0.0.1:5433 -fixture-file fixtures/healthcare-billing-demo-v1.json
+go run ./cmd/asqlctl -command fixture-validate -fixture-file path/to/your-fixture.json
+go run ./cmd/asqlctl -command fixture-load -pgwire 127.0.0.1:5433 -fixture-file path/to/your-fixture.json
 ```
 
 The lower-level `begin` / `execute` / `commit` and `time-travel` commands still exist for engine-oriented workflows, but the normal developer path should be pgwire SQL, fixtures, and Studio.
@@ -556,7 +556,6 @@ make seed-domains-10x  # 10x scale: 1K recipes, 3K orders
 | [Getting started guide](docs/getting-started/README.md) | Primary onboarding path from first run to integration |
 | [Go SDK cookbook](docs/reference/cookbook-go-sdk.md) | Code recipes for common operations |
 | [Architecture one-pager](docs/architecture/architecture-one-pager-v1.md) | System design overview |
-| [Benchmark one-pager](docs/product/benchmark-one-pager-v1.md) | Performance characteristics |
 | [Fixture format and lifecycle](docs/reference/fixture-format-and-lifecycle-v1.md) | Deterministic scenario file contract and loader workflow |
 | [SQLite/Postgres-lite migration guide](docs/migration/sqlite-postgres-lite-guide-v1.md) | Migrate lightweight SQL workloads to ASQL |
 | [PostgreSQL compatibility](docs/reference/postgres-compatibility-surface-v1.md) | pgwire protocol support matrix |
@@ -593,11 +592,10 @@ internal/
     clock/            Deterministic time abstraction
 api/
   proto/              Protocol buffer definitions
-examples/
-  go-client/          Reference Go client
 docs/                 Documentation
 test/
   integration/        End-to-end tests
+  determinism/        Determinism / replay tests
 ```
 
 ---

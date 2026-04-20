@@ -9,25 +9,22 @@ For driver/query-mode guidance, see [../reference/pgwire-driver-guidance-v1.md](
 For the narrow app-facing translation lane that works today with PostgreSQL-oriented services, see [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md).
 For one end-to-end "existing PostgreSQL-oriented service reaches its first successful read/write flow" guide, see [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md).
 
-## Start from the example
+## Start from the reference
 
 Reference material:
 
-- [../../examples/go-client/main.go](../../examples/go-client/main.go)
 - [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
-
-Treat `examples/go-client` as a lower-level reference for the internal/admin
-gRPC surface, not as the default onboarding path.
+- [`sdk/`](../../sdk/) — typed Go client on top of the gRPC admin surface.
 
 When the durable principal catalog is enabled, the gRPC admin/query surface now
 expects database-principal metadata on calls that open transactions or inspect
-current/historical engine state. The example client sends `asql-principal` and
-`asql-password` metadata via `-db-principal` and `-db-password`; bearer tokens
-remain separate transport/operator controls.
+current/historical engine state. Clients send `asql-principal` and
+`asql-password` via metadata; bearer tokens remain separate transport/operator
+controls.
 
 Important: the default local runtime started by `go run ./cmd/asqld ...` in
-getting-started exposes pgwire on `:5433`. It does not make the lower-level
-gRPC example the primary application-facing path for new teams.
+getting-started exposes pgwire on `:5433`. The gRPC admin surface is not the
+primary application-facing path for new teams.
 
 For new application code, a pgwire-first service shape is the right default.
 That is also the runtime started in [02-install-and-run.md](02-install-and-run.md).

@@ -127,11 +127,11 @@ Example: validate and load a fixture from the CLI.
 
 ```bash
 go run ./cmd/asqlctl -command fixture-validate \
-	-fixture-file fixtures/healthcare-billing-demo-v1.json
+	-fixture-file path/to/your-fixture.json
 
 go run ./cmd/asqlctl -command fixture-load \
 	-pgwire 127.0.0.1:5433 \
-	-fixture-file fixtures/healthcare-billing-demo-v1.json
+	-fixture-file path/to/your-fixture.json
 ```
 
 Schema-evolution review commands such as `migration-preflight` still exist in

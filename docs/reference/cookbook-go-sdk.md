@@ -107,10 +107,6 @@ This pattern keeps three things true at the same time:
 - repeated boilerplate does not spread across handlers,
 - rollback behavior stays consistent.
 
-Reference example:
-
-- [bankapp/tx_helpers.go](../../bankapp/tx_helpers.go)
-
 ---
 
 ## Recipe 3: Historical inspection from Go
@@ -301,7 +297,7 @@ For aggregate-oriented services, swap the snapshot token source to:
 See also:
 
 - [docs/getting-started/09-go-sdk-and-integration.md](../getting-started/09-go-sdk-and-integration.md)
-- [bankapp/main.go](../../bankapp/main.go)
-- [bankapp/tx_helpers.go](../../bankapp/tx_helpers.go)
+- [`sdk/`](../../sdk/) — typed Go client on top of the gRPC admin surface.
 
-The older example client remains useful as a low-level reference for engine-oriented operations, but pgwire should be the default integration path for new services.
+pgwire should be the default integration path for new services; the gRPC admin
+surface is reserved for lower-level engine-oriented operations.

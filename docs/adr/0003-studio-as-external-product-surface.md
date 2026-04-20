@@ -257,5 +257,4 @@ This ADR is successful when:
 
 ## Related documents
 
-- [docs/ai/05-backlog.md](../ai/05-backlog.md)
 - [docs/adr/0002-generalist-engine-boundary-and-adoption-surface.md](0002-generalist-engine-boundary-and-adoption-surface.md)

@@ -151,7 +151,7 @@ Those remain follow-on work.
 
 The initial reference pack is:
 
-- [fixtures/healthcare-billing-demo-v1.json](../fixtures/healthcare-billing-demo-v1.json)
+- [path/to/your-fixture.json](../path/to/your-fixture.json)
 
 It demonstrates:
 
@@ -166,7 +166,7 @@ It demonstrates:
 go run ./cmd/asqlctl -command fixture-export \
   -pgwire 127.0.0.1:5433 \
   -domains billing,patients,clinical \
-  -fixture-file fixtures/healthcare-billing-export-v1.json
+  -fixture-file path/to/your-export.json
 ```
 
 The exported file can then be checked with `fixture-validate` or reapplied with `fixture-load`.
