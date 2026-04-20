@@ -1,5 +1,10 @@
 # ASQL – Copilot Instructions
 
+> **Start with `AGENTS.md`** at the repo root. It has the durable contract
+> — determinism rules, repo layout, pgwire gotchas, test tiers, commands,
+> and commit conventions. This file adds product-level context for
+> Copilot-style tools: intent, scope boundaries, and engineering standards.
+
 ## Project intent
 Build and maintain **ASQL**, a general-purpose deterministic SQL engine in Go.
 
@@ -90,11 +95,10 @@ If any answer is “yes” to the first four, refactor before merging.
 
 ## Agent workflow
 1. Read the current task context and relevant docs.
-2. Use `docs/ai/05-backlog.md` for active engineering execution unless the user asks for a docs/product audit task.
-3. Implement the smallest useful vertical slice.
-4. Add or update tests.
-5. Update affected docs.
-6. Record an ADR when the decision is durable and architectural.
+2. Implement the smallest useful vertical slice.
+3. Add or update tests.
+4. Update affected docs.
+5. Record an ADR when the decision is durable and architectural.
 
 ## Definition of done
 A task is done only if:

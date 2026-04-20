@@ -1,0 +1,75 @@
+# ASQL
+
+> A deterministic SQL engine written in Go. Every committed transaction
+> gets a monotonic LSN, history is replay-safe, and the primary
+> application-facing surface is pgwire (PostgreSQL wire protocol). ASQL
+> exposes domain isolation, cross-domain transactions, entity versioning
+> with versioned foreign keys, and time-travel reads (`AS OF LSN`,
+> `FOR HISTORY`). It is not a drop-in PostgreSQL replacement.
+
+## Project essentials
+
+- [Repository](https://github.com/correodabid/asql): source code, issues,
+  and releases.
+- [AGENTS.md](https://github.com/correodabid/asql/blob/main/AGENTS.md):
+  canonical guide for AI agents working in this repo. Determinism
+  contract, repo layout, pgwire gotchas, test tiers, commit conventions.
+- [README.md](https://github.com/correodabid/asql/blob/main/README.md):
+  human-facing overview with quickstart.
+
+## Documentation (user-facing)
+
+- [Getting Started](https://github.com/correodabid/asql/blob/main/docs/getting-started/README.md):
+  primary onboarding path — install, first database, domains,
+  time-travel queries, entities, fixtures, Studio, integration.
+- [PostgreSQL Compatibility](https://github.com/correodabid/asql/blob/main/docs/reference/postgres-compatibility-surface-v1.md):
+  the supported pgwire/SQL surface and intentional gaps.
+- [Architecture One-Pager](https://github.com/correodabid/asql/blob/main/docs/architecture/architecture-one-pager-v1.md):
+  system design summary.
+- [Go Cookbook](https://github.com/correodabid/asql/blob/main/docs/reference/cookbook-go-sdk.md):
+  concrete pgwire / pgx integration recipes.
+- [Fixture Format](https://github.com/correodabid/asql/blob/main/docs/reference/fixture-format-and-lifecycle-v1.md):
+  deterministic scenario file contract.
+
+## Operations
+
+- [Production Runbook](https://github.com/correodabid/asql/blob/main/docs/operations/runbook.md):
+  boot, failover, backup, recovery, upgrade.
+- [Incident Runbook](https://github.com/correodabid/asql/blob/main/docs/operations/incident-runbook-v1.md):
+  P0/P1/P2 response procedures.
+- [SLO Definitions](https://github.com/correodabid/asql/blob/main/docs/operations/slo-v1.md):
+  workload-scoped objectives.
+- [Security Disclosure](https://github.com/correodabid/asql/blob/main/docs/operations/security-disclosure-policy-v1.md):
+  how to report vulnerabilities.
+
+## Architecture decisions
+
+- [ADR directory](https://github.com/correodabid/asql/tree/main/docs/adr):
+  durable rationale for engine-surface choices.
+
+## Ecosystem
+
+- [ASQL Studio](https://github.com/correodabid/asqlstudio): separate
+  desktop workspace (Wails + React). Connects via pgwire.
+
+## AI-agent integration
+
+- ASQL ships an MCP server (`cmd/asql-mcp`) that exposes the engine's
+  unique primitives — time-travel, row history, domain introspection,
+  entity versioning — to any Model Context Protocol client (Claude
+  Desktop, Cursor, Zed, ChatGPT Desktop). See the cmd/asql-mcp/README in
+  the repo.
+
+## Contract for agents writing code
+
+- Module path: `github.com/correodabid/asql`
+- Go toolchain: 1.25+
+- Hard determinism rules documented in AGENTS.md — no wall-clock, no
+  randomness, no map iteration order dependencies in the engine.
+- pgwire protocol: extended query pipeline must stay compatible with
+  pgx v5.9+ semantics (notably, `Describe Portal` is skipped for cached
+  statements — send `RowDescription` eagerly in streaming Execute paths).
+- Tests: `./internal/...` is the default fast loop; `./...` before
+  commit; `./test/determinism/...` for engine changes.
+- Commit format: `<type>(<scope>): <summary>` with Co-Authored-By
+  trailer when an agent contributed.
