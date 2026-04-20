@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -4322,5 +4323,127 @@ func TestPGWireTailEntityChangesFollowWorksOnExtendedProtocol(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		rows.Close()
 		t.Fatal("timeout waiting for extended follow rows")
+	}
+}
+
+// TestPGWireAsOfLSNInlineSyntax guards a regression where the inline
+// `SELECT ... AS OF LSN N` SQL clause was silently interpreted by the
+// parser as a table alias, so pgwire never actually passed the LSN to
+// the time-travel executor and the query returned the current head
+// state regardless of the requested LSN.
+func TestPGWireAsOfLSNInlineSyntax(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	dataDir := filepath.Join(t.TempDir(), "asof-lsn-inline")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: dataDir,
+		Logger:      logger,
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.ServeOnListener(ctx, listener) }()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case err := <-errCh:
+			if err != nil {
+				t.Fatalf("pgwire server exited with error: %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("timeout waiting for pgwire server shutdown")
+		}
+	})
+	addr := listener.Addr().String()
+
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+addr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+
+	// Seed: one INSERT at a known commit LSN, one UPDATE later.
+	seed := []string{
+		"BEGIN DOMAIN travel",
+		"CREATE TABLE u (id INT PRIMARY KEY, name TEXT)",
+		"INSERT INTO u (id, name) VALUES (1, 'alice')",
+		"COMMIT",
+	}
+	for _, sql := range seed {
+		if _, err := conn.Exec(ctx, sql); err != nil {
+			t.Fatalf("seed %q: %v", sql, err)
+		}
+	}
+
+	// Capture the LSN immediately after the INSERT commit — this is the
+	// point we want to time-travel back to later.
+	var lsnAfterInsert int64
+	if err := conn.QueryRow(ctx, "SELECT current_lsn()").Scan(&lsnAfterInsert); err != nil {
+		t.Fatalf("current_lsn after insert: %v", err)
+	}
+
+	// Now mutate.
+	for _, sql := range []string{
+		"BEGIN DOMAIN travel",
+		"UPDATE u SET name = 'ALICE' WHERE id = 1",
+		"COMMIT",
+	} {
+		if _, err := conn.Exec(ctx, sql); err != nil {
+			t.Fatalf("mutate %q: %v", sql, err)
+		}
+	}
+
+	// Sanity: current state should reflect the UPDATE.
+	if _, err := conn.Exec(ctx, "BEGIN DOMAIN travel"); err != nil {
+		t.Fatalf("begin read tx: %v", err)
+	}
+	var name string
+	if err := conn.QueryRow(ctx, "SELECT name FROM u WHERE id = 1").Scan(&name); err != nil {
+		t.Fatalf("current read: %v", err)
+	}
+	if name != "ALICE" {
+		t.Fatalf("current state = %q, want ALICE", name)
+	}
+
+	// The actual guard: inline AS OF LSN must return pre-UPDATE state.
+	var past string
+	if err := conn.QueryRow(ctx,
+		"SELECT name FROM u AS OF LSN "+strconv.FormatInt(lsnAfterInsert, 10)+" WHERE id = 1",
+	).Scan(&past); err != nil {
+		t.Fatalf("as-of-lsn read: %v", err)
+	}
+	if past != "alice" {
+		t.Fatalf("AS OF LSN %d returned name = %q, want 'alice' (pre-UPDATE). "+
+			"This regression means `AS OF LSN` is being silently ignored again.",
+			lsnAfterInsert, past)
+	}
+
+	// AS OF TIMESTAMP must parse cleanly (the exact historical match
+	// depends on the clock; the guard here is that the clause is
+	// recognised and the query runs without being mis-parsed as an alias).
+	if _, err := conn.Exec(ctx,
+		"SELECT * FROM u AS OF TIMESTAMP '2000-01-01T00:00:00Z'"); err != nil {
+		// We expect either a successful empty result or an error about
+		// the timestamp being before the engine's genesis; we do NOT
+		// expect a parse error like "table not found" for "u AS of"
+		// interpreting the clause as an alias.
+		if strings.Contains(err.Error(), "as") && strings.Contains(err.Error(), "alias") {
+			t.Fatalf("AS OF TIMESTAMP was mis-parsed as alias: %v", err)
+		}
+	}
+
+	if _, err := conn.Exec(ctx, "COMMIT"); err != nil {
+		t.Fatalf("commit read tx: %v", err)
 	}
 }

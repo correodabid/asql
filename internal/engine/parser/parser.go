@@ -1195,6 +1195,14 @@ func parseSelect(sql string) (ast.Statement, error) {
 		remaining = strings.TrimSpace(afterFrom[clauseIndex:])
 	}
 
+	// Extract the trailing temporal clause (AS OF LSN N / AS OF TIMESTAMP 'T')
+	// before parsing the table reference, so ` AS OF … ` isn't mistaken for
+	// an alias.
+	fromSpec, asOfLSN, asOfTsMicros, err := extractTrailingAsOf(fromSpec)
+	if err != nil {
+		return nil, err
+	}
+
 	forHistory := false
 	if len(fromSpec) >= len(" FOR HISTORY") && strings.EqualFold(fromSpec[len(fromSpec)-len(" FOR HISTORY"):], " FOR HISTORY") {
 		forHistory = true
@@ -1310,22 +1318,24 @@ func parseSelect(sql string) (ast.Statement, error) {
 	}
 
 	return ast.SelectStatement{
-		CTEs:              derivedCTEs,
-		Distinct:          distinct,
-		Columns:           columns,
-		JsonAccessColumns: jsonAccessColumns,
-		CaseWhenColumns:   caseWhenColumns,
-		TableName:         table,
-		TableAlias:        tableAlias,
-		ForHistory:        forHistory,
-		Joins:             joins,
-		Where:             predicate,
-		GroupBy:           groupBy,
-		Having:            having,
-		OrderBy:           orderBy,
-		Limit:             limit,
-		Offset:            offset,
-		WindowFunctions:   windowFunctions,
+		CTEs:                derivedCTEs,
+		Distinct:            distinct,
+		Columns:             columns,
+		JsonAccessColumns:   jsonAccessColumns,
+		CaseWhenColumns:     caseWhenColumns,
+		TableName:           table,
+		TableAlias:          tableAlias,
+		ForHistory:          forHistory,
+		AsOfLSN:             asOfLSN,
+		AsOfTimestampMicros: asOfTsMicros,
+		Joins:               joins,
+		Where:               predicate,
+		GroupBy:             groupBy,
+		Having:              having,
+		OrderBy:             orderBy,
+		Limit:               limit,
+		Offset:              offset,
+		WindowFunctions:     windowFunctions,
 	}, nil
 }
 
@@ -1817,6 +1827,98 @@ func parseGroupBy(clause string) ([]string, error) {
 	}
 
 	return columns, nil
+}
+
+// extractTrailingAsOf recognises the optional `AS OF LSN N` or
+// `AS OF TIMESTAMP '<iso>'` clause that may trail a SELECT's FROM
+// specification, returning the FROM text with the clause stripped and
+// the extracted values (one of asOfLSN / asOfTimestampMicros will be
+// non-nil, both nil when no clause is present).
+//
+// This lives at the parser level — not at the transport — so every
+// consumer (pgwire, fixtures, shell, tests) sees the same contract:
+// time-travel is a first-class SELECT clause, not a comment hack.
+//
+// Both pgwire and the parser historically accepted a `/* as-of-lsn: N */`
+// comment as an alternate encoding. That path still works (the comment
+// is stripped at transport level before the parser sees the SQL); this
+// function adds the native SQL form.
+func extractTrailingAsOf(fromSpec string) (string, *uint64, *int64, error) {
+	// Walk backwards from the right looking for " AS OF " with a valid
+	// tail. Done textually rather than with a regex so we only match
+	// when the clause is outside any quoted literal. We accept these
+	// shapes (case-insensitive):
+	//   AS OF LSN <digits>
+	//   AS OF TIMESTAMP '<iso timestamp>'
+	trimmed := strings.TrimRight(fromSpec, " \t\r\n")
+	upper := strings.ToUpper(trimmed)
+
+	// Find the last occurrence of " AS OF " that is not inside quotes.
+	asOfIdx := -1
+	inQuote := false
+	for i := 0; i < len(trimmed); i++ {
+		if trimmed[i] == '\'' {
+			inQuote = !inQuote
+			continue
+		}
+		if inQuote {
+			continue
+		}
+		if i+len(" AS OF ") <= len(upper) && upper[i:i+len(" AS OF ")] == " AS OF " {
+			asOfIdx = i
+		}
+	}
+	if asOfIdx < 0 {
+		return trimmed, nil, nil, nil
+	}
+
+	clause := strings.TrimSpace(trimmed[asOfIdx+len(" AS OF "):])
+	head := strings.TrimSpace(trimmed[:asOfIdx])
+
+	upperClause := strings.ToUpper(clause)
+	switch {
+	case strings.HasPrefix(upperClause, "LSN "):
+		value := strings.TrimSpace(clause[len("LSN "):])
+		n, err := strconv.ParseUint(value, 10, 64)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("%w: AS OF LSN requires an unsigned integer, got %q", errInvalidSQL, value)
+		}
+		return head, &n, nil, nil
+	case strings.HasPrefix(upperClause, "TIMESTAMP "):
+		value := strings.TrimSpace(clause[len("TIMESTAMP "):])
+		if len(value) < 2 || value[0] != '\'' || value[len(value)-1] != '\'' {
+			return "", nil, nil, fmt.Errorf("%w: AS OF TIMESTAMP requires a quoted ISO-8601 timestamp, got %q", errInvalidSQL, value)
+		}
+		iso := value[1 : len(value)-1]
+		ts, err := parseIsoTimestamp(iso)
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("%w: AS OF TIMESTAMP could not parse %q: %v", errInvalidSQL, iso, err)
+		}
+		micros := ts.UnixMicro()
+		return head, nil, &micros, nil
+	}
+	// Any other token sequence after AS OF is either a versioned FK
+	// clause (shouldn't appear here) or a malformed request. Returning
+	// the original spec lets callers that don't care about time-travel
+	// continue to work.
+	return trimmed, nil, nil, nil
+}
+
+// parseIsoTimestamp accepts a handful of ISO-8601 shapes that a user is
+// likely to type at the SQL layer.
+func parseIsoTimestamp(s string) (time.Time, error) {
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t.UTC(), nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("unrecognised timestamp format")
 }
 
 func parseOrderBy(clause string) ([]ast.OrderByClause, error) {

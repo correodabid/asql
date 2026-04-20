@@ -351,14 +351,21 @@ type SelectStatement struct {
 	TableName         string               `json:"table_name"`
 	TableAlias        string               `json:"table_alias,omitempty"`
 	ForHistory        bool                 `json:"for_history,omitempty"`
-	Joins             []JoinClause         `json:"joins,omitempty"`
-	Where             *Predicate           `json:"where,omitempty"`
-	GroupBy           []string             `json:"group_by,omitempty"`
-	Having            *Predicate           `json:"having,omitempty"`
-	OrderBy           []OrderByClause      `json:"order_by,omitempty"`
-	Limit             *int                 `json:"limit,omitempty"`
-	Offset            *int                 `json:"offset,omitempty"`
-	WindowFunctions   []WindowFunction     `json:"window_functions,omitempty"`
+	// AsOfLSN, when non-nil, carries the commit LSN requested via the
+	// inline SQL clause `AS OF LSN N`. It is mutually exclusive with
+	// AsOfTimestamp. When both are nil the query reads the current head.
+	AsOfLSN *uint64 `json:"as_of_lsn,omitempty"`
+	// AsOfTimestampMicros, when non-nil, carries the timestamp (in Unix
+	// microseconds) requested via `AS OF TIMESTAMP '<iso>'`.
+	AsOfTimestampMicros *int64           `json:"as_of_timestamp_micros,omitempty"`
+	Joins               []JoinClause     `json:"joins,omitempty"`
+	Where               *Predicate       `json:"where,omitempty"`
+	GroupBy             []string         `json:"group_by,omitempty"`
+	Having              *Predicate       `json:"having,omitempty"`
+	OrderBy             []OrderByClause  `json:"order_by,omitempty"`
+	Limit               *int             `json:"limit,omitempty"`
+	Offset              *int             `json:"offset,omitempty"`
+	WindowFunctions     []WindowFunction `json:"window_functions,omitempty"`
 }
 
 func (SelectStatement) statementNode() {}

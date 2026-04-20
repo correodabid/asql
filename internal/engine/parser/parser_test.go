@@ -1282,6 +1282,112 @@ func TestParseSelectWithoutForHistory(t *testing.T) {
 	}
 }
 
+func TestParseSelectAsOfLSN(t *testing.T) {
+	// Inline AS OF LSN clause must be recognised and extracted from the
+	// FROM spec so the table reference stays clean and the AST carries
+	// the LSN explicitly.
+	cases := []struct {
+		sql       string
+		wantLSN   uint64
+		wantTable string
+	}{
+		{"SELECT * FROM users AS OF LSN 42", 42, "users"},
+		{"SELECT * FROM users AS OF LSN 42 WHERE id = 1", 42, "users"},
+		{"SELECT * FROM users AS OF LSN 42 ORDER BY id", 42, "users"},
+		{"SELECT * FROM users AS OF LSN 42 LIMIT 10", 42, "users"},
+		{"SELECT id FROM accounts.users AS OF LSN 100", 100, "accounts.users"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.sql, func(t *testing.T) {
+			stmt, err := Parse(tc.sql)
+			if err != nil {
+				t.Fatalf("parse: %v", err)
+			}
+			sel, ok := stmt.(ast.SelectStatement)
+			if !ok {
+				t.Fatalf("expected SelectStatement, got %T", stmt)
+			}
+			if sel.AsOfLSN == nil {
+				t.Fatalf("expected AsOfLSN to be set")
+			}
+			if *sel.AsOfLSN != tc.wantLSN {
+				t.Errorf("AsOfLSN = %d, want %d", *sel.AsOfLSN, tc.wantLSN)
+			}
+			if sel.TableName != tc.wantTable {
+				t.Errorf("TableName = %q, want %q", sel.TableName, tc.wantTable)
+			}
+			if sel.TableAlias == "of" || sel.TableAlias == "lsn" {
+				t.Errorf("table alias polluted by AS OF clause: %q", sel.TableAlias)
+			}
+		})
+	}
+}
+
+func TestParseSelectAsOfTimestamp(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM users AS OF TIMESTAMP '2024-06-15T12:34:56Z'")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	sel, ok := stmt.(ast.SelectStatement)
+	if !ok {
+		t.Fatalf("expected SelectStatement, got %T", stmt)
+	}
+	if sel.AsOfTimestampMicros == nil {
+		t.Fatal("expected AsOfTimestampMicros to be set")
+	}
+	if sel.AsOfLSN != nil {
+		t.Error("expected AsOfLSN to be nil when TIMESTAMP is used")
+	}
+	// 2024-06-15T12:34:56Z → unix micros
+	want := int64(1718454896000000)
+	if *sel.AsOfTimestampMicros != want {
+		t.Errorf("AsOfTimestampMicros = %d, want %d", *sel.AsOfTimestampMicros, want)
+	}
+	if sel.TableName != "users" {
+		t.Errorf("TableName polluted: %q", sel.TableName)
+	}
+}
+
+func TestParseSelectAsOfRejectsInvalidValue(t *testing.T) {
+	// Non-numeric LSN must error, not silently drop the clause.
+	for _, sql := range []string{
+		"SELECT * FROM users AS OF LSN abc",
+		"SELECT * FROM users AS OF LSN -5",
+		"SELECT * FROM users AS OF TIMESTAMP nothing",
+		"SELECT * FROM users AS OF TIMESTAMP 'not-a-date'",
+	} {
+		if _, err := Parse(sql); err == nil {
+			t.Errorf("expected parse error for %q, got nil", sql)
+		}
+	}
+}
+
+func TestParseSelectAsOfLSNZeroIsValid(t *testing.T) {
+	// LSN 0 is the initial genesis position and must be representable.
+	stmt, err := Parse("SELECT * FROM users AS OF LSN 0")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	sel := stmt.(ast.SelectStatement)
+	if sel.AsOfLSN == nil || *sel.AsOfLSN != 0 {
+		t.Errorf("expected AsOfLSN=0, got %v", sel.AsOfLSN)
+	}
+}
+
+func TestParseSelectWithoutAsOfLeavesFieldsNil(t *testing.T) {
+	stmt, err := Parse("SELECT * FROM users WHERE id = 1")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	sel := stmt.(ast.SelectStatement)
+	if sel.AsOfLSN != nil {
+		t.Errorf("expected AsOfLSN=nil for plain SELECT, got %v", *sel.AsOfLSN)
+	}
+	if sel.AsOfTimestampMicros != nil {
+		t.Errorf("expected AsOfTimestampMicros=nil for plain SELECT")
+	}
+}
+
 func TestParseCreateTableDefaultAutoIncrement(t *testing.T) {
 	stmt, err := Parse("CREATE TABLE users (id INT PRIMARY KEY DEFAULT AUTOINCREMENT, name TEXT);")
 	if err != nil {

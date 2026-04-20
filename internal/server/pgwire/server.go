@@ -1458,6 +1458,16 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 			if _, err := server.engine.AuthorizeSQL(session.Principal(), stripped, domains); err != nil {
 				return executor.Result{}, nil, err
 			}
+			// Inline `AS OF LSN N` / `AS OF TIMESTAMP '...'` in the SQL
+			// takes priority over the legacy /* as-of-... */ comment
+			// hint; it carries the user's explicit intent.
+			effKind := asOfKind
+			effValue := asOfValue
+			if selectStatement.AsOfLSN != nil {
+				effKind, effValue = "lsn", *selectStatement.AsOfLSN
+			} else if selectStatement.AsOfTimestampMicros != nil {
+				effKind, effValue = "ts", uint64(*selectStatement.AsOfTimestampMicros)
+			}
 			var result executor.Result
 			var err error
 			if selectStatement.ForHistory {
@@ -1466,19 +1476,19 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 				}
 				result, err = server.engine.RowHistory(ctx, stripped, domains)
 			} else {
-				switch asOfKind {
+				switch effKind {
 				case "ts":
-					if err = server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "as_of_timestamp", targetKind: "timestamp", targetTimestampMicros: asOfValue}); err != nil {
+					if err = server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "as_of_timestamp", targetKind: "timestamp", targetTimestampMicros: effValue}); err != nil {
 						return executor.Result{}, nil, err
 					}
-					result, err = server.engine.TimeTravelQueryAsOfTimestamp(ctx, stripped, domains, asOfValue)
+					result, err = server.engine.TimeTravelQueryAsOfTimestamp(ctx, stripped, domains, effValue)
 				default:
 					targetLSN := maxLSN
-					if asOfKind == "lsn" {
-						if err = server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "as_of_lsn", targetKind: "lsn", targetLSN: asOfValue}); err != nil {
+					if effKind == "lsn" {
+						if err = server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "as_of_lsn", targetKind: "lsn", targetLSN: effValue}); err != nil {
 							return executor.Result{}, nil, err
 						}
-						targetLSN = asOfValue
+						targetLSN = effValue
 					}
 					result, err = server.engine.TimeTravelQueryAsOfLSN(ctx, stripped, domains, targetLSN)
 				}
