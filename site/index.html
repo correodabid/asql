@@ -25,10 +25,11 @@
       </a>
       <div class="nav-links">
         <a href="#features">Features</a>
+        <a href="#compare">vs Others</a>
         <a href="studio.html">Studio</a>
         <a href="docs.html">Docs</a>
         <a href="#performance">Performance</a>
-        <a href="https://github.com/davidrjonas/asql" class="nav-gh" target="_blank" rel="noopener">
+        <a href="https://github.com/correodabid/asql" class="nav-gh" target="_blank" rel="noopener">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         </a>
       </div>
@@ -37,8 +38,8 @@
 
   <!-- ═══════════════════════════════ HERO ═══════════════════════════════ -->
   <section class="hero">
-    <div class="hero-glow"></div>
-    <div class="container">
+    <div class="hero-glow" aria-hidden="true"><span></span></div>
+    <div class="container" style="position:relative;z-index:1;">
       <div class="hero-badge">Open Source · Written in Go · Deterministic by Design</div>
       <h1 class="hero-title">
         The SQL engine that<br>
@@ -54,26 +55,59 @@
       <div class="hero-actions">
         <a href="#quickstart" class="btn btn-primary">Get Started</a>
         <a href="docs.html" class="btn btn-ghost">Evaluate Safely →</a>
-        <a href="https://github.com/davidrjonas/asql" class="btn btn-ghost" target="_blank" rel="noopener">
+        <a href="https://github.com/correodabid/asql" class="btn btn-ghost" target="_blank" rel="noopener">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           View on GitHub
         </a>
       </div>
-      <div class="hero-terminal">
-        <div class="terminal-bar">
-          <span class="terminal-dot red"></span>
-          <span class="terminal-dot yellow"></span>
-          <span class="terminal-dot green"></span>
-          <span class="terminal-title">terminal</span>
+      <!-- Live time-travel demo — shows the one feature nobody else has -->
+      <div class="hero-demo" aria-label="Interactive time-travel demonstration">
+        <div class="hero-demo-frame">
+          <div class="terminal-bar">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot yellow"></span>
+            <span class="terminal-dot green"></span>
+            <span class="terminal-title">
+              <span id="demo-title">asql — time-travel demo</span>
+              <span class="demo-lsn" id="demo-lsn">LSN 0</span>
+            </span>
+          </div>
+          <div class="hero-demo-body">
+            <pre class="hero-demo-code" id="demo-code"></pre>
+            <div class="hero-demo-output" id="demo-output" aria-live="polite"></div>
+          </div>
         </div>
-        <pre class="terminal-body"><code><span class="t-comment"># Start ASQL on the canonical pgwire path</span>
-<span class="t-prompt">$</span> go run ./cmd/asqld -addr :5433 -data-dir .asql
-
-    <span class="t-comment"># Connect with supported pgwire clients and flows</span>
-<span class="t-prompt">$</span> psql -h localhost -p 5433 -d asql</code></pre>
+        <div class="hero-demo-caption">
+          <span class="demo-dot-pulse"></span>
+          Same database. Any point in history. One SELECT away.
+        </div>
       </div>
     </div>
   </section>
+
+  <!-- ═══════════════════════════ KEYWORD TICKER ═══════════════════════════ -->
+  <div class="keyword-ticker" aria-hidden="true">
+    <div class="keyword-track">
+      <!-- list ×2 so it loops seamlessly -->
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>LSN</strong> · monotonic commit position</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>WAL</strong> · append-only source of truth</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>Domain</strong> · explicit transaction scope</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>Entity</strong> · versioned aggregate across tables</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>Replay</strong> · same input, same state, always</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>AS OF LSN</strong> · read any point in history</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>FOR HISTORY</strong> · row-level audit, zero setup</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>pgwire</strong> · use the drivers you already have</span>
+      <!-- duplicate for seamless loop -->
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>LSN</strong> · monotonic commit position</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>WAL</strong> · append-only source of truth</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>Domain</strong> · explicit transaction scope</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>Entity</strong> · versioned aggregate across tables</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>Replay</strong> · same input, same state, always</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>AS OF LSN</strong> · read any point in history</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>FOR HISTORY</strong> · row-level audit, zero setup</span>
+      <span class="keyword-item"><span class="keyword-dot"></span><strong>pgwire</strong> · use the drivers you already have</span>
+    </div>
+  </div>
 
   <!-- ═══════════════════════════ VALUE PROPS ═══════════════════════════ -->
   <section class="section section-dark" id="why">
@@ -113,6 +147,107 @@
           <h3>Scale when you need it</h3>
           <p>Start local. Add replication. Form a Raft cluster. Same API, same semantics, no migration.</p>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════════════════ COMPARISON ═══════════════════════════ -->
+  <section class="section" id="compare">
+    <div class="container">
+      <div class="section-header">
+        <h2>What makes ASQL different</h2>
+        <p class="section-sub">A deterministic engine with replay-safe history — capabilities other SQL databases either don't offer, or require custom infrastructure to approximate.</p>
+      </div>
+      <div class="compare-wrap">
+        <table class="compare-table">
+          <thead>
+            <tr>
+              <th class="compare-feature"></th>
+              <th class="compare-asql">
+                <span class="compare-col-name">ASQL</span>
+              </th>
+              <th>PostgreSQL</th>
+              <th>MySQL</th>
+              <th>SQLite</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="compare-feature">
+                <strong>Time-travel queries</strong>
+                <small><code>SELECT ... AS OF LSN</code> out of the box</small>
+              </td>
+              <td class="compare-asql"><span class="cmp-yes">✓ Native</span></td>
+              <td><span class="cmp-no">Via extensions + effort</span></td>
+              <td><span class="cmp-no">No</span></td>
+              <td><span class="cmp-no">No</span></td>
+            </tr>
+            <tr>
+              <td class="compare-feature">
+                <strong>Deterministic replay</strong>
+                <small>Bit-identical state from same WAL</small>
+              </td>
+              <td class="compare-asql"><span class="cmp-yes">✓ Contract</span></td>
+              <td><span class="cmp-partial">Best-effort</span></td>
+              <td><span class="cmp-partial">Best-effort</span></td>
+              <td><span class="cmp-partial">Best-effort</span></td>
+            </tr>
+            <tr>
+              <td class="compare-feature">
+                <strong>Domain isolation</strong>
+                <small>Per-transaction explicit scope</small>
+              </td>
+              <td class="compare-asql"><span class="cmp-yes">✓ Built-in</span></td>
+              <td><span class="cmp-partial">Via schemas + discipline</span></td>
+              <td><span class="cmp-partial">Via databases</span></td>
+              <td><span class="cmp-no">No</span></td>
+            </tr>
+            <tr>
+              <td class="compare-feature">
+                <strong>Entity versioning</strong>
+                <small>Versioned FKs across related tables</small>
+              </td>
+              <td class="compare-asql"><span class="cmp-yes">✓ Native</span></td>
+              <td><span class="cmp-no">Application-level</span></td>
+              <td><span class="cmp-no">Application-level</span></td>
+              <td><span class="cmp-no">Application-level</span></td>
+            </tr>
+            <tr>
+              <td class="compare-feature">
+                <strong>Row-level history</strong>
+                <small><code>FOR HISTORY</code> without CDC</small>
+              </td>
+              <td class="compare-asql"><span class="cmp-yes">✓ First-class</span></td>
+              <td><span class="cmp-partial">Via triggers / CDC</span></td>
+              <td><span class="cmp-partial">Via triggers / CDC</span></td>
+              <td><span class="cmp-no">No</span></td>
+            </tr>
+            <tr>
+              <td class="compare-feature">
+                <strong>Single binary, zero deps</strong>
+                <small>No JVM, no sidecar, no runtime</small>
+              </td>
+              <td class="compare-asql"><span class="cmp-yes">✓ Static Go</span></td>
+              <td><span class="cmp-no">Server process + libs</span></td>
+              <td><span class="cmp-no">Server process + libs</span></td>
+              <td><span class="cmp-yes">✓ Embedded</span></td>
+            </tr>
+            <tr>
+              <td class="compare-feature">
+                <strong>pgwire protocol</strong>
+                <small>Works with existing tooling</small>
+              </td>
+              <td class="compare-asql"><span class="cmp-yes">✓ Pragmatic subset</span></td>
+              <td><span class="cmp-yes">✓ Reference</span></td>
+              <td><span class="cmp-no">No</span></td>
+              <td><span class="cmp-no">No</span></td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="compare-note">
+          ASQL is not a drop-in PostgreSQL replacement — it's a deterministic engine that happens to speak pgwire.
+          When time-travel, replay, and domain isolation matter more than full Postgres parity, the trade is worth it.
+        </p>
       </div>
     </div>
   </section>
@@ -305,7 +440,7 @@
             <span>pgx</span><span>psql</span><span>JDBC</span><span>DBeaver</span><span>Studio</span>
           </div>
         </div>
-        <div class="arch-arrow">▼</div>
+        <div class="arch-flow" aria-hidden="true"><div class="arch-flow-dot"></div></div>
         <div class="arch-layer arch-transport">
           <div class="arch-label">Transport</div>
           <div class="arch-items">
@@ -313,7 +448,7 @@
             <span>gRPC <small>(admin)</small></span>
           </div>
         </div>
-        <div class="arch-arrow">▼</div>
+        <div class="arch-flow" aria-hidden="true"><div class="arch-flow-dot" style="animation-delay:-0.7s"></div></div>
         <div class="arch-layer arch-engine">
           <div class="arch-label">Engine</div>
           <div class="arch-items">
@@ -326,17 +461,17 @@
             <span>TX Manager</span>
           </div>
         </div>
-        <div class="arch-arrow">▼</div>
+        <div class="arch-flow" aria-hidden="true"><div class="arch-flow-dot" style="animation-delay:-1.4s"></div></div>
         <div class="arch-layer arch-storage">
-          <div class="arch-label">Storage</div>
+          <div class="arch-label">Storage · the source of truth</div>
           <div class="arch-items">
-            <span>Append-only WAL</span>
+            <span class="arch-wal">Append-only WAL</span>
             <span>BTree / Hash Indexes</span>
             <span>Binary Snapshots</span>
           </div>
         </div>
-        <div class="arch-arrow-opt">
-          <span>▼ optional</span>
+        <div class="arch-flow arch-flow-opt" aria-hidden="true">
+          <div class="arch-flow-label">optional</div>
         </div>
         <div class="arch-layer arch-cluster">
           <div class="arch-label">Cluster</div>
@@ -360,19 +495,49 @@
 
       <div class="bench-grid">
         <div class="bench-card bench-hero-card">
-          <div class="bench-number">587</div>
+          <div class="bench-number" data-count-to="587">0</div>
           <div class="bench-unit">tx/sec</div>
           <div class="bench-desc">Sustained cluster writes<br><small>3-node quorum · wide transactions · 4 workers</small></div>
+          <div class="bench-spark" aria-hidden="true">
+            <div class="bench-spark-bar" style="height:35%"></div>
+            <div class="bench-spark-bar" style="height:55%"></div>
+            <div class="bench-spark-bar" style="height:48%"></div>
+            <div class="bench-spark-bar" style="height:68%"></div>
+            <div class="bench-spark-bar" style="height:52%"></div>
+            <div class="bench-spark-bar" style="height:72%"></div>
+            <div class="bench-spark-bar" style="height:60%"></div>
+            <div class="bench-spark-bar" style="height:80%"></div>
+          </div>
         </div>
         <div class="bench-card bench-hero-card">
-          <div class="bench-number">18,201</div>
+          <div class="bench-number" data-count-to="18201" data-count-format="thousands">0</div>
           <div class="bench-unit">rows/sec</div>
           <div class="bench-desc">Cluster row throughput<br><small>wide-tx scenario · replicated + fsync'd</small></div>
+          <div class="bench-spark" aria-hidden="true">
+            <div class="bench-spark-bar" style="height:40%"></div>
+            <div class="bench-spark-bar" style="height:62%"></div>
+            <div class="bench-spark-bar" style="height:55%"></div>
+            <div class="bench-spark-bar" style="height:78%"></div>
+            <div class="bench-spark-bar" style="height:70%"></div>
+            <div class="bench-spark-bar" style="height:85%"></div>
+            <div class="bench-spark-bar" style="height:75%"></div>
+            <div class="bench-spark-bar" style="height:90%"></div>
+          </div>
         </div>
         <div class="bench-card bench-hero-card">
-          <div class="bench-number">6ms</div>
+          <div class="bench-number" data-count-to="6" data-count-suffix="ms">0ms</div>
           <div class="bench-unit">P50 latency</div>
           <div class="bench-desc">Cluster write latency<br><small>quorum commit · wide-tx scenario</small></div>
+          <div class="bench-spark bench-spark-latency" aria-hidden="true">
+            <div class="bench-spark-bar" style="height:30%"></div>
+            <div class="bench-spark-bar" style="height:25%"></div>
+            <div class="bench-spark-bar" style="height:35%"></div>
+            <div class="bench-spark-bar" style="height:28%"></div>
+            <div class="bench-spark-bar" style="height:32%"></div>
+            <div class="bench-spark-bar" style="height:26%"></div>
+            <div class="bench-spark-bar" style="height:40%"></div>
+            <div class="bench-spark-bar" style="height:30%"></div>
+          </div>
         </div>
       </div>
 
@@ -631,7 +796,7 @@ conn.Exec(ctx, "COMMIT")</code></pre>
         <p>
           <strong>Compatibility stance:</strong> ASQL implements a pragmatic PostgreSQL-compatible subset over pgwire.
           It works with <code>pgx</code>, <code>psql</code>, <code>JDBC</code>, <code>DBeaver</code>, <code>DataGrip</code>, and <code>pgAdmin</code>.
-          <a href="https://github.com/davidrjonas/asql/blob/main/docs/reference/postgres-compatibility-surface-v1.md">Full compatibility matrix →</a>
+          <a href="https://github.com/correodabid/asql/blob/main/docs/reference/postgres-compatibility-surface-v1.md">Full compatibility matrix →</a>
         </p>
       </div>
     </div>
@@ -705,7 +870,7 @@ conn.Exec(ctx, "COMMIT")</code></pre>
           <pre><code>go run ./cmd/asqlctl \
   -command fixture-load \
   -pgwire 127.0.0.1:5433 \
-  -fixture-file fixtures/demo.json</code></pre>
+  -fixture-file path/to/fixture.json</code></pre>
         </div>
         <div class="tool-card">
           <h4>🐳 Docker</h4>
@@ -734,9 +899,9 @@ docker run -p 5433:5433 \
           <h4>Compatibility Matrix</h4>
           <p>See the supported PostgreSQL-compatible subset and the flows that work today before assuming parity.</p>
         </a>
-        <a href="doc.html?path=product/benchmark-one-pager-v1.md" class="docs-ref-card">
-          <h4>Benchmark One-Pager</h4>
-          <p>Review benchmark evidence, workload framing, and the current performance posture without hunting through internal notes.</p>
+        <a href="doc.html?path=architecture/architecture-one-pager-v1.md" class="docs-ref-card">
+          <h4>Architecture One-Pager</h4>
+          <p>See how the engine, WAL, pgwire transport, and optional cluster tier fit together.</p>
         </a>
         <a href="doc.html?path=operations/release-upgrade-compat-checklist-v1.md" class="docs-ref-card">
           <h4>Production & Release Gates</h4>
@@ -752,7 +917,7 @@ docker run -p 5433:5433 \
       <h2>Ready to try a database that<br>actually remembers?</h2>
       <p>ASQL is open source. Start with the documented pgwire path, then validate compatibility, benchmark evidence, and operator workflows from the docs.</p>
       <div class="hero-actions">
-        <a href="https://github.com/davidrjonas/asql" class="btn btn-primary" target="_blank" rel="noopener">
+        <a href="https://github.com/correodabid/asql" class="btn btn-primary" target="_blank" rel="noopener">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" style="margin-right:6px"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
           Star on GitHub
         </a>
@@ -773,19 +938,19 @@ docker run -p 5433:5433 \
         <a href="index.html">Engine</a>
         <a href="studio.html">Studio</a>
         <a href="docs.html">Docs</a>
-        <a href="https://github.com/davidrjonas/asql">GitHub</a>
+        <a href="https://github.com/correodabid/asql">GitHub</a>
       </div>
     </div>
   </footer>
 
   <script>
-    // Sticky nav background on scroll
+    // ─── Sticky nav background on scroll ───
     const nav = document.getElementById('nav');
     window.addEventListener('scroll', () => {
       nav.classList.toggle('scrolled', window.scrollY > 40);
     });
 
-    // Smooth scroll for anchor links
+    // ─── Smooth scroll for anchor links ───
     document.querySelectorAll('a[href^="#"]').forEach(a => {
       a.addEventListener('click', e => {
         const target = document.querySelector(a.getAttribute('href'));
@@ -796,19 +961,142 @@ docker run -p 5433:5433 \
       });
     });
 
-    // Intersection observer for fade-in animations
-    const observer = new IntersectionObserver((entries) => {
+    // ─── Fade-in observer ───
+    const fadeObserver = new IntersectionObserver((entries) => {
       entries.forEach(entry => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add('visible');
-        }
+        if (entry.isIntersecting) entry.target.classList.add('visible');
       });
     }, { threshold: 0.1, rootMargin: '0px 0px -60px 0px' });
 
-    document.querySelectorAll('.feature-block, .value-card, .deploy-card, .bench-card, .usecase-card, .tool-card, .sql-card, .qs-step').forEach(el => {
+    document.querySelectorAll(
+      '.feature-block, .value-card, .deploy-card, .bench-card, .usecase-card, .tool-card, .sql-card, .qs-step, .compare-wrap'
+    ).forEach(el => {
       el.classList.add('fade-in');
-      observer.observe(el);
+      fadeObserver.observe(el);
     });
+
+    // ─── Animated counters for benchmark numbers ───
+    function formatCounter(v, format, suffix) {
+      let s;
+      if (format === 'thousands') {
+        s = Math.round(v).toLocaleString('en-US');
+      } else {
+        s = Math.round(v).toString();
+      }
+      return s + (suffix || '');
+    }
+    const counterObserver = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        const el = entry.target;
+        if (el.dataset.counted === '1') return;
+        el.dataset.counted = '1';
+        const to = parseFloat(el.dataset.countTo);
+        const format = el.dataset.countFormat;
+        const suffix = el.dataset.countSuffix || '';
+        const duration = 1600;
+        const start = performance.now();
+        const easeOut = t => 1 - Math.pow(1 - t, 3);
+        function step(now) {
+          const t = Math.min(1, (now - start) / duration);
+          el.textContent = formatCounter(to * easeOut(t), format, suffix);
+          if (t < 1) requestAnimationFrame(step);
+          else el.textContent = formatCounter(to, format, suffix);
+        }
+        requestAnimationFrame(step);
+        counterObserver.unobserve(el);
+      });
+    }, { threshold: 0.4 });
+    document.querySelectorAll('[data-count-to]').forEach(el => counterObserver.observe(el));
+
+    // ─── Hero time-travel demo ───
+    // Tells the whole story: insert, commit, update, commit, then travel back.
+    // Cycles forever, respects prefers-reduced-motion.
+    const demoCode = document.getElementById('demo-code');
+    const demoOutput = document.getElementById('demo-output');
+    const demoLsn = document.getElementById('demo-lsn');
+    const demoTitle = document.getElementById('demo-title');
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    // Highlighter for SQL keywords — just enough for the hero.
+    const KEYWORDS = ['BEGIN DOMAIN', 'COMMIT', 'INSERT INTO', 'UPDATE', 'SET', 'WHERE', 'SELECT', 'FROM', 'AS OF LSN', 'VALUES'];
+    function highlightSQL(src) {
+      // Escape HTML
+      let s = src.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      // Comments first
+      s = s.replace(/--[^\n]*/g, m => `<span class="c">${m}</span>`);
+      // Strings
+      s = s.replace(/'[^']*'/g, m => `<span class="s">${m}</span>`);
+      // Numbers
+      s = s.replace(/\b(\d+)\b/g, '<span class="n">$1</span>');
+      // Keywords (longest first so "BEGIN DOMAIN" wins over "BEGIN")
+      KEYWORDS.sort((a, b) => b.length - a.length).forEach(kw => {
+        const re = new RegExp('\\b' + kw.replace(/ /g, '\\s+') + '\\b', 'g');
+        s = s.replace(re, m => `<span class="k">${m}</span>`);
+      });
+      return s;
+    }
+
+    const steps = [
+      { sql: "BEGIN DOMAIN app;",                                                       lsn: 1, output: null,                                                                              pause: 500 },
+      { sql: "INSERT INTO users (id, name, status) VALUES (1, 'Alice', 'active');",     lsn: 1, output: null,                                                                              pause: 600 },
+      { sql: "COMMIT;",                                                                 lsn: 2, output: ['<span class="out-ok">COMMIT — LSN 2</span>'],                                     pause: 1100 },
+      { sql: "SELECT * FROM users;",                                                    lsn: 2, output: [
+        '<span class="out-col">id  name   status</span>',
+        '<span class="out-row">1   Alice  active</span>',
+      ], pause: 1200 },
+      { sql: "BEGIN DOMAIN app;\nUPDATE users SET status = 'suspended' WHERE id = 1;\nCOMMIT;", lsn: 3, output: ['<span class="out-ok">COMMIT — LSN 3</span>'], pause: 1100 },
+      { sql: "SELECT * FROM users;",                                                    lsn: 3, output: [
+        '<span class="out-col">id  name   status</span>',
+        '<span class="out-row">1   Alice  <span class="out-diff">suspended</span></span>',
+      ], pause: 1300 },
+      { sql: "-- Travel back to LSN 2:\nSELECT * FROM users AS OF LSN 2;",              lsn: 3, output: [
+        '<span class="out-col">id  name   status</span>',
+        '<span class="out-row">1   Alice  <span class="out-diff out-restored">active</span></span>',
+        '<span class="out-note">↑ history is addressable, not reconstructed</span>',
+      ], pause: 2800 },
+    ];
+
+    async function typeText(el, text, speedMs) {
+      for (let i = 1; i <= text.length; i++) {
+        el.innerHTML = highlightSQL(text.slice(0, i)) + '<span class="demo-caret">▍</span>';
+        await sleep(speedMs);
+      }
+      el.innerHTML = highlightSQL(text) + '<span class="demo-caret">▍</span>';
+    }
+
+    function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+    async function runDemo() {
+      if (!demoCode) return;
+      if (prefersReducedMotion) {
+        // Static fallback: show the final frame
+        const last = steps[steps.length - 1];
+        demoCode.innerHTML = highlightSQL(last.sql);
+        demoOutput.innerHTML = last.output.map(l => `<div>${l}</div>`).join('');
+        demoLsn.textContent = 'LSN ' + last.lsn;
+        return;
+      }
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        for (const step of steps) {
+          demoOutput.innerHTML = '';
+          demoTitle.textContent = 'asql — time-travel demo';
+          demoLsn.textContent = 'LSN ' + step.lsn;
+          // typing speed depends on length — shorter strings type faster
+          const speed = step.sql.length > 60 ? 14 : 22;
+          await typeText(demoCode, step.sql, speed);
+          await sleep(250);
+          if (step.output) {
+            demoOutput.innerHTML = step.output.map(l => `<div>${l}</div>`).join('');
+          }
+          await sleep(step.pause);
+        }
+        // brief pause before looping
+        await sleep(900);
+      }
+    }
+    runDemo();
   </script>
 </body>
 </html>
