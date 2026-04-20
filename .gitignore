@@ -32,4 +32,4 @@ scripts
 
 .vscode
 
-hospital-miks/frontend/node_modules/*
+hospital-miks/frontend/node_modules/*/asql-mcp

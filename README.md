@@ -563,6 +563,7 @@ make seed-domains-10x  # 10x scale: 1K recipes, 3K orders
 | [Runbook](docs/operations/runbook.md) | Executable demo commands |
 | [Incident runbook](docs/operations/incident-runbook-v1.md) | Operational procedures |
 | [Security disclosure](docs/operations/security-disclosure-policy-v1.md) | Vulnerability reporting |
+| [AI agent integration (`asql-mcp`)](cmd/asql-mcp/README.md) | MCP server exposing ASQL to Claude Desktop, Cursor, Zed, and other MCP clients |
 
 ---
 
