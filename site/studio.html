@@ -9,18 +9,19 @@
   <meta property="og:title" content="ASQL Studio — Visual Database Workspace">
   <meta property="og:description" content="Design schemas visually. Explore historical state. Monitor cluster health and routing. All in one native app.">
   <meta property="og:type" content="website">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%233b82f6'/><stop offset='1' stop-color='%238b5cf6'/></linearGradient></defs><path d='M13 2L3 14h7l-1 8 11-13h-8l1-7z' fill='url(%23g)'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute"><defs><linearGradient id="brand-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3b82f6"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs></svg>
   <!-- ═══════════════════════════════ NAV ═══════════════════════════════ -->
   <nav class="nav" id="nav">
     <div class="nav-inner">
       <a href="index.html" class="nav-logo">
-        <span class="logo-icon">⚡</span> ASQL
+        <span class="logo-icon"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 11-13h-8l1-7z" fill="url(#brand-grad)"/></svg></span> ASQL
       </a>
       <button class="nav-toggle" id="navToggle" aria-label="Open menu" aria-expanded="false">
         <span class="nav-toggle-bars"><span></span><span></span><span></span></span>
@@ -73,43 +74,43 @@
             <div class="studio-sidebar-section">
               <div class="studio-sidebar-label">HOME</div>
               <div class="studio-sidebar-item">
-                <span class="sb-icon">⚡</span> Start Here
+                <span class="sb-icon"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 11-13h-8l1-7z" fill="url(#brand-grad)"/></svg></span> Start Here
               </div>
             </div>
             <div class="studio-sidebar-section">
               <div class="studio-sidebar-label">QUERY</div>
               <div class="studio-sidebar-item">
-                <span class="sb-icon">⌨️</span> Workspace
+                <span class="sb-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l3 3-3 3"/><path d="M12 13h8"/><rect x="2" y="3" width="20" height="18" rx="2"/></svg></span> Workspace
               </div>
               <div class="studio-sidebar-item active">
-                <span class="sb-icon">⏳</span> Time Explorer
+                <span class="sb-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 2"/></svg></span> Time Explorer
               </div>
               <div class="studio-sidebar-item">
-                <span class="sb-icon">🔗</span> Entities
+                <span class="sb-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></span> Entities
               </div>
             </div>
             <div class="studio-sidebar-section">
               <div class="studio-sidebar-label">SCHEMA</div>
               <div class="studio-sidebar-item">
-                <span class="sb-icon">📐</span> Builder
+                <span class="sb-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21.3 15.3l-6 6a1 1 0 0 1-1.4 0l-12-12a1 1 0 0 1 0-1.4l6-6a1 1 0 0 1 1.4 0l12 12a1 1 0 0 1 0 1.4z"/><path d="M7.5 10.5l2 2"/><path d="M10.5 7.5l2 2"/><path d="M13.5 4.5l2 2"/><path d="M4.5 13.5l2 2"/></svg></span> Builder
               </div>
               <div class="studio-sidebar-item">
-                <span class="sb-icon">📄</span> DDL
+                <span class="sb-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg></span> DDL
               </div>
             </div>
             <div class="studio-sidebar-section">
               <div class="studio-sidebar-label">OPS</div>
               <div class="studio-sidebar-item">
-                <span class="sb-icon">📊</span> Dashboard
+                <span class="sb-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"/><path d="M7 15v-5"/><path d="M12 15v-9"/><path d="M17 15v-3"/></svg></span> Dashboard
               </div>
               <div class="studio-sidebar-item">
-                <span class="sb-icon">🌐</span> Cluster
+                <span class="sb-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 4 10 15 15 0 0 1-4 10 15 15 0 0 1-4-10 15 15 0 0 1 4-10z"/></svg></span> Cluster
               </div>
               <div class="studio-sidebar-item">
-                <span class="sb-icon">🔄</span> Recovery
+                <span class="sb-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 3v6h6"/></svg></span> Recovery
               </div>
               <div class="studio-sidebar-item">
-                <span class="sb-icon">📦</span> Fixtures
+                <span class="sb-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></span> Fixtures
               </div>
             </div>
           </div>
@@ -352,8 +353,8 @@
                       <div class="time-cursor" style="left:68%">
                         <span class="time-lsn">LSN 1,284</span>
                       </div>
-                      <div class="time-snap-marker" style="left:25%">📸</div>
-                      <div class="time-snap-marker" style="left:82%">📸</div>
+                      <div class="time-snap-marker" style="left:25%"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>
+                      <div class="time-snap-marker" style="left:82%"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg></div>
                     </div>
                   </div>
                   <div class="time-range">
@@ -616,22 +617,22 @@
       </div>
       <div class="detail-showcase">
         <div class="detail-card">
-          <div class="detail-icon">🔑</div>
+          <div class="detail-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M11.5 11.5L21 2"/><path d="M17 5l4 4"/><path d="M14 8l3 3"/></svg></div>
           <h4>PK / FK Badges</h4>
           <p>Instantly see which columns are primary keys, foreign keys, or unique constraints.</p>
         </div>
         <div class="detail-card">
-          <div class="detail-icon">🔗</div>
+          <div class="detail-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></div>
           <h4>FK Navigation</h4>
           <p>Click any FK value to jump to the referenced row. Follow relationships across tables and domains.</p>
         </div>
         <div class="detail-card">
-          <div class="detail-icon">📜</div>
+          <div class="detail-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19 17V5a2 2 0 0 0-2-2H4"/><path d="M8 21h12a2 2 0 0 0 2-2v-1a2 2 0 0 0-2-2H8z"/><path d="M4 3a2 2 0 0 0-2 2v3h6"/><path d="M9 8V5"/><path d="M8 13h8"/><path d="M8 17h4"/></svg></div>
           <h4>Mutation History</h4>
           <p>Full change log for every row: INSERT, UPDATE, DELETE with commit LSN and stable history metadata.</p>
         </div>
         <div class="detail-card">
-          <div class="detail-icon">🏷️</div>
+          <div class="detail-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg></div>
           <h4>Entity Versions</h4>
           <p>See the entity version for the current row and browse its full version history.</p>
         </div>
@@ -641,7 +642,7 @@
           <p>Reverse FK lookup: see all rows in other tables that reference this row.</p>
         </div>
         <div class="detail-card">
-          <div class="detail-icon">🕐</div>
+          <div class="detail-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg></div>
           <h4>Temporal Metadata</h4>
           <p>Commit LSN, entity version, resolved versioned FK references — all visible per row.</p>
         </div>
@@ -751,7 +752,7 @@
     <div class="container footer-columns">
       <div class="footer-col footer-col-brand">
         <div class="footer-brand">
-          <span class="logo-icon">⚡</span> ASQL
+          <span class="logo-icon"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 11-13h-8l1-7z" fill="url(#brand-grad)"/></svg></span> ASQL
         </div>
         <p class="footer-tagline">A deterministic SQL engine. Replay any state, query any point in time, over pgwire.</p>
       </div>

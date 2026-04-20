@@ -6,7 +6,7 @@
   <title>ASQL — Canonical Docs</title>
   <meta name="description" content="Canonical ASQL docs for the pgwire runtime path, deterministic history workflows, compatibility policy, and production operation.">
   <meta name="theme-color" content="#0a0e17">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%233b82f6'/><stop offset='1' stop-color='%238b5cf6'/></linearGradient></defs><path d='M13 2L3 14h7l-1 8 11-13h-8l1-7z' fill='url(%23g)'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -15,11 +15,12 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
 </head>
 <body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute"><defs><linearGradient id="brand-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3b82f6"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs></svg>
   <!-- ═══════════════════════════════ NAV ═══════════════════════════════ -->
   <nav class="nav scrolled" id="nav">
     <div class="nav-inner">
       <a href="index.html" class="nav-logo">
-        <span class="logo-icon">⚡</span> ASQL
+        <span class="logo-icon"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 11-13h-8l1-7z" fill="url(#brand-grad)"/></svg></span> ASQL
       </a>
       <button class="nav-toggle" id="navToggle" aria-label="Open menu" aria-expanded="false">
         <span class="nav-toggle-bars"><span></span><span></span><span></span></span>
@@ -95,7 +96,7 @@
     <div class="container footer-columns">
       <div class="footer-col footer-col-brand">
         <div class="footer-brand">
-          <span class="logo-icon">⚡</span> ASQL
+          <span class="logo-icon"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 11-13h-8l1-7z" fill="url(#brand-grad)"/></svg></span> ASQL
         </div>
         <p class="footer-tagline">A deterministic SQL engine. Replay any state, query any point in time, over pgwire.</p>
       </div>
@@ -279,7 +280,7 @@
         console.warn('Failed to highlight code block, falling back to escaped text.', err);
         highlighted = escapeHtml(text);
       }
-      return `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${lang || ''}</span><button class="md-code-copy" onclick="copyCode(this)" title="Copy">📋</button></div><pre><code class="hljs language-${language}">${highlighted}</code></pre></div>`;
+      return `<div class="md-code-block"><div class="md-code-header"><span class="md-code-lang">${lang || ''}</span><button class="md-code-copy" onclick="copyCode(this)" title="Copy"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="2.5"/><path d="M4 5v14c0 1.5 3.5 2.5 8 2.5s8-1 8-2.5V5"/><path d="M4 12c0 1.5 3.5 2.5 8 2.5s8-1 8-2.5"/></svg></button></div><pre><code class="hljs language-${language}">${highlighted}</code></pre></div>`;
     };
 
     marked.setOptions({
@@ -309,7 +310,7 @@
       const code = btn.closest('.md-code-block').querySelector('code').textContent;
       navigator.clipboard.writeText(code).then(() => {
         btn.textContent = '✓';
-        setTimeout(() => { btn.textContent = '📋'; }, 1500);
+        setTimeout(() => { btn.textContent = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="2.5"/><path d="M4 5v14c0 1.5 3.5 2.5 8 2.5s8-1 8-2.5V5"/><path d="M4 12c0 1.5 3.5 2.5 8 2.5s8-1 8-2.5"/></svg>'; }, 1500);
       });
     }
 

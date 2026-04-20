@@ -10,18 +10,19 @@
   <meta property="og:description" content="Replay any state. Query any point in time. Run the canonical pgwire path from single node to cluster.">
   <meta property="og:type" content="website">
   <meta name="twitter:card" content="summary_large_image">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop offset='0' stop-color='%233b82f6'/><stop offset='1' stop-color='%238b5cf6'/></linearGradient></defs><path d='M13 2L3 14h7l-1 8 11-13h-8l1-7z' fill='url(%23g)'/></svg>">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
+  <svg width="0" height="0" aria-hidden="true" style="position:absolute"><defs><linearGradient id="brand-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#3b82f6"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient></defs></svg>
   <!-- ═══════════════════════════════ NAV ═══════════════════════════════ -->
   <nav class="nav" id="nav">
     <div class="nav-inner">
       <a href="index.html" class="nav-logo">
-        <span class="logo-icon">⚡</span> ASQL
+        <span class="logo-icon"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 11-13h-8l1-7z" fill="url(#brand-grad)"/></svg></span> ASQL
       </a>
       <button class="nav-toggle" id="navToggle" aria-label="Open menu" aria-expanded="false">
         <span class="nav-toggle-bars"><span></span><span></span><span></span></span>
@@ -129,32 +130,32 @@
       </div>
       <div class="value-grid">
         <div class="value-card">
-          <div class="value-icon">🔄</div>
+          <div class="value-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 3v6h6"/></svg></div>
           <h3>Reproduce any bug exactly</h3>
           <p>Same WAL input, same state output. Always. Replay production issues deterministically instead of guessing.</p>
         </div>
         <div class="value-card">
-          <div class="value-icon">⏳</div>
+          <div class="value-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 10 10"/><path d="M12 8v4l3 2"/></svg></div>
           <h3>Query any point in time</h3>
           <p>Read data as it existed at any commit. No CDC pipelines, no event sourcing boilerplate. Just <code>SELECT * FROM users AS OF LSN 42</code>.</p>
         </div>
         <div class="value-card">
-          <div class="value-icon">🔒</div>
+          <div class="value-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 7l10-5 10 5v5c0 5-4 9-10 10-6-1-10-5-10-10z"/><path d="M2 12l10 5 10-5"/></svg></div>
           <h3>Isolate data boundaries</h3>
           <p>Domains give you schema-level multi-tenancy with explicit cross-domain transactions. No accidental data leaks.</p>
         </div>
         <div class="value-card">
-          <div class="value-icon">📦</div>
+          <div class="value-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg></div>
           <h3>Single binary, zero config</h3>
           <p>Go binary. Append-only WAL. Automatic snapshots. Run embedded or as a server. No JVM, no sidecar, no runtime dependencies.</p>
         </div>
         <div class="value-card">
-          <div class="value-icon">🔌</div>
+          <div class="value-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2v6"/><path d="M15 2v6"/><path d="M7 8h10v5a5 5 0 0 1-10 0z"/><path d="M12 18v4"/></svg></div>
           <h3>Use your existing tools</h3>
           <p>ASQL exposes a pragmatic PostgreSQL-compatible subset over pgwire for documented `pgx`, `psql`, and mainstream tool flows. No proprietary driver lock-in.</p>
         </div>
         <div class="value-card">
-          <div class="value-icon">📈</div>
+          <div class="value-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg></div>
           <h3>Scale when you need it</h3>
           <p>Start local. Add replication. Form a Raft cluster. Same API, same semantics, no migration.</p>
         </div>
@@ -828,32 +829,32 @@ conn.Query(ctx, `SELECT * FROM invoices
       </div>
       <div class="usecase-grid">
         <div class="usecase-card">
-          <div class="usecase-icon">🏥</div>
+          <div class="usecase-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.84 4.6a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
           <h4>Regulated Industries</h4>
           <p>Full audit trail, deterministic replay, versioned references. Prove data integrity without external tooling.</p>
         </div>
         <div class="usecase-card">
-          <div class="usecase-icon">🏦</div>
+          <div class="usecase-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 21h18"/><path d="M3 10h18"/><path d="M5 6l7-3 7 3"/><path d="M4 10v11"/><path d="M20 10v11"/><path d="M8 14v3"/><path d="M12 14v3"/><path d="M16 14v3"/></svg></div>
           <h4>Financial Systems</h4>
           <p>Time-travel queries for reconciliation. Domain isolation for multi-tenant accounting. Exact state reproduction for audits.</p>
         </div>
         <div class="usecase-card">
-          <div class="usecase-icon">🔍</div>
+          <div class="usecase-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg></div>
           <h4>Debugging & Forensics</h4>
           <p>Reproduce any production bug by replaying the exact WAL sequence. No more "works on my machine".</p>
         </div>
         <div class="usecase-card">
-          <div class="usecase-icon">📡</div>
+          <div class="usecase-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4.9 19.1A10 10 0 0 1 4.9 4.9"/><path d="M7.8 16.2a6 6 0 0 1 0-8.4"/><circle cx="12" cy="12" r="2"/><path d="M16.2 7.8a6 6 0 0 1 0 8.4"/><path d="M19.1 4.9a10 10 0 0 1 0 14.2"/><path d="M12 14v8"/></svg></div>
           <h4>Edge & Offline-First</h4>
           <p>Single binary, no external dependencies. Run at the edge. Sync via WAL replication when connectivity returns.</p>
         </div>
         <div class="usecase-card">
-          <div class="usecase-icon">🏭</div>
+          <div class="usecase-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 20h20"/><path d="M17 20V8l-7 4V8l-7 4v8"/><path d="M17 4h4v16"/><path d="M7 20v-4"/><path d="M12 20v-4"/></svg></div>
           <h4>Manufacturing (eBR)</h4>
           <p>Entity versioning tracks recipe versions. Process orders reference the exact recipe used. Full traceability.</p>
         </div>
         <div class="usecase-card">
-          <div class="usecase-icon">🧪</div>
+          <div class="usecase-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 2v7l-5 10a2 2 0 0 0 2 3h12a2 2 0 0 0 2-3l-5-10V2"/><path d="M8 2h8"/><path d="M7 14h10"/></svg></div>
           <h4>Testing & Simulation</h4>
           <p>Deterministic fixtures for reproducible test scenarios. Load, validate, replay. Same result every time.</p>
         </div>
@@ -870,20 +871,20 @@ conn.Query(ctx, `SELECT * FROM invoices
       </div>
       <div class="tools-grid">
         <div class="tool-card">
-          <h4>🖥️ ASQL Studio</h4>
+          <h4><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/></svg> ASQL Studio</h4>
           <p>Desktop app with SQL editor, schema browser, ER diagrams, time-travel panel, scan stats, and replication monitoring.</p>
           <pre><code>go run ./asqlstudio \
   -pgwire-endpoint 127.0.0.1:5433</code></pre>
         </div>
         <div class="tool-card">
-          <h4>⌨️ CLI (asqlctl)</h4>
+          <h4><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7l3 3-3 3"/><path d="M12 13h8"/><rect x="2" y="3" width="20" height="18" rx="2"/></svg> CLI (asqlctl)</h4>
           <p>Interactive SQL shell, fixture validation and loading, audit commands.</p>
           <pre><code>go run ./cmd/asqlctl \
   -command shell \
   -pgwire 127.0.0.1:5433</code></pre>
         </div>
         <div class="tool-card">
-          <h4>📋 Deterministic Fixtures</h4>
+          <h4><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="2.5"/><path d="M4 5v14c0 1.5 3.5 2.5 8 2.5s8-1 8-2.5V5"/><path d="M4 12c0 1.5 3.5 2.5 8 2.5s8-1 8-2.5"/></svg> Deterministic Fixtures</h4>
           <p>JSON fixture files with validation. Seed complex scenarios reproducibly.</p>
           <pre><code>go run ./cmd/asqlctl \
   -command fixture-load \
@@ -891,7 +892,7 @@ conn.Query(ctx, `SELECT * FROM invoices
   -fixture-file path/to/fixture.json</code></pre>
         </div>
         <div class="tool-card">
-          <h4>🐳 Docker</h4>
+          <h4><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M22 12h-3.5a1.5 1.5 0 0 0-1.5 1.5v0"/><path d="M2 13c0 4 3 7 8 7h3c5 0 9-3 9-8"/><rect x="3" y="9" width="3" height="3"/><rect x="7" y="9" width="3" height="3"/><rect x="11" y="9" width="3" height="3"/><rect x="7" y="5" width="3" height="3"/><rect x="11" y="5" width="3" height="3"/></svg> Docker</h4>
           <p>Distroless container image. Minimal attack surface.</p>
           <pre><code>docker build -t asql:local .
 docker run -p 5433:5433 \
@@ -953,7 +954,7 @@ docker run -p 5433:5433 \
     <div class="container footer-columns">
       <div class="footer-col footer-col-brand">
         <div class="footer-brand">
-          <span class="logo-icon">⚡</span> ASQL
+          <span class="logo-icon"><svg class="brand-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 2L3 14h7l-1 8 11-13h-8l1-7z" fill="url(#brand-grad)"/></svg></span> ASQL
         </div>
         <p class="footer-tagline">A deterministic SQL engine. Replay any state, query any point in time, over pgwire.</p>
       </div>

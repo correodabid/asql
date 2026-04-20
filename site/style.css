@@ -6,6 +6,98 @@
 /* ── Reset & Base ──────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* ── Icon system ────────────────────────────────────────────────
+   Inline SVGs use .icon (outline) or .brand-icon (filled gradient).
+   Size is controlled by the parent's font-size so existing
+   containers (.value-icon, .docs-ql-icon, etc.) keep working.
+   ──────────────────────────────────────────────────────────────── */
+.icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  flex-shrink: 0;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.75;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.brand-icon {
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  vertical-align: -0.125em;
+  flex-shrink: 0;
+}
+/* Tint emoji-sized icon containers with the brand accent so they
+   read as meaningful, not as placeholders. */
+.value-icon,
+.usecase-icon,
+.detail-icon {
+  color: #a5b4fc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #3b82f612, #8b5cf612);
+  border: 1px solid #3b82f622;
+}
+.value-icon .icon,
+.usecase-icon .icon,
+.detail-icon .icon {
+  width: 24px;
+  height: 24px;
+}
+.docs-ql-icon {
+  color: #a5b4fc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #3b82f612, #8b5cf612);
+  border: 1px solid #3b82f622;
+}
+.docs-ql-icon .icon { width: 20px; height: 20px; }
+.docs-section-icon {
+  color: #a5b4fc;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+}
+.docs-section-icon .icon { width: 24px; height: 24px; }
+.sb-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-dim);
+}
+.sb-icon .icon { width: 14px; height: 14px; }
+.studio-sidebar-item.active .sb-icon { color: #c084fc; }
+.time-snap-marker .icon,
+.time-snap-marker {
+  color: var(--text-dim);
+}
+.tool-card h4 .icon {
+  width: 22px;
+  height: 22px;
+  color: #a5b4fc;
+  margin-right: 8px;
+  vertical-align: -0.22em;
+}
+.time-snap-marker .icon {
+  width: 14px;
+  height: 14px;
+}
+
 :root {
   --bg-deep:    #06090f;
   --bg-dark:    #0a0e17;
