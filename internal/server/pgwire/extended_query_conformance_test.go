@@ -94,7 +94,7 @@ func newRawProtoClient(t *testing.T, addr string) *rawProtoClient {
 	for _, raw := range startupMessages {
 		if key, ok := raw.(*pgproto3.BackendKeyData); ok {
 			client.processID = key.ProcessID
-			client.secretKey = key.SecretKey
+			client.secretKey = secretKeyToUint32(key.SecretKey)
 		}
 	}
 	return client

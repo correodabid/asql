@@ -3,6 +3,7 @@ package pgwire
 import (
 	"bufio"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -795,7 +796,7 @@ func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn ne
 			}
 			continue
 		case *pgproto3.CancelRequest:
-			server.cancelRequest(uint32(typed.ProcessID), uint32(typed.SecretKey))
+			server.cancelRequest(uint32(typed.ProcessID), secretKeyToUint32(typed.SecretKey))
 			return true, nil
 		case *pgproto3.StartupMessage:
 			user := typed.Parameters["user"]
@@ -874,7 +875,7 @@ func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn ne
 				msgs = append(msgs, ps)
 			}
 			msgs = append(msgs,
-				&pgproto3.BackendKeyData{ProcessID: backendKey.processID, SecretKey: backendKey.secretKey},
+				&pgproto3.BackendKeyData{ProcessID: backendKey.processID, SecretKey: uint32ToSecretKey(backendKey.secretKey)},
 				&pgproto3.ReadyForQuery{TxStatus: txStatus(nil)},
 			)
 			return false, sendMessages(backend, msgs...)
@@ -887,6 +888,25 @@ func (server *Server) performStartupHandshake(backend *pgproto3.Backend, conn ne
 func (server *Server) allocateBackendKey() backendCancelKey {
 	processID := atomic.AddUint32(&server.nextBackendID, 1)
 	return backendCancelKey{processID: processID, secretKey: processID ^ 0x5A17C0DE}
+}
+
+// uint32ToSecretKey encodes a uint32 secret key as a 4-byte big-endian slice,
+// matching the pgproto3 v5.9+ BackendKeyData.SecretKey []byte representation.
+func uint32ToSecretKey(v uint32) []byte {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, v)
+	return b
+}
+
+// secretKeyToUint32 decodes a pgproto3 v5.9+ SecretKey []byte back to uint32.
+// Fewer than 4 bytes are zero-padded on the left.
+func secretKeyToUint32(b []byte) uint32 {
+	if len(b) >= 4 {
+		return binary.BigEndian.Uint32(b[len(b)-4:])
+	}
+	var buf [4]byte
+	copy(buf[4-len(b):], b)
+	return binary.BigEndian.Uint32(buf[:])
 }
 
 // AdminHTTPAddress returns the bound admin HTTP address when the optional

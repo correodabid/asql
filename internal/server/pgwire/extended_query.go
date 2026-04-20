@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/correodabid/asql/internal/engine/executor"
 	"github.com/correodabid/asql/internal/engine/parser"
@@ -92,7 +93,16 @@ type portal struct {
 	// values are in the exact positions pgx is expecting based on the OIDs it
 	// cached from RowDescription.  If it is nil the Execute phase falls back to
 	// deriving columns from actual result rows (legacy behaviour).
-	describedColumns  []string
+	describedColumns []string
+	// fieldOIDsByName maps lowercase column name → PostgreSQL type OID.
+	// Populated at Bind time from describeFields; used together with
+	// resultFormatCodes to binary-encode DataRow values when the client
+	// requests binary result format (pgx v5.9+ does this for int8/int4/bool).
+	fieldOIDsByName map[string]uint32
+	// resultFormatCodes mirrors the Bind message's ResultFormatCodes field.
+	// Empty means text for all columns; length-1 applies to all columns;
+	// otherwise indexed per column.
+	resultFormatCodes []int16
 	tailEntityChanges *tailEntityChangesPortalState
 }
 
@@ -651,11 +661,15 @@ func (server *Server) handleBind(backend *pgproto3.Backend, state *connState, ms
 	// has been exchanged), the Execute path always has the correct list whether
 	// or not the client sent Describe Statement, Describe Portal, or neither.
 	var describedColumns []string
+	var fieldOIDsByName map[string]uint32
 	if isSelect {
 		if fields := server.describeFields(sql, state.session.ActiveDomains(), state.session.Principal()); fields != nil {
 			describedColumns = make([]string, len(fields))
+			fieldOIDsByName = make(map[string]uint32, len(fields))
 			for i, f := range fields {
-				describedColumns[i] = strings.ToLower(string(f.Name))
+				name := strings.ToLower(string(f.Name))
+				describedColumns[i] = name
+				fieldOIDsByName[name] = f.DataTypeOID
 			}
 		}
 	}
@@ -673,6 +687,8 @@ func (server *Server) handleBind(backend *pgproto3.Backend, state *connState, ms
 		columns:           columns,
 		nextRow:           0,
 		describedColumns:  describedColumns,
+		fieldOIDsByName:   fieldOIDsByName,
+		resultFormatCodes: append([]int16(nil), msg.ResultFormatCodes...),
 		tailEntityChanges: tailState,
 	}
 	backend.Send(&pgproto3.BindComplete{})
@@ -749,6 +765,10 @@ func (server *Server) handleDescribe(backend *pgproto3.Backend, state *connState
 					descCols[i] = strings.ToLower(string(f.Name))
 				}
 				p.describedColumns = descCols
+				// Mark RowDescription as sent so Execute doesn't re-send it.
+				if p.tailEntityChanges != nil {
+					p.tailEntityChanges.rowDescriptionSent = true
+				}
 				state.portals[msg.Name] = p
 				backend.Send(&pgproto3.RowDescription{Fields: fields})
 			} else {
@@ -782,7 +802,7 @@ func (server *Server) handleExtendedExecute(backend *pgproto3.Backend, state *co
 			server.extendedError(backend, state, result.Status, "42704")
 			return nil
 		}
-		nextRow, _, err := server.streamExtendedResult(ctx, backend, state, p.sql, result, columns, msg.MaxRows, p.nextRow)
+		nextRow, _, err := server.streamExtendedResultWithFormats(ctx, backend, state, result, columns, p.fieldOIDsByName, p.resultFormatCodes, msg.MaxRows, p.nextRow)
 		p.nextRow = nextRow
 		state.portals[msg.Portal] = p
 		return err
@@ -794,7 +814,7 @@ func (server *Server) handleExtendedExecute(backend *pgproto3.Backend, state *co
 		return nil
 	}
 	if intercepted, ok := server.interceptCatalog(ctx, p.sql, state.session.ActiveDomains(), state.session.Principal()); ok {
-		nextRow, _, err := server.streamExtendedResult(ctx, backend, state, p.sql, intercepted.result, intercepted.columns, msg.MaxRows, p.nextRow)
+		nextRow, _, err := server.streamExtendedResultWithFormats(ctx, backend, state, intercepted.result, intercepted.columns, p.fieldOIDsByName, p.resultFormatCodes, msg.MaxRows, p.nextRow)
 		p.nextRow = nextRow
 		state.portals[msg.Portal] = p
 		return err
@@ -838,7 +858,7 @@ func (server *Server) handleExtendedExecute(backend *pgproto3.Backend, state *co
 	if len(p.describedColumns) > 0 {
 		columns = p.describedColumns
 	}
-	nextRow, _, err := server.streamExtendedResult(ctx, backend, state, p.sql, result, columns, msg.MaxRows, p.nextRow)
+	nextRow, _, err := server.streamExtendedResultWithFormats(ctx, backend, state, result, columns, p.fieldOIDsByName, p.resultFormatCodes, msg.MaxRows, p.nextRow)
 	p.nextRow = nextRow
 	state.portals[msg.Portal] = p
 	return err
@@ -854,7 +874,7 @@ func runPgwireStreamHook() {
 	}
 }
 
-func (server *Server) streamExtendedResult(ctx context.Context, backend *pgproto3.Backend, state *connState, _ string, result executor.Result, columns []string, maxRows uint32, startRow int) (int, bool, error) {
+func (server *Server) streamExtendedResultWithFormats(ctx context.Context, backend *pgproto3.Backend, state *connState, result executor.Result, columns []string, fieldOIDsByName map[string]uint32, resultFormatCodes []int16, maxRows uint32, startRow int) (int, bool, error) {
 	if startRow < 0 {
 		startRow = 0
 	}
@@ -876,13 +896,18 @@ func (server *Server) streamExtendedResult(ctx context.Context, backend *pgproto
 			}
 			row := result.Rows[rowIndex]
 			values := make([][]byte, 0, len(columns))
-			for _, col := range columns {
+			for colIdx, col := range columns {
 				lit, exists := row[col]
 				if !exists || lit.Kind == ast.LiteralNull || lit.Kind == "" {
 					values = append(values, nil)
 					continue
 				}
-				values = append(values, literalToText(lit))
+				oid := fieldOIDsByName[col]
+				if resultFormatCodeFor(resultFormatCodes, colIdx) == 1 {
+					values = append(values, literalToBinary(lit, oid))
+				} else {
+					values = append(values, literalToText(lit))
+				}
 			}
 			backend.Send(&pgproto3.DataRow{Values: values})
 			sent++
@@ -897,6 +922,113 @@ func (server *Server) streamExtendedResult(ctx context.Context, backend *pgproto
 	return len(result.Rows), false, backend.Flush()
 }
 
+// resultFormatCodeFor returns the format code (0=text, 1=binary) for column i
+// following the PostgreSQL protocol rule: empty → text, single → applies to all,
+// otherwise indexed per column.
+func resultFormatCodeFor(codes []int16, i int) int16 {
+	switch len(codes) {
+	case 0:
+		return 0 // text
+	case 1:
+		return codes[0]
+	default:
+		if i < len(codes) {
+			return codes[i]
+		}
+		return 0
+	}
+}
+
+// literalToBinary encodes a literal value as binary bytes for the given
+// PostgreSQL OID.  Falls back to text encoding for any type not explicitly
+// handled here (the server only sends binary for common numeric/bool types).
+func literalToBinary(lit ast.Literal, oid uint32) []byte {
+	switch oid {
+	case 20: // int8 / int64 – 8-byte big-endian
+		var n int64
+		switch lit.Kind {
+		case ast.LiteralNumber:
+			n = lit.NumberValue
+		case ast.LiteralBoolean:
+			if lit.BoolValue {
+				n = 1
+			}
+		default:
+			if parsed, err := strconv.ParseInt(lit.StringValue, 10, 64); err == nil {
+				n = parsed
+			}
+		}
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, uint64(n))
+		return buf
+	case 23: // int4 / int32 – 4-byte big-endian
+		var n int32
+		switch lit.Kind {
+		case ast.LiteralNumber:
+			n = int32(lit.NumberValue)
+		case ast.LiteralBoolean:
+			if lit.BoolValue {
+				n = 1
+			}
+		default:
+			if parsed, err := strconv.ParseInt(lit.StringValue, 10, 32); err == nil {
+				n = int32(parsed)
+			}
+		}
+		buf := make([]byte, 4)
+		binary.BigEndian.PutUint32(buf, uint32(n))
+		return buf
+	case 21: // int2 / int16 – 2-byte big-endian
+		var n int16
+		switch lit.Kind {
+		case ast.LiteralNumber:
+			n = int16(lit.NumberValue)
+		default:
+			if parsed, err := strconv.ParseInt(lit.StringValue, 10, 16); err == nil {
+				n = int16(parsed)
+			}
+		}
+		buf := make([]byte, 2)
+		binary.BigEndian.PutUint16(buf, uint16(n))
+		return buf
+	case 16: // bool – 1 byte
+		switch lit.Kind {
+		case ast.LiteralBoolean:
+			if lit.BoolValue {
+				return []byte{1}
+			}
+			return []byte{0}
+		default:
+			s := strings.ToLower(lit.StringValue)
+			if s == "t" || s == "true" || s == "1" {
+				return []byte{1}
+			}
+			return []byte{0}
+		}
+	case 1114, 1184: // timestamp / timestamptz – 8-byte big-endian microseconds since PG epoch
+		// ASQL stores timestamps as microseconds since Unix epoch (1970-01-01).
+		// PostgreSQL binary timestamp is microseconds since 2000-01-01 UTC.
+		const pgEpochOffsetMicros = int64(946_684_800_000_000)
+		var unixMicros int64
+		switch lit.Kind {
+		case ast.LiteralNumber, ast.LiteralTimestamp:
+			unixMicros = lit.NumberValue
+		default:
+			// Best-effort: parse ISO string, convert to Unix micros.
+			if t, err := time.Parse(time.RFC3339Nano, lit.StringValue); err == nil {
+				unixMicros = t.UnixMicro()
+			}
+		}
+		pgMicros := unixMicros - pgEpochOffsetMicros
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, uint64(pgMicros))
+		return buf
+	default:
+		// Text OIDs (25=text, 1043=varchar, etc.) and unknown: raw UTF-8 bytes.
+		return literalToText(lit)
+	}
+}
+
 func (server *Server) streamExtendedTailEntityChanges(ctx context.Context, backend *pgproto3.Backend, state *connState, session *executor.Session, portalState *tailEntityChangesPortalState, maxRows uint32) (bool, error) {
 	if portalState == nil {
 		backend.Send(&pgproto3.CommandComplete{CommandTag: []byte("SELECT 0")})
@@ -909,6 +1041,21 @@ func (server *Server) streamExtendedTailEntityChanges(ctx context.Context, backe
 	if err := server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "entity_changes_follow", targetKind: "history_stream"}); err != nil {
 		server.extendedError(backend, state, err.Error(), mapErrorToSQLState(err))
 		return false, nil
+	}
+
+	// pgx v5.9.0's ExecStatement skips Describe Portal and calls
+	// readUntilRowDescription, which blocks until the server sends RowDescription,
+	// DataRow, or CommandComplete.  For FOLLOW queries that have no events yet,
+	// the server would otherwise block in waitForTailEntityChangesWake before
+	// sending anything — causing a deadlock with the test goroutine (which runs
+	// the writer code only AFTER Query() returns).  Send RowDescription eagerly on
+	// the first Execute so Query() can return and the writer can proceed.
+	if !portalState.rowDescriptionSent {
+		portalState.rowDescriptionSent = true
+		backend.Send(&pgproto3.RowDescription{Fields: tailEntityChangesFields()})
+		if err := backend.Flush(); err != nil {
+			return false, err
+		}
 	}
 
 	sent := uint32(0)

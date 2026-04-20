@@ -23,11 +23,12 @@ type tailEntityChangesStatement struct {
 }
 
 type tailEntityChangesPortalState struct {
-	statement tailEntityChangesStatement
-	nextFrom  uint64
-	remaining int
-	totalRows int
-	completed bool
+	statement            tailEntityChangesStatement
+	nextFrom             uint64
+	remaining            int
+	totalRows            int
+	completed            bool
+	rowDescriptionSent   bool // true once RowDescription has been sent to the client
 }
 
 func newTailEntityChangesPortalState(statement tailEntityChangesStatement) *tailEntityChangesPortalState {
