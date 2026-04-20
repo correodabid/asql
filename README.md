@@ -1,5 +1,9 @@
 # ASQL
 
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/Go-1.25%2B-00ADD8)](go.mod)
+[![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
+
 **A deterministic SQL engine built in Go.** Domain isolation, append-only WAL, replay-safe history, and optional clustered operation through pgwire + Raft.
 
 Canonical runtime path:
@@ -601,6 +605,19 @@ test/
 
 ---
 
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md)
+and the [Contributor License Agreement](CLA.md) — the CLA bot will
+post a signing link on your first pull request. The contributor
+workflow, test tiers, and commit conventions are documented in
+[AGENTS.md](AGENTS.md).
+
+Security issues should be reported through the private channel
+described in [SECURITY.md](SECURITY.md), not through public issues.
+
 ## License
 
-See [LICENSE](LICENSE) for details.
+Apache License 2.0 — see [LICENSE](LICENSE). Third-party attributions
+live in [NOTICE](NOTICE). Use of the ASQL name and logo is not granted
+by the license; see the trademark guidance in NOTICE.

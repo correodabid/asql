@@ -1,0 +1,51 @@
+name: CLA Assistant
+
+# Automates Contributor License Agreement signing for pull requests.
+# On a contributor's first PR, the bot posts a comment with a one-click
+# signing link; signatures are stored in .github/cla-signatures.json.
+# Signed contributors (and the maintainer allowlist) are never asked
+# again on future PRs.
+#
+# Contributors can also sign by posting exactly:
+#   I have read the CLA Document and I hereby sign the CLA
+# as a comment on the PR.
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla:
+    runs-on: ubuntu-latest
+    steps:
+      - name: CLA Assistant
+        if: |
+          (github.event.comment.body == 'recheck'
+           || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA')
+          || github.event_name == 'pull_request_target'
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-signatures: '.github/cla-signatures.json'
+          path-to-document: 'https://github.com/correodabid/asql/blob/main/CLA.md'
+          branch: 'main'
+          allowlist: 'correodabid,dependabot[bot]'
+          remote-organization-name: 'correodabid'
+          remote-repository-name: 'asql'
+          custom-notsigned-prcomment: >
+            Thank you for your contribution! Before we can merge, please
+            read the [Contributor License Agreement](https://github.com/correodabid/asql/blob/main/CLA.md)
+            and, if you agree to its terms, post the following comment
+            on this pull request:
+          custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
+          custom-allsigned-prcomment: >
+            All contributors have signed the CLA. Thank you!

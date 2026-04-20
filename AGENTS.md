@@ -205,6 +205,16 @@ go run ./cmd/asql-mcp -pgwire 127.0.0.1:5433
 - `docs/architecture/architecture-one-pager-v1.md` — system layout.
 - `docs/operations/runbook.md` — running the server and the cluster.
 
+Governance files (at repo root):
+
+- `LICENSE` — Apache License 2.0.
+- `NOTICE` — required Apache 2.0 attribution notice.
+- `CONTRIBUTING.md` — the human-facing contributor workflow.
+- `CLA.md` — Contributor License Agreement. Required before merging
+  non-trivial contributions.
+- `CODE_OF_CONDUCT.md` — Contributor Covenant 2.1.
+- `SECURITY.md` — how to report vulnerabilities (private channel).
+
 Agent-specific files:
 
 - `CLAUDE.md` — Claude Code extensions (skills, slash commands).

@@ -1,0 +1,18 @@
+ASQL
+Copyright 2026 ASQL contributors
+
+This product includes software developed by the ASQL project
+(https://github.com/correodabid/asql).
+
+Licensed under the Apache License, Version 2.0. See the LICENSE file
+in the project root for the full license text.
+
+This product depends on third-party libraries whose licenses are
+reproduced in their respective vendored directories or at the source
+listed in go.mod.
+
+PostgreSQL® and the PostgreSQL wire protocol ("pgwire") are trademarks
+or registered trademarks of the PostgreSQL Global Development Group.
+ASQL implements a pragmatic subset of the PostgreSQL wire protocol for
+client compatibility; ASQL is not affiliated with or endorsed by the
+PostgreSQL project.
