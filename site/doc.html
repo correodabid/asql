@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css?v=2">
+  <link rel="stylesheet" href="style.css?v=3">
   <!-- Syntax highlighting theme (matches dark site) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
 </head>
@@ -491,6 +491,23 @@
             panelsHtml += `<div class="tab-panel${activeClass}">${marked.parse(content)}</div>`;
           }
           return `<div class="tab-group"><div class="tab-header" role="tablist">${headerHtml}</div><div class="tab-panels">${panelsHtml}</div></div>\n\n`;
+        }
+      );
+
+      // 4. Collapsible details: :::details[Title]\ncontent\n:::
+      markdown = markdown.replace(
+        /^:::details(?:\[([^\]]*)\])?\s*\n([\s\S]*?)^:::\s*$/gm,
+        (_, title, body) => {
+          const displayTitle = (title && title.trim()) || 'Details';
+          return `<details class="md-details"><summary class="md-details-summary">${displayTitle}</summary><div class="md-details-body">${marked.parse(body.trim())}</div></details>\n\n`;
+        }
+      );
+
+      // 5. Visual numbered steps: :::steps\n1. step one\n2. step two\n:::
+      markdown = markdown.replace(
+        /^:::steps\s*\n([\s\S]*?)^:::\s*$/gm,
+        (_, body) => {
+          return `<div class="md-steps">${marked.parse(body.trim())}</div>\n\n`;
         }
       );
 

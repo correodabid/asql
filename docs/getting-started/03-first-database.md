@@ -2,48 +2,40 @@
 
 This guide creates a small schema, writes data, and reads it back using the pgwire shell.
 
-## 1. Open the shell
+:::steps
+1. **Open the shell**
 
-```bash
-go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
-```
+   ```bash
+   go run ./cmd/asqlctl -command shell -pgwire 127.0.0.1:5433
+   ```
 
-## 2. Create a table and insert data
+2. **Create a table and insert data**
 
-Run this in the shell:
+   ```sql
+   BEGIN DOMAIN app;
+   CREATE TABLE users (id INT PRIMARY KEY, email TEXT UNIQUE, status TEXT);
+   INSERT INTO users (id, email, status) VALUES (1, 'alice@example.com', 'active');
+   COMMIT;
+   ```
 
-```sql
-BEGIN DOMAIN app;
-CREATE TABLE users (id INT PRIMARY KEY, email TEXT UNIQUE, status TEXT);
-INSERT INTO users (id, email, status) VALUES (1, 'alice@example.com', 'active');
-COMMIT;
-```
+3. **Read the data back**
 
-## 3. Read the data back
+   ```sql
+   SELECT * FROM users;
+   ```
 
-Still in the shell:
+4. **Inspect the same data in Studio**
 
-```sql
-SELECT * FROM users;
-```
-
-## 4. Inspect the same data in Studio
-
-If Studio is running:
-
-- open `Workspace`
-- select domain `app`
-- run `SELECT * FROM users`
+   If Studio is running: open `Workspace`, select domain `app`, run `SELECT * FROM users`.
+:::
 
 ## What you learned
 
-At this point you have already used the most important ASQL building block:
+:::info[The two ASQL essentials]
+You already used the most important building block: **explicit transaction scope** before any schema or DML work (`BEGIN DOMAIN app` / `COMMIT`).
 
-- explicit transaction scope before schema or DML work.
-
-You also used the current canonical local interface:
-
-- pgwire through the built-in shell.
+You also used the canonical local interface: **pgwire** through the built-in shell. That same pgwire endpoint is what Studio, `pgx`, and any PostgreSQL-compatible tool will connect to.
+:::
 
 ## Next step
 

@@ -77,122 +77,115 @@ Related docs:
 
 ## Common adoption mistakes
 
-- treating domains as mere schema prefixes instead of boundaries,
-- introducing cross-domain transactions too early,
-- using raw `LSN`s in app code when helper surfaces or entity versions are clearer,
-- leaving demo/test data as ad hoc SQL instead of fixtures,
-- expecting ASQL to absorb business workflow or compliance semantics that should stay in the application,
-- postponing history/time-travel until after the first incident.
+:::warning[Patterns that slow every team down]
+- Treating domains as mere schema prefixes instead of boundaries.
+- Introducing cross-domain transactions too early.
+- Using raw `LSN`s in app code when helper surfaces or entity versions are clearer.
+- Leaving demo/test data as ad hoc SQL instead of fixtures.
+- Expecting ASQL to absorb business workflow or compliance semantics that should stay in the application.
+- Postponing history/time-travel until after the first incident.
+:::
 
 ## Adoption FAQ for SQLite/Postgres/ORM-centric teams
 
-### Is ASQL basically PostgreSQL with a few extra features?
-
-No.
+:::details[Is ASQL basically PostgreSQL with a few extra features?]
+**No.**
 
 The pgwire runtime is intentionally PostgreSQL-shaped, but the product model is different in important ways:
 
-- domains are explicit,
-- temporal inspection is first-class,
-- fixtures are deterministic scenario assets,
-- replay is part of the normal mental model.
+- Domains are explicit.
+- Temporal inspection is first-class.
+- Fixtures are deterministic scenario assets.
+- Replay is part of the normal mental model.
 
 Treat ASQL as its own product with a pragmatic PostgreSQL-compatible subset, not as drop-in PostgreSQL equivalence.
+:::
 
-### Do I really need domains for a small app?
+:::details[Do I really need domains for a small app?]
+**Usually yes — but often only one at first.**
 
-Usually yes, but often only one at first.
+The mistake is not _"starting with one domain"_. The mistake is pretending boundaries do not exist at all.
 
-The mistake is not “starting with one domain”.
-The mistake is pretending boundaries do not exist at all.
+For a narrow first rollout, one explicit domain is often the right move. Split later only when a second boundary is clearly justified.
+:::
 
-For a narrow first rollout, one explicit domain is often the right move.
-Split later only when a second boundary is clearly justified.
+:::details[Should every multi-table workflow become `BEGIN CROSS DOMAIN ...`?]
+**No.**
 
-### Should every workflow that touches multiple tables become `BEGIN CROSS DOMAIN ...`?
+Use cross-domain scope only when atomicity across those domains is truly required. If the workflow is mainly orchestration, sequencing, or UI flow, that usually belongs in the application layer.
+:::
 
-No.
+:::details[Should I model entities immediately?]
+**Only when the application already thinks in aggregates with a stable root and lifecycle.**
 
-Use cross-domain scope only when atomicity across those domains is truly required.
-If the workflow is mainly orchestration, sequencing, or UI flow, that usually belongs in the application layer.
+If the model is still fuzzy, start with rows, history, and fixtures first. Then add entities once the aggregate boundary is clear.
+:::
 
-### Should I model entities immediately?
+:::details[Can I keep using my ORM exactly as it is today?]
+**Usually not without adaptation.**
 
-Only when the application already thinks in aggregates with a stable root and lifecycle.
-
-If the model is still fuzzy, start with rows, history, and fixtures first.
-Then add entities once the aggregate boundary is clear.
-
-### Can I keep using my ORM exactly as it is today?
-
-Usually not without adaptation.
-
-The biggest mismatch is not only SQL syntax.
-It is that ASQL expects explicit transaction boundaries and clearer ownership of workflow semantics.
+The biggest mismatch is not only SQL syntax — it is that ASQL expects explicit transaction boundaries and clearer ownership of workflow semantics.
 
 If your ORM assumes hidden transaction flow, invisible cross-boundary writes, or full PostgreSQL behavior, expect integration work.
 
 The current recommended compromise is a narrow ORM-lite lane:
 
-- keep SQL inspectable,
-- use `simple_protocol` first,
-- translate bare PostgreSQL transaction opens to explicit ASQL transaction primitives,
-- and avoid assuming `UPDATE ... RETURNING`, `DELETE ... RETURNING`, arrays, or full catalog parity.
+- Keep SQL inspectable.
+- Use `simple_protocol` first.
+- Translate bare PostgreSQL transaction opens to explicit ASQL transaction primitives.
+- Avoid assuming `UPDATE ... RETURNING`, `DELETE ... RETURNING`, arrays, or full catalog parity.
 
-Use [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md) as the exact contract for that path.
-Use [../reference/postgres-app-sql-translation-guide-v1.md](../reference/postgres-app-sql-translation-guide-v1.md) for the next high-return SQL rewrites teams usually need during real app evaluation.
+Use [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md) as the exact contract for that path. Use [../reference/postgres-app-sql-translation-guide-v1.md](../reference/postgres-app-sql-translation-guide-v1.md) for the next high-return SQL rewrites teams usually need during real app evaluation.
 
-If the team wants a concrete first proof for an existing PostgreSQL-oriented Go
-service, use [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md)
-before widening the adoption scope.
+If the team wants a concrete first proof for an existing PostgreSQL-oriented Go service, use [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md) before widening the adoption scope.
+:::
 
-### Why does ASQL push fixtures so early?
+:::details[Why does ASQL push fixtures so early?]
+**Because fixtures expose adoption problems early:**
 
-Because fixtures expose adoption problems early:
-
-- unclear domains,
-- ordering mistakes,
-- hidden runtime-generated values,
-- incorrect entity or reference assumptions.
+- Unclear domains.
+- Ordering mistakes.
+- Hidden runtime-generated values.
+- Incorrect entity or reference assumptions.
 
 They are often a faster way to harden the model than starting from handlers or UI paths.
+:::
 
-### Should compliance or approval meaning live in ASQL?
+:::details[Should compliance or approval meaning live in ASQL?]
+**Normally no.**
 
-Normally no.
+ASQL should help store facts, history, temporal references, and deterministic audit-friendly state. The application should still own:
 
-ASQL should help store facts, history, temporal references, and deterministic audit-friendly state.
-The application should still own:
+- Approval meaning.
+- Actor semantics.
+- Evidence interpretation.
+- Business-specific workflow rules.
+:::
 
-- approval meaning,
-- actor semantics,
-- evidence interpretation,
-- business-specific workflow rules.
-
-### If ASQL speaks pgwire, can I assume any PostgreSQL client/tool will just work?
-
-No.
+:::details[If ASQL speaks pgwire, can any PostgreSQL client/tool just work?]
+**No.**
 
 The correct assumption is:
 
-- many PostgreSQL-oriented tools can work within the documented compatibility surface,
-- but teams should verify client behavior against the supported subset instead of assuming full PostgreSQL parity.
+- Many PostgreSQL-oriented tools can work within the documented compatibility surface.
+- But teams should verify client behavior against the supported subset instead of assuming full PostgreSQL parity.
 
 When in doubt, start with pgwire plus `pgx`, then validate additional tooling intentionally.
 
 For the practical driver/query-mode recommendations, see [../reference/pgwire-driver-guidance-v1.md](../reference/pgwire-driver-guidance-v1.md).
 
 For read-only dashboards, prefer one explicit custom-SQL panel first rather than builder-mode assumptions. Use [../reference/bi-lite-adoption-lane-v1.md](../reference/bi-lite-adoption-lane-v1.md) as the narrow contract for that path.
+:::
 
 ## Where adoption friction usually appears
 
-- first domain split,
-- first cross-domain workflow,
-- first entity and versioned reference,
-- first deterministic fixture pack,
-- first question about whether a compliance concept belongs in ASQL or in app code.
-
-Surface those questions early. They are usually design work, not blockers.
+:::info[Surface these early — they are design work, not blockers]
+- First domain split.
+- First cross-domain workflow.
+- First entity and versioned reference.
+- First deterministic fixture pack.
+- First question about whether a compliance concept belongs in ASQL or in app code.
+:::
 
 If the team is unsure whether a friction should become engine work, docs, SDK helpers, or tooling, use [../reference/adoption-review-rubric-v1.md](../reference/adoption-review-rubric-v1.md).
 

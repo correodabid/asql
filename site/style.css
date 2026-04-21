@@ -3036,6 +3036,108 @@ code {
 .tab-panel > .md-code-block { border: none; border-radius: 0; margin: 0; }
 .tab-panel > p, .tab-panel > ul, .tab-panel > ol { padding: 12px 16px; margin: 0; }
 
+/* ── Collapsible details ────────────────────────────────────────── */
+.md-details {
+  margin: 20px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+.md-details-summary {
+  padding: 10px 16px;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text);
+  font-size: 0.92rem;
+  list-style: none;
+  transition: background var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+.md-details-summary::-webkit-details-marker { display: none; }
+.md-details-summary::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-top: 1.5px solid var(--text-dim);
+  border-right: 1.5px solid var(--text-dim);
+  transform: rotate(45deg);
+  transition: transform var(--transition);
+  flex-shrink: 0;
+}
+.md-details[open] > .md-details-summary::before { transform: rotate(135deg); }
+.md-details-summary:hover { background: var(--bg-card-hover); }
+.md-details-body {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+}
+.md-details-body > *:first-child { margin-top: 0 !important; }
+.md-details-body > *:last-child { margin-bottom: 0 !important; }
+
+/* ── Visual numbered steps ──────────────────────────────────────── */
+.md-steps { margin: 24px 0; counter-reset: step; }
+.md-steps > ol { list-style: none; padding: 0; margin: 0; }
+.md-steps > ol > li {
+  counter-increment: step;
+  position: relative;
+  padding: 4px 0 20px 52px;
+  margin: 0;
+  color: var(--text-dim);
+  line-height: 1.65;
+}
+.md-steps > ol > li:last-child { padding-bottom: 0; }
+.md-steps > ol > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.86rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 3px var(--bg-dark), 0 0 0 4px var(--border);
+  z-index: 1;
+}
+.md-steps > ol > li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 35px;
+  bottom: -5px;
+  width: 1px;
+  background: var(--border);
+}
+.md-steps > ol > li > p:first-of-type,
+.md-steps > ol > li > strong:first-child { color: var(--text); font-weight: 600; }
+.md-steps > ol > li .md-code-block { margin-top: 10px; }
+
+/* ── Keyboard keys (<kbd>) ──────────────────────────────────────── */
+kbd {
+  display: inline-block;
+  padding: 1px 7px;
+  font-family: var(--mono);
+  font-size: 0.82em;
+  color: var(--text);
+  background: #1a2035;
+  border: 1px solid var(--border-light);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  line-height: 1.4;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
 /* ── Heading anchor links ───────────────────────────────────────── */
 .heading-anchor {
   display: inline-block;
