@@ -4125,6 +4125,7 @@ func TestPGWireTailEntityChangesFollowStreamsNewCommits(t *testing.T) {
 	readCh := make(chan []followRow, 1)
 	errReadCh := make(chan error, 1)
 	go func() {
+		defer rows.Close()
 		result := make([]followRow, 0, 2)
 		for rows.Next() {
 			var row followRow
@@ -4148,7 +4149,7 @@ func TestPGWireTailEntityChangesFollowStreamsNewCommits(t *testing.T) {
 		"COMMIT",
 	} {
 		if _, err := writerConn.Exec(ctx, sql); err != nil {
-			rows.Close()
+			followCancel()
 			t.Fatalf("writer exec %q: %v", sql, err)
 		}
 	}
@@ -4158,7 +4159,7 @@ func TestPGWireTailEntityChangesFollowStreamsNewCommits(t *testing.T) {
 		"COMMIT",
 	} {
 		if _, err := writerConn.Exec(ctx, sql); err != nil {
-			rows.Close()
+			followCancel()
 			t.Fatalf("writer exec %q: %v", sql, err)
 		}
 	}
@@ -4166,22 +4167,18 @@ func TestPGWireTailEntityChangesFollowStreamsNewCommits(t *testing.T) {
 	select {
 	case got := <-readCh:
 		if len(got) != 2 {
-			rows.Close()
 			t.Fatalf("expected 2 follow rows, got %#v", got)
 		}
 		if got[0].CommitTS.IsZero() || got[0].Version != 1 || got[0].Tables != `["items"]` {
-			rows.Close()
 			t.Fatalf("unexpected first follow row: %#v", got[0])
 		}
 		if got[1].CommitTS.IsZero() || got[1].Version != 2 || got[1].Tables != `["item_steps"]` {
-			rows.Close()
 			t.Fatalf("unexpected second follow row: %#v", got[1])
 		}
 	case err := <-errReadCh:
-		rows.Close()
 		t.Fatalf("read follow rows: %v", err)
 	case <-time.After(3 * time.Second):
-		rows.Close()
+		followCancel()
 		t.Fatal("timeout waiting for follow rows")
 	}
 }
