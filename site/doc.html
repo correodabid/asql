@@ -10,7 +10,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css?v=2">
   <!-- Syntax highlighting theme (matches dark site) -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
 </head>
@@ -468,7 +468,7 @@
 
       // 2. Fenced containers: :::type[Optional Title]\ncontent\n:::
       markdown = markdown.replace(
-        /^:::(note|tip|warning|danger|info)(?:\[([^\]]*)\])?\s*\n([\s\S]*?)^:::\s*\n?/gm,
+        /^:::(note|tip|warning|danger|info)(?:\[([^\]]*)\])?\s*\n([\s\S]*?)^:::\s*$/gm,
         (_, type, title, body) => {
           const titleMap = { note: 'Note', tip: 'Tip', warning: 'Warning', danger: 'Danger', info: 'Info' };
           const displayTitle = (title && title.trim()) || titleMap[type];
@@ -478,7 +478,7 @@
 
       // 3. Tab groups: :::tabs\n:::tab[Label]\ncontent\n...\n:::
       markdown = markdown.replace(
-        /^:::tabs\s*\n([\s\S]*?)^:::\s*\n?/gm,
+        /^:::tabs\s*\n([\s\S]*?)^:::\s*$/gm,
         (_, tabsContent) => {
           const parts = tabsContent.split(/:::tab\[([^\]]+)\]\s*\n/);
           let headerHtml = '';
@@ -573,7 +573,8 @@
 
       let markdown;
       try {
-        const response = await fetch(rawUrl);
+        const fetchOpts = IS_LOCAL ? { cache: 'no-store' } : {};
+        const response = await fetch(rawUrl, fetchOpts);
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         markdown = await response.text();
       } catch (err) {
