@@ -33,4 +33,8 @@
 .asql-*
 .demo-asql
 
+# Local scratch / benchmark output
+.tmp/
+.bench/
+
 scripts
