@@ -131,7 +131,16 @@ func TestRuntimeAndAdminHTTPSmokeFlow(t *testing.T) {
 		t.Fatalf("unexpected readyz payload: %s", string(readyzBody))
 	}
 
-	metricsBody := assertStatus("/metrics", http.StatusOK)
+	// Retry until the commit counter propagates to the metrics endpoint.
+	var metricsBody []byte
+	metricsDeadline := time.Now().Add(2 * time.Second)
+	for {
+		metricsBody = assertStatus("/metrics", http.StatusOK)
+		if strings.Contains(string(metricsBody), "asql_engine_commits_total 1") || time.Now().After(metricsDeadline) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	for _, fragment := range []string{
 		"asql_engine_begins_total",
 		"asql_engine_commits_total 1",
