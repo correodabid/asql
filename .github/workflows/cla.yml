@@ -18,7 +18,7 @@ on:
 
 permissions:
   actions: write
-  contents: read
+  contents: write
   pull-requests: write
   statuses: write
 
@@ -37,10 +37,8 @@ jobs:
         with:
           path-to-signatures: '.github/cla-signatures.json'
           path-to-document: 'https://github.com/correodabid/asql/blob/main/CLA.md'
-          branch: 'main'
+          branch: 'cla-signatures'
           allowlist: 'correodabid,dependabot[bot]'
-          remote-organization-name: 'correodabid'
-          remote-repository-name: 'asql'
           custom-notsigned-prcomment: >
             Thank you for your contribution! Before we can merge, please
             read the [Contributor License Agreement](https://github.com/correodabid/asql/blob/main/CLA.md)
