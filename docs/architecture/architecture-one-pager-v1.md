@@ -28,18 +28,21 @@ Clients
                                 wal + btree
 ```
 
-Production note:
-- canonical local and application-facing runtime: `cmd/asqld` with pgwire enabled,
-- clustered runtime layers pgwire + Raft, with gRPC retained for cluster/admin transport where enabled,
-- standalone gRPC usage is secondary and should not be treated as the default onboarding path.
+:::note[Canonical runtimes]
+- **Local / application-facing**: `cmd/asqld` with pgwire enabled.
+- **Clustered**: layers pgwire + Raft, with gRPC retained for cluster/admin transport where enabled.
+- Standalone gRPC usage is **secondary** and should not be treated as the default onboarding path.
+:::
 
 ## 3) Core architectural principles
 
-- **Single-node first**: every capability works locally before distributed mode.
-- **Determinism first**: same WAL input sequence yields same state and query results.
-- **Domain isolation**: schemas and constraints are isolated per domain.
-- **Append-only truth**: WAL is canonical; materialized state is derived.
-- **Observability by default**: logs, metrics, and replay-oriented diagnostics are built-in.
+:::info[The five principles, in one screen]
+- **Single-node first** — every capability works locally before distributed mode.
+- **Determinism first** — same WAL input sequence yields same state and query results.
+- **Domain isolation** — schemas and constraints are isolated per domain.
+- **Append-only truth** — WAL is canonical; materialized state is derived.
+- **Observability by default** — logs, metrics, and replay-oriented diagnostics are built-in.
+:::
 
 ## 4) Execution and transaction model
 
@@ -75,10 +78,12 @@ This keeps execution core free from transport/storage framework coupling.
 
 ## 7) Why this matters for production teams
 
-- Faster root-cause analysis with replayable history.
-- Safer multi-domain boundaries via explicit transaction scope.
+:::tip[What this buys you in production]
+- Faster root-cause analysis with **replayable history**.
+- Safer multi-domain boundaries via **explicit transaction scope**.
 - Predictable behavior under restart/recovery.
 - Practical path from embedded/local usage to replicated deployments.
+:::
 
 ## 8) Reference specs
 

@@ -18,17 +18,21 @@ This confirms the local toolchain is compatible with the repository.
 
 ## Start ASQL locally
 
+:::tabs
+:::tab[Go run]
 ```bash
 go run ./cmd/asqld -addr :5433 -data-dir .asql
 ```
 
-What this does:
+Starts the engine, persists WAL and snapshots in `.asql`, and exposes the pgwire endpoint on `127.0.0.1:5433`. Keep this process running while you work.
+:::tab[Docker]
+```bash
+docker build -t asql:local .
+docker run -p 5433:5433 -v $(pwd)/.data:/data asql:local
+```
 
-- starts the local engine,
-- persists WAL and snapshots in `.asql`,
-- exposes the pgwire endpoint on `127.0.0.1:5433`.
-
-Keep this process running while you work.
+This container starts `asqld` with its default entrypoint and persists engine state under `/data/.asql` inside the mounted volume.
+:::
 
 ## Optional interactive shell
 
@@ -49,8 +53,7 @@ cd ../asqlstudio
 wails dev
 ```
 
-Studio connects to the asqld you already have running on
-`127.0.0.1:5433`.
+Studio connects to the asqld you already have running on `127.0.0.1:5433`.
 
 Use Studio when you want:
 
@@ -58,16 +61,6 @@ Use Studio when you want:
 - row inspection,
 - time explorer workflows,
 - fixture validate/load/export workflows.
-
-## Optional Docker path
-
-```bash
-docker build -t asql:local .
-docker run -p 5433:5433 -v $(pwd)/.data:/data asql:local
-```
-
-This container starts `asqld` with its default entrypoint and persists engine
-state under `/data/.asql` inside the mounted volume.
 
 ## What to do next
 
@@ -87,4 +80,6 @@ If you are doing repeated experiments and want a clean start:
 rm -rf .asql
 ```
 
-Only do this for local disposable data.
+:::danger[Destructive — cannot be undone]
+This permanently deletes all WAL records and snapshots. Only run it on local development data.
+:::

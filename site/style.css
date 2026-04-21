@@ -2954,6 +2954,207 @@ code {
 }
 .doc-content blockquote p:last-child { margin-bottom: 0; }
 
+/* ── Callout boxes ─────────────────────────────────────────────── */
+.callout {
+  margin: 20px 0;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  border-left-width: 4px;
+  overflow: hidden;
+}
+.callout-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 14px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.callout-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+}
+.callout-body {
+  padding: 4px 14px 12px;
+}
+.callout-body > *:first-child { margin-top: 0 !important; }
+.callout-body > *:last-child { margin-bottom: 0 !important; }
+.callout-body p { margin-bottom: 8px; }
+.callout-body p:last-child { margin-bottom: 0; }
+.callout-body code { background: rgba(255,255,255,0.06) !important; border-color: rgba(255,255,255,0.08) !important; }
+.callout-body .md-code-block { margin-bottom: 8px; }
+/* Note */
+.callout-note { border-left-color: var(--accent); background: #3b82f605; }
+.callout-note .callout-title { color: #60a5fa; background: #3b82f60a; }
+/* Tip */
+.callout-tip { border-left-color: var(--green); background: #10b98105; }
+.callout-tip .callout-title { color: #34d399; background: #10b9810a; }
+/* Warning */
+.callout-warning { border-left-color: var(--yellow); background: #f59e0b05; }
+.callout-warning .callout-title { color: #fbbf24; background: #f59e0b0a; }
+/* Danger */
+.callout-danger { border-left-color: var(--red); background: #ef444405; }
+.callout-danger .callout-title { color: #f87171; background: #ef44440a; }
+/* Info */
+.callout-info { border-left-color: var(--accent-2); background: #8b5cf605; }
+.callout-info .callout-title { color: #a78bfa; background: #8b5cf60a; }
+
+/* ── Tab groups ─────────────────────────────────────────────────── */
+.tab-group {
+  margin: 20px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+.tab-header {
+  display: flex;
+  background: #0f1420;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.tab-btn {
+  padding: 8px 16px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-family: var(--mono);
+  font-weight: 500;
+  cursor: pointer;
+  transition: color var(--transition), border-color var(--transition);
+  white-space: nowrap;
+  margin-bottom: -1px;
+}
+.tab-btn:hover { color: var(--text-dim); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+.tab-panel > .md-code-block { border: none; border-radius: 0; margin: 0; }
+.tab-panel > p, .tab-panel > ul, .tab-panel > ol { padding: 12px 16px; margin: 0; }
+
+/* ── Collapsible details ────────────────────────────────────────── */
+.md-details {
+  margin: 20px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--bg-card);
+}
+.md-details-summary {
+  padding: 10px 16px;
+  cursor: pointer;
+  font-weight: 500;
+  color: var(--text);
+  font-size: 0.92rem;
+  list-style: none;
+  transition: background var(--transition);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  user-select: none;
+}
+.md-details-summary::-webkit-details-marker { display: none; }
+.md-details-summary::before {
+  content: '';
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-top: 1.5px solid var(--text-dim);
+  border-right: 1.5px solid var(--text-dim);
+  transform: rotate(45deg);
+  transition: transform var(--transition);
+  flex-shrink: 0;
+}
+.md-details[open] > .md-details-summary::before { transform: rotate(135deg); }
+.md-details-summary:hover { background: var(--bg-card-hover); }
+.md-details-body {
+  padding: 14px 16px;
+  border-top: 1px solid var(--border);
+}
+.md-details-body > *:first-child { margin-top: 0 !important; }
+.md-details-body > *:last-child { margin-bottom: 0 !important; }
+
+/* ── Visual numbered steps ──────────────────────────────────────── */
+.md-steps { margin: 24px 0; counter-reset: step; }
+.md-steps > ol { list-style: none; padding: 0; margin: 0; }
+.md-steps > ol > li {
+  counter-increment: step;
+  position: relative;
+  padding: 4px 0 20px 52px;
+  margin: 0;
+  color: var(--text-dim);
+  line-height: 1.65;
+}
+.md-steps > ol > li:last-child { padding-bottom: 0; }
+.md-steps > ol > li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.86rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 0 0 3px var(--bg-dark), 0 0 0 4px var(--border);
+  z-index: 1;
+}
+.md-steps > ol > li:not(:last-child)::after {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 35px;
+  bottom: -5px;
+  width: 1px;
+  background: var(--border);
+}
+.md-steps > ol > li > p:first-of-type,
+.md-steps > ol > li > strong:first-child { color: var(--text); font-weight: 600; }
+.md-steps > ol > li .md-code-block { margin-top: 10px; }
+
+/* ── Keyboard keys (<kbd>) ──────────────────────────────────────── */
+kbd {
+  display: inline-block;
+  padding: 1px 7px;
+  font-family: var(--mono);
+  font-size: 0.82em;
+  color: var(--text);
+  background: #1a2035;
+  border: 1px solid var(--border-light);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
+  line-height: 1.4;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+/* ── Heading anchor links ───────────────────────────────────────── */
+.heading-anchor {
+  display: inline-block;
+  margin-left: 8px;
+  opacity: 0;
+  color: var(--text-muted);
+  text-decoration: none !important;
+  font-size: 0.72em;
+  font-weight: 400;
+  transition: opacity var(--transition), color var(--transition);
+  vertical-align: middle;
+}
+.doc-content h2:hover .heading-anchor,
+.doc-content h3:hover .heading-anchor,
+.doc-content h4:hover .heading-anchor { opacity: 1; }
+.heading-anchor:hover { color: var(--accent) !important; }
+
 /* Horizontal rules */
 .doc-content hr {
   border: none;

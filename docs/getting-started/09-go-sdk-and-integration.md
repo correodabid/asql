@@ -2,8 +2,9 @@
 
 ASQL is implemented in Go, so the most natural application integration path is through Go services and tools.
 
-For ordinary application reads and writes, prefer pgwire with `pgx` or `pgxpool`.
-Use lower-level gRPC tooling only when you intentionally need engine-level administrative flows.
+:::tip[pgwire first]
+For ordinary application reads and writes, prefer **pgwire with `pgx` or `pgxpool`**. Use lower-level gRPC tooling only when you intentionally need engine-level administrative flows.
+:::
 
 For driver/query-mode guidance, see [../reference/pgwire-driver-guidance-v1.md](../reference/pgwire-driver-guidance-v1.md).
 For the narrow app-facing translation lane that works today with PostgreSQL-oriented services, see [../reference/orm-lite-adoption-lane-v1.md](../reference/orm-lite-adoption-lane-v1.md).
@@ -16,18 +17,15 @@ Reference material:
 - [../reference/cookbook-go-sdk.md](../reference/cookbook-go-sdk.md)
 - [`sdk/`](../../sdk/) — typed Go client on top of the gRPC admin surface.
 
-When the durable principal catalog is enabled, the gRPC admin/query surface now
-expects database-principal metadata on calls that open transactions or inspect
-current/historical engine state. Clients send `asql-principal` and
-`asql-password` via metadata; bearer tokens remain separate transport/operator
-controls.
+:::info[Durable principals over gRPC]
+When the durable principal catalog is enabled, the gRPC admin/query surface expects database-principal metadata on calls that open transactions or inspect current/historical engine state. Clients send `asql-principal` and `asql-password` via metadata; bearer tokens remain separate transport/operator controls.
+:::
 
-Important: the default local runtime started by `go run ./cmd/asqld ...` in
-getting-started exposes pgwire on `:5433`. The gRPC admin surface is not the
-primary application-facing path for new teams.
+:::warning[gRPC is not the primary app path]
+The default local runtime started by `go run ./cmd/asqld ...` exposes pgwire on `:5433`. The gRPC admin surface is **not** the primary application-facing path for new teams.
 
 For new application code, a pgwire-first service shape is the right default.
-That is also the runtime started in [02-install-and-run.md](02-install-and-run.md).
+:::
 
 ## Typical integration shape
 
@@ -104,10 +102,12 @@ This keeps the historical read path in normal SQL instead of introducing a separ
 
 ## Recommended integration strategy
 
-- keep transaction orchestration explicit,
-- wrap domain names in small application helpers,
-- add fixtures early for integration tests,
-- reserve advanced temporal logic for places that truly need it.
+:::tip[Four rules for a clean integration]
+- Keep transaction orchestration **explicit**.
+- Wrap domain names in small application helpers.
+- Add fixtures early for integration tests.
+- Reserve advanced temporal logic for places that truly need it.
+:::
 
 ## Recommended pgwire path for new teams
 
@@ -133,15 +133,16 @@ If the team is evaluating a light query builder or ORM-like layer, keep the firs
 
 ## Common expectation mismatch
 
-Do not expect ASQL to remove application workflow code.
-The service still decides:
+:::warning[ASQL does not absorb workflow code]
+Do not expect ASQL to remove application workflow code. The service still decides:
 
-- which domains participate,
-- which business steps belong in one transaction,
-- what audit payloads mean,
-- what IDs and timestamps are used.
+- Which domains participate.
+- Which business steps belong in one transaction.
+- What audit payloads mean.
+- What IDs and timestamps are used.
 
-ASQL gives that code a more explicit and replay-safe substrate.
+ASQL gives that code a more explicit and replay-safe substrate — not a substitute.
+:::
 
 ## Next step
 

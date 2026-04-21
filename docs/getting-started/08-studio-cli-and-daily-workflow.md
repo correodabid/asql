@@ -1,6 +1,17 @@
 # 08. Studio, CLI, and Daily Workflow
 
-A practical ASQL adoption usually uses both Studio and `asqlctl`.
+A practical ASQL adoption usually uses **both Studio and `asqlctl`** — they complement each other.
+
+:::tabs
+:::tab[Studio — visual exploration]
+Best for guided onboarding, schema browsing, ad-hoc queries, row detail, mutation/entity history, temporal helpers, and Time Explorer snapshot/diff workflows.
+
+Use Studio when a human is actively exploring the data and needs visual diffing.
+:::tab[asqlctl — scripts & automation]
+Best for shell automation, CI or smoke tests, scripted transactions, fixture workflows, audit evidence export, and reproducible team instructions.
+
+Use `asqlctl` when the same workflow must be repeatable across machines, pipelines, or teammates.
+:::
 
 ## Use Studio for exploration
 
@@ -70,21 +81,19 @@ of the first-run local loop.
 
 ## Bootstrap and rotate database principals
 
-When you enable durable principals, keep two layers separate:
+:::warning[Keep two authorization layers separate]
+- **Operator tokens** still protect admin/process surfaces.
+- **Database principals** (`USER` / `ROLE`) govern pgwire login and in-database authorization.
 
-- operator tokens still protect admin/process surfaces,
-- database principals (`USER` / `ROLE`) govern pgwire login and in-database authorization.
+The first admin principal is a one-time bootstrap step allowed only while the durable principal catalog is empty.
+:::
 
-The first admin principal is a one-time bootstrap step allowed only while the
-durable principal catalog is empty.
-
-Typical local sequence:
-
-1. start `asqld` with the operator/admin token you want to use for bootstrap,
-2. bootstrap the first admin principal,
-3. use that durable principal for pgwire login,
-4. rotate passwords through the durable-principal workflow rather than by
-   changing the operator token.
+:::steps
+1. Start `asqld` with the operator/admin token you want to use for bootstrap.
+2. Bootstrap the first admin principal.
+3. Use that durable principal for pgwire login.
+4. Rotate passwords through the durable-principal workflow — **not** by changing the operator token.
+:::
 
 Bootstrap from the CLI:
 
@@ -185,15 +194,22 @@ WHERE domain = 'billing'
 
 This is a good default CLI path because it turns raw primitives into one repeatable explanation workflow.
 
-When the durable principal catalog is enabled, treat the `asql_admin` helpers as explicit security surfaces: `asql_admin.engine_stats` and other operator/admin views require `ADMIN`, while historical helpers such as `asql_admin.entity_version_history` and `asql_admin.row_history` require `SELECT_HISTORY`.
+:::note[`asql_admin` helpers require explicit privileges]
+When the durable principal catalog is enabled, treat the `asql_admin` helpers as explicit security surfaces:
+
+- `asql_admin.engine_stats` and other operator/admin views require `ADMIN`.
+- Historical helpers such as `asql_admin.entity_version_history` and `asql_admin.row_history` require `SELECT_HISTORY`.
+:::
 
 ## Suggested daily loop
 
-1. run `asqld` locally,
-2. use Studio for interactive inspection,
-3. use `asqlctl` for scripted flows,
-4. create fixtures for realistic scenarios,
-5. verify temporal behavior with Time Explorer and helper queries.
+:::steps
+1. Run `asqld` locally.
+2. Use Studio for interactive inspection.
+3. Use `asqlctl` for scripted flows.
+4. Create fixtures for realistic scenarios.
+5. Verify temporal behavior with Time Explorer and helper queries.
+:::
 
 ## Recommended team habits
 

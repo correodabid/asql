@@ -53,12 +53,13 @@ Runtime flags:
 - `-admin-read-token`: optional bearer token for read-only admin JSON endpoints; falls back to `-auth-token`
 - `-admin-write-token`: optional bearer token for mutating admin JSON endpoints such as backup creation and restore; falls back to `-auth-token`
 
-Important distinction:
+:::warning[Tokens ≠ database principals]
+Process-config tokens are **deployment/operator controls**, not the same thing as durable database principals.
 
-- these process-config tokens are deployment/operator controls,
-- they are not the same thing as durable database principals,
-- when the durable principal catalog is bootstrapped, pgwire logins and in-database privileges come from stored principals and grants,
-- admin HTTP bearer tokens still remain operator-facing transport controls.
+- When the durable principal catalog is bootstrapped, pgwire logins and in-database privileges come from **stored principals and grants**.
+- Admin HTTP bearer tokens remain **operator-facing transport controls**.
+- Rotating one does not imply rotating the other.
+:::
 
 If `-auth-token` is configured, clients must send:
 
@@ -117,11 +118,11 @@ go run ./cmd/asqlctl -command audit-export -data-dir .asql -output audit-evidenc
 go run ./cmd/asqlctl -command audit-export -data-dir .asql -domains billing -table invoices -operation UPDATE -output audit-evidence.jsonl -format jsonl
 ```
 
-Current audit policy is explicit and fail-closed:
-
-- retention mode is `retain_forever`,
-- pruning is not active,
-- exports include a file SHA-256 digest for external evidence handoff.
+:::info[Audit policy — explicit and fail-closed]
+- Retention mode is `retain_forever`.
+- Pruning is not active.
+- Exports include a file SHA-256 digest for external evidence handoff.
+:::
 
 Security-management examples over the admin HTTP surface:
 

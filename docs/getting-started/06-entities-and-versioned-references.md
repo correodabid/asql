@@ -37,18 +37,18 @@ Conceptually:
 
 ## Row-head `LSN` capture vs entity-version capture
 
-This is one of the most important adoption choices in ASQL schema design.
-
+:::warning[One of the most important adoption choices]
 Two schemas can both use `VERSIONED FOREIGN KEY`, but mean very different things:
 
-- **row-head `LSN` capture** says: “I need the latest visible mutation point of this row.”
-- **entity-version capture** says: “I need the business-facing version of this aggregate.”
+- **Row-head `LSN` capture** says: _"I need the latest visible mutation point of this row."_
+- **Entity-version capture** says: _"I need the business-facing version of this aggregate."_
 
 If teams do not make this choice explicitly, they usually end up with confusing temporal columns and unclear historical expectations.
+:::
 
-### Option A: row-based reference
-
-Use this when the referenced table is mostly standalone and row history is already the clearest model.
+:::tabs
+:::tab[Option A — Row-based reference]
+Use when the referenced table is mostly standalone and row history is already the clearest model.
 
 ```sql
 CREATE TABLE clinical.admissions (
@@ -62,21 +62,19 @@ CREATE TABLE clinical.admissions (
 )
 ```
 
-This means:
+**Semantics**
 
-- the temporal token follows the current visible row-head `LSN` of `patients.patients`,
-- downstream code is reasoning about one row snapshot,
-- historical explanation will usually start from `row_lsn(...)` and `FOR HISTORY`.
+- Temporal token follows the current visible **row-head `LSN`** of `patients.patients`.
+- Downstream code reasons about one row snapshot.
+- Historical explanation starts from `row_lsn(...)` and `FOR HISTORY`.
 
-Use this when:
+**Use when**
 
-- the referenced row is mostly independent,
-- no richer aggregate lifecycle needs to be preserved,
-- capturing a row mutation point is clearer than introducing an entity.
-
-### Option B: entity-based reference
-
-Use this when the referenced table is really the root of a richer aggregate and downstream data should capture the aggregate version rather than one row mutation point.
+- The referenced row is mostly independent.
+- No richer aggregate lifecycle needs to be preserved.
+- Capturing a row mutation point is clearer than introducing an entity.
+:::tab[Option B — Entity-based reference]
+Use when the referenced table is really the root of a richer aggregate and downstream data should capture the aggregate version rather than one row mutation point.
 
 ```sql
 CREATE TABLE recipe.master_recipes (
@@ -109,17 +107,18 @@ CREATE TABLE execution.batch_orders (
 )
 ```
 
-This means:
+**Semantics**
 
-- the temporal token follows the entity version of `master_recipe_entity`,
-- downstream code is preserving a replay-safe aggregate snapshot,
-- historical explanation will usually start from `entity_version(...)`, `entity_head_lsn(...)`, and `entity_version_lsn(...)`.
+- Temporal token follows the **entity version** of `master_recipe_entity`.
+- Downstream code preserves a replay-safe aggregate snapshot.
+- Historical explanation starts from `entity_version(...)`, `entity_head_lsn(...)`, and `entity_version_lsn(...)`.
 
-Use this when:
+**Use when**
 
-- the application already thinks in one aggregate root,
-- related child tables belong to the same lifecycle,
-- downstream references should capture a business revision, not just a row mutation point.
+- The application already thinks in one aggregate root.
+- Related child tables belong to the same lifecycle.
+- Downstream references should capture a business revision, not just a row mutation point.
+:::
 
 ## Practical decision rule
 
@@ -134,16 +133,15 @@ Use **entity-version capture** when the answer is mostly aggregate-centric.
 
 ## Common mistake to avoid
 
-Do not create an entity only because you want versioned references to look more structured.
-
+:::danger[Do not create entities to make references "look structured"]
 That usually creates a worse model:
 
-- temporal columns look business-meaningful, but the aggregate boundary is still fuzzy,
-- `resolve_reference(...)` returns entity semantics that the team cannot explain,
-- debugging gets harder because row history and aggregate history are now mixed without a clear reason.
+- Temporal columns look business-meaningful, but the aggregate boundary is still fuzzy.
+- `resolve_reference(...)` returns entity semantics that the team cannot explain.
+- Debugging gets harder because row history and aggregate history are now mixed without a clear reason.
 
-Likewise, do not keep everything row-based if the application already reasons in aggregate revisions.
-That usually pushes too much temporal interpretation into application code.
+Likewise, do not keep everything row-based if the application already reasons in aggregate revisions. That usually pushes too much temporal interpretation into application code.
+:::
 
 ## Automatic capture
 
@@ -173,83 +171,83 @@ For business workflows:
 
 Use this checklist before adding `CREATE ENTITY`.
 
-### 1. Should this be an entity at all?
+:::details[1. Should this be an entity at all?]
+**Usually yes if**
 
-Usually yes if:
+- The application already thinks in one stable aggregate root.
+- Several tables participate in one lifecycle.
+- Historical explanation is easier at aggregate level than row level.
+- Versioned references should follow business aggregate semantics instead of raw row-head `LSN`s.
 
-- the application already thinks in one stable aggregate root,
-- several tables participate in one lifecycle,
-- historical explanation is easier at aggregate level than row level,
-- versioned references should follow business aggregate semantics instead of raw row-head `LSN`s.
+**Usually no if**
 
-Usually no if:
+- The table is mostly standalone.
+- The boundary exists only because rows are often queried together.
+- The team still cannot explain the aggregate lifecycle.
+- Raw row history is already the clearest model.
+:::
 
-- the table is mostly standalone,
-- the boundary exists only because rows are often queried together,
-- the team still cannot explain the aggregate lifecycle,
-- raw row history is already the clearest model.
-
-### 2. Is the `ROOT` table correct?
-
+:::details[2. Is the `ROOT` table correct?]
 Your `ROOT` table should usually be the table that defines:
 
-- aggregate identity,
-- the primary business key for the aggregate,
-- the state transition developers talk about first.
+- Aggregate identity.
+- The primary business key for the aggregate.
+- The state transition developers talk about first.
 
-Good signs:
+**Good signs**
 
-- one row clearly anchors the aggregate,
-- related rows make sense as children of that root,
-- other tables rarely need to exist independently of the root lifecycle.
+- One row clearly anchors the aggregate.
+- Related rows make sense as children of that root.
+- Other tables rarely need to exist independently of the root lifecycle.
 
-Warning signs:
+**Warning signs**
 
-- the chosen root is just the most convenient join point,
-- two tables could both plausibly be the root,
-- identity really lives somewhere else.
+- The chosen root is just the most convenient join point.
+- Two tables could both plausibly be the root.
+- Identity really lives somewhere else.
+:::
 
-### 3. Which tables belong in `INCLUDES`?
+:::details[3. Which tables belong in `INCLUDES`?]
+**Include tables when they**
 
-Include tables when they:
+- Participate in the same lifecycle as the root.
+- Should move version history together with the root.
+- Are part of the replay-safe explanation of one aggregate state.
 
-- participate in the same lifecycle as the root,
-- should move version history together with the root,
-- are part of the replay-safe explanation of one aggregate state.
+**Do not include tables just because**
 
-Do not include tables just because:
+- They are frequently joined.
+- They appear on the same screen.
+- They reference the root without sharing the same lifecycle.
+:::
 
-- they are frequently joined,
-- they appear on the same screen,
-- or they reference the root without sharing the same lifecycle.
-
-### 4. Will versioned references be clearer with entity semantics?
-
+:::details[4. Will versioned references be clearer with entity semantics?]
 Prefer entity semantics when downstream references should capture:
 
-- the business version of the aggregate,
-- not the latest visible row-head `LSN` of one table.
+- The business version of the aggregate.
+- Not the latest visible row-head `LSN` of one table.
 
 If downstream code only needs the latest row mutation point, a plain row-based reference may be enough.
+:::
 
-### 5. Can the team explain the lifecycle in one sentence?
-
+:::details[5. Can the team explain the lifecycle in one sentence?]
 Before creating the entity, make sure the team can say something like:
 
-- “an invoice is rooted in `invoices` and includes `invoice_items` because both belong to one aggregate lifecycle”,
-- or “a recipe is rooted in `recipes` and includes steps/checks because versioned references should follow recipe revisions, not individual row heads”.
+- _"An invoice is rooted in `invoices` and includes `invoice_items` because both belong to one aggregate lifecycle."_
+- Or _"A recipe is rooted in `recipes` and includes steps/checks because versioned references should follow recipe revisions, not individual row heads."_
 
-If that sentence is still fuzzy, delay the entity and use rows first.
+If that sentence is still fuzzy, **delay the entity and use rows first**.
+:::
 
 ## Quick anti-pattern list
 
-Avoid these common mistakes:
-
-- creating an entity for every table by default,
-- choosing `ROOT` based on convenience rather than identity,
-- adding `INCLUDES` tables that are only query-adjacent,
-- using entities to hide unclear application modeling,
-- forcing entity semantics where row history is already enough.
+:::warning[Avoid these common mistakes]
+- Creating an entity for every table by default.
+- Choosing `ROOT` based on convenience rather than identity.
+- Adding `INCLUDES` tables that are only query-adjacent.
+- Using entities to hide unclear application modeling.
+- Forcing entity semantics where row history is already enough.
+:::
 
 ## Example mental model
 

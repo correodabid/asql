@@ -34,11 +34,11 @@ Typical examples:
 
 ## Responsibility boundary
 
-Use this rule early:
-
+:::info[Integration pattern]
 - **Engine-owned**: explicit domains, replay-safe history, temporal queries, entity/version primitives, deterministic fixtures.
 - **App-owned**: workflow states, approvals, actor semantics, compliance meaning, projections specific to one product.
-- **Recommended integration pattern**: keep workflow meaning in the application and use ASQL to make state changes, history, and debugging explicit.
+- **Recommended pattern**: keep workflow meaning in the application and use ASQL to make state changes, history, and debugging explicit.
+:::
 
 When a proposed capability feels attractive because one example app needs it, ask:
 
@@ -77,6 +77,7 @@ ASQL still exposes rows and `LSN`s, but application-facing workflows can also us
 
 ## Adoption mindset
 
+:::tip[Start here]
 The easiest way to succeed with ASQL is:
 
 1. start single-node,
@@ -84,6 +85,7 @@ The easiest way to succeed with ASQL is:
 3. use normal SQL first,
 4. introduce time-travel and fixtures early,
 5. only move into more advanced temporal or aggregate workflows when the app needs them.
+:::
 
 ## Next step
 

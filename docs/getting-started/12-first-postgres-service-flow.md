@@ -4,13 +4,12 @@ This guide is for teams that already have a small PostgreSQL-oriented service
 and want to prove the first real ASQL read/write workflow without pretending the
 database is drop-in PostgreSQL.
 
-Use this guide when all of these are true:
-
-- the service already owns its SQL or can inspect emitted SQL,
-- the first target workflow fits one explicit domain,
-- the team wants pgwire-first application integration,
-- and success means “one real request works end to end” rather than “the whole
-  app migrated unchanged”.
+:::info[Use this guide when all of these are true]
+- The service already owns its SQL or can inspect emitted SQL.
+- The first target workflow fits one explicit domain.
+- The team wants pgwire-first application integration.
+- Success means _"one real request works end to end"_ — not _"the whole app migrated unchanged"_.
+:::
 
 Use it together with:
 
@@ -22,17 +21,18 @@ Use it together with:
 
 ## What this guide proves
 
+:::tip[One real request, end to end]
 By the end of this guide, an existing PostgreSQL-shaped Go service will:
 
-- connect to ASQL over pgwire,
-- create one table in one explicit domain,
-- execute one insert-focused write flow,
-- execute one update flow,
-- read the resulting row back,
-- and inspect the same row through ASQL history tooling.
+- Connect to ASQL over pgwire.
+- Create one table in one explicit domain.
+- Execute one insert-focused write flow.
+- Execute one update flow.
+- Read the resulting row back.
+- Inspect the same row through ASQL history tooling.
 
-That is the current adoption wedge.
-It is intentionally smaller than “full PostgreSQL compatibility”.
+That is the current adoption wedge. It is intentionally smaller than _"full PostgreSQL compatibility"_.
+:::
 
 ## Starting assumptions
 
@@ -274,19 +274,16 @@ it just moved.
 
 ## Step 8 — know what not to port in the first wave
 
-Do not make the first success criteria too broad.
+:::warning[Defer these until after the basic flow is green]
+Keeping the first success criteria **narrow** is the point — it separates real engine/model fit from abstraction noise.
 
-Defer these until after the basic flow is green:
-
-- broad ORM metadata discovery,
-- `UPDATE ... RETURNING` and `DELETE ... RETURNING`,
-- arrays and `ANY(...)`,
-- builder-mode BI workflows,
-- cross-domain writes unless the atomic boundary is already clear,
-- full PostgreSQL parity assumptions in migrations or test helpers.
-
-The first migration wedge is intentionally narrow so the team can separate real
-engine/model fit from abstraction noise.
+- Broad ORM metadata discovery.
+- `UPDATE ... RETURNING` and `DELETE ... RETURNING`.
+- Arrays and `ANY(...)`.
+- Builder-mode BI workflows.
+- Cross-domain writes unless the atomic boundary is already clear.
+- Full PostgreSQL parity assumptions in migrations or test helpers.
+:::
 
 For the next PostgreSQL-shaped query rewrites after this first workflow is
 green, continue with [../reference/postgres-app-sql-translation-guide-v1.md](../reference/postgres-app-sql-translation-guide-v1.md).
