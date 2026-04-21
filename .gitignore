@@ -20,6 +20,11 @@
 
 # IDE
 .DS_Store
+.vscode
+
+# Claude Code (keep skills/ and settings.json — only ignore local/ephemeral files)
+.claude/worktrees/
+.claude/settings.local.json
 
 *.wal
 *.wal.*
@@ -29,7 +34,3 @@
 .demo-asql
 
 scripts
-
-.vscode
-
-hospital-miks/frontend/node_modules/*/asql-mcp
