@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 )
 
 // Storage persists Raft's hard state — currentTerm and votedFor.
@@ -91,7 +92,11 @@ func (s *fileStorage) LoadState(_ context.Context) (uint64, string, error) {
 }
 
 // memStorage is an in-memory Storage used in unit tests.
+// persistLocked intentionally releases n.mu before calling SaveState to avoid
+// holding the Raft lock during I/O, so SaveState may be called concurrently
+// from multiple goroutines and must protect its own state.
 type memStorage struct {
+	mu       sync.Mutex
 	term     uint64
 	votedFor string
 }
@@ -102,11 +107,15 @@ func NewMemStorage() Storage {
 }
 
 func (m *memStorage) SaveState(_ context.Context, term uint64, votedFor string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.term = term
 	m.votedFor = votedFor
 	return nil
 }
 
 func (m *memStorage) LoadState(_ context.Context) (uint64, string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.term, m.votedFor, nil
 }
