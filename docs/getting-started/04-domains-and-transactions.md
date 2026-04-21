@@ -17,13 +17,11 @@ The point is not naming. The point is making boundaries visible.
 
 ## Common expectation mismatch
 
-Teams new to ASQL often assume domains are just namespacing.
-That usually leads to either:
+:::warning[Not just namespacing]
+Teams new to ASQL often assume domains are just namespacing. That usually leads to either a single giant domain that hides real business boundaries, or too many tiny domains that force unnecessary cross-domain work.
 
-- one giant domain that hides real business boundaries, or
-- too many tiny domains that force unnecessary cross-domain work.
-
-Treat a domain as a boundary for invariants, ownership, and replay reasoning.
+Treat a domain as a boundary for **invariants, ownership, and replay reasoning**.
+:::
 
 ## Single-domain transactions
 
@@ -107,8 +105,9 @@ For explicit SQL examples, you can still use qualified names when that is cleare
 
 ## Adoption tip
 
-If domain design is still debated, start with the smallest boundary split that the team can explain clearly.
-Refining from one clear boundary to two is easier than unwinding an over-modeled schema map.
+:::tip
+If domain design is still debated, start with the smallest boundary split that the team can explain clearly. Refining from one clear boundary to two is easier than unwinding an over-modeled schema map.
+:::
 
 ## Domain modeling checklist
 

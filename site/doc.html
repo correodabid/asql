@@ -308,9 +308,10 @@
     // ─── Helper: copy code ───────────────────────────────────────────
     function copyCode(btn) {
       const code = btn.closest('.md-code-block').querySelector('code').textContent;
+      const originalHTML = btn.innerHTML;
       navigator.clipboard.writeText(code).then(() => {
         btn.textContent = '✓';
-        setTimeout(() => { btn.textContent = '<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="8" ry="2.5"/><path d="M4 5v14c0 1.5 3.5 2.5 8 2.5s8-1 8-2.5V5"/><path d="M4 12c0 1.5 3.5 2.5 8 2.5s8-1 8-2.5"/></svg>'; }, 1500);
+        setTimeout(() => { btn.innerHTML = originalHTML; }, 1500);
       });
     }
 
@@ -431,6 +432,98 @@
       });
     }
 
+    // ─── Pre-processor: callout icons ───────────────────────────────
+    function calloutIcon(type) {
+      const icons = {
+        note:    `<svg class="callout-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7" x2="8" y2="11"/><circle cx="8" cy="4.75" r="0.5" fill="currentColor" stroke="none"/></svg>`,
+        tip:     `<svg class="callout-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="3,9 8,2 13,9"/><line x1="5.5" y1="12" x2="10.5" y2="12"/><line x1="6" y1="14" x2="10" y2="14"/></svg>`,
+        warning: `<svg class="callout-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2.5L1.5 13.5h13L8 2.5z"/><line x1="8" y1="6.5" x2="8" y2="9.5"/><circle cx="8" cy="11.5" r="0.5" fill="currentColor" stroke="none"/></svg>`,
+        danger:  `<svg class="callout-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><line x1="5.5" y1="5.5" x2="10.5" y2="10.5"/><line x1="10.5" y1="5.5" x2="5.5" y2="10.5"/></svg>`,
+        info:    `<svg class="callout-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="8" r="6.5"/><line x1="8" y1="7" x2="8" y2="11"/><circle cx="8" cy="4.75" r="0.5" fill="currentColor" stroke="none"/></svg>`,
+      };
+      return icons[type] || icons.note;
+    }
+
+    function buildCallout(type, title, bodyHtml) {
+      return `<div class="callout callout-${type}"><div class="callout-title">${calloutIcon(type)}<span>${title}</span></div><div class="callout-body">${bodyHtml}</div></div>\n\n`;
+    }
+
+    // ─── Pre-processor: custom markdown syntax → HTML ────────────────
+    // Runs on raw markdown BEFORE marked.parse(). Handles:
+    //   1. GitHub-style alerts:  > [!NOTE] / [!TIP] / [!WARNING] / [!IMPORTANT] / [!CAUTION]
+    //   2. Fenced containers:    :::note[Title]  ...content...  :::
+    //   3. Tab groups:           :::tabs  :::tab[Label]  ...content...  :::
+    function preprocess(markdown) {
+      // 1. GitHub-style alerts
+      markdown = markdown.replace(
+        /^> \[!(NOTE|TIP|WARNING|IMPORTANT|CAUTION)\]\n((?:^>[ \t]?.*\n?)*)/gm,
+        (_, rawType, body) => {
+          const typeMap = { NOTE: 'note', TIP: 'tip', WARNING: 'warning', IMPORTANT: 'warning', CAUTION: 'danger' };
+          const titleMap = { note: 'Note', tip: 'Tip', warning: 'Warning', danger: 'Caution' };
+          const type = typeMap[rawType] || 'note';
+          const cleanBody = body.replace(/^>[ \t]?/gm, '').trim();
+          return buildCallout(type, titleMap[type], marked.parse(cleanBody));
+        }
+      );
+
+      // 2. Fenced containers: :::type[Optional Title]\ncontent\n:::
+      markdown = markdown.replace(
+        /^:::(note|tip|warning|danger|info)(?:\[([^\]]*)\])?\s*\n([\s\S]*?)^:::\s*\n?/gm,
+        (_, type, title, body) => {
+          const titleMap = { note: 'Note', tip: 'Tip', warning: 'Warning', danger: 'Danger', info: 'Info' };
+          const displayTitle = (title && title.trim()) || titleMap[type];
+          return buildCallout(type, displayTitle, marked.parse(body.trim()));
+        }
+      );
+
+      // 3. Tab groups: :::tabs\n:::tab[Label]\ncontent\n...\n:::
+      markdown = markdown.replace(
+        /^:::tabs\s*\n([\s\S]*?)^:::\s*\n?/gm,
+        (_, tabsContent) => {
+          const parts = tabsContent.split(/:::tab\[([^\]]+)\]\s*\n/);
+          let headerHtml = '';
+          let panelsHtml = '';
+          for (let i = 1; i < parts.length; i += 2) {
+            const label = parts[i];
+            const content = (parts[i + 1] || '').trim();
+            const activeClass = i === 1 ? ' active' : '';
+            headerHtml += `<button class="tab-btn${activeClass}" onclick="tabClick(this)">${label}</button>`;
+            panelsHtml += `<div class="tab-panel${activeClass}">${marked.parse(content)}</div>`;
+          }
+          return `<div class="tab-group"><div class="tab-header" role="tablist">${headerHtml}</div><div class="tab-panels">${panelsHtml}</div></div>\n\n`;
+        }
+      );
+
+      return markdown;
+    }
+
+    // ─── Tab group interaction ───────────────────────────────────────
+    function tabClick(btn) {
+      const group = btn.closest('.tab-group');
+      const buttons = [...group.querySelectorAll('.tab-btn')];
+      const panels = [...group.querySelectorAll('.tab-panel')];
+      const idx = buttons.indexOf(btn);
+      buttons.forEach(b => b.classList.remove('active'));
+      panels.forEach(p => p.classList.remove('active'));
+      if (idx >= 0) {
+        buttons[idx].classList.add('active');
+        panels[idx].classList.add('active');
+      }
+    }
+
+    // ─── Post-processor: heading anchor links ────────────────────────
+    function enhanceHeadings() {
+      document.querySelectorAll('.doc-content h2, .doc-content h3, .doc-content h4').forEach(h => {
+        if (!h.id) return;
+        const anchor = document.createElement('a');
+        anchor.href = '#' + h.id;
+        anchor.className = 'heading-anchor';
+        anchor.setAttribute('aria-label', 'Link to ' + h.textContent.trim());
+        anchor.textContent = '#';
+        h.appendChild(anchor);
+      });
+    }
+
     // ─── Main: fetch and render ──────────────────────────────────────
     function showFetchError(path, err) {
       document.getElementById('docLoading').style.display = 'none';
@@ -489,8 +582,8 @@
       }
 
       try {
-        // Render
-        const html = marked.parse(markdown);
+        // Pre-process custom syntax, then render
+        const html = marked.parse(preprocess(markdown));
         const content = document.getElementById('docContent');
         content.innerHTML = html;
 
@@ -504,6 +597,7 @@
         buildToc();
         buildNavLinks(path);
         enhanceTables();
+        enhanceHeadings();
 
         // Scroll to hash if present
         if (window.location.hash) {
