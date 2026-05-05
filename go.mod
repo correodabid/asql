@@ -3,7 +3,7 @@ module github.com/correodabid/asql
 go 1.25.9
 
 require (
-	github.com/klauspost/compress v1.18.5
+	github.com/klauspost/compress v1.18.6
 	github.com/modelcontextprotocol/go-sdk v1.5.0
 	google.golang.org/grpc v1.80.0
 )
