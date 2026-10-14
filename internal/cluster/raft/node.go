@@ -505,9 +505,12 @@ func (n *RaftNode) HandleAppendEntries(ctx context.Context, req AppendEntriesReq
 		if conflictIndex > 0 {
 			n.mu.Unlock()
 			truncateStart := time.Now()
-			_ = n.cfg.Log.TruncateAfter(ctx, conflictIndex-1)
+			truncErr := n.cfg.Log.TruncateAfter(ctx, conflictIndex-1)
 			truncateDur += time.Since(truncateStart)
 			n.mu.Lock()
+			if truncErr != nil {
+				return AppendEntriesResponse{}, truncErr
+			}
 			n.resetElectionDeadline() // refresh after I/O to prevent spurious elections
 		}
 		overlapDur += time.Since(overlapStart)

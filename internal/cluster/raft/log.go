@@ -70,6 +70,7 @@ type walAppender interface {
 	Append(ctx context.Context, r ports.WALRecord) (uint64, error)
 	AppendReplicated(ctx context.Context, r ports.WALRecord) error
 	TruncateBefore(ctx context.Context, beforeLSN uint64) error
+	TruncateAfter(ctx context.Context, afterLSN uint64) error
 	ReadFrom(ctx context.Context, fromLSN uint64, limit int) ([]ports.WALRecord, error)
 	LastLSN() uint64
 }
@@ -381,8 +382,8 @@ func (wl *walLog) TruncateAfter(ctx context.Context, afterIndex uint64) error {
 	wl.mu.Lock()
 	defer wl.mu.Unlock()
 
-	if err := wl.store.TruncateBefore(ctx, afterIndex+2); err != nil {
-		return err
+	if err := wl.store.TruncateAfter(ctx, afterIndex); err != nil {
+		return fmt.Errorf("raft: truncate log after %d: %w", afterIndex, err)
 	}
 	// Trim compact term index.
 	for i := len(wl.terms) - 1; i >= 0; i-- {

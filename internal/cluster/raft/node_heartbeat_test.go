@@ -46,6 +46,20 @@ func (m *heartbeatTestWALStore) TruncateBefore(_ context.Context, beforeLSN uint
 	return nil
 }
 
+func (m *heartbeatTestWALStore) TruncateAfter(_ context.Context, afterLSN uint64) error {
+	kept := m.records[:0]
+	for _, r := range m.records {
+		if r.LSN <= afterLSN {
+			kept = append(kept, r)
+		}
+	}
+	m.records = kept
+	if afterLSN < m.lastLSN {
+		m.lastLSN = afterLSN
+	}
+	return nil
+}
+
 func (m *heartbeatTestWALStore) ReadFrom(_ context.Context, fromLSN uint64, limit int) ([]ports.WALRecord, error) {
 	out := make([]ports.WALRecord, 0)
 	for _, r := range m.records {
