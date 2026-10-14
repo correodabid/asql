@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/correodabid/asql/internal/cluster/raft"
 	"github.com/correodabid/asql/internal/engine/executor"
 	"github.com/correodabid/asql/internal/engine/sqlerr"
 
@@ -26,6 +27,10 @@ func mapErrorToSQLState(err error) string {
 	var sqlErr *sqlerr.SQLError
 	if errors.As(err, &sqlErr) {
 		return sqlErr.Code
+	}
+	if errors.Is(err, raft.ErrLeaderNotReady) {
+		// A new leader is still catching up; the write was not attempted.
+		return "57P03" // cannot_connect_now
 	}
 	return sqlStateFromMessage(err.Error())
 }

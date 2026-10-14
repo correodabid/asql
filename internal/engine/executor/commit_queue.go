@@ -106,6 +106,7 @@ func (cq *commitQueue) writerLoop() {
 		}
 		jobs = cq.coalesce(jobs)
 
+		cq.engine.waitLeaderReady(jobs)
 		cq.engine.processCommitBatch(jobs)
 	}
 }
@@ -716,4 +717,21 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 		engine.perf.recordCommit(time.Since(job.commitStart))
 		engine.perf.recordEndTx()
 	}
+}
+
+// leaderReadyWaitTimeout bounds how long a commit batch waits for a newly
+// elected leader to become ready before it is attempted anyway.
+const leaderReadyWaitTimeout = 10 * time.Second
+
+// waitLeaderReady waits, outside writeMu, until the Raft leader can accept
+// appends. A new leader's engine catch-up takes writeMu, so the wait must
+// happen before processCommitBatch takes it.
+func (engine *Engine) waitLeaderReady(jobs []*commitJob) {
+	waiter, ok := engine.raftCommitter.(ports.LeaderReadinessWaiter)
+	if !ok || len(jobs) == 0 {
+		return
+	}
+	ctx, cancel := context.WithTimeout(jobs[0].ctx, leaderReadyWaitTimeout)
+	defer cancel()
+	_ = waiter.WaitLeaderReady(ctx)
 }

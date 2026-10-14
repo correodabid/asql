@@ -31,6 +31,11 @@ var (
 	// ErrQuorumUnreachable is returned when a leader cannot contact a quorum of peers.
 	ErrQuorumUnreachable = errors.New("raft: quorum unreachable")
 
+	// ErrLeaderNotReady is returned by Apply and ApplyBatch while a newly
+	// elected leader is still committing its no-op and catching up its engine.
+	// It is transient: retry after WaitLeaderReady.
+	ErrLeaderNotReady = errors.New("raft: leader not ready yet")
+
 	// ErrIndexOutOfRange is returned when a log index is beyond the known last index.
 	ErrIndexOutOfRange = errors.New("raft: log index out of range")
 )

@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/correodabid/asql/internal/engine/sqlerr"
+
+	"github.com/correodabid/asql/internal/cluster/raft"
 )
 
 func TestSQLStateFromMessageMappings(t *testing.T) {
@@ -89,5 +91,20 @@ func TestMapErrorToSQLState_PlainErrorFallsBackToStringMatch(t *testing.T) {
 	plain := errors.New("division by zero")
 	if got := mapErrorToSQLState(plain); got != "22012" {
 		t.Fatalf("mapErrorToSQLState(plain) = %s, want 22012", got)
+	}
+}
+
+func TestMapErrorToSQLState_RaftWriteOutcomes(t *testing.T) {
+	cases := []struct {
+		err  error
+		want string
+	}{
+		// New leader still catching up: the write was not attempted.
+		{fmt.Errorf("commit: %w", raft.ErrLeaderNotReady), "57P03"},
+	}
+	for _, tc := range cases {
+		if got := mapErrorToSQLState(tc.err); got != tc.want {
+			t.Errorf("mapErrorToSQLState(%v) = %s, want %s", tc.err, got, tc.want)
+		}
 	}
 }
