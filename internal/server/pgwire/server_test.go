@@ -2,6 +2,7 @@ package pgwire
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"github.com/correodabid/asql/internal/engine/executor"
+	"github.com/correodabid/asql/internal/engine/ports"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -4124,7 +4126,16 @@ func TestPGWireTailEntityChangesFollowStreamsNewCommits(t *testing.T) {
 	}
 	readCh := make(chan []followRow, 1)
 	errReadCh := make(chan error, 1)
+	readDone := make(chan struct{})
+	// Only the reader goroutine touches rows. On every exit path cancel the
+	// follow and wait for the reader before the connection is closed: pgx
+	// connections must not be used from two goroutines.
+	defer func() {
+		followCancel()
+		<-readDone
+	}()
 	go func() {
+		defer close(readDone)
 		defer rows.Close()
 		result := make([]followRow, 0, 2)
 		for rows.Next() {
@@ -4268,7 +4279,17 @@ func TestPGWireTailEntityChangesFollowWorksOnExtendedProtocol(t *testing.T) {
 
 	readCh := make(chan []followRow, 1)
 	errReadCh := make(chan error, 1)
+	readDone := make(chan struct{})
+	// Only the reader goroutine touches rows. On every exit path cancel the
+	// follow and wait for the reader before the connection is closed: pgx
+	// connections must not be used from two goroutines.
+	defer func() {
+		followCancel()
+		<-readDone
+	}()
 	go func() {
+		defer close(readDone)
+		defer rows.Close()
 		result := make([]followRow, 0, 2)
 		for rows.Next() {
 			var row followRow
@@ -4295,7 +4316,6 @@ func TestPGWireTailEntityChangesFollowWorksOnExtendedProtocol(t *testing.T) {
 		"COMMIT",
 	} {
 		if _, err := writerConn.Exec(ctx, sql); err != nil {
-			rows.Close()
 			t.Fatalf("writer exec %q: %v", sql, err)
 		}
 	}
@@ -4303,22 +4323,17 @@ func TestPGWireTailEntityChangesFollowWorksOnExtendedProtocol(t *testing.T) {
 	select {
 	case got := <-readCh:
 		if len(got) != 2 {
-			rows.Close()
 			t.Fatalf("expected 2 extended follow rows, got %#v", got)
 		}
 		if got[0].CommitTS.IsZero() || got[0].Version != 1 || got[0].Tables != `["items"]` {
-			rows.Close()
 			t.Fatalf("unexpected first extended follow row: %#v", got[0])
 		}
 		if got[1].CommitTS.IsZero() || got[1].Version != 2 || got[1].Tables != `["item_steps"]` {
-			rows.Close()
 			t.Fatalf("unexpected second extended follow row: %#v", got[1])
 		}
 	case err := <-errReadCh:
-		rows.Close()
 		t.Fatalf("read extended follow rows: %v", err)
 	case <-time.After(3 * time.Second):
-		rows.Close()
 		t.Fatal("timeout waiting for extended follow rows")
 	}
 }
@@ -4442,5 +4457,41 @@ func TestPGWireAsOfLSNInlineSyntax(t *testing.T) {
 
 	if _, err := conn.Exec(ctx, "COMMIT"); err != nil {
 		t.Fatalf("commit read tx: %v", err)
+	}
+}
+
+// TestTailEntityChangesWakePollsWhenObservedHeadLagsWAL guards a lost wakeup
+// in FOLLOW streams: the WAL wakes subscribers before the engine publishes a
+// commit's state, so a read can miss a commit that is already in the WAL.
+// The wait must compare the head that read observed with the WAL and poll,
+// instead of blocking on a subscription that only closes on the next append.
+func TestTailEntityChangesWakePollsWhenObservedHeadLagsWAL(t *testing.T) {
+	server, err := New(Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: filepath.Join(t.TempDir(), "wake-data"),
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatalf("new pgwire server: %v", err)
+	}
+	t.Cleanup(server.Stop)
+	if _, err := server.walStore.Append(context.Background(), ports.WALRecord{TxID: "tx", Type: "BEGIN", Timestamp: 1}); err != nil {
+		t.Fatalf("append: %v", err)
+	}
+	walLSN := server.walStore.LastLSN()
+	never := make(chan struct{})
+
+	// The read observed a head behind the WAL: return promptly to re-read.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if err := server.waitForTailEntityChangesWake(ctx, never, walLSN-1); err != nil {
+		t.Fatalf("lagging observed head must poll, got %v", err)
+	}
+
+	// The read was up to date: block until the next append (here, the deadline).
+	ctx, cancel = context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := server.waitForTailEntityChangesWake(ctx, never, walLSN); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("up-to-date observed head must wait for a wake, got %v", err)
 	}
 }
