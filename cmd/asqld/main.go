@@ -40,6 +40,7 @@ func main() {
 	probeTimeout := flag.Duration("probe-timeout", 0, "per-RPC timeout for heartbeat probes (0 = default 1s)")
 	adminAddr := flag.String("admin-addr", "", "admin HTTP listen address for /metrics, /readyz, /livez (e.g. :9090)")
 	pprofAddr := flag.String("pprof-addr", "", "pprof HTTP listen address (e.g. :6060)")
+	ledgerMode := flag.String("ledger", "chain", "WAL ledger mode: chain (hash-chain every WAL record, ADR 0005) or off")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -91,6 +92,7 @@ func main() {
 		ClusterGRPCAddr:  *grpcAddr,
 		PeerProbeTimeout: *probeTimeout,
 		JoinAddr:         *joinAddr,
+		LedgerMode:       *ledgerMode,
 	}
 
 	if *peers != "" {

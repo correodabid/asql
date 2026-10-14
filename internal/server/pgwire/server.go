@@ -323,7 +323,11 @@ func New(config Config) (*Server, error) {
 		return nil, fmt.Errorf("initialize data directory: %w", err)
 	}
 
-	walStore, err := wal.NewSegmentedLogStore(dd.WALBasePath(), wal.AlwaysSync{})
+	ledgerMode, err := wal.ParseLedgerMode(config.LedgerMode)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ledger mode: %w", err)
+	}
+	walStore, err := wal.NewSegmentedLogStore(dd.WALBasePath(), wal.AlwaysSync{}, wal.WithLedgerMode(ledgerMode))
 	if err != nil {
 		return nil, fmt.Errorf("initialize wal store: %w", err)
 	}
