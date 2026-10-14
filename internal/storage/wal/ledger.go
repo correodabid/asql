@@ -42,6 +42,13 @@ const (
 	// ledgerRingSize bounds how many recent (LSN, chain) points a store keeps
 	// in memory so snapshots can anchor the chain at their LSN.
 	ledgerRingSize = 4096
+
+	// ledgerContiguousMax is the largest leaf input hashed in one Sum256 call
+	// over a contiguous scratch buffer; larger payloads are streamed.
+	ledgerContiguousMax = 16 << 10
+
+	// ledgerStackLeafMax is the largest leaf input hashed from a stack buffer.
+	ledgerStackLeafMax = 256
 )
 
 // LedgerMode selects whether a log store maintains the hash chain.
@@ -115,23 +122,43 @@ func LedgerLeaf(record ports.WALRecord) (ChainHash, error) {
 }
 
 func ledgerLeaf(term, timestamp uint64, txID string, typeEnum byte, payload []byte) ChainHash {
+	// Small leaves (BEGIN/COMMIT, short mutations) hash a stack buffer.
+	if leafHeaderSize+len(txID)+len(payload) <= ledgerStackLeafMax {
+		var buf [ledgerStackLeafMax]byte
+		b := appendLeafHeader(buf[:0], term, timestamp, txID, typeEnum, len(payload))
+		b = append(b, payload...)
+		return sha256.Sum256(b)
+	}
 	lh := leafHasherPool.Get().(*leafHasher)
-	b := lh.scratch[:0]
+	b := appendLeafHeader(lh.scratch[:0], term, timestamp, txID, typeEnum, len(payload))
+	var leaf ChainHash
+	if len(b)+len(payload) <= ledgerContiguousMax {
+		b = append(b, payload...)
+		leaf = sha256.Sum256(b)
+	} else {
+		lh.h.Reset()
+		lh.h.Write(b)
+		lh.h.Write(payload)
+		lh.h.Sum(lh.sum[:0])
+		leaf = ChainHash(lh.sum)
+	}
+	lh.scratch = b
+	leafHasherPool.Put(lh)
+	return leaf
+}
+
+// leafHeaderSize is the fixed part of a leaf input: prefix(1) + Term(8) +
+// Timestamp(8) + u16 TxID length(2) + TypeEnum(1) + u32 payload length(4).
+const leafHeaderSize = 1 + 8 + 8 + 2 + 1 + 4
+
+func appendLeafHeader(b []byte, term, timestamp uint64, txID string, typeEnum byte, payloadLen int) []byte {
 	b = append(b, ledgerLeafPrefix)
 	b = binary.BigEndian.AppendUint64(b, term)
 	b = binary.BigEndian.AppendUint64(b, timestamp)
 	b = binary.BigEndian.AppendUint16(b, uint16(len(txID)))
 	b = append(b, txID...)
 	b = append(b, typeEnum)
-	b = binary.BigEndian.AppendUint32(b, uint32(len(payload)))
-	lh.h.Reset()
-	lh.h.Write(b)
-	lh.h.Write(payload)
-	lh.h.Sum(lh.sum[:0])
-	leaf := ChainHash(lh.sum)
-	lh.scratch = b
-	leafHasherPool.Put(lh)
-	return leaf
+	return binary.BigEndian.AppendUint32(b, uint32(payloadLen))
 }
 
 // ChainStep advances the chain from prev by the record at lsn with the given leaf.
@@ -203,6 +230,7 @@ func newLedgerState(mode LedgerMode) ledgerState {
 		ls.valid = true
 		ls.rooted = true
 		ls.head = GenesisChain
+		ls.ring = make([]ledgerPoint, 0, ledgerRingSize)
 	}
 	return ls
 }
