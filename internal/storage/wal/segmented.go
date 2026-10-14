@@ -1774,6 +1774,10 @@ func (store *SegmentedLogStore) compactSegment(seg *segment) error {
 	seg.file = newF
 	seg.size = newInfo.Size()
 	seg.compressed = true
+	// A WALZ file has no outer header: the original header, ledger anchors
+	// included, is inside the compressed payload. Readers must start at
+	// offset 0 to see the WALZ magic, as they do for segments opened from disk.
+	seg.headerSize = 0
 	store.totalSize += newInfo.Size() - oldSize
 	store.mu.Unlock()
 
