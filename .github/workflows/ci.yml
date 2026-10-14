@@ -78,8 +78,11 @@ jobs:
       - name: Verify module dependencies
         run: go mod verify
 
+      # Pinned: govulncheck v1.8.0+ requires Go 1.26, and CI builds with the
+      # Go version from go.mod (1.25.x, GOTOOLCHAIN=local). Bump together
+      # with the Go version.
       - name: Install govulncheck
-        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
 
       # govulncheck currently reports 2 pgx CVEs (GO-2026-4771/4772). Fixed in
       # pgx v5.9.0, but upgrading breaks our server's binary int8 encoding for
