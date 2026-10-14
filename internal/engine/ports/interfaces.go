@@ -68,6 +68,15 @@ type Sizer interface {
 	TotalSize() (int64, error)
 }
 
+// LedgerReader is implemented by log stores that maintain the tamper-evident
+// hash chain over the WAL (ADR 0005). LedgerChainAt returns the chain value at
+// lsn while the store still holds it in memory. The chain is metadata about
+// the log: the engine only records it in snapshots as an anchor and never
+// lets it influence state.
+type LedgerReader interface {
+	LedgerChainAt(lsn uint64) ([32]byte, bool)
+}
+
 // RaftCommitter is the narrow interface the executor uses to route each WAL
 // record through the Raft consensus layer before committing it locally.
 // Implementations block until a quorum of nodes has durably stored the entry.

@@ -2,8 +2,11 @@ package pgwire
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 // Config holds all configuration for the pgwire (PostgreSQL-wire) server.
@@ -15,6 +18,7 @@ type Config struct {
 	AuthToken       string // optional pgwire password and cluster/admin bearer token
 	AdminReadToken  string // optional bearer token for read-only admin API endpoints; falls back to AuthToken
 	AdminWriteToken string // optional bearer token for mutating admin API endpoints; falls back to AuthToken
+	LedgerMode      string // WAL ledger mode (ADR 0005): "off" or "chain"; empty means "chain"
 
 	// Cluster fields — optional. When NodeID, Peers, and ClusterGRPCAddr are
 	// all set the server starts the production cluster runtime: pgwire + Raft,
@@ -39,6 +43,9 @@ func (config Config) Validate() error {
 	}
 	if config.Logger == nil {
 		return errors.New("logger is required")
+	}
+	if _, err := wal.ParseLedgerMode(config.LedgerMode); err != nil {
+		return fmt.Errorf("ledger: %w", err)
 	}
 	return nil
 }

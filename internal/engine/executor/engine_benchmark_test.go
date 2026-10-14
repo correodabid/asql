@@ -2208,11 +2208,22 @@ func newBenchmarkEngine(b *testing.B) (*wal.SegmentedLogStore, *Engine) {
 	return newBenchmarkEngineWithSegmentSize(b, wal.DefaultSegmentSize)
 }
 
+// benchmarkLedgerMode reads ASQL_BENCH_LEDGER (off|chain, default chain) so
+// the same benchmark names can be compared across ledger modes with benchstat.
+func benchmarkLedgerMode(b *testing.B) wal.LedgerMode {
+	b.Helper()
+	mode, err := wal.ParseLedgerMode(os.Getenv("ASQL_BENCH_LEDGER"))
+	if err != nil {
+		b.Fatalf("ASQL_BENCH_LEDGER: %v", err)
+	}
+	return mode
+}
+
 func newBenchmarkEngineWithSegmentSize(b *testing.B, segmentSize int64) (*wal.SegmentedLogStore, *Engine) {
 	b.Helper()
 
 	path := filepath.Join(b.TempDir(), "bench.wal")
-	store, err := wal.NewSegmentedLogStore(path, wal.EveryN{N: 256}, wal.WithSegmentSize(segmentSize))
+	store, err := wal.NewSegmentedLogStore(path, wal.EveryN{N: 256}, wal.WithSegmentSize(segmentSize), wal.WithLedgerMode(benchmarkLedgerMode(b)))
 	if err != nil {
 		b.Fatalf("new file log store: %v", err)
 	}
@@ -2243,7 +2254,7 @@ func BenchmarkEngineWriteCommitConcurrent(b *testing.B) {
 	ctx := context.Background()
 
 	path := filepath.Join(b.TempDir(), "bench-concurrent.wal")
-	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{})
+	store, err := wal.NewSegmentedLogStore(path, wal.AlwaysSync{}, wal.WithLedgerMode(benchmarkLedgerMode(b)))
 	if err != nil {
 		b.Fatalf("new file log store: %v", err)
 	}

@@ -52,7 +52,8 @@ type Store struct {
 
 // New opens (or creates) an audit store at basePath (e.g. "<datadir>/audit/audit").
 func New(basePath string) (*Store, error) {
-	seg, err := wal.NewSegmentedLogStore(basePath, wal.AlwaysSync{})
+	// Chaining the audit store is a separate decision (ADR 0005, non-goals).
+	seg, err := wal.NewSegmentedLogStore(basePath, wal.AlwaysSync{}, wal.WithLedgerMode(wal.LedgerOff))
 	if err != nil {
 		return nil, fmt.Errorf("audit: open segment store: %w", err)
 	}
