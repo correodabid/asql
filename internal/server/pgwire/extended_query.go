@@ -1076,6 +1076,7 @@ func (server *Server) streamExtendedTailEntityChanges(ctx context.Context, backe
 		}
 
 		ch := server.walStore.Subscribe()
+		observedHead := server.engine.HeadLSN()
 		events, err := server.engine.EntityChanges(ctx, executor.EntityChangesRequest{
 			Domain:  portalState.statement.Domain,
 			Entity:  portalState.statement.Entity,
@@ -1136,7 +1137,7 @@ func (server *Server) streamExtendedTailEntityChanges(ctx context.Context, backe
 			backend.Send(&pgproto3.CommandComplete{CommandTag: []byte(fmt.Sprintf("SELECT %d", portalState.totalRows))})
 			return false, backend.Flush()
 		}
-		if err := server.waitForTailEntityChangesWake(ctx, ch); err != nil {
+		if err := server.waitForTailEntityChangesWake(ctx, ch, observedHead); err != nil {
 			if errors.Is(err, context.Canceled) {
 				server.extendedError(backend, state, "query canceled", "57014")
 				return false, nil
