@@ -85,6 +85,7 @@ type FileLogStore struct {
 	lastLSN      uint64
 	ledgerMode   LedgerMode
 	ledger       ledgerState
+	leafCache    leafCache
 }
 
 // FileLogStoreOption configures a FileLogStore.
@@ -167,11 +168,11 @@ func (store *FileLogStore) Append(ctx context.Context, record ports.WALRecord) (
 		return 0, err
 	}
 
-	leaves, err := computeLeaves(store.ledgerMode, []ports.WALRecord{record})
+	leaves, err := store.leafCache.compute(store.ledgerMode, []ports.WALRecord{record})
 	if err != nil {
 		return 0, fmt.Errorf("wal ledger leaf: %w", err)
 	}
-	defer releaseLeaves(leaves)
+	defer store.leafCache.release(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -219,11 +220,11 @@ func (store *FileLogStore) AppendBatch(ctx context.Context, records []ports.WALR
 		return nil, nil
 	}
 
-	leaves, err := computeLeaves(store.ledgerMode, records)
+	leaves, err := store.leafCache.compute(store.ledgerMode, records)
 	if err != nil {
 		return nil, fmt.Errorf("wal ledger leaf: %w", err)
 	}
-	defer releaseLeaves(leaves)
+	defer store.leafCache.release(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -285,11 +286,11 @@ func (store *FileLogStore) AppendBatchNoSync(ctx context.Context, records []port
 		return nil, nil
 	}
 
-	leaves, err := computeLeaves(store.ledgerMode, records)
+	leaves, err := store.leafCache.compute(store.ledgerMode, records)
 	if err != nil {
 		return nil, fmt.Errorf("wal ledger leaf: %w", err)
 	}
-	defer releaseLeaves(leaves)
+	defer store.leafCache.release(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -358,11 +359,11 @@ func (store *FileLogStore) AppendReplicated(ctx context.Context, record ports.WA
 		return err
 	}
 
-	leaves, err := computeLeaves(store.ledgerMode, []ports.WALRecord{record})
+	leaves, err := store.leafCache.compute(store.ledgerMode, []ports.WALRecord{record})
 	if err != nil {
 		return fmt.Errorf("wal ledger leaf: %w", err)
 	}
-	defer releaseLeaves(leaves)
+	defer store.leafCache.release(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()

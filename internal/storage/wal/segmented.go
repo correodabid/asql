@@ -257,6 +257,7 @@ type SegmentedLogStore struct {
 	compactionScheduled atomic.Bool
 	ledger              ledgerState
 	ledgerMode          LedgerMode
+	leafCache           leafCache
 }
 
 // SegmentOption configures the SegmentedLogStore.
@@ -1096,11 +1097,11 @@ func (store *SegmentedLogStore) Append(ctx context.Context, record ports.WALReco
 		return 0, err
 	}
 
-	leaves, err := computeLeaves(store.ledgerMode, []ports.WALRecord{record})
+	leaves, err := store.leafCache.compute(store.ledgerMode, []ports.WALRecord{record})
 	if err != nil {
 		return 0, fmt.Errorf("wal ledger leaf: %w", err)
 	}
-	defer releaseLeaves(leaves)
+	defer store.leafCache.release(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -1160,11 +1161,11 @@ func (store *SegmentedLogStore) AppendBatch(ctx context.Context, records []ports
 		return nil, nil
 	}
 
-	leaves, err := computeLeaves(store.ledgerMode, records)
+	leaves, err := store.leafCache.compute(store.ledgerMode, records)
 	if err != nil {
 		return nil, fmt.Errorf("wal ledger leaf: %w", err)
 	}
-	defer releaseLeaves(leaves)
+	defer store.leafCache.release(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -1245,11 +1246,11 @@ func (store *SegmentedLogStore) AppendBatchNoSync(ctx context.Context, records [
 		return nil, nil
 	}
 
-	leaves, err := computeLeaves(store.ledgerMode, records)
+	leaves, err := store.leafCache.compute(store.ledgerMode, records)
 	if err != nil {
 		return nil, fmt.Errorf("wal ledger leaf: %w", err)
 	}
-	defer releaseLeaves(leaves)
+	defer store.leafCache.release(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -1354,11 +1355,11 @@ func (store *SegmentedLogStore) AppendReplicated(ctx context.Context, record por
 		return err
 	}
 
-	leaves, err := computeLeaves(store.ledgerMode, []ports.WALRecord{record})
+	leaves, err := store.leafCache.compute(store.ledgerMode, []ports.WALRecord{record})
 	if err != nil {
 		return fmt.Errorf("wal ledger leaf: %w", err)
 	}
-	defer releaseLeaves(leaves)
+	defer store.leafCache.release(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -1417,11 +1418,11 @@ func (store *SegmentedLogStore) AppendReplicatedBatch(ctx context.Context, recor
 		return nil
 	}
 
-	leaves, err := computeLeaves(store.ledgerMode, records)
+	leaves, err := store.leafCache.compute(store.ledgerMode, records)
 	if err != nil {
 		return fmt.Errorf("wal ledger leaf: %w", err)
 	}
-	defer releaseLeaves(leaves)
+	defer store.leafCache.release(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()

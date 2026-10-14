@@ -6,7 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
-	"sync"
+	"sync/atomic"
 
 	"github.com/correodabid/asql/internal/engine/ports"
 )
@@ -101,16 +101,6 @@ var GenesisChain = func() ChainHash {
 	return sha256.Sum256(buf)
 }()
 
-type leafHasher struct {
-	h       hash.Hash
-	scratch []byte
-	sum     [sha256.Size]byte
-}
-
-var leafHasherPool = sync.Pool{New: func() any {
-	return &leafHasher{h: sha256.New(), scratch: make([]byte, 0, 64)}
-}}
-
 // LedgerLeaf computes the leaf hash of a WAL record. The record's LSN is not
 // part of the leaf.
 func LedgerLeaf(record ports.WALRecord) (ChainHash, error) {
@@ -122,28 +112,38 @@ func LedgerLeaf(record ports.WALRecord) (ChainHash, error) {
 }
 
 func ledgerLeaf(term, timestamp uint64, txID string, typeEnum byte, payload []byte) ChainHash {
-	// Small leaves (BEGIN/COMMIT, short mutations) hash a stack buffer.
+	return (*leafBuf)(nil).leaf(term, timestamp, txID, typeEnum, payload)
+}
+
+// leaf hashes one leaf. Small leaves (BEGIN/COMMIT, short mutations) hash a
+// stack buffer; larger ones reuse lb's scratch and hasher. A nil lb, used off
+// the hot path (startup rehash, verification), allocates for large leaves.
+func (lb *leafBuf) leaf(term, timestamp uint64, txID string, typeEnum byte, payload []byte) ChainHash {
 	if leafHeaderSize+len(txID)+len(payload) <= ledgerStackLeafMax {
 		var buf [ledgerStackLeafMax]byte
 		b := appendLeafHeader(buf[:0], term, timestamp, txID, typeEnum, len(payload))
 		b = append(b, payload...)
 		return sha256.Sum256(b)
 	}
-	lh := leafHasherPool.Get().(*leafHasher)
-	b := appendLeafHeader(lh.scratch[:0], term, timestamp, txID, typeEnum, len(payload))
+	if lb == nil {
+		lb = &leafBuf{}
+	}
+	b := appendLeafHeader(lb.scratch[:0], term, timestamp, txID, typeEnum, len(payload))
 	var leaf ChainHash
 	if len(b)+len(payload) <= ledgerContiguousMax {
 		b = append(b, payload...)
 		leaf = sha256.Sum256(b)
 	} else {
-		lh.h.Reset()
-		lh.h.Write(b)
-		lh.h.Write(payload)
-		lh.h.Sum(lh.sum[:0])
-		leaf = ChainHash(lh.sum)
+		if lb.h == nil {
+			lb.h = sha256.New()
+		}
+		lb.h.Reset()
+		lb.h.Write(b)
+		lb.h.Write(payload)
+		lb.h.Sum(lb.sum[:0])
+		leaf = ChainHash(lb.sum)
 	}
-	lh.scratch = b
-	leafHasherPool.Put(lh)
+	lb.scratch = b
 	return leaf
 }
 
@@ -171,36 +171,49 @@ func ChainStep(prev ChainHash, lsn uint64, leaf ChainHash) ChainHash {
 	return sha256.Sum256(buf[:])
 }
 
-// leafBuf is a pooled scratch slice for batch leaves. The leaves are
-// overwritten in place by the chain values once LSNs are known, so a batch
-// append needs no per-call allocation.
-type leafBuf struct{ hashes []ChainHash }
+// leafBuf holds the leaves of one append call plus the scratch space used to
+// hash them. The leaves are overwritten in place by the chain values once
+// LSNs are known.
+type leafBuf struct {
+	hashes  []ChainHash
+	h       hash.Hash
+	scratch []byte
+	sum     [sha256.Size]byte
+}
 
-var leafBufPool = sync.Pool{New: func() any { return &leafBuf{hashes: make([]ChainHash, 0, 16)} }}
+// leafCache keeps one spare leafBuf per store. Unlike a sync.Pool it is not
+// emptied by GC, so the serialized commit path never allocates one; a
+// concurrent appender that finds the spare taken allocates its own.
+type leafCache struct {
+	spare atomic.Pointer[leafBuf]
+}
 
-// computeLeaves hashes every record's leaf. It runs before the store lock is
+// compute hashes every record's leaf. It runs before the store lock is
 // taken. It returns nil when the ledger is off; the caller must release a
 // non-nil buffer.
-func computeLeaves(mode LedgerMode, records []ports.WALRecord) (*leafBuf, error) {
+func (c *leafCache) compute(mode LedgerMode, records []ports.WALRecord) (*leafBuf, error) {
 	if mode == LedgerOff {
 		return nil, nil
 	}
-	lb := leafBufPool.Get().(*leafBuf)
+	lb := c.spare.Swap(nil)
+	if lb == nil {
+		lb = &leafBuf{hashes: make([]ChainHash, 0, 16)}
+	}
 	lb.hashes = lb.hashes[:0]
 	for _, record := range records {
-		leaf, err := LedgerLeaf(record)
+		typeEnum, err := typeStringToEnum(record.Type)
 		if err != nil {
-			releaseLeaves(lb)
+			c.release(lb)
 			return nil, err
 		}
-		lb.hashes = append(lb.hashes, leaf)
+		lb.hashes = append(lb.hashes, lb.leaf(record.Term, record.Timestamp, record.TxID, typeEnum, record.Payload))
 	}
 	return lb, nil
 }
 
-func releaseLeaves(lb *leafBuf) {
+func (c *leafCache) release(lb *leafBuf) {
 	if lb != nil {
-		leafBufPool.Put(lb)
+		c.spare.Store(lb)
 	}
 }
 
