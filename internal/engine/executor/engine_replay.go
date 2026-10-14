@@ -57,6 +57,13 @@ func (engine *Engine) Replay(ctx context.Context) error {
 		if maxSeq > engine.snapSeq {
 			engine.snapSeq = maxSeq
 		}
+		if engine.replayLimited {
+			for len(snapshots) > 0 && snapshots[len(snapshots)-1].lsn > engine.replayLimit {
+				slog.Warn("replay: ignoring snapshot beyond replay limit",
+					"snapshot_lsn", snapshots[len(snapshots)-1].lsn, "replay_limit", engine.replayLimit)
+				snapshots = snapshots[:len(snapshots)-1]
+			}
+		}
 
 		if len(snapshots) > 0 {
 			latest := &snapshots[len(snapshots)-1]
@@ -67,6 +74,7 @@ func (engine *Engine) Replay(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("replay read wal delta: %w", err)
 			}
+			deltaRecords = engine.recordsWithinReplayLimit(deltaRecords)
 			if len(deltaRecords) > 0 && deltaRecords[0].LSN != latest.lsn+1 {
 				return fmt.Errorf("%w: snapshot lsn=%d next wal lsn=%d", errSnapshotWALMismatch, latest.lsn, deltaRecords[0].LSN)
 			}
@@ -82,10 +90,26 @@ func (engine *Engine) Replay(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("replay read wal: %w", err)
 	}
+	records = engine.recordsWithinReplayLimit(records)
 	if err := engine.rebuildFromRecords(records, 0, false); err != nil {
 		return err
 	}
 	return engine.ensureTimestampIndex(ctx, loadedTimestampIndex, records, true)
+}
+
+// recordsWithinReplayLimit returns the prefix of LSN-ordered records allowed
+// by the replay limit.
+func (engine *Engine) recordsWithinReplayLimit(records []ports.WALRecord) []ports.WALRecord {
+	if !engine.replayLimited {
+		return records
+	}
+	limit := engine.replayLimit
+	n := sort.Search(len(records), func(i int) bool { return records[i].LSN > limit })
+	if n < len(records) {
+		slog.Info("replay: deferring WAL records beyond replay limit to raft",
+			"replay_limit", limit, "deferred", len(records)-n)
+	}
+	return records[:n]
 }
 
 // replayFromSnapshots restores all intermediate snapshots into the in-memory
@@ -781,4 +805,35 @@ func buildTxCommitLSNIndex(records []ports.WALRecord) map[string]uint64 {
 		}
 	}
 	return index
+}
+
+// RollbackTo discards engine state beyond lsn and rebuilds it from the
+// persisted snapshots and WAL records up to lsn. Raft calls it on a follower
+// whose engine applied entries that a new leader then replaced: the WAL has
+// already been truncated after lsn. It must not run concurrently with
+// commits, which on a follower go through the leader.
+func (engine *Engine) RollbackTo(ctx context.Context, lsn uint64) error {
+	if engine.HeadLSN() <= lsn {
+		return nil
+	}
+	slog.Warn("engine: rolling back state", "from_lsn", engine.HeadLSN(), "to_lsn", lsn)
+	engine.clearWALRecordCache()
+	engine.clearHistoricalStateCache()
+	if engine.snapshots != nil {
+		engine.snapshots.mu.Lock()
+		engine.snapshots.clear()
+		engine.snapshots.mu.Unlock()
+	}
+
+	prevLimit, prevLimited := engine.replayLimit, engine.replayLimited
+	engine.replayLimit, engine.replayLimited = lsn, true
+	defer func() { engine.replayLimit, engine.replayLimited = prevLimit, prevLimited }()
+
+	engine.writeMu.Lock()
+	engine.catalog = domains.NewCatalog()
+	engine.headLSN = 0
+	engine.logicalTS = 0
+	engine.readState.Store(&readableState{domains: make(map[string]*domainState)})
+	engine.writeMu.Unlock()
+	return engine.Replay(ctx)
 }
