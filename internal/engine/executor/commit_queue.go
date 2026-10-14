@@ -642,6 +642,7 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 			engine.writeMu.Unlock()
 
 			snap := captureSnapshotWithCatalog(state, catalog)
+			engine.anchorSnapshot(&snap)
 			snapStore := engine.snapshots
 			snapStore.mu.Lock()
 			snapStore.add(snap)

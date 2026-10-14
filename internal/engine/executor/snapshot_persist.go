@@ -35,6 +35,10 @@ type persistedSnapshot struct {
 	Catalog    persistedCatalog
 	Principals []persistedPrincipal
 	Domains    map[string]*persistedDomain
+
+	// LedgerChain is the WAL ledger chain value at LSN (ADR 0005).
+	LedgerChain    [32]byte
+	HasLedgerChain bool
 }
 
 type persistedCatalog struct {
@@ -396,9 +400,11 @@ func domainEntityVersionsToMarshalable(versions map[string]*entityVersionIndex) 
 
 func marshalableToSnapshot(ps persistedSnapshot) engineSnapshot {
 	snap := engineSnapshot{
-		lsn:       ps.LSN,
-		logicalTS: ps.LogicalTS,
-		state:     engineState{domains: make(map[string]*domainState, len(ps.Domains)), principals: make(map[string]*principalState, len(ps.Principals))},
+		lsn:            ps.LSN,
+		logicalTS:      ps.LogicalTS,
+		ledgerChain:    ps.LedgerChain,
+		hasLedgerChain: ps.HasLedgerChain,
+		state:          engineState{domains: make(map[string]*domainState, len(ps.Domains)), principals: make(map[string]*principalState, len(ps.Principals))},
 	}
 
 	// Catalog
@@ -724,6 +730,7 @@ func (engine *Engine) persistAllSnapshots() {
 	engine.snapSeq++
 	isFull := (engine.snapSeq-1)%fullSnapshotFrequency == 0
 	prevLogicalTS := engine.lastDiskSnapshotLogicalTS
+	engine.anchorSnapshot(&latest)
 	if err := writeSnapshotToDir(engine.snapDir, engine.snapSeq, latest, isFull, prevLogicalTS); err != nil {
 		slog.Error("snapshot: failed to write disk checkpoint", "lsn", latest.lsn, "seq", engine.snapSeq, "error", err.Error())
 		engine.snapSeq-- // revert so next attempt retries the same seq
@@ -1039,6 +1046,9 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 				// so duplicating the accumulated persisted-domain tree first only
 				// adds restart-time copy cost without providing extra isolation.
 				Domains: accumulated,
+
+				LedgerChain:    entry.ledgerChain,
+				HasLedgerChain: entry.hasLedgerChain,
 			}
 			snap := marshalableToSnapshot(full)
 			rebuildAllIndexes(&snap)

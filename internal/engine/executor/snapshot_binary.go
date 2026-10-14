@@ -15,7 +15,11 @@ import (
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
-// Binary snapshot format (version 12).
+// Binary snapshot format (version 13).
+//
+// Changes vs v12:
+//   - [1B] has_ledger_chain + [32B] ledger chain at the snapshot LSN after
+//     is_full (ADR 0005). Older versions decode without an anchor.
 //
 // All multi-byte integers are big-endian. The file is zstd-compressed on disk.
 //
@@ -92,7 +96,7 @@ import (
 
 var (
 	snapMagic   = [4]byte{'A', 'S', 'N', 'P'}
-	snapVersion = byte(12)
+	snapVersion = byte(13)
 
 	// snapCRC32C is the CRC32C (Castagnoli) table, hardware-accelerated on x86 (SSE4.2) and ARM.
 	snapCRC32C = crc32.MakeTable(crc32.Castagnoli)
@@ -295,6 +299,21 @@ func (r *binReader) u64() uint64 {
 func (r *binReader) i64() int64    { return int64(r.u64()) }
 func (r *binReader) f64() float64  { return math.Float64frombits(r.u64()) }
 func (r *binReader) boolean() bool { return r.u8() != 0 }
+
+// readLedgerChain reads the v13 ledger anchor; older versions have none.
+func (r *binReader) readLedgerChain() ([32]byte, bool) {
+	var chain [32]byte
+	if r.version < 13 {
+		return chain, false
+	}
+	has := r.boolean()
+	if !r.need(len(chain)) {
+		return chain, false
+	}
+	copy(chain[:], r.data[r.off:r.off+len(chain)])
+	r.off += len(chain)
+	return chain, has
+}
 
 // str reads a string as a 4-byte dictionary index (v9 format).
 func (r *binReader) str() string {
@@ -1424,6 +1443,8 @@ func (w *binWriter) snapshot(snap *engineSnapshot, isFull bool, prevLogicalTS ui
 	w.u64(snap.lsn)
 	w.u64(snap.logicalTS)
 	w.boolean(isFull)
+	w.boolean(snap.hasLedgerChain)
+	w.buf.Write(snap.ledgerChain[:])
 	w.catalog(snap)
 	w.principals(snap.state.principals)
 
@@ -1502,6 +1523,9 @@ type rawSnapshotFileEntry struct {
 	catalog    persistedCatalog
 	principals []persistedPrincipal
 	domains    map[string]*persistedDomain
+
+	ledgerChain    [32]byte
+	hasLedgerChain bool
 }
 
 // decodeSnapshotFileBinaryRaw decodes a binary snapshot file and returns the raw
@@ -1526,8 +1550,8 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 	r.off = 4
 
 	version := r.u8()
-	if version != 11 && version != snapVersion {
-		return nil, fmt.Errorf("snapshot binary: unsupported version %d (expected 11 or %d)", version, snapVersion)
+	if version < 11 || version > snapVersion {
+		return nil, fmt.Errorf("snapshot binary: unsupported version %d (expected 11-%d)", version, snapVersion)
 	}
 	r.version = version
 
@@ -1552,6 +1576,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 		lsn := r.u64()
 		logicalTS := r.u64()
 		isFull := r.boolean()
+		ledgerChain, hasLedgerChain := r.readLedgerChain()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1565,6 +1590,9 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 			catalog:    catalog,
 			principals: principals,
 			domains:    domains,
+
+			ledgerChain:    ledgerChain,
+			hasLedgerChain: hasLedgerChain,
 		})
 	}
 	return entries, nil
@@ -1690,8 +1718,8 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 	r.off = 4 // skip magic
 
 	version := r.u8()
-	if version != 11 && version != snapVersion {
-		return nil, fmt.Errorf("snapshot binary: unsupported version %d (expected 11 or %d)", version, snapVersion)
+	if version < 11 || version > snapVersion {
+		return nil, fmt.Errorf("snapshot binary: unsupported version %d (expected 11-%d)", version, snapVersion)
 	}
 	r.version = version
 
@@ -1723,6 +1751,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 		lsn := r.u64()
 		logicalTS := r.u64()
 		isFull := r.boolean()
+		ledgerChain, hasLedgerChain := r.readLedgerChain()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1743,6 +1772,9 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 			Catalog:    catalog,
 			Principals: principals,
 			Domains:    accumulated,
+
+			LedgerChain:    ledgerChain,
+			HasLedgerChain: hasLedgerChain,
 		}
 
 		result[i] = marshalableToSnapshot(full)
@@ -1769,8 +1801,8 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 	r := &binReader{data: data[:payloadEnd]}
 	r.off = 4
 	version := r.u8()
-	if version != 11 && version != snapVersion {
-		return nil, false, fmt.Errorf("snapshot binary: unsupported version %d (expected 11 or %d)", version, snapVersion)
+	if version < 11 || version > snapVersion {
+		return nil, false, fmt.Errorf("snapshot binary: unsupported version %d (expected 11-%d)", version, snapVersion)
 	}
 	r.version = version
 
@@ -1798,6 +1830,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 	if !r.boolean() {
 		return nil, false, nil
 	}
+	snap.ledgerChain, snap.hasLedgerChain = r.readLedgerChain()
 	snap.catalog = r.readCatalogState()
 	snap.state.principals = principalsStateFromPersisted(r.readPrincipals())
 

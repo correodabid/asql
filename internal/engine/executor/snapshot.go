@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/correodabid/asql/internal/engine/domains"
+	"github.com/correodabid/asql/internal/engine/ports"
 )
 
 // snapshotInterval controls how many WAL records are processed between
@@ -185,6 +186,11 @@ type engineSnapshot struct {
 	logicalTS uint64
 	catalog   *domains.Catalog
 	state     engineState
+
+	// ledgerChain is the WAL ledger chain value at lsn (ADR 0005). It is
+	// metadata about the log: replay never reads it.
+	ledgerChain    [32]byte
+	hasLedgerChain bool
 }
 
 // snapshotStore keeps an ordered list of snapshots indexed by LSN.
@@ -337,6 +343,19 @@ func captureSnapshotWithCatalog(state *readableState, catalog *domains.Catalog) 
 		catalog:   cloneCatalog(catalog),
 		state:     engineState{domains: domains, principals: clonePrincipals(state.principals)},
 	}
+}
+
+// anchorSnapshot records the WAL ledger chain value at the snapshot LSN, when
+// the log store maintains a ledger and still holds that value.
+func (engine *Engine) anchorSnapshot(snap *engineSnapshot) {
+	if snap.hasLedgerChain || engine.logStore == nil {
+		return
+	}
+	lr, ok := engine.logStore.(ports.LedgerReader)
+	if !ok {
+		return
+	}
+	snap.ledgerChain, snap.hasLedgerChain = lr.LedgerChainAt(snap.lsn)
 }
 
 // captureSnapshot clones the catalog and then captures a deep-copy snapshot.
