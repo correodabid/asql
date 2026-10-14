@@ -61,7 +61,11 @@ func CatalogSegments(basePath string) ([]SegmentCatalogEntry, error) {
 			_ = f.Close()
 			return nil, fmt.Errorf("read wal segment header %s: %w", file.fileName, err)
 		}
-		records, _, err := scanSegmentRecords(f, hasHeader)
+		headerSize := int64(0)
+		if hasHeader {
+			headerSize = header.size()
+		}
+		records, _, _, err := scanSegmentRecords(f, headerSize)
 		if closeErr := f.Close(); closeErr != nil && err == nil {
 			err = closeErr
 		}

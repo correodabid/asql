@@ -83,10 +83,23 @@ type FileLogStore struct {
 	syncStrategy SyncStrategy
 	appendCount  uint64
 	lastLSN      uint64
+	ledgerMode   LedgerMode
+	ledger       ledgerState
+}
+
+// FileLogStoreOption configures a FileLogStore.
+type FileLogStoreOption func(*FileLogStore)
+
+// WithFileLedgerMode selects whether the store maintains the tamper-evident
+// hash chain (ADR 0005). The default is LedgerChain. A FileLogStore has no
+// segment headers, so the chain is recomputed from the records on open; after
+// TruncateBefore the reopened chain is re-anchored at the first kept record.
+func WithFileLedgerMode(mode LedgerMode) FileLogStoreOption {
+	return func(s *FileLogStore) { s.ledgerMode = mode }
 }
 
 // NewFileLogStore initializes or opens a file-backed WAL store.
-func NewFileLogStore(path string, syncStrategy SyncStrategy) (*FileLogStore, error) {
+func NewFileLogStore(path string, syncStrategy SyncStrategy, opts ...FileLogStoreOption) (*FileLogStore, error) {
 	if syncStrategy == nil {
 		syncStrategy = AlwaysSync{}
 	}
@@ -100,6 +113,10 @@ func NewFileLogStore(path string, syncStrategy SyncStrategy) (*FileLogStore, err
 		file:         file,
 		syncStrategy: syncStrategy,
 	}
+	for _, opt := range opts {
+		opt(store)
+	}
+	store.ledger = newLedgerState(store.ledgerMode)
 
 	records, err := store.readAllLocked()
 	if err != nil {
@@ -111,6 +128,10 @@ func NewFileLogStore(path string, syncStrategy SyncStrategy) (*FileLogStore, err
 
 	if len(records) > 0 {
 		store.lastLSN = records[len(records)-1].LSN
+	}
+	if err := store.restoreLedger(records); err != nil {
+		_ = file.Close()
+		return nil, err
 	}
 
 	if _, err := file.Seek(0, io.SeekEnd); err != nil {
@@ -146,6 +167,12 @@ func (store *FileLogStore) Append(ctx context.Context, record ports.WALRecord) (
 		return 0, err
 	}
 
+	leaves, err := computeLeaves(store.ledgerMode, []ports.WALRecord{record})
+	if err != nil {
+		return 0, fmt.Errorf("wal ledger leaf: %w", err)
+	}
+	defer releaseLeaves(leaves)
+
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -166,6 +193,7 @@ func (store *FileLogStore) Append(ctx context.Context, record ports.WALRecord) (
 	if _, err := store.file.Write(encoded); err != nil {
 		return 0, fmt.Errorf("write wal record: %w", err)
 	}
+	store.commitLedgerLocked(nextLSN, leaves)
 
 	store.appendCount++
 	if store.syncStrategy.ShouldSync(store.appendCount) {
@@ -190,6 +218,12 @@ func (store *FileLogStore) AppendBatch(ctx context.Context, records []ports.WALR
 	if len(records) == 0 {
 		return nil, nil
 	}
+
+	leaves, err := computeLeaves(store.ledgerMode, records)
+	if err != nil {
+		return nil, fmt.Errorf("wal ledger leaf: %w", err)
+	}
+	defer releaseLeaves(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -226,6 +260,7 @@ func (store *FileLogStore) AppendBatch(ctx context.Context, records []ports.WALR
 	if _, err := store.file.Write(buf); err != nil {
 		return nil, fmt.Errorf("write wal batch: %w", err)
 	}
+	store.commitLedgerLocked(lsns[0], leaves)
 
 	store.appendCount += uint64(len(records))
 	if store.syncStrategy.ShouldSync(store.appendCount) {
@@ -249,6 +284,12 @@ func (store *FileLogStore) AppendBatchNoSync(ctx context.Context, records []port
 	if len(records) == 0 {
 		return nil, nil
 	}
+
+	leaves, err := computeLeaves(store.ledgerMode, records)
+	if err != nil {
+		return nil, fmt.Errorf("wal ledger leaf: %w", err)
+	}
+	defer releaseLeaves(leaves)
 
 	store.mu.Lock()
 	defer store.mu.Unlock()
@@ -283,6 +324,7 @@ func (store *FileLogStore) AppendBatchNoSync(ctx context.Context, records []port
 	if _, err := store.file.Write(buf); err != nil {
 		return nil, fmt.Errorf("write wal batch: %w", err)
 	}
+	store.commitLedgerLocked(lsns[0], leaves)
 
 	store.appendCount += uint64(len(records))
 	store.lastLSN += uint64(len(records))
@@ -316,6 +358,12 @@ func (store *FileLogStore) AppendReplicated(ctx context.Context, record ports.WA
 		return err
 	}
 
+	leaves, err := computeLeaves(store.ledgerMode, []ports.WALRecord{record})
+	if err != nil {
+		return fmt.Errorf("wal ledger leaf: %w", err)
+	}
+	defer releaseLeaves(leaves)
+
 	store.mu.Lock()
 	defer store.mu.Unlock()
 
@@ -339,6 +387,7 @@ func (store *FileLogStore) AppendReplicated(ctx context.Context, record ports.WA
 	if _, err := store.file.Write(encoded); err != nil {
 		return fmt.Errorf("write replicated wal record: %w", err)
 	}
+	store.commitLedgerLocked(record.LSN, leaves)
 
 	store.appendCount++
 	if store.syncStrategy.ShouldSync(store.appendCount) {
@@ -617,4 +666,50 @@ func (store *FileLogStore) TruncateBefore(ctx context.Context, beforeLSN uint64)
 
 	// lastLSN stays unchanged — LSN sequence is immutable.
 	return nil
+}
+
+// restoreLedger recomputes the chain over every record read on open.
+func (store *FileLogStore) restoreLedger(records []diskRecord) error {
+	if store.ledgerMode != LedgerChain || len(records) == 0 {
+		return nil
+	}
+	ls := &store.ledger
+	if first := records[0].LSN; first > 1 {
+		ls.reset(first-1, GenesisChain, false)
+		slog.Warn("wal ledger: history before first retained LSN is unanchored; re-anchoring chain", "first_lsn", first)
+	}
+	for _, r := range records {
+		typeEnum, err := typeStringToEnum(r.Type)
+		if err != nil {
+			return fmt.Errorf("wal ledger: LSN %d: %w", r.LSN, err)
+		}
+		ls.step(r.LSN, ledgerLeaf(r.Term, r.Timestamp, r.TxID, typeEnum, r.Payload))
+	}
+	return nil
+}
+
+// commitLedgerLocked advances the chain over records just written at
+// firstLSN. lb is nil when the ledger is off.
+func (store *FileLogStore) commitLedgerLocked(firstLSN uint64, lb *leafBuf) {
+	if lb == nil {
+		return
+	}
+	store.ledger.advance(firstLSN, lb)
+	store.ledger.commit(firstLSN, lb)
+}
+
+// LedgerHead returns the current chain head.
+func (store *FileLogStore) LedgerHead() LedgerHead {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	return store.ledger.headInfo()
+}
+
+// LedgerChainAt returns the chain value at lsn while it is still among the
+// recent points kept in memory. Implements ports.LedgerReader.
+func (store *FileLogStore) LedgerChainAt(lsn uint64) ([32]byte, bool) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	chain, ok := store.ledger.chainAt(lsn)
+	return chain, ok
 }
