@@ -2,6 +2,7 @@ package raft
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/rand"
@@ -58,6 +59,14 @@ type Config struct {
 	// followers can apply the delta without rereading the WAL. The callback
 	// runs in a separate goroutine to avoid blocking the RPC. May be nil.
 	OnEntriesCommitted func(ctx context.Context, commitIndex uint64, records []ports.WALRecord)
+
+	// OnCommitIndexLowered is called, synchronously, when a follower finds
+	// that entries it counted as committed conflict with the leader's. That
+	// only happens to a node whose commit index was overestimated on start
+	// (no persisted commit index: the whole WAL was assumed committed). The
+	// log has already been truncated after afterIndex; implementations must
+	// roll derived state back to afterIndex. May be nil.
+	OnCommitIndexLowered func(ctx context.Context, afterIndex uint64) error
 
 	Logger *slog.Logger
 }
@@ -152,6 +161,11 @@ type RaftNode struct {
 
 	replicateMu     sync.Mutex
 	replicationBusy bool
+
+	// commitStore persists a lower bound of commitIndex off the commit path;
+	// nil when Storage does not implement CommitIndexStore.
+	commitStore     CommitIndexStore
+	commitPersistCh chan struct{}
 }
 
 // NewRaftNode creates a RaftNode from config and restores persisted term state.
@@ -173,10 +187,29 @@ func NewRaftNode(ctx context.Context, cfg Config) (*RaftNode, error) {
 	n.currentTerm = term
 	n.votedFor = voted
 
-	// Restore commitIndex from the WAL last index.
-	// We assume any record that made it to the WAL was committed (single-node
-	// safety; the distributed invariant is enforced by quorum append going forward).
-	n.commitIndex = cfg.Log.LastIndex()
+	// Restore commitIndex from the persisted lower bound. The WAL may end
+	// with entries a former leader wrote but never replicated, so its last
+	// index is not a commit index. Without a persisted value (a node written
+	// before it was persisted) fall back to the old assumption that the whole
+	// WAL is committed; a conflicting leader later corrects it.
+	lastIndex := cfg.Log.LastIndex()
+	n.commitIndex = lastIndex
+	n.commitPersistCh = make(chan struct{}, 1)
+	if cs, ok := cfg.Storage.(CommitIndexStore); ok {
+		n.commitStore = cs
+		saved, found, err := cs.LoadCommitIndex(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("raft: load commit index: %w", err)
+		}
+		if found {
+			n.commitIndex = min(saved, lastIndex)
+		} else if lastIndex > 0 {
+			cfg.Logger.Warn("raft.commit_index_unknown",
+				slog.String("node", cfg.NodeID),
+				slog.Uint64("assumed_commit_index", lastIndex),
+				slog.String("detail", "no persisted commit index; assuming the whole WAL is committed until the leader says otherwise"))
+		}
+	}
 	n.lastApplied = n.commitIndex
 
 	n.resetElectionDeadline()
@@ -503,9 +536,25 @@ func (n *RaftNode) HandleAppendEntries(ctx context.Context, req AppendEntriesReq
 			}
 		}
 		if conflictIndex > 0 {
+			// A leader never overwrites committed entries, so a conflict at or
+			// below commitIndex means this node's commit index was
+			// overestimated on start (see NewRaftNode).
+			lowered := conflictIndex <= n.commitIndex
+			if lowered {
+				n.cfg.Logger.Warn("raft.commit_index_lowered",
+					slog.String("node", n.cfg.NodeID),
+					slog.Uint64("commit_index", n.commitIndex),
+					slog.Uint64("conflict_index", conflictIndex))
+				n.commitIndex = conflictIndex - 1
+				n.lastApplied = min(n.lastApplied, n.commitIndex)
+				n.signalCommitPersist()
+			}
 			n.mu.Unlock()
 			truncateStart := time.Now()
 			truncErr := n.cfg.Log.TruncateAfter(ctx, conflictIndex-1)
+			if truncErr == nil && lowered && n.cfg.OnCommitIndexLowered != nil {
+				truncErr = n.cfg.OnCommitIndexLowered(ctx, conflictIndex-1)
+			}
 			truncateDur += time.Since(truncateStart)
 			n.mu.Lock()
 			if truncErr != nil {
@@ -540,6 +589,7 @@ func (n *RaftNode) HandleAppendEntries(ctx context.Context, req AppendEntriesReq
 		} else {
 			n.commitIndex = lastNew
 		}
+		n.signalCommitPersist()
 	}
 	commitAdvanceDur += time.Since(commitAdvanceStart)
 
@@ -628,6 +678,13 @@ func committedWALRecordsFromAppend(entries []RaftEntry, fromLSN, toLSN uint64) [
 func (n *RaftNode) Run(ctx context.Context) error {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
+
+	persistDone := make(chan struct{})
+	go func() {
+		defer close(persistDone)
+		n.persistCommitLoop(ctx)
+	}()
+	defer func() { <-persistDone }()
 
 	for {
 		select {
@@ -731,14 +788,7 @@ func (n *RaftNode) startElection(ctx context.Context) {
 
 		if votes >= quorum && curState == stateCandidate {
 			if readyCh := n.becomeLeader(ctx, term); readyCh != nil {
-				// Synchronously catch up engine state before unblocking writes.
-				if n.cfg.OnEntriesCommitted != nil {
-					n.mu.Lock()
-					ci := n.commitIndex
-					n.mu.Unlock()
-					n.cfg.OnEntriesCommitted(ctx, ci, nil)
-				}
-				close(readyCh)
+				go n.establishLeadership(ctx, term, readyCh)
 			}
 			return
 		}
@@ -751,13 +801,7 @@ func (n *RaftNode) startElection(ctx context.Context) {
 		n.mu.Unlock()
 		if curState == stateCandidate {
 			if readyCh := n.becomeLeader(ctx, term); readyCh != nil {
-				if n.cfg.OnEntriesCommitted != nil {
-					n.mu.Lock()
-					ci := n.commitIndex
-					n.mu.Unlock()
-					n.cfg.OnEntriesCommitted(ctx, ci, nil)
-				}
-				close(readyCh)
+				go n.establishLeadership(ctx, term, readyCh)
 			}
 		}
 	}
@@ -1124,6 +1168,14 @@ func (n *RaftNode) broadcastAndCommit(ctx context.Context, newIndex uint64) erro
 		}
 	}
 
+	if acks >= quorum {
+		// No peers: this node alone is the quorum.
+		n.mu.Lock()
+		n.advanceCommitIndexLocked(term)
+		n.mu.Unlock()
+		return nil
+	}
+
 	n.cfg.Logger.Warn("raft.quorum_unreachable",
 		slog.Int("acks", acks),
 		slog.Int("quorum", quorum),
@@ -1152,6 +1204,7 @@ func (n *RaftNode) advanceCommitIndexLocked(term uint64) {
 			entryTerm, err := n.cfg.Log.Term(candidate)
 			if err == nil && entryTerm == term {
 				n.commitIndex = candidate
+				n.signalCommitPersist()
 				return
 			}
 		}
@@ -1195,4 +1248,119 @@ func (n *RaftNode) resetElectionDeadline() {
 	spread := n.electionMax - n.electionMin
 	jitter := time.Duration(rand.Int63n(int64(spread)))
 	n.electionDeadline = n.cfg.Clock.Now().Add(n.electionMin + jitter)
+}
+
+// noopTxIDPrefix marks the empty transaction a new leader commits.
+const noopTxIDPrefix = "raft-noop-"
+
+// establishLeadership commits an empty transaction in the new term before the
+// leader accepts writes. A leader may only count replicas for entries of its
+// own term (§5.4.2), so entries inherited from earlier terms, including any
+// uncommitted tail of its own WAL, become committed exactly when this no-op
+// does (§8). The engine then catches up to the commit index and readyCh is
+// closed. If leadership is lost first, readyCh is closed anyway so waiting
+// writers observe ErrNotLeader instead of blocking.
+func (n *RaftNode) establishLeadership(ctx context.Context, term uint64, readyCh chan struct{}) {
+	defer close(readyCh)
+
+	txID := fmt.Sprintf("%s%d", noopTxIDPrefix, term)
+	entries, err := n.cfg.Log.AppendLeaderBatch(ctx, term, []BatchRecord{
+		{Type: "BEGIN", TxID: txID},
+		{Type: "COMMIT", TxID: txID},
+	})
+	if err != nil {
+		n.cfg.Logger.Error("raft.leader_noop_append_failed", slog.Uint64("term", term), slog.String("error", err.Error()))
+		n.stepDownIfLeader(ctx, term)
+		return
+	}
+	noopIndex := entries[len(entries)-1].Index
+	n.mu.Lock()
+	if n.state == stateLeader && n.currentTerm == term && n.matchIndex != nil {
+		n.matchIndex[n.cfg.NodeID] = noopIndex
+	}
+	n.mu.Unlock()
+
+	for {
+		if !n.isLeaderInTerm(term) {
+			return
+		}
+		err := n.broadcastAndCommit(ctx, noopIndex)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, ErrNotLeader) {
+			return
+		}
+		n.cfg.Logger.Warn("raft.leader_noop_commit_retry", slog.Uint64("term", term), slog.String("error", err.Error()))
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(n.heartbeatInt):
+		}
+	}
+
+	if n.cfg.OnEntriesCommitted != nil {
+		n.mu.Lock()
+		ci := n.commitIndex
+		n.mu.Unlock()
+		n.cfg.OnEntriesCommitted(ctx, ci, nil)
+	}
+}
+
+func (n *RaftNode) isLeaderInTerm(term uint64) bool {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.state == stateLeader && n.currentTerm == term
+}
+
+func (n *RaftNode) stepDownIfLeader(ctx context.Context, term uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.state == stateLeader && n.currentTerm == term {
+		n.becomeFollowerLocked(term)
+		_ = n.persistLocked(ctx)
+	}
+}
+
+// signalCommitPersist asks persistCommitLoop to save the commit index.
+func (n *RaftNode) signalCommitPersist() {
+	if n.commitStore == nil {
+		return
+	}
+	select {
+	case n.commitPersistCh <- struct{}{}:
+	default:
+	}
+}
+
+// persistCommitLoop saves the latest commit index whenever it advances,
+// coalescing bursts, and once more on shutdown. It keeps the fsync off the
+// commit path; a stale saved value is safe (see CommitIndexStore).
+func (n *RaftNode) persistCommitLoop(ctx context.Context) {
+	if n.commitStore == nil {
+		return
+	}
+	var saved uint64
+	persist := func(saveCtx context.Context) {
+		n.mu.Lock()
+		ci := n.commitIndex
+		n.mu.Unlock()
+		if ci == saved {
+			return
+		}
+		if err := n.commitStore.SaveCommitIndex(saveCtx, ci); err != nil {
+			n.cfg.Logger.Warn("raft.commit_index_persist_failed", slog.String("error", err.Error()))
+			return
+		}
+		saved = ci
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			persist(context.Background())
+			return
+		case <-n.commitPersistCh:
+			persist(ctx)
+		}
+	}
 }

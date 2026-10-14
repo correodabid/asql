@@ -172,10 +172,13 @@ type Engine struct {
 	lastDiskSnapshotLSN           uint64 // headLSN of the last successfully written disk snapshot
 	lastDiskSnapshotLogicalTS     uint64 // logicalTS of the last successfully written disk snapshot
 	perf                          *perfStats
-	retainWAL                     bool                // when true, WAL is never truncated after snapshot persistence (audit/compliance)
-	auditStore                    ports.AuditStore    // non-nil when a persistent audit log is wired in
-	raftCommitter                 ports.RaftCommitter // non-nil in cluster mode; routes every WAL write through Raft quorum
-	timestampIndex                *timestampLSNIndex
+	retainWAL                     bool // when true, WAL is never truncated after snapshot persistence (audit/compliance)
+	// replayLimit bounds startup replay when replayLimited (see WithReplayLimit).
+	replayLimit    uint64
+	replayLimited  bool
+	auditStore     ports.AuditStore    // non-nil when a persistent audit log is wired in
+	raftCommitter  ports.RaftCommitter // non-nil in cluster mode; routes every WAL write through Raft quorum
+	timestampIndex *timestampLSNIndex
 	// vfkSubscriptions maps "sourceDomain.sourceTable" to the list of subscriber
 	// domains that maintain a read-only projection of that table. This index is
 	// populated when a CREATE TABLE with VFK constraints is processed and is
@@ -299,6 +302,19 @@ func WithAuditStore(s ports.AuditStore) EngineOption {
 		e.auditStore = s
 		// retainWAL is intentionally NOT set to false here.
 		// Use WithWALGC() explicitly if you want WAL truncation after snapshots.
+	}
+}
+
+// WithReplayLimit bounds startup replay to WAL records with LSN <= lsn, and
+// ignores persisted snapshots taken beyond it. In cluster mode the WAL can
+// end with entries that were never committed by a quorum; the caller passes
+// the last commit index known to be durable, and Raft delivers the rest
+// through ApplyCommittedRecords once it is committed (or replaces it if it
+// never was).
+func WithReplayLimit(lsn uint64) EngineOption {
+	return func(e *Engine) {
+		e.replayLimit = lsn
+		e.replayLimited = true
 	}
 }
 
