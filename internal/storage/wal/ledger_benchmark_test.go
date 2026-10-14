@@ -13,13 +13,13 @@ import (
 func BenchmarkLedgerLeaf(b *testing.B) {
 	for _, size := range []int{0, 256, 1024, 4096} {
 		b.Run(fmt.Sprintf("payload=%d", size), func(b *testing.B) {
-			rec := ports.WALRecord{Term: 1, Timestamp: 42, TxID: "tx-000042", Type: "MUTATION", Payload: bytes.Repeat([]byte{7}, size)}
+			// Measures the append hot path: leaves hashed with a reused leafBuf.
+			payload := bytes.Repeat([]byte{7}, size)
+			lb := &leafBuf{}
 			b.SetBytes(int64(size))
 			b.ReportAllocs()
 			for i := 0; i < b.N; i++ {
-				if _, err := LedgerLeaf(rec); err != nil {
-					b.Fatal(err)
-				}
+				lb.leaf(1, 42, "tx-000042", typeEnumMutation, payload)
 			}
 		})
 	}
