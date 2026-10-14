@@ -1542,6 +1542,7 @@ func (server *Server) handleTailEntityChangesFollowQuery(ctx context.Context, ba
 	totalRows := 0
 	for {
 		ch := server.walStore.Subscribe()
+		observedHead := server.engine.HeadLSN()
 		batchLimit := 0
 		if remaining > 0 {
 			batchLimit = remaining
@@ -1588,7 +1589,7 @@ func (server *Server) handleTailEntityChangesFollowQuery(ctx context.Context, ba
 		if !stmt.Follow || (stmt.ToLSN > 0 && nextFrom > stmt.ToLSN) {
 			break
 		}
-		if err := server.waitForTailEntityChangesWake(ctx, ch); err != nil {
+		if err := server.waitForTailEntityChangesWake(ctx, ch, observedHead); err != nil {
 			if errors.Is(err, context.Canceled) {
 				return sendErrorAndReadyCode(backend, "query canceled", "57014", session)
 			}
@@ -1600,8 +1601,17 @@ func (server *Server) handleTailEntityChangesFollowQuery(ctx context.Context, ba
 	return backend.Flush()
 }
 
-func (server *Server) waitForTailEntityChangesWake(ctx context.Context, ch <-chan struct{}) error {
-	if server.engine.HeadLSN() < server.walStore.LastLSN() {
+// waitForTailEntityChangesWake blocks a FOLLOW stream until there may be new
+// entity changes. ch must come from walStore.Subscribe and observedHead from
+// engine.HeadLSN, both taken before the EntityChanges read that found
+// nothing. The WAL wakes subscribers before the engine publishes the commit's
+// state, so a commit can be in the WAL but not yet visible to that read.
+// Comparing the head that read observed (not a fresh HeadLSN, which may
+// already include the commit) against the WAL makes the stream poll until
+// the state catches up instead of blocking on ch, which only closes on the
+// next append.
+func (server *Server) waitForTailEntityChangesWake(ctx context.Context, ch <-chan struct{}, observedHead uint64) error {
+	if observedHead < server.walStore.LastLSN() {
 		timer := time.NewTimer(2 * time.Millisecond)
 		defer timer.Stop()
 		select {

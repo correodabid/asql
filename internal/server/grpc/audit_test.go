@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -79,22 +80,22 @@ func TestAuditEventsForTxAndAdminAPIs(t *testing.T) {
 		t.Fatalf("scan strategy stats invoke: %v", err)
 	}
 
-	if !handler.hasAuditOperation("tx.begin", "success") {
+	if !handler.awaitAuditOperation("tx.begin", "success") {
 		t.Fatal("missing tx.begin audit event")
 	}
-	if !handler.hasAuditOperation("tx.execute", "success") {
+	if !handler.awaitAuditOperation("tx.execute", "success") {
 		t.Fatal("missing tx.execute audit event")
 	}
-	if !handler.hasAuditOperation("tx.commit", "success") {
+	if !handler.awaitAuditOperation("tx.commit", "success") {
 		t.Fatal("missing tx.commit audit event")
 	}
-	if !handler.hasAuditOperation("admin.time_travel_query", "success") {
+	if !handler.awaitAuditOperation("admin.time_travel_query", "success") {
 		t.Fatal("missing admin.time_travel_query audit event")
 	}
-	if !handler.hasAuditOperation("admin.replay_to_lsn", "success") {
+	if !handler.awaitAuditOperation("admin.replay_to_lsn", "success") {
 		t.Fatal("missing admin.replay_to_lsn audit event")
 	}
-	if !handler.hasAuditOperation("admin.scan_strategy_stats", "success") {
+	if !handler.awaitAuditOperation("admin.scan_strategy_stats", "success") {
 		t.Fatal("missing admin.scan_strategy_stats audit event")
 	}
 }
@@ -154,7 +155,7 @@ func TestAuditEventsIncludeFencingRejection(t *testing.T) {
 		t.Fatal("expected commit fencing rejection error")
 	}
 
-	if !handler.hasAuditOperation("ha.fencing_rejection", "failure") {
+	if !handler.awaitAuditOperation("ha.fencing_rejection", "failure") {
 		t.Fatal("missing ha.fencing_rejection audit event")
 	}
 }
@@ -192,6 +193,22 @@ func (handler *auditCaptureHandler) WithAttrs(_ []slog.Attr) slog.Handler {
 
 func (handler *auditCaptureHandler) WithGroup(string) slog.Handler {
 	return handler
+}
+
+// awaitAuditOperation reports whether the audit event is logged within a
+// deadline. The service hands audit events to a background writer through
+// auditCh, so they reach the logger after the RPC has already returned.
+func (handler *auditCaptureHandler) awaitAuditOperation(operation, status string) bool {
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if handler.hasAuditOperation(operation, status) {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 }
 
 func (handler *auditCaptureHandler) hasAuditOperation(operation, status string) bool {
