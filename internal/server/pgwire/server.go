@@ -338,7 +338,27 @@ func New(config Config) (*Server, error) {
 		return nil, fmt.Errorf("initialize audit store: %w", err)
 	}
 
-	engine, err := executor.New(context.Background(), walStore, dd.SnapDir(), executor.WithAuditStore(auditStore))
+	clusterMode := config.NodeID != "" && config.ClusterGRPCAddr != "" && (len(config.Peers) > 0 || config.JoinAddr != "")
+	engineOpts := []executor.EngineOption{executor.WithAuditStore(auditStore)}
+	var raftStorage raft.Storage
+	if clusterMode {
+		// The WAL tail may hold entries a former leader wrote but never
+		// replicated: replay only up to the last commit index known to be
+		// durable, and let Raft deliver (or replace) the rest.
+		raftStorage = raft.NewFileStorage(dd.MetaDir() + "/raft-state.json")
+		if cs, ok := raftStorage.(raft.CommitIndexStore); ok {
+			commitIndex, found, loadErr := cs.LoadCommitIndex(context.Background())
+			if loadErr != nil {
+				_ = walStore.Close()
+				_ = auditStore.Close()
+				return nil, fmt.Errorf("load raft commit index: %w", loadErr)
+			}
+			if found {
+				engineOpts = append(engineOpts, executor.WithReplayLimit(commitIndex))
+			}
+		}
+	}
+	engine, err := executor.New(context.Background(), walStore, dd.SnapDir(), engineOpts...)
 	if err != nil {
 		_ = walStore.Close()
 		_ = auditStore.Close()
@@ -366,7 +386,7 @@ func New(config Config) (*Server, error) {
 
 	// Wire full cluster machinery when NodeID + ClusterGRPCAddr are set and
 	// either static peers OR a join address is provided.
-	if config.NodeID != "" && config.ClusterGRPCAddr != "" && (len(config.Peers) > 0 || config.JoinAddr != "") {
+	if clusterMode {
 		peers, parseErr := grpcserver.ParsePeers(config.Peers)
 		if parseErr != nil {
 			_ = walStore.Close()
@@ -410,7 +430,6 @@ func New(config Config) (*Server, error) {
 			return nil, fmt.Errorf("initialize raft log: %w", raftLogErr)
 		}
 		commitCatchUp := newCommitCatchUpCoalescer(config.Logger, engine.ApplyCommittedRecords)
-		raftStorage := raft.NewFileStorage(dd.MetaDir() + "/raft-state.json")
 		raftNode, raftNodeErr := raft.NewRaftNode(context.Background(), raft.Config{
 			NodeID:    config.NodeID,
 			Peers:     raftPeers,
@@ -421,7 +440,8 @@ func New(config Config) (*Server, error) {
 			OnEntriesCommitted: func(ctx context.Context, commitIndex uint64, records []ports.WALRecord) {
 				commitCatchUp.handle(ctx, commitIndex, records)
 			},
-			Logger: config.Logger,
+			OnCommitIndexLowered: engine.RollbackTo,
+			Logger:               config.Logger,
 		})
 		if raftNodeErr != nil {
 			_ = walStore.Close()
