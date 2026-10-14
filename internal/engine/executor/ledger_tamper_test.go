@@ -10,8 +10,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/correodabid/asql/internal/storage/wal"
 	"github.com/klauspost/compress/s2"
+
+	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 // TestWALTamperIsDetectedByLedger is the acceptance test for ADR 0005. An
