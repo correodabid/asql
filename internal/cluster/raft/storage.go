@@ -24,6 +24,20 @@ type Storage interface {
 	LoadState(ctx context.Context) (term uint64, votedFor string, err error)
 }
 
+// CommitIndexStore is implemented by storages that also persist a lower
+// bound of the commit index. Raft does not require it for safety (the commit
+// index is volatile in the paper) but ASQL needs it on restart: the engine
+// only replays WAL entries known to be committed, because the WAL tail may
+// hold entries a former leader wrote but never replicated. Saving a value
+// below the true commit index is always safe; the rest is re-learned from
+// the leader. The value is written off the commit path.
+type CommitIndexStore interface {
+	SaveCommitIndex(ctx context.Context, index uint64) error
+	// LoadCommitIndex returns ok=false when no commit index was ever saved
+	// (a fresh node, or one written before the commit index was persisted).
+	LoadCommitIndex(ctx context.Context) (index uint64, ok bool, err error)
+}
+
 type fileStorage struct {
 	path string // absolute path to the state file, e.g. "/data/raft-state.json"
 }
@@ -45,8 +59,47 @@ func (s *fileStorage) SaveState(_ context.Context, term uint64, votedFor string)
 	if err != nil {
 		return fmt.Errorf("raft storage: marshal: %w", err)
 	}
+	return writeFileAtomic(s.path, data)
+}
 
-	dir := filepath.Dir(s.path)
+type raftCommit struct {
+	CommitIndex uint64 `json:"commit_index"`
+}
+
+// commitPath is the commit-index file next to the state file.
+func (s *fileStorage) commitPath() string {
+	return filepath.Join(filepath.Dir(s.path), "raft-commit.json")
+}
+
+// SaveCommitIndex atomically writes the commit index to disk.
+func (s *fileStorage) SaveCommitIndex(_ context.Context, index uint64) error {
+	data, err := json.Marshal(raftCommit{CommitIndex: index})
+	if err != nil {
+		return fmt.Errorf("raft storage: marshal commit index: %w", err)
+	}
+	return writeFileAtomic(s.commitPath(), data)
+}
+
+// LoadCommitIndex reads the commit index from disk.
+func (s *fileStorage) LoadCommitIndex(_ context.Context) (uint64, bool, error) {
+	data, err := os.ReadFile(s.commitPath())
+	if os.IsNotExist(err) {
+		return 0, false, nil
+	}
+	if err != nil {
+		return 0, false, fmt.Errorf("raft storage: read commit index: %w", err)
+	}
+	var c raftCommit
+	if err := json.Unmarshal(data, &c); err != nil {
+		return 0, false, fmt.Errorf("raft storage: unmarshal commit index: %w", err)
+	}
+	return c.CommitIndex, true, nil
+}
+
+// writeFileAtomic writes data to path via a synced temp file and a rename, so
+// no partial write is ever observable.
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".raft-state-*.tmp")
 	if err != nil {
 		return fmt.Errorf("raft storage: create temp: %w", err)
@@ -68,7 +121,7 @@ func (s *fileStorage) SaveState(_ context.Context, term uint64, votedFor string)
 		return fmt.Errorf("raft storage: close temp: %w", err)
 	}
 
-	if err := os.Rename(tmp.Name(), s.path); err != nil {
+	if err := os.Rename(tmp.Name(), path); err != nil {
 		return fmt.Errorf("raft storage: rename: %w", err)
 	}
 	return nil
@@ -96,9 +149,11 @@ func (s *fileStorage) LoadState(_ context.Context) (uint64, string, error) {
 // holding the Raft lock during I/O, so SaveState may be called concurrently
 // from multiple goroutines and must protect its own state.
 type memStorage struct {
-	mu       sync.Mutex
-	term     uint64
-	votedFor string
+	mu          sync.Mutex
+	term        uint64
+	votedFor    string
+	commitIndex uint64
+	commitSaved bool
 }
 
 // NewMemStorage returns a non-durable in-memory Storage for tests.
@@ -118,4 +173,18 @@ func (m *memStorage) LoadState(_ context.Context) (uint64, string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.term, m.votedFor, nil
+}
+
+func (m *memStorage) SaveCommitIndex(_ context.Context, index uint64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.commitIndex = index
+	m.commitSaved = true
+	return nil
+}
+
+func (m *memStorage) LoadCommitIndex(_ context.Context) (uint64, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.commitIndex, m.commitSaved, nil
 }
