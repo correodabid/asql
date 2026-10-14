@@ -89,3 +89,17 @@ func TestWaitLeaderReadyReportsLostLeadership(t *testing.T) {
 		t.Fatalf("WaitLeaderReady after losing leadership: %v, want ErrNotLeader", err)
 	}
 }
+
+func TestLeaderStepsDownWhenAppendCannotReachQuorum(t *testing.T) {
+	n := newReadinessLeader(t, failingTransport{})
+	_, err := n.ApplyBatch(context.Background(), []BatchRecord{{Type: "BEGIN", TxID: "t"}, {Type: "COMMIT", TxID: "t"}})
+	if !errors.Is(err, ErrQuorumUnreachable) {
+		t.Fatalf("ApplyBatch without quorum: %v, want ErrQuorumUnreachable", err)
+	}
+	if n.IsLeader() {
+		t.Fatal("leader must step down after an append fails to reach a quorum")
+	}
+	if got := n.cfg.Log.LastIndex(); got != 5 {
+		t.Fatalf("the unreplicated entries stay in the log for the next leader to resolve: last index %d", got)
+	}
+}

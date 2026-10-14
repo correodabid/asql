@@ -3,6 +3,7 @@ package integration
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -89,6 +90,109 @@ func execTx(eng *executor.Engine, sql string) error {
 		}
 	}
 	return nil
+}
+
+// TestLeaderLosingQuorumStaysConsistent: a write fails with quorum
+// unreachable, the followers come back, and the next write commits. The
+// failed write's entries are in the leader's log, so they are committed too
+// (followers apply them); the leader's engine must agree with the committed
+// log.
+func TestLeaderLosingQuorumStaysConsistent(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	walPath := filepath.Join(t.TempDir(), "leader.wal")
+	store, err := wal.NewSegmentedLogStore(walPath, wal.AlwaysSync{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	eng, err := executor.New(ctx, store, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rlog, err := raft.NewWALLog(ctx, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	peers := &switchablePeers{}
+	node, err := raft.NewRaftNode(ctx, raft.Config{
+		NodeID:             "n1",
+		Peers:              []raft.Peer{{NodeID: "n2", RaftAddr: "n2"}, {NodeID: "n3", RaftAddr: "n3"}},
+		Storage:            raft.NewMemStorage(),
+		Log:                rlog,
+		Transport:          peers,
+		Clock:              clock.Realtime{},
+		ElectionMinTimeout: 30 * time.Millisecond,
+		ElectionMaxTimeout: 60 * time.Millisecond,
+		HeartbeatInterval:  20 * time.Millisecond,
+		Logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		OnEntriesCommitted: func(ctx context.Context, commitIndex uint64, records []ports.WALRecord) {
+			_ = eng.ApplyCommittedRecords(ctx, commitIndex, records)
+		},
+		OnCommitIndexLowered: eng.RollbackTo,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng.SetRaftCommitter(raftCommitter{node: node})
+	go func() { _ = node.Run(ctx) }()
+
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		deadline := time.Now().Add(10 * time.Second)
+		for !cond() {
+			if time.Now().After(deadline) {
+				t.Fatalf("timeout waiting for %s", what)
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	retryWrite := func(sql string) {
+		t.Helper()
+		waitFor("write "+sql, func() bool { return execTx(eng, sql) == nil })
+	}
+	waitFor("leadership", node.IsLeader)
+	retryWrite("CREATE TABLE results (id INT, result TEXT)")
+	retryWrite("INSERT INTO results (id, result) VALUES (1, 'a')")
+
+	// Followers unreachable: the write fails, but its entries stay in the
+	// leader's log.
+	peers.down.Store(true)
+	err = execTx(eng, "INSERT INTO results (id, result) VALUES (99, 'failed write')")
+	t.Logf("write during partition: %v (leader=%v)", err, node.IsLeader())
+	if err == nil {
+		t.Fatal("expected the write to fail without quorum")
+	}
+
+	// Followers back: the next write commits everything before it.
+	peers.down.Store(false)
+	retryWrite("INSERT INTO results (id, result) VALUES (5, 'b')")
+
+	// The committed log, as any follower applies it.
+	committedLSN := store.LastLSN()
+	records, err := store.ReadFrom(ctx, 1, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replicaStore, err := wal.NewSegmentedLogStore(filepath.Join(t.TempDir(), "replica.wal"), wal.AlwaysSync{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer replicaStore.Close()
+	if err := replicaStore.AppendReplicatedBatch(ctx, records); err != nil {
+		t.Fatal(err)
+	}
+	replica, err := executor.New(ctx, replicaStore, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	want := fmt.Sprint(idsIn(t, replica))
+	got := fmt.Sprint(idsIn(t, eng))
+	t.Logf("committed log up to LSN %d gives ids=%s; leader engine has ids=%s (head %d)", committedLSN, want, got, eng.HeadLSN())
+	if got != want {
+		t.Fatalf("leader engine diverged from its committed log: leader=%s committed=%s", got, want)
+	}
 }
 
 // A write that arrives while a newly elected leader is still committing its

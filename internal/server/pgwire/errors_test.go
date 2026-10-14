@@ -99,6 +99,8 @@ func TestMapErrorToSQLState_RaftWriteOutcomes(t *testing.T) {
 		err  error
 		want string
 	}{
+		// Reached the leader's log but not a quorum: may still commit.
+		{fmt.Errorf("commit: %w", raft.ErrQuorumUnreachable), "08007"},
 		// New leader still catching up: the write was not attempted.
 		{fmt.Errorf("commit: %w", raft.ErrLeaderNotReady), "57P03"},
 	}

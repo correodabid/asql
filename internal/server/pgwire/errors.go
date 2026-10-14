@@ -28,6 +28,11 @@ func mapErrorToSQLState(err error) string {
 	if errors.As(err, &sqlErr) {
 		return sqlErr.Code
 	}
+	if errors.Is(err, raft.ErrQuorumUnreachable) {
+		// The write reached the leader's log but not a quorum: it may still
+		// commit. Clients must not treat this as a definite failure.
+		return "08007" // transaction_resolution_unknown
+	}
 	if errors.Is(err, raft.ErrLeaderNotReady) {
 		// A new leader is still catching up; the write was not attempted.
 		return "57P03" // cannot_connect_now

@@ -313,6 +313,7 @@ func (n *RaftNode) Apply(ctx context.Context, typ, txID string, payload []byte) 
 
 	// Fan out AppendEntries to all followers and wait for quorum.
 	if err := n.broadcastAndCommit(ctx, entry.Index); err != nil {
+		n.stepDownOnLostQuorum(ctx, term, err)
 		return Entry{}, err
 	}
 
@@ -377,6 +378,7 @@ func (n *RaftNode) ApplyBatch(ctx context.Context, records []BatchRecord) ([]Ent
 	// Single broadcastAndCommit for the entire batch — this is the key
 	// optimisation: N local appends + 1 network round-trip instead of N.
 	if err := n.broadcastAndCommit(ctx, lastIndex); err != nil {
+		n.stepDownOnLostQuorum(ctx, term, err)
 		return nil, err
 	}
 
@@ -1295,6 +1297,21 @@ func (n *RaftNode) isLeaderInTerm(term uint64) bool {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.state == stateLeader && n.currentTerm == term
+}
+
+// stepDownOnLostQuorum makes the leader step down when a client append could
+// not reach a quorum. The entries are already in its log and may still be
+// committed later (they are in the current term), but the engine never
+// applied them. Stepping down stops further writes on top of them; if this
+// node is elected again its no-op commits them and the engine catches up
+// (establishLeadership), and if another node wins without them they are
+// truncated. Either way the engine never skips a committed entry.
+func (n *RaftNode) stepDownOnLostQuorum(ctx context.Context, term uint64, err error) {
+	if !errors.Is(err, ErrQuorumUnreachable) {
+		return
+	}
+	n.cfg.Logger.Warn("raft.leader_step_down_lost_quorum", slog.String("node", n.cfg.NodeID), slog.Uint64("term", term))
+	n.stepDownIfLeader(ctx, term)
 }
 
 func (n *RaftNode) stepDownIfLeader(ctx context.Context, term uint64) {

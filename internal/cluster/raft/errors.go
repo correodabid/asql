@@ -28,8 +28,11 @@ var (
 	// log is less up-to-date than ours (§5.4.1).
 	ErrCandidateLogBehind = errors.New("raft: candidate log is behind")
 
-	// ErrQuorumUnreachable is returned when a leader cannot contact a quorum of peers.
-	ErrQuorumUnreachable = errors.New("raft: quorum unreachable")
+	// ErrQuorumUnreachable is returned when a leader cannot replicate an
+	// append to a quorum. The entries are already in the leader's log, so the
+	// write's outcome is unknown: it may still be committed. The leader steps
+	// down.
+	ErrQuorumUnreachable = errors.New("raft: quorum unreachable; write outcome unknown")
 
 	// ErrLeaderNotReady is returned by Apply and ApplyBatch while a newly
 	// elected leader is still committing its no-op and catching up its engine.
