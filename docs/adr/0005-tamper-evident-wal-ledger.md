@@ -154,6 +154,38 @@ A digest is:
 - A compliance profile refuses to start with `WithWALGC()` unless segments are archived
   before removal, and refuses to start if any retained segment is unanchored.
 
+## Threat model and current limit
+
+The chain detects a modification only when something the attacker cannot rewrite
+still holds an earlier chain value. In phase 1 every anchor (segment headers,
+snapshots) lives in the same data directory as the WAL. Against an attacker with
+write access to that directory, phase 1 therefore guarantees less than its name
+suggests:
+
+- **Detected:** editing, dropping, reordering or truncating records while leaving
+  the anchors alone, which is what a careless or partial edit does. Also detected
+  is any accidental divergence between replicas.
+- **Not detected:** a full rewrite. The attacker edits a value, recomputes the
+  record CRCs and the whole chain from the edit onwards, rewrites the segment header
+  anchors, and deletes the snapshots so the engine regenerates them with matching
+  anchors. Everything on disk is then self-consistent and `verify-ledger` passes.
+  The chain construction is public and keyless, so nothing on disk can prevent this.
+
+`internal/engine/executor/ledger_rewrite_test.go` demonstrates both halves. After a
+full rewrite `verify-ledger` passes, while verification against a chain value
+exported before the rewrite (`VerifyOptions.Anchors`) fails with `chain-mismatch`.
+
+Closing the gap needs a chain value the attacker cannot rewrite:
+
+1. **Signed digests (phase 1b).** A signature stops a forged digest from being
+   minted without the node key. It does not stop an attacker who also holds the key,
+   such as one with root on the node.
+2. **Digests held elsewhere.** Digests must be published somewhere the operator of
+   the data directory does not control: an auditor, object storage with object lock,
+   or a transparency log. Then a rewrite is detected against any digest published
+   before it. This is the guarantee regulated deployments need, and it comes from
+   deployment practice, not from the database alone.
+
 ## Performance
 
 The requirement is: **no measurable regression on the commit path, and bounded,
@@ -265,6 +297,7 @@ What the numbers say:
 - **Tamper test (the point of this ADR).** Write transactions, flip one byte of a
   mutation payload on disk and recompute the record CRC32C. Today the engine replays it
   silently. With this ADR, `verify-ledger` must fail and report the exact LSN.
+- **Full-rewrite test.** Shows the limit described in Threat model.
 - Reorder, drop, and truncate-and-append variants of the tamper test.
 - Compaction invariance: the chain is identical before and after `CompactSealedSegments`.
 - v4 to v5 migration invariance.
