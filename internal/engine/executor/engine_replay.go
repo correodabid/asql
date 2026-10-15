@@ -614,7 +614,20 @@ func (engine *Engine) CatchUp(ctx context.Context, upToLSN uint64) error {
 	if latest != nil && len(records) > 0 && records[len(records)-1].LSN <= latest.headLSN {
 		return nil
 	}
-	return engine.rebuildFromRecordsAfterSnapshot(records, current.headLSN)
+	if err := engine.rebuildFromRecordsAfterSnapshot(records, current.headLSN); err != nil {
+		return err
+	}
+	engine.indexAppliedRecords(records)
+	return nil
+}
+
+// indexAppliedRecords adds records applied outside the commit queue (Raft
+// followers) to the timestamp index, as the commit queue does for local
+// commits.
+func (engine *Engine) indexAppliedRecords(records []ports.WALRecord) {
+	if err := engine.timestampIndex.append(records); err != nil {
+		slog.Warn("timestamp index append failed", "error", err.Error(), "records", len(records))
+	}
 }
 
 // ApplyCommittedRecords applies a directly supplied committed WAL delta when it
@@ -665,7 +678,11 @@ func (engine *Engine) ApplyCommittedRecords(ctx context.Context, upToLSN uint64,
 		return engine.CatchUp(ctx, upToLSN)
 	}
 
-	return engine.rebuildFromRecordsAfterSnapshotWithOptions(filtered, current.headLSN, false)
+	if err := engine.rebuildFromRecordsAfterSnapshotWithOptions(filtered, current.headLSN, false); err != nil {
+		return err
+	}
+	engine.indexAppliedRecords(filtered)
+	return nil
 }
 
 func logDirectApplyFallback(reason string, headLSN, upToLSN uint64, records []ports.WALRecord) {
@@ -824,6 +841,16 @@ func (engine *Engine) RollbackTo(ctx context.Context, lsn uint64) error {
 		engine.snapshots.clear()
 		engine.snapshots.mu.Unlock()
 	}
+	// Derived state persisted beyond lsn describes entries that no longer
+	// exist; a later restart would otherwise load it.
+	if engine.snapDir != "" {
+		if err := removeSnapshotFilesAfter(engine.snapDir, lsn); err != nil {
+			return fmt.Errorf("rollback snapshots: %w", err)
+		}
+	}
+	if err := engine.timestampIndex.truncateAfter(lsn); err != nil {
+		return fmt.Errorf("rollback timestamp index: %w", err)
+	}
 
 	prevLimit, prevLimited := engine.replayLimit, engine.replayLimited
 	engine.replayLimit, engine.replayLimited = lsn, true
@@ -833,6 +860,10 @@ func (engine *Engine) RollbackTo(ctx context.Context, lsn uint64) error {
 	engine.catalog = domains.NewCatalog()
 	engine.headLSN = 0
 	engine.logicalTS = 0
+	// Replay re-derives these from the snapshots that survived; with none,
+	// the next checkpoint must not be a delta against a removed one.
+	engine.lastDiskSnapshotLSN = 0
+	engine.lastDiskSnapshotLogicalTS = 0
 	engine.readState.Store(&readableState{domains: make(map[string]*domainState)})
 	engine.writeMu.Unlock()
 	return engine.Replay(ctx)
