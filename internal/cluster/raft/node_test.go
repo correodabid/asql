@@ -299,6 +299,10 @@ func peersForNode(ids []string, self string) []raft.Peer {
 
 func applyWrites(t *testing.T, ctx context.Context, leader *raft.RaftNode, prefix string, count int) uint64 {
 	t.Helper()
+	// Apply fails fast until the leader has committed its no-op.
+	if err := leader.WaitLeaderReady(ctx); err != nil {
+		t.Fatalf("wait leader ready: %v", err)
+	}
 	var last uint64
 	for i := 0; i < count; i++ {
 		entry, err := leader.Apply(ctx, "COMMIT", fmt.Sprintf("%s-%02d", prefix, i), []byte(`{"op":"write"}`))
@@ -742,6 +746,10 @@ func TestLeaderApplyAndReplication(t *testing.T) {
 	}
 
 	leader := waitLeaderAmong(t, nodes, time.Second)
+
+	if err := leader.WaitLeaderReady(ctx); err != nil {
+		t.Fatalf("WaitLeaderReady: %v", err)
+	}
 
 	// Apply a transaction commit entry.
 	entry, err := leader.Apply(ctx, "COMMIT", "tx-001", []byte(`{"table":"users"}`))
