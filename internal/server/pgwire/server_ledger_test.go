@@ -2,9 +2,13 @@ package pgwire
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"path/filepath"
 	"testing"
 	"time"
@@ -66,7 +70,7 @@ func execLedgerWrites(t *testing.T, pgwireAddr string, from, to int) {
 
 func TestSignedLedgerDigestsMatchTheWAL(t *testing.T) {
 	config, keys := signedLedgerConfig(t)
-	server, pgwireAddr, _, cleanup := startAdminSmokeServer(t, config)
+	server, pgwireAddr, adminAddr, cleanup := startAdminSmokeServer(t, config)
 	execLedgerWrites(t, pgwireAddr, 1, 10)
 
 	// The checkpointer signs while the server runs, not only on shutdown.
@@ -81,6 +85,7 @@ func TestSignedLedgerDigestsMatchTheWAL(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
+	checkDigestSurfaces(t, server, pgwireAddr, adminAddr, keys)
 	execLedgerWrites(t, pgwireAddr, 11, 12)
 	cleanup()
 
@@ -109,5 +114,107 @@ func TestSignedLedgerDigestsMatchTheWAL(t *testing.T) {
 	// Shutdown signs the final head, so the newest digest covers the whole WAL.
 	if !report.OK || latest.LSN != report.LastLSN || latest.NodeID != "node-a" {
 		t.Fatalf("digest LSN %d, WAL last LSN %d, ok=%v failure=%v", latest.LSN, report.LastLSN, report.OK, report.Failure)
+	}
+}
+
+// checkDigestSurfaces reads digests through admin HTTP and SQL and checks
+// they match the log.
+func checkDigestSurfaces(t *testing.T, server *Server, pgwireAddr, adminAddr string, keys ledgerdigest.Keyring) {
+	t.Helper()
+	latest, _ := server.ledger.log.Latest()
+	covering, ok, err := server.ledger.log.Covering(3)
+	if err != nil || !ok {
+		t.Fatalf("no digest covers LSN 3: %v", err)
+	}
+
+	get := func(path string, want int) ledgerdigest.Digest {
+		t.Helper()
+		resp, err := http.Get("http://" + adminAddr + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != want {
+			t.Fatalf("GET %s: status %d, want %d: %s", path, resp.StatusCode, want, body)
+		}
+		var d ledgerdigest.Digest
+		if want == http.StatusOK {
+			if err := json.Unmarshal(body, &d); err != nil {
+				t.Fatalf("GET %s: %v: %s", path, err, body)
+			}
+			if err := d.Verify(keys); err != nil {
+				t.Fatalf("GET %s: %v", path, err)
+			}
+		}
+		return d
+	}
+	if d := get("/api/v1/ledger/digest", http.StatusOK); d.LSN != latest.LSN || d.Chain != latest.Chain {
+		t.Fatalf("latest digest over HTTP: LSN %d, want %d", d.LSN, latest.LSN)
+	}
+	if d := get("/api/v1/ledger/digest?lsn=3", http.StatusOK); d.LSN != covering.LSN {
+		t.Fatalf("covering digest over HTTP: LSN %d, want %d", d.LSN, covering.LSN)
+	}
+	get(fmt.Sprintf("/api/v1/ledger/digest?lsn=%d", latest.LSN+1000), http.StatusNotFound)
+	get("/api/v1/ledger/digest?lsn=x", http.StatusBadRequest)
+
+	ctx := context.Background()
+	for _, mode := range []string{"simple_protocol", "cache_statement"} {
+		conn, err := pgx.Connect(ctx, "postgres://asql@"+pgwireAddr+"/asql?sslmode=disable&default_query_exec_mode="+mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for sql, want := range map[string]ledgerdigest.Digest{
+			"SELECT * FROM asql_admin.ledger_digest":                latest,
+			"SELECT * FROM asql_admin.ledger_digest WHERE lsn >= 3": covering,
+		} {
+			var (
+				version, lsn, term, timestamp       int64
+				chain, nodeID, keyID, signedAt, sig string
+			)
+			if err := conn.QueryRow(ctx, sql).Scan(&version, &lsn, &chain, &term, &timestamp, &nodeID, &keyID, &signedAt, &sig); err != nil {
+				t.Fatalf("%s (%s): %v", sql, mode, err)
+			}
+			if uint64(lsn) != want.LSN || chain != hex.EncodeToString(want.Chain[:]) || keyID != want.KeyID || sig != base64.StdEncoding.EncodeToString(want.Sig) {
+				t.Fatalf("%s (%s): lsn=%d chain=%s, want lsn=%d", sql, mode, lsn, chain, want.LSN)
+			}
+		}
+		_ = conn.Close(ctx)
+	}
+}
+
+func TestLedgerDigestSurfacesWithoutSigning(t *testing.T) {
+	config, _ := signedLedgerConfig(t)
+	config.LedgerMode, config.LedgerKeyFile = "chain", ""
+	_, pgwireAddr, adminAddr, cleanup := startAdminSmokeServer(t, config)
+	defer cleanup()
+
+	resp, err := http.Get("http://" + adminAddr + "/api/v1/ledger/digest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status %d, want 404", resp.StatusCode)
+	}
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+pgwireAddr+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close(ctx) }()
+	rows, err := conn.Query(ctx, "SELECT * FROM asql_admin.ledger_digest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for rows.Next() {
+		n++
+	}
+	if err := rows.Err(); err != nil || n != 0 {
+		t.Fatalf("rows=%d err=%v, want no rows", n, err)
+	}
+	if got := len(rows.FieldDescriptions()); got != len(ledgerDigestColumns) {
+		t.Fatalf("columns = %d, want %d", got, len(ledgerDigestColumns))
 	}
 }

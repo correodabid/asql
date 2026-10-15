@@ -134,6 +134,7 @@ func (server *Server) startAdminHTTP() error {
 	mux.HandleFunc("/api/v1/failover-history", server.withAdminAuth(adminScopeRead, server.handleAdminFailoverHistory))
 	mux.HandleFunc("/api/v1/snapshot-catalog", server.withAdminAuth(adminScopeRead, server.handleAdminSnapshotCatalog))
 	mux.HandleFunc("/api/v1/wal-retention", server.withAdminAuth(adminScopeRead, server.handleAdminWALRetention))
+	mux.HandleFunc("/api/v1/ledger/digest", server.withAdminAuth(adminScopeRead, server.handleAdminLedgerDigest))
 	mux.HandleFunc("/api/v1/security/principals", server.withAdminAuth(adminScopeRead, server.handleAdminListPrincipals))
 	mux.HandleFunc("/api/v1/security/audit", server.withAdminAuth(adminScopeRead, server.handleAdminSecurityAudit))
 	mux.HandleFunc("/api/v1/security/bootstrap-admin", server.withAdminAuth(adminScopeWrite, server.handleAdminBootstrapPrincipal))
