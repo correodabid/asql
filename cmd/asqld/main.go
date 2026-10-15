@@ -40,7 +40,10 @@ func main() {
 	probeTimeout := flag.Duration("probe-timeout", 0, "per-RPC timeout for heartbeat probes (0 = default 1s)")
 	adminAddr := flag.String("admin-addr", "", "admin HTTP listen address for /metrics, /readyz, /livez (e.g. :9090)")
 	pprofAddr := flag.String("pprof-addr", "", "pprof HTTP listen address (e.g. :6060)")
-	ledgerMode := flag.String("ledger", "chain", "WAL ledger mode: chain (hash-chain every WAL record, ADR 0005) or off")
+	ledgerMode := flag.String("ledger", "chain", "WAL ledger mode: chain (hash-chain every WAL record, ADR 0005), signed (chain plus signed digests; needs -ledger-key) or off")
+	ledgerKey := flag.String("ledger-key", "", "Ed25519 private key (PEM, PKCS #8, mode 0600) that signs ledger digests with -ledger=signed")
+	ledgerDigestInterval := flag.Duration("ledger-digest-interval", 0, "with -ledger=signed, sign the committed chain head at most this often (0 = default 1s)")
+	ledgerDigestEvery := flag.Uint64("ledger-digest-every", 0, "with -ledger=signed, also sign after this many committed LSNs (0 = default 10000)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -93,6 +96,10 @@ func main() {
 		PeerProbeTimeout: *probeTimeout,
 		JoinAddr:         *joinAddr,
 		LedgerMode:       *ledgerMode,
+
+		LedgerKeyFile:         *ledgerKey,
+		LedgerDigestInterval:  *ledgerDigestInterval,
+		LedgerDigestEveryLSNs: *ledgerDigestEvery,
 	}
 
 	if *peers != "" {
