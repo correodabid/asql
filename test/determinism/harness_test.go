@@ -213,24 +213,12 @@ func (n *node) fingerprint(p probes) fingerprint {
 	f.add("head", fmt.Sprint(head))
 
 	schema := e.SchemaSnapshot(nil)
-	for i := range schema.Domains {
-		kept := schema.Domains[i].Tables[:0]
-		for _, t := range schema.Domains[i].Tables {
-			if !isProjectionTable(t.Name) {
-				kept = append(kept, t)
-			}
-		}
-		schema.Domains[i].Tables = kept
-	}
 	f.add("schema", jsonString(n.t, schema))
 
 	type tableRef struct{ domain, table string }
 	var tables []tableRef
 	for _, d := range schema.Domains {
 		for _, t := range d.Tables {
-			if isProjectionTable(t.Name) {
-				continue
-			}
 			tables = append(tables, tableRef{d.Name, t.Name})
 		}
 	}
@@ -327,13 +315,6 @@ func renderRow(row map[string]ast.Literal) string {
 	}
 	return strings.Join(parts, ",")
 }
-
-// isProjectionTable reports a VFK projection shadow table. They are internal,
-// and known not to be reproducible yet: only the live commit path refreshes
-// them, so any replay leaves them as seeded at CREATE TABLE, and a snapshot
-// drops their internal flag, which makes them show up in the schema.
-// TODO: drop once projections are rebuilt on replay and snapshot restore.
-func isProjectionTable(name string) bool { return strings.HasPrefix(name, "__proj__") }
 
 // historyIsUnreliable marks FOR HISTORY sections in comparisons where row
 // history is known not to be reproducible yet: across crashes (the audit

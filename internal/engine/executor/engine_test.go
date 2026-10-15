@@ -11469,7 +11469,7 @@ func TestTimeTravelQueryCrossDomainVFK(t *testing.T) {
 		t.Fatal("expected table-not-found at pre-DDL LSN, got nil")
 	}
 	if strings.Contains(errAtPast.Error(), "unexpected EOF") {
-		t.Fatalf("server panicked (nil vfkSubscriptions not fixed): %v", errAtPast)
+		t.Fatalf("time travel over a VFK table panicked: %v", errAtPast)
 	}
 
 	// ── Time travel at head LSN: process_orders exists, returns the row ───────

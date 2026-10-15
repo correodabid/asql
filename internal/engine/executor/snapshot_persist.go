@@ -1521,3 +1521,23 @@ func decompressZstd(data []byte) ([]byte, error) {
 	defer zstdDecoderPool.Put(dec)
 	return dec.DecodeAll(data, nil)
 }
+
+// legacyProjectionPrefix names the versioned-foreign-key projection tables
+// that earlier versions kept in subscriber domains.
+const legacyProjectionPrefix = "__proj__"
+
+// dropLegacyProjectionTables removes those projection tables from snapshots
+// persisted by earlier versions. They were never in the catalog, which tells
+// them apart from a user table that happens to share the prefix.
+func dropLegacyProjectionTables(snapshots []engineSnapshot) {
+	for i := range snapshots {
+		for domainName, ds := range snapshots[i].state.domains {
+			for tableName := range ds.tables {
+				if strings.HasPrefix(tableName, legacyProjectionPrefix) &&
+					(snapshots[i].catalog == nil || !snapshots[i].catalog.HasTable(domainName, tableName)) {
+					delete(ds.tables, tableName)
+				}
+			}
+		}
+	}
+}

@@ -250,7 +250,6 @@ type tableState struct {
 	foreignKeys          []foreignKeyConstraint
 	checkConstraints     []checkConstraint
 	versionedForeignKeys []versionedForeignKeyConstraint
-	isProjection         bool // true for VFK projection shadow tables (hidden from schema introspection)
 	lastMutationTS       uint64
 	changeLog            []changeLogEntry
 	// indexesLoaded is true when all index bucket/entry data was restored from
@@ -355,13 +354,6 @@ type foreignKeyConstraint struct {
 	column           string
 	referencesTable  string
 	referencesColumn string
-}
-
-// projectionSubscription records a subscriber domain table that mirrors a
-// source domain's table via a Versioned Foreign Key projection.
-type projectionSubscription struct {
-	subscriberDomain string // domain that holds the projected table
-	projTableName    string // name of the projected (read-only mirror) table
 }
 
 type versionedForeignKeyConstraint struct {
@@ -1059,77 +1051,6 @@ type windowPartition struct {
 	indices []int
 }
 
-// cloneTableStateProjection creates a schema-only clone of src for use as a
-// VFK projection table. Rows, changeLog, and index data are empty; schema
-// (columns, definitions, indexes structure, constraints) is copied.
-func cloneTableStateProjection(src *tableState) *tableState {
-	columns := make([]string, len(src.columns))
-	copy(columns, src.columns)
-
-	colDefs := make(map[string]ast.ColumnDefinition, len(src.columnDefinitions))
-	for k, v := range src.columnDefinitions {
-		colDefs[k] = v
-	}
-
-	uniqueColumns := make(map[string]struct{}, len(src.uniqueColumns))
-	for k := range src.uniqueColumns {
-		uniqueColumns[k] = struct{}{}
-	}
-	uniqueColumnList := make([]string, len(src.uniqueColumnList))
-	copy(uniqueColumnList, src.uniqueColumnList)
-	notNullColumns := make([]string, len(src.notNullColumns))
-	copy(notNullColumns, src.notNullColumns)
-	foreIgnKeys := make([]foreignKeyConstraint, len(src.foreignKeys))
-	copy(foreIgnKeys, src.foreignKeys)
-	checkConstrs := make([]checkConstraint, len(src.checkConstraints))
-	copy(checkConstrs, src.checkConstraints)
-	vfks := make([]versionedForeignKeyConstraint, len(src.versionedForeignKeys))
-	copy(vfks, src.versionedForeignKeys)
-
-	// Clone index structure with empty data.
-	idxs := make(map[string]*indexState, len(src.indexes))
-	for name, srcIdx := range src.indexes {
-		dst := &indexState{
-			name:    srcIdx.name,
-			kind:    srcIdx.kind,
-			columns: make([]string, len(srcIdx.columns)),
-		}
-		copy(dst.columns, srcIdx.columns)
-		if srcIdx.kind == "hash" {
-			dst.buckets = make(map[string][]int)
-		}
-		idxs[name] = dst
-	}
-	idxedCols := make(map[string]string, len(src.indexedColumns))
-	for k, v := range src.indexedColumns {
-		idxedCols[k] = v
-	}
-	idxedColSets := make(map[string]string, len(src.indexedColumnSets))
-	for k, v := range src.indexedColumnSets {
-		idxedColSets[k] = v
-	}
-
-	ts := &tableState{
-		columns:              columns,
-		columnDefinitions:    colDefs,
-		rows:                 make([][]ast.Literal, 0),
-		indexes:              idxs,
-		indexedColumns:       idxedCols,
-		indexedColumnSets:    idxedColSets,
-		primaryKey:           src.primaryKey,
-		uniqueColumns:        uniqueColumns,
-		uniqueColumnList:     uniqueColumnList,
-		notNullColumns:       notNullColumns,
-		pkAutoUUID:           src.pkAutoUUID,
-		foreignKeys:          foreIgnKeys,
-		checkConstraints:     checkConstrs,
-		versionedForeignKeys: vfks,
-		isProjection:         true,
-	}
-	rebuildColumnIndex(ts)
-	return ts
-}
-
 // rowToMap converts a stored []ast.Literal row to a map[string]ast.Literal
 // for use in the query pipeline (predicates, projections, aggregations).
 // Each call allocates a fresh map, so callers own the result and mutations
@@ -1171,11 +1092,4 @@ func tableRowsToMaps(ts *tableState) []map[string]ast.Literal {
 		result[i] = rowToMap(ts, row)
 	}
 	return result
-}
-
-// projectionTableName returns the internal name used for VFK projection shadow
-// tables inside subscriber domains. The "__proj__" prefix ensures these tables
-// are hidden from normal schema introspection.
-func projectionTableName(srcDomain, srcTable string) string {
-	return "__proj__" + srcDomain + "__" + srcTable
 }

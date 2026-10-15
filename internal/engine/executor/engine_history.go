@@ -83,11 +83,10 @@ func (engine *Engine) TimeTravelQueryAsOfLSN(ctx context.Context, sql string, tx
 	}
 
 	temp := &Engine{
-		catalog:          domains.NewCatalog(),
-		scanStats:        make(map[scanStrategy]uint64),
-		vfkSubscriptions: make(map[string][]projectionSubscription),
-		logStore:         engine.logStore,
-		snapshots:        engine.snapshots,
+		catalog:   domains.NewCatalog(),
+		scanStats: make(map[scanStrategy]uint64),
+		logStore:  engine.logStore,
+		snapshots: engine.snapshots,
 	}
 	tempInitial := &readableState{domains: make(map[string]*domainState)}
 	temp.readState.Store(tempInitial)

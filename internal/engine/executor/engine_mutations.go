@@ -1082,38 +1082,6 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		rebuildPKAutoUUID(ts)
 		domainState.tables[plan.TableName] = ts
 
-		// Register VFK subscriptions and seed initial projection tables for
-		// any cross-domain VERSIONED FOREIGN KEY constraints. These shadow
-		// tables live inside the subscriber domain (plan.DomainName) and are
-		// rebuilt from the final source-table state for each commit job that
-		// mutates the source table.
-		for _, vfk := range versionedFKs {
-			if vfk.referencesDomain == "" || vfk.referencesDomain == plan.DomainName {
-				continue // same-domain VFK — no projection needed
-			}
-			subKey := vfk.referencesDomain + "." + vfk.referencesTable
-			projName := projectionTableName(vfk.referencesDomain, vfk.referencesTable)
-			// Avoid duplicate subscription entries.
-			alreadyRegistered := false
-			for _, existing := range engine.vfkSubscriptions[subKey] {
-				if existing.subscriberDomain == plan.DomainName && existing.projTableName == projName {
-					alreadyRegistered = true
-					break
-				}
-			}
-			if !alreadyRegistered {
-				engine.vfkSubscriptions[subKey] = append(engine.vfkSubscriptions[subKey], projectionSubscription{
-					subscriberDomain: plan.DomainName,
-					projTableName:    projName,
-				})
-			}
-			// Seed the projection table from current source rows if present.
-			if srcDS, ok := state.domains[vfk.referencesDomain]; ok {
-				if srcTable, ok := srcDS.tables[vfk.referencesTable]; ok {
-					domainState.tables[projName] = rebuildProjectionFromSource(srcTable)
-				}
-			}
-		}
 		return nil
 	case planner.OperationAlterTableAddColumn:
 		if !engine.catalog.HasTable(plan.DomainName, plan.TableName) {

@@ -54,6 +54,7 @@ func (engine *Engine) Replay(ctx context.Context) error {
 			}
 		}
 
+		dropLegacyProjectionTables(snapshots)
 		if maxSeq > engine.snapSeq {
 			engine.snapSeq = maxSeq
 		}
@@ -282,11 +283,10 @@ func (engine *Engine) buildStateFromRecords(records []ports.WALRecord, targetLSN
 	}
 
 	temp := &Engine{
-		catalog:          domains.NewCatalog(),
-		scanStats:        make(map[scanStrategy]uint64),
-		logStore:         engine.logStore,
-		snapshots:        engine.snapshots,
-		vfkSubscriptions: make(map[string][]projectionSubscription),
+		catalog:   domains.NewCatalog(),
+		scanStats: make(map[scanStrategy]uint64),
+		logStore:  engine.logStore,
+		snapshots: engine.snapshots,
 	}
 	tempInitial := &readableState{domains: make(map[string]*domainState)}
 	temp.readState.Store(tempInitial)

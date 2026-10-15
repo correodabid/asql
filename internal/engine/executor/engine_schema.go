@@ -44,11 +44,6 @@ func (engine *Engine) SchemaSnapshot(domainsFilter []string) SchemaSnapshot {
 		domain := SchemaDomain{Name: domainName, Tables: make([]SchemaTable, 0, len(tableNames)), Entities: schemaEntities(domainState)}
 		for _, tableName := range tableNames {
 			table := domainState.tables[tableName]
-			// Skip VFK projection shadow tables — they are internal and must not
-			// appear in schema snapshots or be visible to external consumers.
-			if table.isProjection {
-				continue
-			}
 			columns := make([]SchemaColumn, 0, len(table.columns))
 			for _, columnName := range table.columns {
 				definition, hasDefinition := table.columnDefinitions[columnName]

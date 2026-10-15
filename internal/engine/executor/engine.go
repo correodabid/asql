@@ -179,12 +179,7 @@ type Engine struct {
 	auditStore     ports.AuditStore    // non-nil when a persistent audit log is wired in
 	raftCommitter  ports.RaftCommitter // non-nil in cluster mode; routes every WAL write through Raft quorum
 	timestampIndex *timestampLSNIndex
-	// vfkSubscriptions maps "sourceDomain.sourceTable" to the list of subscriber
-	// domains that maintain a read-only projection of that table. This index is
-	// populated when a CREATE TABLE with VFK constraints is processed and is
-	// used by fanoutProjections to materialise rows into subscriber domains.
-	vfkSubscriptions map[string][]projectionSubscription
-	replayMode       bool // true during WAL replay; skips VFK validation
+	replayMode     bool // true during WAL replay; skips VFK validation
 }
 
 type walRecordCache struct {
@@ -374,7 +369,6 @@ func New(ctx context.Context, logStore ports.LogStore, snapDir string, opts ...E
 		perf:                 newPerfStats(),
 		retainWAL:            true, // default: preserve full WAL for compliance
 		timestampIndex:       newTimestampLSNIndex(snapDir),
-		vfkSubscriptions:     make(map[string][]projectionSubscription),
 	}
 
 	for _, opt := range opts {

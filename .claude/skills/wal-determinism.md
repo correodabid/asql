@@ -94,8 +94,8 @@ Three layers of defense:
    replays, follower apply in arbitrary batches, prefix replay vs time
    travel, WAL compaction, ledger on/off, and a transaction whose COMMIT
    never reached the WAL (it must never apply). Run it after any engine or
-   WAL-layer change. Known gaps it still excludes (row history, VFK
-   projection tables) are listed in `harness_test.go`.
+   WAL-layer change. The known gap it still excludes (row history) is
+   listed in `harness_test.go`.
 3. **`test/integration/`** exercises failover, restart, and snapshot
    replay end to end.
 
