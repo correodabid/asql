@@ -48,7 +48,7 @@ func (store *SegmentedLogStore) TruncateAfter(ctx context.Context, afterLSN uint
 		if seg.firstLSN != 0 && seg.firstLSN <= afterLSN {
 			break
 		}
-		path := seg.file.Name()
+		path := store.segmentPath(seg.seqNum)
 		if err := seg.file.Close(); err != nil {
 			return fmt.Errorf("close segment %06d: %w", seg.seqNum, err)
 		}
@@ -145,7 +145,7 @@ func (store *SegmentedLogStore) rewriteSegmentThrough(seg *segment, afterLSN uin
 	oldSize := seg.size
 	seg.size = seg.headerSize + int64(len(frames))
 
-	path := seg.file.Name()
+	path := store.segmentPath(seg.seqNum)
 	tmpPath := path + ".truncatetmp"
 	tmp, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {

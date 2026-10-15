@@ -1611,7 +1611,7 @@ func (store *SegmentedLogStore) TruncateBefore(ctx context.Context, beforeLSN ui
 
 		if !isActive && seg.lastLSN > 0 && seg.lastLSN < beforeLSN {
 			// Entire segment is below the truncation point — delete it.
-			path := seg.file.Name()
+			path := store.segmentPath(seg.seqNum)
 			store.totalSize -= seg.size
 			seg.file.Close()
 			if err := os.Remove(path); err != nil {
@@ -1693,7 +1693,7 @@ func (store *SegmentedLogStore) compactSegment(seg *segment) error {
 		store.mu.Unlock()
 		return nil
 	}
-	path := seg.file.Name()
+	path := store.segmentPath(seg.seqNum)
 	store.mu.Unlock()
 
 	// Open a fresh read-only handle so we don't disturb the segment's file position.
@@ -1811,7 +1811,7 @@ func (store *SegmentedLogStore) SegmentPaths() []string {
 	defer store.mu.Unlock()
 	paths := make([]string, len(store.segments))
 	for i, seg := range store.segments {
-		paths[i] = seg.file.Name()
+		paths[i] = store.segmentPath(seg.seqNum)
 	}
 	return paths
 }
