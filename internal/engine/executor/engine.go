@@ -837,72 +837,49 @@ func (engine *Engine) TimelineCommits(ctx context.Context, fromLSN, toLSN uint64
 		return nil, fmt.Errorf("read wal for timeline: %w", err)
 	}
 
-	// Index: txID -> commit LSN & timestamp
-	type commitInfo struct {
-		lsn       uint64
-		timestamp uint64
-	}
-	txCommit := make(map[string]commitInfo)
-	for _, r := range records {
-		if toLSN > 0 && r.LSN > toLSN {
-			break
-		}
-		if r.Type == walTypeCommit {
-			txCommit[r.TxID] = commitInfo{lsn: r.LSN, timestamp: r.Timestamp}
-		}
+	if toLSN > 0 {
+		n := sort.Search(len(records), func(i int) bool { return records[i].LSN > toLSN })
+		records = records[:n]
 	}
 
-	// Collect mutations grouped by txID
-	type mutation struct {
-		domain    string
-		table     string
-		operation string
-	}
-	txMutations := make(map[string][]mutation)
-	for _, r := range records {
-		if toLSN > 0 && r.LSN > toLSN {
-			break
-		}
-		if r.Type != walTypeMutation {
+	// Group mutations under the COMMIT that closes them; TxIDs repeat across
+	// the WAL (see txCommitLSNs).
+	commitLSNs := txCommitLSNs(records)
+	byCommit := make(map[uint64]*TimelineCommit)
+	var commits []TimelineCommit
+	for i, r := range records {
+		if r.Type == walTypeCommit {
+			commits = append(commits, TimelineCommit{LSN: r.LSN, TxID: r.TxID, Timestamp: r.Timestamp, Tables: []TimelineCommitMutation{}})
 			continue
 		}
-		if _, ok := txCommit[r.TxID]; !ok {
+		if r.Type != walTypeMutation || commitLSNs[i] == 0 {
 			continue // uncommitted
 		}
 		recDomain, plan, err := decodeMutationPayloadV2(r.Payload)
 		if err != nil {
 			continue
 		}
-		// Skip mutations outside the requested domain
 		if domainFilter != "" && strings.ToLower(recDomain) != domainFilter {
 			continue
 		}
-		txMutations[r.TxID] = append(txMutations[r.TxID], mutation{
-			domain:    plan.DomainName,
-			table:     plan.TableName,
-			operation: string(plan.Operation),
-		})
-	}
-
-	// Build sorted commit list — only include commits that have mutations
-	// surviving the domain filter.
-	commits := make([]TimelineCommit, 0, len(txCommit))
-	for txID, info := range txCommit {
-		muts := txMutations[txID]
-		if domainFilter != "" && len(muts) == 0 {
-			continue // commit doesn't touch this domain
+		c := byCommit[commitLSNs[i]]
+		if c == nil {
+			c = &TimelineCommit{}
+			byCommit[commitLSNs[i]] = c
 		}
-		tables := make([]TimelineCommitMutation, len(muts))
-		for i, m := range muts {
-			tables[i] = TimelineCommitMutation{Domain: m.domain, Table: m.table, Operation: m.operation}
-		}
-		commits = append(commits, TimelineCommit{
-			LSN:       info.lsn,
-			TxID:      txID,
-			Timestamp: info.timestamp,
-			Tables:    tables,
-		})
+		c.Tables = append(c.Tables, TimelineCommitMutation{Domain: plan.DomainName, Table: plan.TableName, Operation: string(plan.Operation)})
 	}
+	// Keep only commits with mutations surviving the domain filter.
+	kept := commits[:0]
+	for _, c := range commits {
+		if m := byCommit[c.LSN]; m != nil {
+			c.Tables = m.Tables
+		} else if domainFilter != "" {
+			continue
+		}
+		kept = append(kept, c)
+	}
+	commits = kept
 	sort.Slice(commits, func(i, j int) bool { return commits[i].LSN < commits[j].LSN })
 
 	if limit > 0 && len(commits) > limit {
