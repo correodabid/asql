@@ -84,8 +84,10 @@ Breaking them is a production-severity bug, not a stylistic choice.
    engine, not around it. Never bypass WAL append.
 2. **No wall-clock, no randomness, no process-derived values** in anything
    the engine observes. Timestamps must come through the
-   `platform/clock` abstraction; IDs must be explicit or WAL-derived
-   (`UUID_V7` is deterministic via the injected clock).
+   `platform/clock` abstraction; IDs must be explicit or WAL-derived.
+   `UUID_V7` and `TX_TIMESTAMP` defaults read the real clock and
+   randomness, so they are generated once at commit and materialized
+   into the WAL payload; replay reads them back, never regenerates them.
 3. **Parser and executor are pure functions of their input.** Two replays
    of the same WAL must produce byte-identical state and query-visible
    results.
@@ -131,7 +133,7 @@ restarts, failovers, and fresh-checkout rebuilds.
 | `./internal/server/pgwire/...` | medium (~30–60 s) | pgwire / engine protocol edits |
 | `./...` | 1–3 min | before committing |
 | `./test/integration/...` | minutes | cluster / replication / recovery edits |
-| `./test/determinism/...` | minutes | engine / WAL / executor changes |
+| `./test/determinism/...` | seconds | engine / WAL / executor changes |
 
 **Default loop**: `go test ./internal/...`. Full suite:
 `go test -timeout 300s ./...`. Isolate a hanging test with `-run Name
