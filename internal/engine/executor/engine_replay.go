@@ -614,7 +614,20 @@ func (engine *Engine) CatchUp(ctx context.Context, upToLSN uint64) error {
 	if latest != nil && len(records) > 0 && records[len(records)-1].LSN <= latest.headLSN {
 		return nil
 	}
-	return engine.rebuildFromRecordsAfterSnapshot(records, current.headLSN)
+	if err := engine.rebuildFromRecordsAfterSnapshot(records, current.headLSN); err != nil {
+		return err
+	}
+	engine.indexAppliedRecords(records)
+	return nil
+}
+
+// indexAppliedRecords adds records applied outside the commit queue (Raft
+// followers) to the timestamp index, as the commit queue does for local
+// commits.
+func (engine *Engine) indexAppliedRecords(records []ports.WALRecord) {
+	if err := engine.timestampIndex.append(records); err != nil {
+		slog.Warn("timestamp index append failed", "error", err.Error(), "records", len(records))
+	}
 }
 
 // ApplyCommittedRecords applies a directly supplied committed WAL delta when it
@@ -665,7 +678,11 @@ func (engine *Engine) ApplyCommittedRecords(ctx context.Context, upToLSN uint64,
 		return engine.CatchUp(ctx, upToLSN)
 	}
 
-	return engine.rebuildFromRecordsAfterSnapshotWithOptions(filtered, current.headLSN, false)
+	if err := engine.rebuildFromRecordsAfterSnapshotWithOptions(filtered, current.headLSN, false); err != nil {
+		return err
+	}
+	engine.indexAppliedRecords(filtered)
+	return nil
 }
 
 func logDirectApplyFallback(reason string, headLSN, upToLSN uint64, records []ports.WALRecord) {
