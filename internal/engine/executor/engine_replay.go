@@ -98,18 +98,24 @@ func (engine *Engine) Replay(ctx context.Context) error {
 }
 
 // recordsWithinReplayLimit returns the prefix of LSN-ordered records allowed
-// by the replay limit.
+// by the replay limit. A transaction the limit cuts through is deferred
+// whole: Raft may still commit the rest of it.
+//
+// Without a limit the WAL is all there is, and a transaction left without
+// its COMMIT never commits. Replay skips its mutations but keeps the head at
+// the WAL's last LSN, which the commit path counts on to assign LSNs.
 func (engine *Engine) recordsWithinReplayLimit(records []ports.WALRecord) []ports.WALRecord {
 	if !engine.replayLimited {
 		return records
 	}
 	limit := engine.replayLimit
 	n := sort.Search(len(records), func(i int) bool { return records[i].LSN > limit })
-	if n < len(records) {
+	within := withoutUnfinishedTx(records[:n])
+	if deferred := len(records) - len(within); deferred > 0 {
 		slog.Info("replay: deferring WAL records beyond replay limit to raft",
-			"replay_limit", limit, "deferred", len(records)-n)
+			"replay_limit", limit, "deferred", deferred)
 	}
-	return records[:n]
+	return within
 }
 
 // replayFromSnapshots restores all intermediate snapshots into the in-memory
@@ -327,9 +333,9 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 	captureReplaySnapshots := !bounded
 
 	commitLSNs := txCommitLSNs(records)
-	pendingCommitLSN := make(map[string]uint64)
 	txEntityCollectors := make(map[string]map[string]map[string][]string)
 	txClonedTables := make(map[string]map[string]struct{})
+	snapshotDue := false
 
 	for i, record := range records {
 		if bounded && record.LSN > targetLSN {
@@ -354,7 +360,12 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 				delete(txEntityCollectors, record.TxID)
 			}
 			delete(txClonedTables, record.TxID)
-			delete(pendingCommitLSN, record.TxID)
+			if snapshotDue {
+				newState.headLSN = engine.headLSN
+				newState.logicalTS = engine.logicalTS
+				engine.snapshots.add(captureSnapshot(newState, engine.catalog))
+				snapshotDue = false
+			}
 			continue
 		}
 
@@ -373,6 +384,11 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 			continue
 		}
 
+		commitLSN := commitLSNs[i]
+		if !committedWithin(commitLSN, targetLSN, bounded) {
+			continue
+		}
+
 		plan, ok, err := replayPlanForRecord(record, replayPlans, i)
 		if err != nil {
 			return err
@@ -381,8 +397,6 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 			continue
 		}
 
-		commitLSN := commitLSNs[i]
-		pendingCommitLSN[record.TxID] = commitLSN
 		if txEntityCollectors[record.TxID] == nil {
 			txEntityCollectors[record.TxID] = make(map[string]map[string][]string)
 		}
@@ -395,18 +409,13 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 
 		engine.mutationCount++
 
-		// Capture periodic snapshots for fast time-travel queries.
+		// Capture periodic snapshots for fast time-travel queries, at the
+		// next COMMIT so that no snapshot holds a partial transaction.
 		interval := uint64(adaptiveSnapshotInterval(engine.mutationCount))
 		if captureReplaySnapshots && engine.snapshots != nil && interval > 0 && engine.mutationCount%interval == 0 {
-			newState.headLSN = engine.headLSN
-			newState.logicalTS = engine.logicalTS
-			engine.snapshots.add(captureSnapshot(newState, engine.catalog))
+			snapshotDue = true
 		}
 	}
-
-	// Record entity versions for any remaining transactions whose COMMIT
-	// records were not within the replayed range (bounded replay).
-	replayEntityVersionsInOrder(newState, txEntityCollectors, pendingCommitLSN)
 
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
@@ -473,10 +482,10 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 	newState := current.cloneForMutation(allDomainKeys(current.domains))
 
 	commitLSNs := txCommitLSNs(records)
-	pendingCommitLSN := make(map[string]uint64)
 	txEntityCollectors := make(map[string]map[string]map[string][]string)
 	txClonedTables := make(map[string]map[string]struct{})
 	touchedTables := make(map[string]map[string]struct{})
+	snapshotDue := false
 
 	for i, record := range records {
 		if record.LSN <= afterLSN {
@@ -497,7 +506,12 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 				delete(txEntityCollectors, record.TxID)
 			}
 			delete(txClonedTables, record.TxID)
-			delete(pendingCommitLSN, record.TxID)
+			if snapshotDue {
+				newState.headLSN = engine.headLSN
+				newState.logicalTS = engine.logicalTS
+				engine.snapshots.add(captureSnapshot(newState, engine.catalog))
+				snapshotDue = false
+			}
 			continue
 		}
 
@@ -516,6 +530,11 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 			continue
 		}
 
+		commitLSN := commitLSNs[i]
+		if !committedWithin(commitLSN, 0, false) {
+			continue
+		}
+
 		_, plan, err := decodeMutationPayloadV2(record.Payload)
 		if err != nil {
 			return fmt.Errorf("decode mutation payload lsn=%d: %w", record.LSN, err)
@@ -525,8 +544,6 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 		}
 		touchedTables[plan.DomainName][plan.TableName] = struct{}{}
 
-		commitLSN := commitLSNs[i]
-		pendingCommitLSN[record.TxID] = commitLSN
 		if txEntityCollectors[record.TxID] == nil {
 			txEntityCollectors[record.TxID] = make(map[string]map[string][]string)
 		}
@@ -541,14 +558,9 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 
 		interval := uint64(adaptiveSnapshotInterval(engine.mutationCount))
 		if captureSnapshots && engine.snapshots != nil && interval > 0 && engine.mutationCount%interval == 0 {
-			newState.headLSN = engine.headLSN
-			newState.logicalTS = engine.logicalTS
-			engine.snapshots.add(captureSnapshot(newState, engine.catalog))
+			snapshotDue = true
 		}
 	}
-
-	// Record entity versions for any remaining transactions.
-	replayEntityVersionsInOrder(newState, txEntityCollectors, pendingCommitLSN)
 
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
@@ -632,21 +644,28 @@ func (engine *Engine) CatchUp(ctx context.Context, upToLSN uint64) error {
 
 // withoutUnfinishedTx drops a transaction that the records end inside of:
 // its BEGIN is present but its COMMIT is not yet. Raft can commit an index
-// in the middle of a transaction's records; applying them would expose a
-// partial transaction and resolve its mutations without a commit LSN. The
-// head stays before the transaction, and the next catch-up rereads it from
-// the WAL. A transaction's records are contiguous (one batch per commit), so
-// only the tail can hold one that may still commit.
+// in the middle of a transaction's records, and a crash can cut a batch
+// short; applying them would expose a partial transaction. The head stays
+// before the transaction, so the next catch-up rereads it from the WAL once
+// its COMMIT arrives. A transaction's records are contiguous (one batch per
+// commit), so only a tail that holds nothing but that transaction's records
+// can still commit; anything appended after it means it never will.
 func withoutUnfinishedTx(records []ports.WALRecord) []ports.WALRecord {
+	if len(records) == 0 {
+		return records
+	}
+	txID := records[len(records)-1].TxID
 	for i := len(records) - 1; i >= 0; i-- {
-		switch records[i].Type {
-		case walTypeCommit:
+		switch {
+		case records[i].TxID != txID || records[i].Type == walTypeCommit || records[i].Type == walTypeSecurity:
 			return records
-		case walTypeBegin:
+		case records[i].Type == walTypeBegin:
 			return records[:i]
 		}
 	}
-	return records
+	// The records start inside the transaction (the head is past its BEGIN)
+	// and do not reach its COMMIT.
+	return records[:0]
 }
 
 // indexAppliedRecords adds records applied outside the commit queue (Raft
@@ -745,7 +764,6 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 	newState := current.cloneForMutation(allDomainKeys(current.domains))
 
 	commitLSNs := txCommitLSNs(records)
-	pendingCommitLSN := make(map[string]uint64)
 	txEntityCollectors := make(map[string]map[string]map[string][]string)
 	txClonedTables := make(map[string]map[string]struct{})
 
@@ -771,7 +789,6 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 				delete(txEntityCollectors, record.TxID)
 			}
 			delete(txClonedTables, record.TxID)
-			delete(pendingCommitLSN, record.TxID)
 			continue
 		}
 
@@ -790,13 +807,16 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 			continue
 		}
 
+		commitLSN := commitLSNs[i]
+		if !committedWithin(commitLSN, targetLSN, true) {
+			continue
+		}
+
 		_, plan, err := decodeMutationPayloadV2(record.Payload)
 		if err != nil {
 			return fmt.Errorf("decode mutation payload lsn=%d: %w", record.LSN, err)
 		}
 
-		commitLSN := commitLSNs[i]
-		pendingCommitLSN[record.TxID] = commitLSN
 		if txEntityCollectors[record.TxID] == nil {
 			txEntityCollectors[record.TxID] = make(map[string]map[string][]string)
 		}
@@ -808,10 +828,6 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 		}
 	}
 
-	// Record entity versions for any remaining transactions whose COMMIT
-	// was outside the (afterLSN, targetLSN] window.
-	replayEntityVersionsInOrder(newState, txEntityCollectors, pendingCommitLSN)
-
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
 	engine.readState.Store(newState)
@@ -819,32 +835,13 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 	return nil
 }
 
-// replayEntityVersionsInOrder records entity versions for replayed transactions
-// in commitLSN order. This ensures deterministic version numbering regardless
-// of Go map iteration order.
-func replayEntityVersionsInOrder(state *readableState, collectors map[string]map[string]map[string][]string, commitLSNs map[string]uint64) {
-	if len(collectors) == 0 {
-		return
-	}
-
-	type txEntry struct {
-		txID      string
-		commitLSN uint64
-		collector map[string]map[string][]string
-	}
-	ordered := make([]txEntry, 0, len(collectors))
-	for txID, collector := range collectors {
-		if len(collector) > 0 {
-			ordered = append(ordered, txEntry{txID: txID, commitLSN: commitLSNs[txID], collector: collector})
-		}
-	}
-	sort.Slice(ordered, func(i, j int) bool {
-		return ordered[i].commitLSN < ordered[j].commitLSN
-	})
-
-	for _, entry := range ordered {
-		recordEntityVersions(state, entry.collector, entry.commitLSN)
-	}
+// committedWithin reports whether a replayed mutation's transaction commits
+// at or before targetLSN (any LSN when not bounded). commitLSN is 0 when the
+// COMMIT is not in the WAL: the transaction never committed (its batch was
+// cut short by a crash, or a new Raft leader replaced the rest) and none of
+// its mutations may be applied.
+func committedWithin(commitLSN, targetLSN uint64, bounded bool) bool {
+	return commitLSN != 0 && (!bounded || commitLSN <= targetLSN)
 }
 
 // txCommitLSNs maps each record to the LSN of the COMMIT that closes its

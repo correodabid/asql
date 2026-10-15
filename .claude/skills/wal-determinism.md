@@ -92,7 +92,8 @@ Three layers of defense:
    query-visible across every way of rebuilding state: restart with and
    without snapshots, restarts and crashes mid-workload, repeated
    replays, follower apply in arbitrary batches, prefix replay vs time
-   travel, WAL compaction, ledger on/off. Run it after any engine or
+   travel, WAL compaction, ledger on/off, and a transaction whose COMMIT
+   never reached the WAL (it must never apply). Run it after any engine or
    WAL-layer change. Known gaps it still excludes (row history, VFK
    projection tables) are listed in `harness_test.go`.
 3. **`test/integration/`** exercises failover, restart, and snapshot
