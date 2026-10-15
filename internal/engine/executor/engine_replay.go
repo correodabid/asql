@@ -616,6 +616,9 @@ func (engine *Engine) CatchUp(ctx context.Context, upToLSN uint64) error {
 			return nil
 		}
 	}
+	if records = withoutUnfinishedTx(records); len(records) == 0 {
+		return nil
+	}
 	latest := engine.readState.Load()
 	if latest != nil && len(records) > 0 && records[len(records)-1].LSN <= latest.headLSN {
 		return nil
@@ -625,6 +628,25 @@ func (engine *Engine) CatchUp(ctx context.Context, upToLSN uint64) error {
 	}
 	engine.indexAppliedRecords(records)
 	return nil
+}
+
+// withoutUnfinishedTx drops a transaction that the records end inside of:
+// its BEGIN is present but its COMMIT is not yet. Raft can commit an index
+// in the middle of a transaction's records; applying them would expose a
+// partial transaction and resolve its mutations without a commit LSN. The
+// head stays before the transaction, and the next catch-up rereads it from
+// the WAL. A transaction's records are contiguous (one batch per commit), so
+// only the tail can hold one that may still commit.
+func withoutUnfinishedTx(records []ports.WALRecord) []ports.WALRecord {
+	for i := len(records) - 1; i >= 0; i-- {
+		switch records[i].Type {
+		case walTypeCommit:
+			return records
+		case walTypeBegin:
+			return records[:i]
+		}
+	}
+	return records
 }
 
 // indexAppliedRecords adds records applied outside the commit queue (Raft
@@ -682,6 +704,9 @@ func (engine *Engine) ApplyCommittedRecords(ctx context.Context, upToLSN uint64,
 	if upToLSN > 0 && filtered[len(filtered)-1].LSN < upToLSN {
 		logDirectApplyFallback("missing-commit-tail", current.headLSN, upToLSN, filtered)
 		return engine.CatchUp(ctx, upToLSN)
+	}
+	if filtered = withoutUnfinishedTx(filtered); len(filtered) == 0 {
+		return nil
 	}
 
 	if err := engine.rebuildFromRecordsAfterSnapshotWithOptions(filtered, current.headLSN, false); err != nil {
