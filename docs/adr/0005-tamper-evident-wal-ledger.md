@@ -1,6 +1,6 @@
 # ADR 0005: Make the WAL tamper-evident with a hash-chained ledger and signed digests
 
-- Status: Accepted. Phase 1 (`ledger=off|chain`, anchors, `verify-ledger`) shipped in #35; phase 1b (`ledger=signed`, digests and their surfaces) in progress
+- Status: Accepted. Phase 1 (`ledger=off|chain`, anchors, `verify-ledger`) shipped in #35. Phase 1b (`ledger=signed`, digests and their surfaces) is implemented on `feat/wal-ledger-signed`
 - Date: 2026-10-14
 - Decision drivers:
   - ASQL positions itself as a database teams can reason about under audit; today the WAL detects accidental corruption but not deliberate rewriting
@@ -114,45 +114,86 @@ does not depend on it.
 
 ### 4. Signed digests
 
-A digest is:
+A digest is a signed statement that the chain had value `chain` at a committed `lsn`:
 
 ```
-{ version: 1, lsn, chain, term, timestamp, node_id, key_id, sig: Ed25519(canonical bytes) }
+{ version: 1, lsn, chain, term, timestamp, node_id, key_id, signed_at,
+  sig: Ed25519(canonical bytes) }
 ```
 
-- Signing happens **per group commit, not per record**, and defaults to time- and
-  count-based checkpoints (e.g. every 1 s or 10,000 commits, whichever first) rather than
-  every commit. Ed25519 is deterministic, so it does not violate the no-randomness rule.
-  Still, signatures live outside engine-observable state.
-- Keys are per node and come from operator configuration or a file. KMS/HSM backends
-  can be added behind a `ports.LedgerSigner` interface later.
-- Digests are appended to a small sidecar log under the data directory and exposed
-  through the admin surface. Publishing them somewhere the operator does not control is
-  what turns "tamper-evident" into "tamper-proof in practice". Examples: an auditor's
-  mailbox, object storage with object lock, a transparency log. That publishing step is
-  deliberately left to deployments.
+- **Only committed state is signed.** The signed LSN is the engine's applied head.
+  The engine applies only entries Raft has committed, so a digest never covers a WAL
+  tail that a new leader could still replace (#37, #38). Signing the WAL's last LSN
+  instead would produce valid, signed digests that contradict the legitimate log,
+  which looks exactly like tampering.
+- **Canonical bytes, not JSON.** The signature covers a fixed big-endian encoding:
+  the domain string `asql-ledger-digest-v1`, a zero byte, then `version`, `lsn`,
+  `chain`, `term`, `timestamp`, `signed_at` (Unix ns), and length-prefixed `node_id`
+  and `key_id`. JSON is only the transport form; JSON canonicalization is a classic
+  source of signature bugs.
+- **Fields.** `term` and `timestamp` belong to the WAL record at `lsn`. `timestamp`
+  is the logical WAL timestamp, not wall-clock time. `signed_at` is the signer's
+  wall clock: it is signed, but only the node asserts it. Proving that a state
+  existed by a given time requires publishing or time-stamping the digest elsewhere
+  (RFC 3161, a transparency log).
+- **Checkpointed, never per commit.** A checkpointer signs at most every second, or
+  sooner after 10,000 committed LSNs, and only when the head has advanced. Both
+  values are configurable. It runs off the commit path. Shutdown signs the final
+  head. Ed25519 is deterministic, and signatures live outside engine-observable
+  state.
+- **Keys.** Each node has its own key. Every replica holds the same chain, so
+  digests from several nodes at one LSN act as independent witnesses. Keys are
+  standard PEM files: PKCS #8 private keys, mode 0600, which `openssl genpkey
+  -algorithm ed25519` or `asqlctl -command ledger-keygen` produce, and PKIX public
+  keys. `key_id` is the first 8 bytes of SHA-256 over the public key, in hex. Signing
+  goes through `ports.LedgerSigner`, so KMS or HSM backends can be added later.
+- **Verification needs a trusted key from outside.** A digest never carries the key
+  that verifies it; otherwise an attacker would re-sign a forged digest with their
+  own key. Verifiers pass trusted public keys explicitly.
+- **Sidecar log.** Digests are appended, one JSON line each and synced, to
+  `<data-dir>/ledger/digests-<first LSN>.jsonl`. Files rotate at 16 MiB and are kept,
+  because digests are evidence. At the defaults, continuous writes produce at most
+  one digest per second, about 17 MB per day. A torn last line is truncated on open.
+- **Publishing.** Publishing digests somewhere the operator does not control is what
+  turns "tamper-evident" into "tamper-proof in practice" (see Threat model).
+  Examples: an auditor's mailbox, object storage with object lock, a transparency
+  log. That step is deliberately left to deployments.
 
 ### 5. Surfaces
 
-- Admin HTTP: `GET /ledger/digest` (latest) and `GET /ledger/digest?lsn=N`.
-- SQL: `SELECT * FROM asql_ledger_digest()` for clients that only speak pgwire.
-- CLI: `asqlctl verify-ledger --data-dir D [--digest d.json] [--from-snapshot]`. It
-  reads segments (raw and WALZ), recomputes leaves and the chain, checks segment header
-  and snapshot anchors, and checks a supplied digest's chain value and signature.
+- Admin HTTP: `GET /api/v1/ledger/digest` returns the latest digest, and
+  `GET /api/v1/ledger/digest?lsn=N` returns the oldest digest covering LSN N. That is
+  what an auditor needs to check a record at N; arbitrary LSNs are not signed on
+  demand. Read scope, like the other `/api/v1` endpoints.
+- SQL: `SELECT * FROM asql_admin.ledger_digest [WHERE lsn >= N]`, the same as one
+  row, for clients that only speak pgwire. It follows the existing `asql_admin.*`
+  virtual tables and is served by the pgwire catalog layer, outside the engine. Node-
+  specific digest data therefore cannot reach the WAL, for example through
+  `INSERT ... SELECT`, and break replay determinism.
+- CLI: `asqlctl -command verify-ledger -data-dir D [-digest d.json -pubkey keys.pem]
+  [-from-snapshot]`. It reads segments (raw and WALZ), recomputes leaves and the
+  chain, and checks segment header and snapshot anchors. With `-digest` it also
+  checks the digest's signature against the trusted keys in `-pubkey` (one or more
+  PEM public keys) and its chain value against the recomputed chain. It fails when
+  the WAL ends before the digest's LSN, because committed records were removed, and
+  when the retained WAL starts after it.
   Exit code non-zero on mismatch. It reports the first divergence as an interval
   `(last good anchor, first failing anchor]`. A break in the LSN sequence (a dropped,
   duplicated or reordered record) is reported at the exact LSN. A modified record is
-  located only as precisely as the anchors allow: segment headers and snapshots are
-  checkpoints, not per-record values. Exact per-record location needs a reference
-  sequence (a signed digest, a replica, or a copy), which comes with phase 2.
+  located only as precisely as the anchors allow: segment headers, snapshots and
+  digests are checkpoints, not per-record values. Exact per-record location needs a
+  reference sequence (a replica or a copy).
 
 ### 6. Configuration
 
-- `ledger` mode with values `off | chain | signed`. Default `chain`, because it is cheap
-  (see Performance) and makes every deployment tamper-evident without configuration.
-  `signed` requires a key.
+- `ledger` mode with values `off | chain | signed` (`asqld -ledger`). Default `chain`,
+  because it is cheap (see Performance) and makes every deployment tamper-evident
+  without configuration. `signed` maintains the chain exactly like `chain` and needs
+  `-ledger-key`. `-ledger-digest-interval` and `-ledger-digest-every` tune the
+  checkpoints.
 - A compliance profile refuses to start with `WithWALGC()` unless segments are archived
-  before removal, and refuses to start if any retained segment is unanchored.
+  before removal, and refuses to start if any retained segment is unanchored. Not
+  implemented yet.
 
 ## Threat model and current limit
 
@@ -179,12 +220,20 @@ Closing the gap needs a chain value the attacker cannot rewrite:
 
 1. **Signed digests (phase 1b).** A signature stops a forged digest from being
    minted without the node key. It does not stop an attacker who also holds the key,
-   such as one with root on the node.
+   such as one with root on the node. `verify-ledger -digest` fails on a replaced but
+   self-consistent history and on a clean truncation, both of which pass without a
+   digest (`cmd/asqlctl/ledger_digest_command_test.go`).
 2. **Digests held elsewhere.** Digests must be published somewhere the operator of
    the data directory does not control: an auditor, object storage with object lock,
    or a transparency log. Then a rewrite is detected against any digest published
    before it. This is the guarantee regulated deployments need, and it comes from
    deployment practice, not from the database alone.
+
+Known gap: a node that started without a persisted Raft commit index (an upgrade
+from before #38) assumes its whole WAL is committed. If the new leader later replaces
+part of it, the engine rolls back (`RollbackTo`), but digests it signed in between
+remain in the log and contradict the new history. No attacker is involved, only
+that upgrade path, and the other nodes' digests are unaffected.
 
 ## Performance
 
@@ -212,7 +261,7 @@ mode with `ASQL_BENCH_LEDGER=off|chain`.
 | Leaf, 1 KiB payload | 356 ns |
 | Leaf, 4 KiB payload | 1.30 µs |
 | Chain step | 64 ns |
-| Ed25519 sign (for phase 1b) | 11.6 µs |
+| Ed25519 sign | 11.6 µs |
 
 **WAL append of one transaction, no fsync** (`BenchmarkSegmentedAppendTxNoSync`):
 
@@ -232,6 +281,10 @@ The primary gate holds: at most 1 µs per transaction, and no extra allocations.
 
 benchstat finds no significant difference, so the secondary gate holds. Bytes and
 allocations per op do not change either.
+
+**`ledger=signed`** does not touch the commit path. The checkpointer costs one
+Ed25519 signature (11.6 µs), one WAL read from the recent-record cache and one synced
+append to the digest log, at most once per second by default.
 
 ### Prototype (reference)
 
@@ -326,7 +379,8 @@ What the numbers say:
 
 - New benchmarks: `BenchmarkLedgerLeaf`, `BenchmarkLedgerChainStep`,
   `BenchmarkSegmentedAppendTxNoSync` (ledger on/off) and the existing
-  `BenchmarkEngineWriteCommit*` set run with `ledger=off|chain|signed`.
+  `BenchmarkEngineWriteCommit*` set run with `ledger=off|chain`. `signed` adds
+  nothing to the commit path, so it has no commit benchmark of its own.
 - CI performance gates. The end-to-end commit benchmarks have 3–7% run-to-run noise on
   shared runners, so a tight percentage gate on them alone would be flaky:
   - **Primary, CPU-bound and stable:** on `BenchmarkSegmentedAppendTxNoSync`, the chain
