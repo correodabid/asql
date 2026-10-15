@@ -499,11 +499,8 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 		// validateVersionedForeignKeys() at commit time see them and skip.
 		var returningRows []map[string]ast.Literal
 		if plan.Operation == planner.OperationInsert && len(plan.ReturningColumns) > 0 {
-			// Lazy catch-up: after a Raft follower→leader transition the
-			// in-memory readState may lag behind the WAL (which already
-			// contains records replicated from the old leader). Replay them
-			// now so the table schema is available for default resolution.
-			if err := engine.CatchUp(context.Background(), 0); err != nil {
+			// The table schema must be current for default resolution.
+			if err := engine.catchUpBeforeReturning(ctx); err != nil {
 				return Result{}, fmt.Errorf("catchup before returning: %w", err)
 			}
 			snap := engine.readState.Load()
@@ -580,6 +577,26 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 		session.activeTx.plans = append(session.activeTx.plans, plan)
 		return Result{Status: "QUEUED", Rows: returningRows}, nil
 	}
+}
+
+// catchUpBeforeReturning brings the in-memory state up to date before
+// INSERT ... RETURNING resolves defaults. After a Raft follower→leader
+// transition the state may lag behind the WAL. The WAL may also end with
+// entries that are not committed, which must never be applied: nothing would
+// roll the engine back if a new leader replaced them. Leader readiness covers
+// catch-up to the commit index, so in cluster mode the engine waits for it
+// instead of replaying the WAL. As for commits, a failed wait is left for the
+// commit to report.
+func (engine *Engine) catchUpBeforeReturning(ctx context.Context) error {
+	if engine.raftCommitter == nil {
+		return engine.CatchUp(ctx, 0)
+	}
+	if waiter, ok := engine.raftCommitter.(ports.LeaderReadinessWaiter); ok {
+		ctx, cancel := context.WithTimeout(ctx, leaderReadyWaitTimeout)
+		defer cancel()
+		_ = waiter.WaitLeaderReady(ctx)
+	}
+	return nil
 }
 
 // PerfStats returns a snapshot of engine performance metrics.
