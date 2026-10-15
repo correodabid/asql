@@ -173,6 +173,10 @@ func (a raftCommitterAdapter) Apply(ctx context.Context, typ, txID string, paylo
 	return entry.Index, nil
 }
 
+func (a raftCommitterAdapter) WaitLeaderReady(ctx context.Context) error {
+	return a.node.WaitLeaderReady(ctx)
+}
+
 func (a raftCommitterAdapter) ApplyBatch(ctx context.Context, records []ports.RaftRecord) ([]uint64, error) {
 	batch := make([]raft.BatchRecord, len(records))
 	for i, r := range records {

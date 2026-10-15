@@ -97,6 +97,15 @@ type RaftCommitter interface {
 	ApplyBatch(ctx context.Context, records []RaftRecord) (lsns []uint64, err error)
 }
 
+// LeaderReadinessWaiter is an optional RaftCommitter extension. The engine
+// calls WaitLeaderReady before taking its write lock for a commit, because a
+// new leader's catch-up needs that lock and Apply/ApplyBatch fail fast until
+// the catch-up is done. An error means the commit should proceed and let
+// Apply/ApplyBatch report the failure.
+type LeaderReadinessWaiter interface {
+	WaitLeaderReady(ctx context.Context) error
+}
+
 // RaftRecord is a single entry to be proposed to the Raft log as part of a
 // batch operation via RaftCommitter.ApplyBatch.
 type RaftRecord struct {
