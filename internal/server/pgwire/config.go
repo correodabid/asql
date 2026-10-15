@@ -18,7 +18,15 @@ type Config struct {
 	AuthToken       string // optional pgwire password and cluster/admin bearer token
 	AdminReadToken  string // optional bearer token for read-only admin API endpoints; falls back to AuthToken
 	AdminWriteToken string // optional bearer token for mutating admin API endpoints; falls back to AuthToken
-	LedgerMode      string // WAL ledger mode (ADR 0005): "off" or "chain"; empty means "chain"
+	LedgerMode      string // WAL ledger mode (ADR 0005): "off", "chain" or "signed"; empty means "chain"
+	// LedgerKeyFile is the node's Ed25519 private key (PEM, PKCS #8) used to
+	// sign ledger digests. Required with LedgerMode "signed".
+	LedgerKeyFile string
+	// LedgerDigestInterval and LedgerDigestEveryLSNs set how often the
+	// committed chain head is signed: at most every interval, or sooner after
+	// that many LSNs. Zero means the defaults (1s and 10,000).
+	LedgerDigestInterval  time.Duration
+	LedgerDigestEveryLSNs uint64
 
 	// Cluster fields — optional. When NodeID, Peers, and ClusterGRPCAddr are
 	// all set the server starts the production cluster runtime: pgwire + Raft,
@@ -44,8 +52,27 @@ func (config Config) Validate() error {
 	if config.Logger == nil {
 		return errors.New("logger is required")
 	}
-	if _, err := wal.ParseLedgerMode(config.LedgerMode); err != nil {
+	if _, _, err := config.ledgerSettings(); err != nil {
 		return fmt.Errorf("ledger: %w", err)
 	}
 	return nil
+}
+
+// ledgerSettings resolves the WAL ledger mode. "signed" maintains the chain
+// like "chain" and also signs checkpointed digests of the committed head.
+func (config Config) ledgerSettings() (mode wal.LedgerMode, signed bool, err error) {
+	if config.LedgerMode == "signed" {
+		if config.LedgerKeyFile == "" {
+			return 0, false, errors.New("ledger mode signed requires a key file")
+		}
+		return wal.LedgerChain, true, nil
+	}
+	mode, err = wal.ParseLedgerMode(config.LedgerMode)
+	if err != nil {
+		return 0, false, fmt.Errorf("invalid ledger mode %q (want off, chain or signed)", config.LedgerMode)
+	}
+	if config.LedgerKeyFile != "" {
+		return 0, false, errors.New("a ledger key file is only used with ledger mode signed")
+	}
+	return mode, false, nil
 }

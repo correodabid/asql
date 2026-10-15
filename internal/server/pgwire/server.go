@@ -28,6 +28,7 @@ import (
 	"github.com/correodabid/asql/internal/platform/datadir"
 	grpcserver "github.com/correodabid/asql/internal/server/grpc"
 	"github.com/correodabid/asql/internal/storage/audit"
+	"github.com/correodabid/asql/internal/storage/ledgerdigest"
 	"github.com/correodabid/asql/internal/storage/wal"
 	api "github.com/correodabid/asql/pkg/adminapi"
 
@@ -212,6 +213,7 @@ type Server struct {
 	walStore   *wal.SegmentedLogStore
 	auditStore *audit.Store
 	leadership *coordinator.LeadershipManager
+	ledger     *ledgerSigning // nil unless ledger mode is signed
 
 	// cluster machinery — nil when operating in standalone mode. When set, this
 	// server is running the production cluster path (pgwire + Raft).
@@ -327,9 +329,15 @@ func New(config Config) (*Server, error) {
 		return nil, fmt.Errorf("initialize data directory: %w", err)
 	}
 
-	ledgerMode, err := wal.ParseLedgerMode(config.LedgerMode)
+	ledgerMode, ledgerSigned, err := config.ledgerSettings()
 	if err != nil {
 		return nil, fmt.Errorf("invalid ledger mode: %w", err)
+	}
+	var ledgerSigner *ledgerdigest.Ed25519Signer
+	if ledgerSigned {
+		if ledgerSigner, err = ledgerdigest.LoadSigner(config.LedgerKeyFile); err != nil {
+			return nil, err
+		}
 	}
 	walStore, err := wal.NewSegmentedLogStore(dd.WALBasePath(), wal.AlwaysSync{}, wal.WithLedgerMode(ledgerMode))
 	if err != nil {
@@ -495,6 +503,14 @@ func New(config Config) (*Server, error) {
 		)
 	}
 
+	if ledgerSigner != nil {
+		if srv.ledger, err = newLedgerSigning(config, dd, engine, walStore, ledgerSigner); err != nil {
+			_ = walStore.Close()
+			_ = auditStore.Close()
+			return nil, fmt.Errorf("initialize ledger signing: %w", err)
+		}
+	}
+
 	return srv, nil
 }
 
@@ -513,6 +529,7 @@ func (server *Server) ServeOnListener(ctx context.Context, listener net.Listener
 	server.listener = listener
 
 	server.config.Logger.Info("pgwire server listening", "address", listener.Addr().String())
+	server.ledger.start()
 	if err := server.startAdminHTTP(); err != nil {
 		return err
 	}
@@ -626,6 +643,7 @@ func (server *Server) Stop() {
 		// in-flight async checkpoint goroutines before closing the WAL.
 		// Without this, every graceful restart replays the full WAL delta.
 		server.engine.WaitPendingSnapshots()
+		server.ledger.stop()
 		if server.auditStore != nil {
 			_ = server.auditStore.Close()
 		}

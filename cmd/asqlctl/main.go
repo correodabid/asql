@@ -46,7 +46,7 @@ func main() {
 	adminHTTPAddr := flag.String("admin-http", "", "ASQL admin HTTP endpoint for operational/security commands (for example 127.0.0.1:9090)")
 	authToken := flag.String("auth-token", "", "optional bearer token for authenticated APIs")
 	demo := flag.Bool("demo", false, "run end-to-end gRPC demo flow")
-	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|verify-ledger|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-show|principal-who-can-history|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-revoke-privilege|principal-grant-role|principal-revoke-role|principal-set-password|principal-disable|principal-enable|principal-delete")
+	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|verify-ledger|ledger-keygen|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-show|principal-who-can-history|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-revoke-privilege|principal-grant-role|principal-revoke-role|principal-set-password|principal-disable|principal-enable|principal-delete")
 	mode := flag.String("mode", "domain", "tx mode for begin: domain|cross")
 	domains := flag.String("domains", "", "comma-separated domains (required for begin and usually for time-travel)")
 	tableName := flag.String("table", "", "table filter for audit commands")
@@ -68,6 +68,8 @@ func main() {
 	outputFormat := flag.String("format", "json", "output format for export commands: json|jsonl")
 	fixtureFile := flag.String("fixture-file", "", "path to a deterministic fixture JSON file")
 	fromSnapshot := flag.Bool("from-snapshot", false, "verify-ledger: verify a WAL truncated by WAL GC from its first retained segment, anchored to a snapshot")
+	digestPath := flag.String("digest", "", "verify-ledger: signed ledger digest (JSON) to check against the WAL; needs -pubkey")
+	pubKeyPath := flag.String("pubkey", "", "verify-ledger: trusted Ed25519 public key(s), PEM; one per node")
 	flag.Parse()
 
 	// Support positional  "asqlctl shell"  syntax in addition to -command.
@@ -121,8 +123,16 @@ func main() {
 			return
 		}
 
+		if isLedgerKeygenCommand(*command) {
+			if err := runLedgerKeygen(os.Stdout, *outputPath); err != nil {
+				fmt.Fprintf(os.Stderr, "command failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+
 		if isLedgerCommand(*command) {
-			if err := runVerifyLedger(os.Stdout, *dataDir, *fromSnapshot); err != nil {
+			if err := runVerifyLedger(os.Stdout, verifyLedgerOptions{DataDir: *dataDir, FromSnapshot: *fromSnapshot, DigestPath: *digestPath, PubKeyPath: *pubKeyPath}); err != nil {
 				fmt.Fprintf(os.Stderr, "command failed: %v\n", err)
 				os.Exit(1)
 			}

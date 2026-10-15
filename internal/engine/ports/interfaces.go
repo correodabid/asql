@@ -77,6 +77,18 @@ type LedgerReader interface {
 	LedgerChainAt(lsn uint64) ([32]byte, bool)
 }
 
+// LedgerSigner signs WAL ledger digests (ADR 0005, ledger=signed). The
+// built-in implementation holds a node's Ed25519 key; KMS or HSM backends can
+// implement it later. Signatures are metadata about the log, never engine
+// state.
+type LedgerSigner interface {
+	// KeyID identifies the verification key; verifiers use it to pick the
+	// trusted public key.
+	KeyID() string
+	// Sign returns an Ed25519 signature over message.
+	Sign(message []byte) ([]byte, error)
+}
+
 // RaftCommitter is the narrow interface the executor uses to route each WAL
 // record through the Raft consensus layer before committing it locally.
 // Implementations block until a quorum of nodes has durably stored the entry.
