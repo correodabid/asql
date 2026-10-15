@@ -841,6 +841,16 @@ func (engine *Engine) RollbackTo(ctx context.Context, lsn uint64) error {
 		engine.snapshots.clear()
 		engine.snapshots.mu.Unlock()
 	}
+	// Derived state persisted beyond lsn describes entries that no longer
+	// exist; a later restart would otherwise load it.
+	if engine.snapDir != "" {
+		if err := removeSnapshotFilesAfter(engine.snapDir, lsn); err != nil {
+			return fmt.Errorf("rollback snapshots: %w", err)
+		}
+	}
+	if err := engine.timestampIndex.truncateAfter(lsn); err != nil {
+		return fmt.Errorf("rollback timestamp index: %w", err)
+	}
 
 	prevLimit, prevLimited := engine.replayLimit, engine.replayLimited
 	engine.replayLimit, engine.replayLimited = lsn, true
@@ -850,6 +860,10 @@ func (engine *Engine) RollbackTo(ctx context.Context, lsn uint64) error {
 	engine.catalog = domains.NewCatalog()
 	engine.headLSN = 0
 	engine.logicalTS = 0
+	// Replay re-derives these from the snapshots that survived; with none,
+	// the next checkpoint must not be a delta against a removed one.
+	engine.lastDiskSnapshotLSN = 0
+	engine.lastDiskSnapshotLogicalTS = 0
 	engine.readState.Store(&readableState{domains: make(map[string]*domainState)})
 	engine.writeMu.Unlock()
 	return engine.Replay(ctx)
