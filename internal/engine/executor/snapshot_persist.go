@@ -1185,6 +1185,56 @@ func cleanupOldSnapshotFiles(snapDir string, keep int) error {
 	return nil
 }
 
+// removeSnapshotFilesAfter deletes every snapshot file that holds state
+// beyond lsn, together with the files written after it: later delta files
+// build on it. What remains is a seq-ordered prefix that restores to state at
+// or below lsn.
+func removeSnapshotFilesAfter(snapDir string, lsn uint64) error {
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read snapshot dir: %w", err)
+	}
+	var files []snapshotDirFile
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasPrefix(name, snapFilePrefix) {
+			continue
+		}
+		seq, err := strconv.ParseUint(strings.TrimPrefix(name, snapFilePrefix), 10, 64)
+		if err != nil {
+			continue
+		}
+		files = append(files, snapshotDirFile{seq: seq, name: name})
+	}
+	sort.Slice(files, func(i, j int) bool { return files[i].seq < files[j].seq })
+
+	cut := len(files)
+	for i, file := range files {
+		raw, err := loadRawSnapshotEntries(filepath.Join(snapDir, file.name))
+		if err != nil {
+			return fmt.Errorf("%s: %w", file.name, err)
+		}
+		beyond := false
+		for _, r := range raw {
+			beyond = beyond || r.lsn > lsn
+		}
+		if beyond {
+			cut = i
+			break
+		}
+	}
+	for _, file := range files[cut:] {
+		if err := os.Remove(filepath.Join(snapDir, file.name)); err != nil {
+			return fmt.Errorf("remove snapshot %s: %w", file.name, err)
+		}
+		slog.Warn("snapshot: removed checkpoint beyond rollback point", "file", file.name, "rollback_lsn", lsn)
+	}
+	return nil
+}
+
 // totalSnapshotDirSize returns the total size in bytes of all snapshot files
 // in the directory. Used for PerfStats reporting.
 func totalSnapshotDirSize(snapDir string) int64 {

@@ -185,6 +185,46 @@ func (index *timestampLSNIndex) append(records []ports.WALRecord) error {
 	return nil
 }
 
+// truncateAfter drops every entry with LSN > lsn, in memory and on disk, so
+// that the entries that later reuse those LSNs are indexed.
+func (index *timestampLSNIndex) truncateAfter(lsn uint64) error {
+	if index == nil {
+		return nil
+	}
+
+	index.mu.Lock()
+	defer index.mu.Unlock()
+
+	n := sort.Search(len(index.ranges), func(i int) bool { return index.ranges[i].endLSN() > lsn })
+	if n == len(index.ranges) {
+		return nil
+	}
+	ranges := index.ranges[:n]
+	if r := index.ranges[n]; r.startLSN <= lsn {
+		r.count = lsn - r.startLSN + 1
+		ranges = append(ranges, r)
+	}
+	index.ranges = ranges
+
+	if index.filePath == "" {
+		return nil
+	}
+	var entries []timestampLSNEntry
+	for _, r := range ranges {
+		for i := uint64(0); i < r.count; i++ {
+			entries = append(entries, timestampLSNEntry{timestamp: r.startTimestamp + i, lsn: r.startLSN + i})
+		}
+	}
+	if err := writeTimestampIndexFile(index.filePath, entries); err != nil {
+		// Never leave entries for discarded LSNs on disk.
+		_ = os.Remove(index.filePath)
+		index.persistOK = false
+		return err
+	}
+	index.persistOK = true
+	return nil
+}
+
 func decodeTimestampIndex(data []byte) ([]timestampLSNEntry, error) {
 	if len(data) == 0 {
 		return nil, nil
