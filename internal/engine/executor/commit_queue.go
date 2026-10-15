@@ -297,9 +297,18 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 			if mutation.plan.Operation == planner.OperationInsert || mutation.plan.Operation == planner.OperationUpdate {
 				if ds := newState.domains[mutation.plan.DomainName]; ds != nil {
 					if tbl := ds.tables[mutation.plan.TableName]; tbl != nil {
-						if mutation.plan.Operation == planner.OperationInsert {
+						if mutation.plan.Operation == planner.OperationInsert && len(mutation.plan.MultiValues) == 0 {
 							// Single-row fast path: avoid slice allocation.
 							collectEntityMutationsSingle(ds, mutation.plan, rowToMap(tbl, tbl.rows[len(tbl.rows)-1]), entityCollector, batchFKEntityCache)
+						} else if mutation.plan.Operation == planner.OperationInsert {
+							// Multi-row INSERT appends every row; collect them all,
+							// as replay does.
+							inserted := tbl.rows[max(0, len(tbl.rows)-1-len(mutation.plan.MultiValues)):]
+							affectedRows := make([]map[string]ast.Literal, 0, len(inserted))
+							for _, rowSlice := range inserted {
+								affectedRows = append(affectedRows, rowToMap(tbl, rowSlice))
+							}
+							collectEntityMutations(ds, mutation.plan, affectedRows, entityCollector)
 						} else {
 							var affectedRows []map[string]ast.Literal
 							for _, rowSlice := range tbl.rows {

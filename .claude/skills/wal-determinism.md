@@ -15,8 +15,9 @@ reproduction. Breaking it is a production-severity bug.
 1. **Timestamps** — all observable timestamps must be the WAL commit
    timestamp or explicit SQL literals. Never `time.Now()`.
 2. **Identifiers** — IDs must be explicit (provided by the caller) or
-   WAL-derived (e.g. `UUID_V7` resolved through the deterministic
-   clock). Never `uuid.New()` or random.
+   WAL-derived. Volatile defaults (`UUID_V7`, `TX_TIMESTAMP`) are
+   generated once at commit and materialized into the WAL payload, so
+   replay reads them back. Never generate one during replay.
 3. **Ordering** — anything observable must have a stable source of
    order. No map iteration order. No goroutine-race-dependent
    interleaving. No wall-clock-sorted results.
@@ -85,8 +86,15 @@ Three layers of defense:
 
 1. **Unit tests** use `clock.Fixed` + explicit IDs. If your code needs
    real time to pass a test, that's a smell.
-2. **`test/determinism/`** replays WAL from scratch and checksums the
-   resulting state. Run it after any engine or WAL-layer change.
+2. **`test/determinism/`** runs a workload (multi- and cross-domain
+   transactions, entities, VFKs, volatile defaults, schema changes,
+   savepoints, rollbacks) and compares a fingerprint of everything
+   query-visible across every way of rebuilding state: restart with and
+   without snapshots, restarts and crashes mid-workload, repeated
+   replays, follower apply in arbitrary batches, prefix replay vs time
+   travel, WAL compaction, ledger on/off. Run it after any engine or
+   WAL-layer change. Known gaps it still excludes (row history, VFK
+   projection tables) are listed in `harness_test.go`.
 3. **`test/integration/`** exercises failover, restart, and snapshot
    replay end to end.
 
@@ -98,8 +106,8 @@ that's why the determinism layer exists.
 - Using `time.Now()` in a new helper because "it's just for logging" —
   fine for logs, **not fine** if the value flows into query results or
   WAL.
-- Generating an ID with `uuid.New()` instead of going through the
-  deterministic UUID_V7 resolution.
+- Generating an ID with `uuid.New()` during replay instead of reading
+  the value materialized in the WAL.
 - Iterating `map[...]struct{...}` when building a result set.
 - Writing a feature test that starts two goroutines and asserts on which
   committed first.

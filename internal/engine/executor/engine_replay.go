@@ -326,7 +326,8 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 	}
 	captureReplaySnapshots := !bounded
 
-	txCommitLSN := buildTxCommitLSNIndex(records)
+	commitLSNs := txCommitLSNs(records)
+	pendingCommitLSN := make(map[string]uint64)
 	txEntityCollectors := make(map[string]map[string]map[string][]string)
 	txClonedTables := make(map[string]map[string]struct{})
 
@@ -353,6 +354,7 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 				delete(txEntityCollectors, record.TxID)
 			}
 			delete(txClonedTables, record.TxID)
+			delete(pendingCommitLSN, record.TxID)
 			continue
 		}
 
@@ -379,7 +381,8 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 			continue
 		}
 
-		commitLSN := txCommitLSN[record.TxID]
+		commitLSN := commitLSNs[i]
+		pendingCommitLSN[record.TxID] = commitLSN
 		if txEntityCollectors[record.TxID] == nil {
 			txEntityCollectors[record.TxID] = make(map[string]map[string][]string)
 		}
@@ -403,7 +406,7 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 
 	// Record entity versions for any remaining transactions whose COMMIT
 	// records were not within the replayed range (bounded replay).
-	replayEntityVersionsInOrder(newState, txEntityCollectors, txCommitLSN)
+	replayEntityVersionsInOrder(newState, txEntityCollectors, pendingCommitLSN)
 
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
@@ -469,12 +472,13 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 	}
 	newState := current.cloneForMutation(allDomainKeys(current.domains))
 
-	txCommitLSN := buildTxCommitLSNIndex(records)
+	commitLSNs := txCommitLSNs(records)
+	pendingCommitLSN := make(map[string]uint64)
 	txEntityCollectors := make(map[string]map[string]map[string][]string)
 	txClonedTables := make(map[string]map[string]struct{})
 	touchedTables := make(map[string]map[string]struct{})
 
-	for _, record := range records {
+	for i, record := range records {
 		if record.LSN <= afterLSN {
 			continue
 		}
@@ -493,6 +497,7 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 				delete(txEntityCollectors, record.TxID)
 			}
 			delete(txClonedTables, record.TxID)
+			delete(pendingCommitLSN, record.TxID)
 			continue
 		}
 
@@ -520,7 +525,8 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 		}
 		touchedTables[plan.DomainName][plan.TableName] = struct{}{}
 
-		commitLSN := txCommitLSN[record.TxID]
+		commitLSN := commitLSNs[i]
+		pendingCommitLSN[record.TxID] = commitLSN
 		if txEntityCollectors[record.TxID] == nil {
 			txEntityCollectors[record.TxID] = make(map[string]map[string][]string)
 		}
@@ -542,7 +548,7 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 	}
 
 	// Record entity versions for any remaining transactions.
-	replayEntityVersionsInOrder(newState, txEntityCollectors, txCommitLSN)
+	replayEntityVersionsInOrder(newState, txEntityCollectors, pendingCommitLSN)
 
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
@@ -610,6 +616,9 @@ func (engine *Engine) CatchUp(ctx context.Context, upToLSN uint64) error {
 			return nil
 		}
 	}
+	if records = withoutUnfinishedTx(records); len(records) == 0 {
+		return nil
+	}
 	latest := engine.readState.Load()
 	if latest != nil && len(records) > 0 && records[len(records)-1].LSN <= latest.headLSN {
 		return nil
@@ -619,6 +628,25 @@ func (engine *Engine) CatchUp(ctx context.Context, upToLSN uint64) error {
 	}
 	engine.indexAppliedRecords(records)
 	return nil
+}
+
+// withoutUnfinishedTx drops a transaction that the records end inside of:
+// its BEGIN is present but its COMMIT is not yet. Raft can commit an index
+// in the middle of a transaction's records; applying them would expose a
+// partial transaction and resolve its mutations without a commit LSN. The
+// head stays before the transaction, and the next catch-up rereads it from
+// the WAL. A transaction's records are contiguous (one batch per commit), so
+// only the tail can hold one that may still commit.
+func withoutUnfinishedTx(records []ports.WALRecord) []ports.WALRecord {
+	for i := len(records) - 1; i >= 0; i-- {
+		switch records[i].Type {
+		case walTypeCommit:
+			return records
+		case walTypeBegin:
+			return records[:i]
+		}
+	}
+	return records
 }
 
 // indexAppliedRecords adds records applied outside the commit queue (Raft
@@ -677,6 +705,9 @@ func (engine *Engine) ApplyCommittedRecords(ctx context.Context, upToLSN uint64,
 		logDirectApplyFallback("missing-commit-tail", current.headLSN, upToLSN, filtered)
 		return engine.CatchUp(ctx, upToLSN)
 	}
+	if filtered = withoutUnfinishedTx(filtered); len(filtered) == 0 {
+		return nil
+	}
 
 	if err := engine.rebuildFromRecordsAfterSnapshotWithOptions(filtered, current.headLSN, false); err != nil {
 		return err
@@ -713,11 +744,12 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 	current := engine.readState.Load()
 	newState := current.cloneForMutation(allDomainKeys(current.domains))
 
-	txCommitLSN := buildTxCommitLSNIndex(records)
+	commitLSNs := txCommitLSNs(records)
+	pendingCommitLSN := make(map[string]uint64)
 	txEntityCollectors := make(map[string]map[string]map[string][]string)
 	txClonedTables := make(map[string]map[string]struct{})
 
-	for _, record := range records {
+	for i, record := range records {
 		if record.LSN <= afterLSN {
 			continue
 		}
@@ -739,6 +771,7 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 				delete(txEntityCollectors, record.TxID)
 			}
 			delete(txClonedTables, record.TxID)
+			delete(pendingCommitLSN, record.TxID)
 			continue
 		}
 
@@ -762,7 +795,8 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 			return fmt.Errorf("decode mutation payload lsn=%d: %w", record.LSN, err)
 		}
 
-		commitLSN := txCommitLSN[record.TxID]
+		commitLSN := commitLSNs[i]
+		pendingCommitLSN[record.TxID] = commitLSN
 		if txEntityCollectors[record.TxID] == nil {
 			txEntityCollectors[record.TxID] = make(map[string]map[string][]string)
 		}
@@ -776,7 +810,7 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 
 	// Record entity versions for any remaining transactions whose COMMIT
 	// was outside the (afterLSN, targetLSN] window.
-	replayEntityVersionsInOrder(newState, txEntityCollectors, txCommitLSN)
+	replayEntityVersionsInOrder(newState, txEntityCollectors, pendingCommitLSN)
 
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
@@ -813,15 +847,32 @@ func replayEntityVersionsInOrder(state *readableState, collectors map[string]map
 	}
 }
 
-// buildTxCommitLSNIndex pre-scans WAL records to map each transaction ID to its commit LSN.
-func buildTxCommitLSNIndex(records []ports.WALRecord) map[string]uint64 {
-	index := make(map[string]uint64)
-	for _, r := range records {
-		if r.Type == walTypeCommit {
-			index[r.TxID] = r.LSN
+// txCommitLSNs maps each record to the LSN of the COMMIT that closes its
+// transaction, or 0 when that COMMIT is not among records.
+//
+// TxIDs are not unique across a WAL: the counter behind them restarts with
+// every process, and each Raft leader has its own. A transaction's records
+// follow its BEGIN and precede its COMMIT, so a record belongs to the next
+// COMMIT with its TxID. A BEGIN starts a new transaction: records left open
+// under the same TxID never committed (a crashed process) and resolve to 0.
+func txCommitLSNs(records []ports.WALRecord) []uint64 {
+	commits := make([]uint64, len(records))
+	open := make(map[string][]int)
+	for i, r := range records {
+		switch r.Type {
+		case walTypeBegin:
+			open[r.TxID] = append(open[r.TxID][:0], i)
+		case walTypeCommit:
+			for _, j := range open[r.TxID] {
+				commits[j] = r.LSN
+			}
+			commits[i] = r.LSN
+			delete(open, r.TxID)
+		default:
+			open[r.TxID] = append(open[r.TxID], i)
 		}
 	}
-	return index
+	return commits
 }
 
 // RollbackTo discards engine state beyond lsn and rebuilds it from the
