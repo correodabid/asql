@@ -46,7 +46,7 @@ func TestVerifyLedgerCommand(t *testing.T) {
 	}
 
 	var out bytes.Buffer
-	if err := runVerifyLedger(&out, dir, false); err != nil {
+	if err := runVerifyLedger(&out, verifyLedgerOptions{DataDir: dir}); err != nil {
 		t.Fatalf("verify clean data dir: %v\n%s", err, out.String())
 	}
 	var result verifyLedgerOutput
@@ -69,7 +69,7 @@ func TestVerifyLedgerCommand(t *testing.T) {
 		t.Fatal(err)
 	}
 	out.Reset()
-	err = runVerifyLedger(&out, dir, false)
+	err = runVerifyLedger(&out, verifyLedgerOptions{DataDir: dir})
 	if !errors.Is(err, errLedgerVerifyFailed) {
 		t.Fatalf("expected verification failure, got %v", err)
 	}
@@ -81,7 +81,7 @@ func TestVerifyLedgerCommand(t *testing.T) {
 		t.Fatalf("expected mismatch report: %s", out.String())
 	}
 
-	if err := runVerifyLedger(&out, "", false); err == nil {
+	if err := runVerifyLedger(&out, verifyLedgerOptions{}); err == nil {
 		t.Fatal("expected error without -data-dir")
 	}
 }
