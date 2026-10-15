@@ -1,6 +1,6 @@
 # ADR 0005: Make the WAL tamper-evident with a hash-chained ledger and signed digests
 
-- Status: Proposed
+- Status: Accepted. Phase 1 (`ledger=off|chain`, anchors, `verify-ledger`) shipped in #35; phase 1b (`ledger=signed`, digests and their surfaces) in progress
 - Date: 2026-10-14
 - Decision drivers:
   - ASQL positions itself as a database teams can reason about under audit; today the WAL detects accidental corruption but not deliberate rewriting
@@ -191,6 +191,50 @@ Closing the gap needs a chain value the attacker cannot rewrite:
 The requirement is: **no measurable regression on the commit path, and bounded,
 documented overhead in the worst case.**
 
+### Implementation (phase 1)
+
+Measured on 2026-10-15 against `d78f6dc` (phase 1 merged, plus the Raft fixes that
+followed). Environment: Apple M5, darwin/arm64, 10 cores, hardware SHA-256, run
+natively. The no-SHA-NI x86 case was not re-measured; the prototype figures below
+remain the reference for it.
+
+Method: `-count=10`, interleaving `off` and `chain` runs and alternating which mode
+goes first in each round, compared with benchstat. The engine benchmarks select the
+mode with `ASQL_BENCH_LEDGER=off|chain`.
+
+**Primitives** (`BenchmarkLedgerLeaf`, `BenchmarkLedgerChainStep`, n=6; Ed25519 with
+`crypto/ed25519` over a 128-byte message). All are allocation-free:
+
+| Operation | Cost |
+|---|---|
+| Leaf, empty payload (BEGIN/COMMIT) | 47 ns |
+| Leaf, 256 B payload | 119 ns |
+| Leaf, 1 KiB payload | 356 ns |
+| Leaf, 4 KiB payload | 1.30 µs |
+| Chain step | 64 ns |
+| Ed25519 sign (for phase 1b) | 11.6 µs |
+
+**WAL append of one transaction, no fsync** (`BenchmarkSegmentedAppendTxNoSync`):
+
+| Mutation size | off | chain | Overhead per tx | allocs/op off → chain |
+|---|---|---|---|---|
+| 128 B | 2.12 µs ± 3% | 2.59 µs ± 3% | +0.47 µs (+22%, p=0.000) | 9 → 9 |
+| 1 KiB | 2.24 µs ± 1% | 2.97 µs ± 1% | +0.73 µs (+33%, p=0.000) | 9 → 9 |
+
+The primary gate holds: at most 1 µs per transaction, and no extra allocations.
+
+**End-to-end engine commit**:
+
+| Benchmark | off | chain | Difference |
+|---|---|---|---|
+| `EngineWriteCommit` | 734 µs ± 6% | 744 µs ± 4% | ~ (p=0.280) |
+| `EngineWriteCommitConcurrent` | 238 µs ± 0% | 238 µs ± 1% | ~ (p=0.739) |
+
+benchstat finds no significant difference, so the secondary gate holds. Bytes and
+allocations per op do not change either.
+
+### Prototype (reference)
+
 Measurements were taken on 2026-10-14 against `71b1a8f` with a throwaway prototype. The
 leaf and chain were computed inside the existing `SegmentedLogStore` append paths, under
 the WAL lock. That is the naive placement, so the numbers are an upper bound on cost.
@@ -266,8 +310,11 @@ What the numbers say:
    re-encode `job.preEncoded` there), and `Term`, which Raft assigns. In standalone
    mode the leaf cost therefore stays on the serialized writer loop, outside the WAL
    lock.
-2. **No extra allocations on the hot path.** Hashers, scratch buffers and the batch
-   leaf slice come from `sync.Pool`s; the chain step hashes a fixed-size stack array.
+2. **No extra allocations on the hot path.** Leaves up to 256 bytes hash a stack
+   buffer. Larger leaves, the hasher and the batch leaf slice use one spare buffer
+   per store, held in an `atomic.Pointer`. A `sync.Pool` was tried first, but GC
+   empties it, which showed up as fractional allocations per append. The chain
+   step hashes a fixed-size stack array.
 3. **No extra I/O per commit.** Chain values reach disk only through segment headers
    (written when headers are already persisted) and through snapshots.
 4. **Signing is amortized.** At most one signature per group commit, by default far
@@ -294,9 +341,10 @@ What the numbers say:
 
 ## Testing
 
-- **Tamper test (the point of this ADR).** Write transactions, flip one byte of a
-  mutation payload on disk and recompute the record CRC32C. Today the engine replays it
-  silently. With this ADR, `verify-ledger` must fail and report the exact LSN.
+- **Tamper test (the point of this ADR).** Write transactions, edit a mutation
+  payload on disk and recompute the record CRC32C. Before this ADR the engine
+  replayed it silently. Now `verify-ledger` fails and locates the edit within the
+  interval between anchors (see Surfaces), and the store refuses to open.
 - **Full-rewrite test.** Shows the limit described in Threat model.
 - Reorder, drop, and truncate-and-append variants of the tamper test.
 - Compaction invariance: the chain is identical before and after `CompactSealedSegments`.
@@ -320,7 +368,7 @@ Positive:
 
 Negative / costs:
 
-- Segment header format change (v2) and snapshot format change.
+- Segment header format change (v3 to v4, 64 to 128 bytes) and snapshot format change.
 - Key management becomes an operator concern in `signed` mode.
 - The chain proves the log was not rewritten, **not that the data was true when it was
   written**. Source authenticity (signed inserts from instruments or upstream systems)
