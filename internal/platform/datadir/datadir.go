@@ -18,6 +18,8 @@
 //	    audit.000002
 //	  meta/
 //	    node.json         ← node identity & persistent config (future)
+//	  ledger/
+//	    digests-NNNN.jsonl ← signed ledger digests (ledger=signed)
 package datadir
 
 import (
@@ -34,6 +36,8 @@ const (
 	dirSnap  = "snap"
 	dirMeta  = "meta"
 	dirAudit = "audit"
+	// dirLedger holds the signed digest log; created on first use.
+	dirLedger = "ledger"
 
 	walBaseName   = "wal"   // segment files: wal.000001, wal.000002, …
 	auditBaseName = "audit" // audit log segments: audit.000001, …
@@ -86,6 +90,10 @@ func (d *DataDir) AuditBasePath() string { return filepath.Join(d.root, dirAudit
 
 // MetaDir returns the path to the meta/ subdirectory.
 func (d *DataDir) MetaDir() string { return filepath.Join(d.root, dirMeta) }
+
+// LedgerDir returns the path to the ledger/ subdirectory, which holds the
+// signed digest log (ADR 0005, ledger=signed).
+func (d *DataDir) LedgerDir() string { return filepath.Join(d.root, dirLedger) }
 
 // String returns the root path (useful for logging).
 func (d *DataDir) String() string { return d.root }
