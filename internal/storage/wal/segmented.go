@@ -1,6 +1,7 @@
 package wal
 
 import (
+	"bufio"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -769,22 +770,23 @@ func scanRecordsFromFile(f *os.File) ([]diskRecord, int64, error) {
 func scanRecordsFromFileFiltered(f *os.File, fromLSN uint64, limit int) ([]ports.WALRecord, int64, error) {
 	var records []ports.WALRecord
 	lengthBuf := make([]byte, 4)
-	var validEnd int64
+
+	// Read through a buffer: unbuffered, every frame cost a seek and two
+	// reads, which dominated replay and audit reads.
+	pos, err := f.Seek(0, io.SeekCurrent)
+	if err != nil {
+		return nil, 0, fmt.Errorf("seek current pos: %w", err)
+	}
+	r := bufio.NewReaderSize(f, scanBufferSize)
+	validEnd := pos
 
 	for {
-		pos, err := f.Seek(0, io.SeekCurrent)
-		if err != nil {
-			return nil, 0, fmt.Errorf("seek current pos: %w", err)
-		}
-
-		if _, err := io.ReadFull(f, lengthBuf); err != nil {
+		if _, err := io.ReadFull(r, lengthBuf); err != nil {
 			if errors.Is(err, io.EOF) {
-				validEnd = pos
 				break
 			}
 			if errors.Is(err, io.ErrUnexpectedEOF) {
 				slog.Warn("wal: truncated record (incomplete length prefix)", "valid_records", len(records))
-				validEnd = pos
 				break
 			}
 			return nil, 0, fmt.Errorf("read length prefix: %w", err)
@@ -792,10 +794,9 @@ func scanRecordsFromFileFiltered(f *os.File, fromLSN uint64, limit int) ([]ports
 
 		length := binary.BigEndian.Uint32(lengthBuf)
 		body := make([]byte, length)
-		if _, err := io.ReadFull(f, body); err != nil {
+		if _, err := io.ReadFull(r, body); err != nil {
 			if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, io.EOF) {
 				slog.Warn("wal: truncated record (incomplete payload)", "valid_records", len(records))
-				validEnd = pos
 				break
 			}
 			return nil, 0, fmt.Errorf("read record payload: %w", err)
@@ -805,6 +806,7 @@ func scanRecordsFromFileFiltered(f *os.File, fromLSN uint64, limit int) ([]ports
 		if err != nil {
 			return nil, 0, err
 		}
+		validEnd += 4 + int64(length)
 
 		if record.LSN >= fromLSN {
 			records = append(records, ports.WALRecord{
@@ -816,16 +818,16 @@ func scanRecordsFromFileFiltered(f *os.File, fromLSN uint64, limit int) ([]ports
 				Payload:   record.Payload,
 			})
 			if limit > 0 && len(records) >= limit {
-				validEnd = pos + 4 + int64(length)
 				break
 			}
 		}
-
-		validEnd = pos + 4 + int64(length)
 	}
 
 	return records, validEnd, nil
 }
+
+// scanBufferSize is the read buffer for scanning raw segment frames.
+const scanBufferSize = 256 << 10
 
 // createSegment creates a new empty segment file.
 func (store *SegmentedLogStore) createSegment() error {

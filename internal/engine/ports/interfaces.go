@@ -156,6 +156,9 @@ type AuditStore interface {
 	// a crash is regenerated from the WAL.
 	Sync() error
 	ReadAll(ctx context.Context) ([]AuditEntry, error)
+	// ReadTable returns the row changes of one table in commit order; an
+	// empty domain matches every domain.
+	ReadTable(ctx context.Context, domain, table string) ([]AuditEntry, error)
 	ReadFromLSN(ctx context.Context, fromLSN uint64, limit int) ([]AuditEntry, error)
 	TotalSize() (int64, error)
 }

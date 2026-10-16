@@ -225,7 +225,20 @@ func (s *Store) ReadFromLSN(ctx context.Context, fromLSN uint64, limit int) ([]p
 	if err != nil {
 		return nil, fmt.Errorf("audit: read records: %w", err)
 	}
-	return coveredEntries(records, fromLSN, limit)
+	return coveredEntries(records, fromLSN, limit, nil)
+}
+
+// ReadTable implements ports.AuditStore: the covered entries of one table,
+// in commit order. An empty domain matches every domain. Other tables'
+// entries are skipped before their rows are decoded.
+func (s *Store) ReadTable(ctx context.Context, domain, table string) ([]ports.AuditEntry, error) {
+	records, err := s.inner.ReadFrom(ctx, 0, 0)
+	if err != nil {
+		return nil, fmt.Errorf("audit: read records: %w", err)
+	}
+	return coveredEntries(records, 0, 0, func(d, t []byte) bool {
+		return string(t) == table && (domain == "" || string(d) == domain)
+	})
 }
 
 // ReadReadOnly returns the covered entries with CommitLSN >= fromLSN of the
@@ -237,13 +250,14 @@ func ReadReadOnly(basePath string, fromLSN uint64) ([]ports.AuditEntry, int64, e
 	if err != nil {
 		return nil, 0, fmt.Errorf("audit: read records: %w", err)
 	}
-	entries, err := coveredEntries(records, fromLSN, 0)
+	entries, err := coveredEntries(records, fromLSN, 0, nil)
 	return entries, size, err
 }
 
 // coveredEntries decodes the entries that a mark covers, or every entry of
-// a store written before marks existed.
-func coveredEntries(records []ports.WALRecord, fromLSN uint64, limit int) ([]ports.AuditEntry, error) {
+// a store written before marks existed. keep, when set, selects entries by
+// their raw domain and table before the rest is decoded.
+func coveredEntries(records []ports.WALRecord, fromLSN uint64, limit int, keep func(domain, table []byte) bool) ([]ports.AuditEntry, error) {
 	var out, unmarked []ports.AuditEntry
 	sawMark := false
 	for _, r := range records {
@@ -255,6 +269,15 @@ func coveredEntries(records []ports.WALRecord, fromLSN uint64, limit int) ([]por
 			out = append(out, unmarked...)
 			unmarked = unmarked[:0]
 			continue
+		}
+		if keep != nil {
+			domain, table, ok := entryTable(r.Payload)
+			if !ok {
+				return nil, errors.New("audit: decode record: bad entry header")
+			}
+			if !keep(domain, table) {
+				continue
+			}
 		}
 		e, err := decodeEntry(r.Payload)
 		if err != nil {
@@ -345,6 +368,29 @@ func encodeLit(w *abuf, lit ast.Literal) {
 	default:
 		w.byte1(litNull)
 	}
+}
+
+// entryTable returns an entry's domain and table without decoding the rest.
+// The slices alias payload.
+func entryTable(payload []byte) (domain, table []byte, ok bool) {
+	r := &areader{data: payload}
+	if ver, err := r.byte1(); err != nil || ver != auditPayloadVersion {
+		return nil, nil, false
+	}
+	next := func() ([]byte, bool) {
+		n, err := r.uv()
+		if err != nil || r.off+int(n) > len(r.data) {
+			return nil, false
+		}
+		b := r.data[r.off : r.off+int(n)]
+		r.off += int(n)
+		return b, true
+	}
+	if domain, ok = next(); !ok {
+		return nil, nil, false
+	}
+	table, ok = next()
+	return domain, table, ok
 }
 
 func decodeEntry(data []byte) (ports.AuditEntry, error) {
