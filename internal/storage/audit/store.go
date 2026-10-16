@@ -11,6 +11,12 @@
 //	[1B op: 0x01=INSERT 0x02=UPDATE 0x03=DELETE]
 //	[rowMap oldRow]  0x00=nil | 0x01 [uv N] [[str col][literal] x N]
 //	[rowMap newRow]  same
+//
+// Coverage: after the entries of a group of commits, a mark record
+// (payload [1B 0x80][8B LSN LE]) states that the store holds the
+// row changes of every commit up to that LSN. Entries after the last mark
+// belong to a write that did not finish and are ignored, and dropped by the
+// next write. A store with entries but no mark predates coverage tracking.
 package audit
 
 import (
@@ -19,6 +25,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 	"github.com/correodabid/asql/internal/engine/ports"
@@ -44,66 +51,189 @@ const (
 	litTimestamp byte = 0x08
 )
 
+const (
+	recordType = "AUDIT"
+	// markPayloadVersion tells a coverage mark from an entry
+	// (auditPayloadVersion).
+	markPayloadVersion byte = 0x80
+)
+
+func isMark(payload []byte) bool { return len(payload) > 0 && payload[0] == markPayloadVersion }
+
 // Store is an append-only audit log backed by SegmentedLogStore.
 // Implements ports.AuditStore.
 type Store struct {
 	inner *wal.SegmentedLogStore
+
+	mu sync.Mutex
+	// covered is the LSN through which the store holds every commit's row
+	// changes; tracked is false for a store written before marks existed.
+	covered uint64
+	tracked bool
+	// markRecord is the store record LSN of the last mark (0 for none), and
+	// dirtyTail is set when unmarked entries follow it.
+	markRecord uint64
+	dirtyTail  bool
 }
 
 // New opens (or creates) an audit store at basePath (e.g. "<datadir>/audit/audit").
+// Opening never modifies the store, so read-only tools can open a live one.
 func New(basePath string) (*Store, error) {
 	// Chaining the audit store is a separate decision (ADR 0005, non-goals).
 	seg, err := wal.NewSegmentedLogStore(basePath, wal.AlwaysSync{}, wal.WithLedgerMode(wal.LedgerOff))
 	if err != nil {
 		return nil, fmt.Errorf("audit: open segment store: %w", err)
 	}
-	return &Store{inner: seg}, nil
+	s := &Store{inner: seg}
+	records, err := seg.ReadFrom(context.Background(), 0, 0)
+	if err != nil {
+		_ = seg.Close()
+		return nil, fmt.Errorf("audit: read records: %w", err)
+	}
+	s.scan(records)
+	return s, nil
 }
 
-// AppendBatch persists a slice of audit entries.
-func (s *Store) AppendBatch(ctx context.Context, entries []ports.AuditEntry) error {
-	if len(entries) == 0 {
-		return nil
+// scan derives the coverage state from the store's records.
+func (s *Store) scan(records []ports.WALRecord) {
+	s.covered, s.markRecord, s.dirtyTail = 0, 0, false
+	sawEntry, sawMark := false, false
+	for _, r := range records {
+		if r.Type != recordType {
+			continue
+		}
+		if isMark(r.Payload) {
+			if lsn, ok := decodeMark(r.Payload); ok {
+				s.covered, s.markRecord, s.dirtyTail, sawMark = lsn, r.LSN, false, true
+			}
+			continue
+		}
+		sawEntry, s.dirtyTail = true, true
 	}
-	records := make([]ports.WALRecord, len(entries))
+	s.tracked = sawMark || !sawEntry
+	if !s.tracked {
+		s.dirtyTail = false
+	}
+}
+
+// Covered implements ports.AuditStore.
+func (s *Store) Covered() (uint64, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.covered, s.tracked
+}
+
+// AppendCommitted implements ports.AuditStore: it appends the row changes of
+// the commits up to through, then a mark covering through, in one write.
+func (s *Store) AppendCommitted(ctx context.Context, entries []ports.AuditEntry, through uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.dirtyTail {
+		if err := s.inner.TruncateAfter(ctx, s.markRecord); err != nil {
+			return fmt.Errorf("audit: drop unfinished write: %w", err)
+		}
+		s.dirtyTail = false
+	}
+	records := make([]ports.WALRecord, 0, len(entries)+1)
 	for i, e := range entries {
 		payload, err := encodeEntry(e)
 		if err != nil {
 			return fmt.Errorf("audit: encode entry[%d]: %w", i, err)
 		}
-		records[i] = ports.WALRecord{Type: "AUDIT", Payload: payload}
+		records = append(records, ports.WALRecord{Type: recordType, Payload: payload})
 	}
-	_, err := s.inner.AppendBatch(ctx, records)
-	return err
+	mark := make([]byte, 9)
+	mark[0] = markPayloadVersion
+	binary.LittleEndian.PutUint64(mark[1:], through)
+	records = append(records, ports.WALRecord{Type: recordType, Payload: mark})
+	lsns, err := s.inner.AppendBatch(ctx, records)
+	if err != nil {
+		// Part of the batch may be on disk: drop it before the next write.
+		s.dirtyTail = true
+		return err
+	}
+	s.covered, s.tracked, s.markRecord = max(s.covered, through), true, lsns[len(lsns)-1]
+	return nil
 }
 
-// ReadAll returns all audit entries in insertion order.
+// TruncateAfter implements ports.AuditStore: it keeps the commits up to the
+// last mark at or before lsn. On a store that predates coverage tracking it
+// keeps nothing for lsn 0, which resets it.
+func (s *Store) TruncateAfter(ctx context.Context, lsn uint64) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	records, err := s.inner.ReadFrom(ctx, 0, 0)
+	if err != nil {
+		return fmt.Errorf("audit: read records: %w", err)
+	}
+	var cut uint64
+	for _, r := range records {
+		if r.Type != recordType || !isMark(r.Payload) {
+			continue
+		}
+		through, ok := decodeMark(r.Payload)
+		if !ok || through > lsn {
+			break
+		}
+		cut = r.LSN
+	}
+	if err := s.inner.TruncateAfter(ctx, cut); err != nil {
+		return fmt.Errorf("audit: truncate: %w", err)
+	}
+	records, err = s.inner.ReadFrom(ctx, 0, 0)
+	if err != nil {
+		return fmt.Errorf("audit: read records: %w", err)
+	}
+	s.scan(records)
+	s.tracked = true
+	return nil
+}
+
+func decodeMark(payload []byte) (uint64, bool) {
+	if len(payload) != 9 || payload[0] != markPayloadVersion {
+		return 0, false
+	}
+	return binary.LittleEndian.Uint64(payload[1:]), true
+}
+
+// ReadAll returns all covered audit entries in commit order.
 func (s *Store) ReadAll(ctx context.Context) ([]ports.AuditEntry, error) {
 	return s.ReadFromLSN(ctx, 0, 0)
 }
 
-// ReadFromLSN returns entries with CommitLSN >= fromLSN. limit=0 means unlimited.
+// ReadFromLSN returns covered entries with CommitLSN >= fromLSN. limit=0
+// means unlimited. Entries of an unfinished write are left out.
 func (s *Store) ReadFromLSN(ctx context.Context, fromLSN uint64, limit int) ([]ports.AuditEntry, error) {
 	records, err := s.inner.ReadFrom(ctx, 0, 0)
 	if err != nil {
 		return nil, fmt.Errorf("audit: read records: %w", err)
 	}
-	var out []ports.AuditEntry
+	var out, unmarked []ports.AuditEntry
+	sawMark := false
 	for _, r := range records {
-		if r.Type != "AUDIT" {
+		if r.Type != recordType {
+			continue
+		}
+		if isMark(r.Payload) {
+			sawMark = true
+			out = append(out, unmarked...)
+			unmarked = unmarked[:0]
 			continue
 		}
 		e, err := decodeEntry(r.Payload)
 		if err != nil {
 			return nil, fmt.Errorf("audit: decode record: %w", err)
 		}
-		if e.CommitLSN < fromLSN {
-			continue
+		if e.CommitLSN >= fromLSN {
+			unmarked = append(unmarked, e)
 		}
-		out = append(out, e)
-		if limit > 0 && len(out) >= limit {
-			break
-		}
+	}
+	if !sawMark {
+		// Written before coverage tracking: every entry stands.
+		out = append(out, unmarked...)
+	}
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
 	}
 	return out, nil
 }

@@ -316,14 +316,6 @@ func renderRow(row map[string]ast.Literal) string {
 	return strings.Join(parts, ",")
 }
 
-// historyIsUnreliable marks FOR HISTORY sections in comparisons where row
-// history is known not to be reproducible yet: across crashes (the audit
-// store is written asynchronously), on followers (they never write their
-// audit store) and between independent runs (rows of one commit come back in
-// no fixed order).
-// TODO: drop once FOR HISTORY is reproducible from the WAL.
-func historyIsUnreliable(section string) bool { return strings.HasPrefix(section, "history ") }
-
 // without returns f minus the sections skip selects.
 func (f fingerprint) without(skip func(string) bool) fingerprint {
 	var out fingerprint

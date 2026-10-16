@@ -398,19 +398,14 @@ func (engine *Engine) TimeTravelQueryAsOfTimestampAsPrincipal(ctx context.Contex
 	return engine.TimeTravelQueryAsOfTimestamp(ctx, sql, txDomains, logicalTimestamp)
 }
 
-// rowHistoryFromAuditStore serves a FOR HISTORY query from the persistent audit
-// log rather than the WAL-based changeLog. This path is active whenever an
-// AuditStore is wired into the engine, and it remains correct even after WAL GC.
-//
-// Behaviour:
-//   - Reads all audit entries and filters by domain/table/predicate.
-//   - INSERT entries are deduplicated by CommitLSN: the lazy-anchoring write
-//     path may re-add the INSERT after an engine restart, so duplicates are
-//     possible in the persistent store. Deduplication is O(n) via a seen-LSN map.
-//   - Results are sorted chronologically by CommitLSN.
-//   - If no audit entries match (row is insert-only, never mutated), falls back
-//     to the in-memory changeLog so the INSERT is still visible to the caller.
+// rowHistoryFromAuditStore serves a FOR HISTORY query from the audit store,
+// which holds every committed row change in commit order (see
+// history_log.go). It first waits for the history of everything committed
+// so far, so a query sees its own writes.
 func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planner.Plan, imports []ast.ImportDirective) (Result, error) {
+	if err := engine.drainHistory(ctx); err != nil {
+		return Result{}, err
+	}
 	entries, err := engine.auditStore.ReadAll(ctx)
 	if err != nil {
 		return Result{}, fmt.Errorf("audit store read: %w", err)
@@ -424,29 +419,11 @@ func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planne
 		}
 	}
 
-	targetDomain := plan.DomainName
-	targetTable := plan.TableName
-
-	// seenInsertLSN deduplicates INSERT entries: the lazy-anchor write path
-	// may write the same INSERT multiple times across engine restarts.
-	seenInsertLSN := make(map[uint64]struct{})
 	var historyRows []map[string]ast.Literal
 	for _, e := range entries {
-		if e.Table != targetTable {
+		if e.Table != plan.TableName || (plan.DomainName != "" && e.Domain != plan.DomainName) {
 			continue
 		}
-		if targetDomain != "" && e.Domain != targetDomain {
-			continue
-		}
-
-		// Deduplicate INSERT entries written by the lazy-anchoring path.
-		if e.Operation == "INSERT" {
-			if _, dup := seenInsertLSN[e.CommitLSN]; dup {
-				continue
-			}
-			seenInsertLSN[e.CommitLSN] = struct{}{}
-		}
-
 		// Use newRow for INSERT/UPDATE, oldRow for DELETE when matching WHERE.
 		matchRow := e.NewRow
 		if e.Operation == "DELETE" {
@@ -455,45 +432,11 @@ func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planne
 		if matchRow == nil {
 			continue
 		}
-
 		if plan.Filter != nil && !matchPredicate(matchRow, plan.Filter, state, engine) {
 			continue
 		}
-
-		resultRow := buildHistoryResultRow(matchRow, e.CommitLSN, e.Operation)
-		historyRows = append(historyRows, resultRow)
+		historyRows = append(historyRows, buildHistoryResultRow(matchRow, e.CommitLSN, e.Operation))
 	}
-
-	// Fallback for insert-only rows: not yet in audit (INSERT anchoring happens
-	// only on first UPDATE/DELETE). Serve directly from the in-memory changeLog.
-	if len(historyRows) == 0 {
-		ds, ok := state.domains[targetDomain]
-		if ok {
-			tbl, ok := ds.tables[targetTable]
-			if ok {
-				for _, entry := range tbl.changeLog {
-					matchRow := entry.newRow
-					if entry.operation == "DELETE" {
-						matchRow = entry.oldRow
-					}
-					if matchRow == nil {
-						continue
-					}
-					if plan.Filter != nil && !matchPredicate(matchRow, plan.Filter, state, engine) {
-						continue
-					}
-					resultRow := buildHistoryResultRow(matchRow, entry.commitLSN, entry.operation)
-					historyRows = append(historyRows, resultRow)
-				}
-			}
-		}
-	}
-
-	// Sort chronologically — lazy-anchored INSERT entries land after the
-	// UPDATE/DELETE that triggered them in the slice, reorder here.
-	sort.Slice(historyRows, func(i, j int) bool {
-		return historyRows[i][HistoryCommitLSNColumnName].NumberValue < historyRows[j][HistoryCommitLSNColumnName].NumberValue
-	})
 
 	if plan.Limit != nil && len(historyRows) > *plan.Limit {
 		historyRows = historyRows[:*plan.Limit]

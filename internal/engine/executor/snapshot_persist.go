@@ -723,6 +723,9 @@ func (engine *Engine) persistAllSnapshots() {
 	if latest.lsn == engine.lastDiskSnapshotLSN && latest.logicalTS == engine.lastDiskSnapshotLogicalTS {
 		return
 	}
+	if !engine.historyCovers(latest.lsn) {
+		return
+	}
 
 	// Write the latest snapshot as the single checkpoint file.
 	// Every fullSnapshotFrequency-th file (seq-1 divisible) is a full snapshot;

@@ -941,6 +941,7 @@ func (engine *Engine) applyPlanToState(state *readableState, plan planner.Plan, 
 // fkValCache, when non-nil, caches positive FK-existence lookups to avoid
 // redundant hasBucket walks when multiple child rows reference the same parent.
 func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner.Plan, mutationLSN uint64, clonedTables map[string]struct{}, fkValCache map[string]struct{}, pendingEntityVersions map[string]map[string][]string) error {
+	engine.history.target(plan.DomainName, plan.TableName)
 
 	domainState := getOrCreateDomain(state, plan.DomainName)
 
@@ -1512,7 +1513,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 						continue // silently skip this row
 					}
 					if plan.OnConflict.Action == ast.OnConflictDoUpdate {
-						if err := applyOnConflictUpdate(table, row, plan.OnConflict, conflictRowIdx, mutationLSN); err != nil {
+						if err := engine.applyOnConflictUpdate(table, row, plan.OnConflict, conflictRowIdx, mutationLSN); err != nil {
 							return err
 						}
 						if collectInsertPerf {
@@ -1559,7 +1560,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 				indexDur += time.Since(indexStarted)
 			}
 			// Change log keeps maps for history/audit readability.
-			table.changeLog = append(table.changeLog, changeLogEntry{
+			engine.logChange(table, changeLogEntry{
 				commitLSN: mutationLSN,
 				operation: "INSERT",
 				newRow:    row,
@@ -1675,11 +1676,19 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 				domainState.tables[plan.TableName] = table
 			}
 
-			for rowID, u := range updatedByRowID {
+			// Row order, so that row history lists the changes the same way
+			// on every node and every replay.
+			updatedRowIDs := make([]int, 0, len(updatedByRowID))
+			for rowID := range updatedByRowID {
+				updatedRowIDs = append(updatedRowIDs, rowID)
+			}
+			sort.Ints(updatedRowIDs)
+			for _, rowID := range updatedRowIDs {
+				u := updatedByRowID[rowID]
 				// Convert updated map back to positional slice for storage.
 				table.rows[rowID] = rowFromMap(table.columns, u.newRow)
 				// Change log keeps maps for history/audit readability.
-				table.changeLog = append(table.changeLog, changeLogEntry{
+				engine.logChange(table, changeLogEntry{
 					commitLSN: mutationLSN,
 					operation: "UPDATE",
 					oldRow:    u.oldRow,
@@ -1705,7 +1714,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		remaining := make([][]ast.Literal, 0, len(table.rows))
 		var deletedRowData []map[string]ast.Literal
 		deletedRows := 0
-		matchedDeleteRowIDs := make(map[int]struct{})
+		matchedDeleteRows := make(map[int]map[string]ast.Literal)
 		candidateRowIDs, _, _, hasIndexedCandidates := candidateRowIDsForPredicate(table, plan.Filter, false)
 		if chooseSingleTableScanStrategy(table, plan.Filter, nil) == scanStrategyIndexUnionP {
 			if hybridRowIDs, ok := matchedRowIDsForHybridORPredicate(table, plan.Filter, state, engine); ok {
@@ -1722,13 +1731,15 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 				if !matchPredicate(rowMap, plan.Filter, state, engine) {
 					continue
 				}
-				matchedDeleteRowIDs[rowID] = struct{}{}
-				deletedRowData = append(deletedRowData, rowMap)
-				deletedRows++
+				matchedDeleteRows[rowID] = rowMap
 			}
 		}
+		// Deleted rows are collected in row order, whatever order the index
+		// returned them in, so that row history is the same on every node.
 		for rowID, rowSlice := range table.rows {
-			if _, deleted := matchedDeleteRowIDs[rowID]; deleted {
+			if rowMap, deleted := matchedDeleteRows[rowID]; deleted {
+				deletedRowData = append(deletedRowData, rowMap)
+				deletedRows++
 				continue
 			}
 			if !hasIndexedCandidates {
@@ -1757,7 +1768,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			}
 
 			for _, row := range deletedRowData {
-				table.changeLog = append(table.changeLog, changeLogEntry{
+				engine.logChange(table, changeLogEntry{
 					commitLSN: mutationLSN,
 					operation: "DELETE",
 					oldRow:    row,
@@ -1914,7 +1925,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 
 		// Record change log entries for all truncated rows.
 		for _, rowSlice := range table.rows {
-			table.changeLog = append(table.changeLog, changeLogEntry{
+			engine.logChange(table, changeLogEntry{
 				commitLSN: mutationLSN,
 				operation: "DELETE",
 				oldRow:    rowToMap(table, rowSlice),
@@ -2103,7 +2114,7 @@ func findConflictingRow(table *tableState, row map[string]ast.Literal, conflictC
 // applyOnConflictUpdate modifies the existing conflicting row in-place
 // using the DO UPDATE SET assignments. Handles EXCLUDED.col references
 // by substituting values from the would-be-inserted row.
-func applyOnConflictUpdate(table *tableState, newRow map[string]ast.Literal, oc *ast.OnConflictClause, conflictRowIdx int, mutationLSN uint64) error {
+func (engine *Engine) applyOnConflictUpdate(table *tableState, newRow map[string]ast.Literal, oc *ast.OnConflictClause, conflictRowIdx int, mutationLSN uint64) error {
 	existingSlice := table.rows[conflictRowIdx]
 	if existingSlice == nil {
 		return fmt.Errorf("conflict row at index %d is nil", conflictRowIdx)
@@ -2175,7 +2186,7 @@ func applyOnConflictUpdate(table *tableState, newRow map[string]ast.Literal, oc 
 	}
 
 	// Record the update in changeLog.
-	table.changeLog = append(table.changeLog, changeLogEntry{
+	engine.logChange(table, changeLogEntry{
 		commitLSN: mutationLSN,
 		operation: "UPDATE",
 		oldRow:    oldRow,

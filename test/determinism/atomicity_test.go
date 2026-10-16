@@ -53,7 +53,7 @@ func TestUncommittedTransactionIsNeverApplied(t *testing.T) {
 	n := openNode(t, t.TempDir(), nodeOptions{})
 	n.run(phases[0]...)
 	n.run(phases[1]...)
-	before := n.fingerprint(workloadProbes).without(historyIsUnreliable)
+	before := n.fingerprint(workloadProbes)
 	n.close()
 
 	orphan := uncommittedRecords(t, n, orphanTx)
@@ -65,7 +65,7 @@ func TestUncommittedTransactionIsNeverApplied(t *testing.T) {
 	n.open()
 	// The head moves past the orphan: later commits are numbered after it.
 	isHead := func(section string) bool { return section == "head" }
-	requireSame(t, "replay with an uncommitted tail", before.without(isHead), n.fingerprint(workloadProbes).without(historyIsUnreliable).without(isHead))
+	requireSame(t, "replay with an uncommitted tail", before.without(isHead), n.fingerprint(workloadProbes).without(isHead))
 	if got, want := n.engine.HeadLSN(), orphan[len(orphan)-1].LSN; got != want {
 		t.Fatalf("head after replay = %d, want the WAL's last LSN %d", got, want)
 	}
@@ -73,7 +73,7 @@ func TestUncommittedTransactionIsNeverApplied(t *testing.T) {
 	for _, phase := range phases[2:] {
 		n.run(phase...)
 	}
-	live := n.fingerprint(workloadProbes).without(historyIsUnreliable)
+	live := n.fingerprint(workloadProbes)
 	res, err := n.engine.Query(ctx, "SELECT id FROM items WHERE id = 100 OR qty = 999", []string{"inventory"})
 	if err != nil {
 		t.Fatal(err)
@@ -83,12 +83,12 @@ func TestUncommittedTransactionIsNeverApplied(t *testing.T) {
 	}
 
 	n.restart()
-	requireSame(t, "restart after an uncommitted transaction", live, n.fingerprint(workloadProbes).without(historyIsUnreliable))
+	requireSame(t, "restart after an uncommitted transaction", live, n.fingerprint(workloadProbes))
 	records := n.records()
 	n.close()
 
 	fresh := replayFromWALAlone(t, n, nodeOptions{})
-	requireSame(t, "fresh replay after an uncommitted transaction", live, fresh.fingerprint(workloadProbes).without(historyIsUnreliable))
+	requireSame(t, "fresh replay after an uncommitted transaction", live, fresh.fingerprint(workloadProbes))
 	fresh.close()
 
 	follower := openNode(t, t.TempDir(), nodeOptions{})
@@ -102,7 +102,7 @@ func TestUncommittedTransactionIsNeverApplied(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	requireSame(t, "follower after an uncommitted transaction", live, follower.fingerprint(workloadProbes).without(historyIsUnreliable))
+	requireSame(t, "follower after an uncommitted transaction", live, follower.fingerprint(workloadProbes))
 }
 
 // TestReplayLimitInsideTransactionDefersIt: in cluster mode startup replay
@@ -112,7 +112,6 @@ func TestUncommittedTransactionIsNeverApplied(t *testing.T) {
 func TestReplayLimitInsideTransactionDefersIt(t *testing.T) {
 	ctx := context.Background()
 	leader, live := runWorkload(t, t.TempDir(), nodeOptions{}, nil)
-	live = live.without(historyIsUnreliable)
 	records := leader.records()
 	leader.close()
 
@@ -132,7 +131,7 @@ func TestReplayLimitInsideTransactionDefersIt(t *testing.T) {
 		if err := follower.engine.CatchUp(ctx, records[len(records)-1].LSN); err != nil {
 			t.Fatal(err)
 		}
-		requireSame(t, fmt.Sprintf("replay limited to LSN %d, then caught up", limit), live, follower.fingerprint(workloadProbes).without(historyIsUnreliable))
+		requireSame(t, fmt.Sprintf("replay limited to LSN %d, then caught up", limit), live, follower.fingerprint(workloadProbes))
 		follower.close()
 	}
 	if cuts == 0 {

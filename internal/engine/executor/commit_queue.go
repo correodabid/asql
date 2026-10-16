@@ -248,6 +248,11 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 		// Apply mutations (DML-first path for all jobs).
 		clonedTables := make(map[string]struct{}, len(job.ordered))
 		entityCollector := make(map[string]map[string][]string)
+		var jobHistory *historyCollector
+		if engine.historyWriter != nil {
+			jobHistory = &historyCollector{}
+			engine.history = jobHistory
+		}
 
 		applyFailed := false
 		for mi := range job.ordered {
@@ -317,6 +322,8 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 			}
 		}
 
+		engine.history = nil
+
 		if applyFailed {
 			continue
 		}
@@ -326,106 +333,9 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 			recordEntityVersions(newState, entityCollector, predictedCommitLSN)
 		}
 
-		// Collect audit entries from changeLog if an audit store is configured.
-		//
-		// Strategy — "lazy INSERT anchoring":
-		//   • INSERT commits are NOT written to audit at INSERT time.
-		//   • When the first UPDATE or DELETE for a row arrives, the original
-		//     INSERT is found in the changeLog by PK and added to the audit
-		//     batch together with the mutating entry.
-		//   • Subsequent UPDATEs/DELETEs only write their own entry (INSERT
-		//     already in audit).
-		//   • FOR HISTORY queries: if rows are in audit → return from audit;
-		//     if not (insert-only rows) → fall back to changeLog.
-		if engine.auditStore != nil {
-			// insertAuditKeys prevents adding the same INSERT commitLSN twice
-			// within a single batch (e.g. two UPDATEs to the same row).
-			type insertAuditKey struct {
-				domain, table string
-				lsn           uint64
-			}
-			insertAuditKeys := make(map[insertAuditKey]struct{})
-
-			for domainName := range job.affected {
-				ds := newState.domains[domainName]
-				if ds == nil {
-					continue
-				}
-				for tableName, tbl := range ds.tables {
-					pkCol := tbl.primaryKey
-
-					// Phase 1: collect UPDATE/DELETE entries for this commit.
-					var tableEntries []ports.AuditEntry
-					var mutatedPKVals []ast.Literal
-					for i := len(tbl.changeLog) - 1; i >= 0; i-- {
-						e := tbl.changeLog[i]
-						if e.commitLSN < predictedCommitLSN {
-							break
-						}
-						if e.commitLSN != predictedCommitLSN || e.operation == "INSERT" {
-							continue
-						}
-						tableEntries = append(tableEntries, ports.AuditEntry{
-							CommitLSN: e.commitLSN,
-							Domain:    domainName,
-							Table:     tableName,
-							Operation: e.operation,
-							OldRow:    e.oldRow,
-							NewRow:    e.newRow,
-						})
-						if pkCol != "" && e.oldRow != nil {
-							if pkV, ok := e.oldRow[pkCol]; ok {
-								mutatedPKVals = append(mutatedPKVals, pkV)
-							}
-						}
-					}
-					if len(tableEntries) == 0 {
-						continue
-					}
-					allAuditEntries = append(allAuditEntries, tableEntries...)
-
-					// Phase 2: lazy INSERT anchoring.
-					// For each mutated PK, find the original INSERT in the changeLog
-					// and add it to the batch so FOR HISTORY returns complete history.
-					if pkCol == "" || len(mutatedPKVals) == 0 {
-						continue
-					}
-					needed := make(map[string]struct{}, len(mutatedPKVals))
-					for _, v := range mutatedPKVals {
-						needed[literalKey(v)] = struct{}{}
-					}
-					for _, entry := range tbl.changeLog {
-						if len(needed) == 0 {
-							break
-						}
-						if entry.operation != "INSERT" || entry.commitLSN >= predictedCommitLSN || entry.newRow == nil {
-							continue
-						}
-						pkV, ok := entry.newRow[pkCol]
-						if !ok {
-							continue
-						}
-						k := literalKey(pkV)
-						if _, want := needed[k]; !want {
-							continue
-						}
-						// Guard against duplicates within this batch.
-						iKey := insertAuditKey{domainName, tableName, entry.commitLSN}
-						if _, dup := insertAuditKeys[iKey]; !dup {
-							insertAuditKeys[iKey] = struct{}{}
-							allAuditEntries = append(allAuditEntries, ports.AuditEntry{
-								CommitLSN: entry.commitLSN,
-								Domain:    domainName,
-								Table:     tableName,
-								Operation: "INSERT",
-								OldRow:    nil,
-								NewRow:    entry.newRow,
-							})
-						}
-						delete(needed, k)
-					}
-				}
-			}
+		// Row changes of this commit, for FOR HISTORY (see history_log.go).
+		if jobHistory != nil {
+			allAuditEntries = append(allAuditEntries, jobHistory.entries...)
 		}
 
 		// Build WAL records for this job.
@@ -540,18 +450,8 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 			}
 		}
 
-		// Flush audit entries asynchronously after successful WAL write.
-		if engine.auditStore != nil && len(allAuditEntries) > 0 {
-			entriesToFlush := allAuditEntries
-			go func() {
-				if err := engine.auditStore.AppendBatch(context.Background(), entriesToFlush); err != nil {
-					if engine.perf != nil {
-						engine.perf.recordAuditError()
-					}
-					slog.Warn("audit: append batch failed", "err", err, "count", len(entriesToFlush))
-				}
-			}()
-		}
+		// Row history is written off the commit path, in commit order.
+		engine.enqueueHistory(allAuditEntries, engine.headLSN)
 		if engine.timestampIndex != nil {
 			if err := engine.timestampIndex.append(allWALRecords); err != nil {
 				slog.Warn("timestamp index append failed", "error", err.Error(), "records", len(allWALRecords))
@@ -650,7 +550,7 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 			snapStore.evictOldest(adaptiveMaxMemorySnapshots(mutationCount))
 			snapStore.mu.Unlock()
 
-			if needDiskCheckpoint {
+			if needDiskCheckpoint && engine.historyCovers(snap.lsn) {
 				engine.snapWriteInFlight.Store(true)
 				defer engine.snapWriteInFlight.Store(false)
 				// Allocate next sequence number and capture delta base under writeMu.

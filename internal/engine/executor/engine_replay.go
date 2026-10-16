@@ -37,6 +37,14 @@ func (engine *Engine) Replay(ctx context.Context) error {
 		}
 	}
 
+	if engine.historyWriter != nil {
+		covered, err := engine.prepareHistory(ctx)
+		if err != nil {
+			return err
+		}
+		engine.historyFrom = covered
+	}
+
 	// When a snapshot exists, read only the WAL delta after the snapshot LSN —
 	// O(delta) instead of O(total WAL), making cold start proportional to
 	// unsnapshotted writes rather than total history.
@@ -57,6 +65,15 @@ func (engine *Engine) Replay(ctx context.Context) error {
 		dropLegacyProjectionTables(snapshots)
 		if maxSeq > engine.snapSeq {
 			engine.snapSeq = maxSeq
+		}
+		if engine.historyWriter != nil {
+			// Replay regenerates missing row history only after the snapshot
+			// it starts from.
+			for len(snapshots) > 0 && snapshots[len(snapshots)-1].lsn > engine.historyFrom {
+				slog.Info("replay: ignoring snapshot beyond row history coverage",
+					"snapshot_lsn", snapshots[len(snapshots)-1].lsn, "history_lsn", engine.historyFrom)
+				snapshots = snapshots[:len(snapshots)-1]
+			}
 		}
 		if engine.replayLimited {
 			for len(snapshots) > 0 && snapshots[len(snapshots)-1].lsn > engine.replayLimit {
@@ -336,6 +353,8 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 	txEntityCollectors := make(map[string]map[string]map[string][]string)
 	txClonedTables := make(map[string]map[string]struct{})
 	snapshotDue := false
+	history := engine.replayHistory(bounded)
+	defer func() { engine.history = nil }()
 
 	for i, record := range records {
 		if bounded && record.LSN > targetLSN {
@@ -403,6 +422,7 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 		if txClonedTables[record.TxID] == nil {
 			txClonedTables[record.TxID] = make(map[string]struct{})
 		}
+		engine.historyFor(history, commitLSN)
 		if err := engine.applyMutationPlanWithEntityTrackingTracked(newState, plan, commitLSN, txEntityCollectors[record.TxID], txClonedTables[record.TxID], nil); err != nil {
 			return fmt.Errorf("apply replay mutation lsn=%d: %w", record.LSN, err)
 		}
@@ -419,6 +439,7 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
+	engine.finishReplayHistory(history)
 
 	// Flatten all index overlay chains produced during replay so that
 	// subsequent reads get O(1) hash lookups instead of walking deep chains.
@@ -486,6 +507,8 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 	txClonedTables := make(map[string]map[string]struct{})
 	touchedTables := make(map[string]map[string]struct{})
 	snapshotDue := false
+	history := engine.replayHistory(false)
+	defer func() { engine.history = nil }()
 
 	for i, record := range records {
 		if record.LSN <= afterLSN {
@@ -550,6 +573,7 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 		if txClonedTables[record.TxID] == nil {
 			txClonedTables[record.TxID] = make(map[string]struct{})
 		}
+		engine.historyFor(history, commitLSN)
 		if err := engine.applyMutationPlanWithEntityTrackingTracked(newState, plan, commitLSN, txEntityCollectors[record.TxID], txClonedTables[record.TxID], nil); err != nil {
 			return fmt.Errorf("apply replay mutation lsn=%d: %w", record.LSN, err)
 		}
@@ -564,6 +588,7 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
+	engine.finishReplayHistory(history)
 
 	// Incremental follower direct-apply runs on every committed delta, so a
 	// full flatten of touched indexes makes replay cost grow with table size.
@@ -898,6 +923,14 @@ func (engine *Engine) RollbackTo(ctx context.Context, lsn uint64) error {
 	}
 	if err := engine.timestampIndex.truncateAfter(lsn); err != nil {
 		return fmt.Errorf("rollback timestamp index: %w", err)
+	}
+	if engine.historyWriter != nil {
+		if err := engine.drainHistory(ctx); err != nil {
+			return fmt.Errorf("rollback row history: %w", err)
+		}
+		if err := engine.auditStore.TruncateAfter(ctx, lsn); err != nil {
+			return fmt.Errorf("rollback row history: %w", err)
+		}
 	}
 
 	prevLimit, prevLimited := engine.replayLimit, engine.replayLimited
