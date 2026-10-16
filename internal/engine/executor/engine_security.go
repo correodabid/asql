@@ -767,6 +767,7 @@ func (engine *Engine) appendSecurityMutation(ctx context.Context, payload securi
 	newState.logicalTS = engine.logicalTS
 	engine.readState.Store(newState)
 	engine.appendWALRecordCache([]ports.WALRecord{record})
+	engine.enqueueHistory(nil, lsn)
 	engine.clearHistoricalStateCache()
 	return nil
 }

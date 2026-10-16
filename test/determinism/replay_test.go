@@ -76,7 +76,7 @@ func TestReplayAcrossRestartsAndCrashes(t *testing.T) {
 	fresh := replayFromWALAlone(t, n, nodeOptions{})
 	defer fresh.close()
 	requireSame(t, "fresh replay after restarts and crashes",
-		live.without(historyIsUnreliable), fresh.fingerprint(workloadProbes).without(historyIsUnreliable))
+		live, fresh.fingerprint(workloadProbes))
 }
 
 // TestRepeatedReplaysAreIdentical: replaying the same WAL several times,

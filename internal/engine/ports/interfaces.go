@@ -138,12 +138,23 @@ type AuditEntry struct {
 	NewRow    map[string]ast.Literal // nil for DELETE
 }
 
-// AuditStore is a write-once, read-all log of row-level change history.
-// It is populated during the commit path and is never truncated.
-// When wired into the engine it replaces the WAL-based history replay
-// for FOR HISTORY queries and enables safe WAL GC after snapshots.
+// AuditStore holds row-level change history: the row changes of every
+// committed transaction, in commit order, as an index of the WAL that
+// outlives WAL GC. FOR HISTORY reads it.
 type AuditStore interface {
-	AppendBatch(ctx context.Context, entries []AuditEntry) error
+	// AppendCommitted appends the row changes of the commits up to through
+	// and records that the store covers every commit up to through.
+	AppendCommitted(ctx context.Context, entries []AuditEntry, through uint64) error
+	// Covered returns the LSN through which the store holds every commit's
+	// row changes. tracked is false for a store written before coverage was
+	// recorded, whose history may have gaps.
+	Covered() (lsn uint64, tracked bool)
+	// TruncateAfter drops the row changes of commits after lsn.
+	TruncateAfter(ctx context.Context, lsn uint64) error
+	// Sync makes appended row changes durable and visible to readers in
+	// other processes. Appends are not synced one by one: history lost in
+	// a crash is regenerated from the WAL.
+	Sync() error
 	ReadAll(ctx context.Context) ([]AuditEntry, error)
 	ReadFromLSN(ctx context.Context, fromLSN uint64, limit int) ([]AuditEntry, error)
 	TotalSize() (int64, error)

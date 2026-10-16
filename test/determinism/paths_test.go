@@ -34,11 +34,11 @@ func TestFollowerApplyMatchesLeader(t *testing.T) {
 		}
 		i = end
 	}
-	want := live.without(historyIsUnreliable)
-	requireSame(t, "follower after applying replicated batches", want, follower.fingerprint(workloadProbes).without(historyIsUnreliable))
+	want := live
+	requireSame(t, "follower after applying replicated batches", want, follower.fingerprint(workloadProbes))
 	follower.restart()
 	defer follower.close()
-	requireSame(t, "follower after restart", want, follower.fingerprint(workloadProbes).without(historyIsUnreliable))
+	requireSame(t, "follower after restart", want, follower.fingerprint(workloadProbes))
 }
 
 // TestTimeTravelMatchesPrefixReplay: reading AS OF LSN k on the full engine
@@ -100,12 +100,10 @@ func TestCompactionAndLedgerModeDoNotChangeReplay(t *testing.T) {
 
 // requireSameExceptVolatile compares two independent runs of the workload:
 // UUID_V7 and TX_TIMESTAMP defaults legitimately differ between runs, so
-// only sections that cannot contain them are compared, and row history is
-// left out (see historyIsUnreliable).
+// only sections that cannot contain them are compared.
 func requireSameExceptVolatile(t *testing.T, label string, a, b fingerprint) {
 	t.Helper()
-	skip := func(name string) bool { return containsVolatile(name) || historyIsUnreliable(name) }
-	requireSame(t, label, a.without(skip), b.without(skip))
+	requireSame(t, label, a.without(containsVolatile), b.without(containsVolatile))
 }
 
 func containsVolatile(section string) bool {

@@ -174,17 +174,19 @@ type Engine struct {
 	perf                          *perfStats
 	retainWAL                     bool // when true, WAL is never truncated after snapshot persistence (audit/compliance)
 	// replayLimit bounds startup replay when replayLimited (see WithReplayLimit).
-	replayLimit    uint64
-	replayLimited  bool
-	auditStore     ports.AuditStore    // non-nil when a persistent audit log is wired in
+	replayLimit   uint64
+	replayLimited bool
+	auditStore    ports.AuditStore // non-nil when a persistent audit log is wired in
+	// historyWriter writes row history to auditStore (see history_log.go);
+	// history, when set, collects the row changes being applied, and
+	// historyFrom is the LSN through which auditStore held history when
+	// replay started.
+	historyWriter  *historyWriter
+	history        *historyCollector
+	historyFrom    uint64
 	raftCommitter  ports.RaftCommitter // non-nil in cluster mode; routes every WAL write through Raft quorum
 	timestampIndex *timestampLSNIndex
-	// vfkSubscriptions maps "sourceDomain.sourceTable" to the list of subscriber
-	// domains that maintain a read-only projection of that table. This index is
-	// populated when a CREATE TABLE with VFK constraints is processed and is
-	// used by fanoutProjections to materialise rows into subscriber domains.
-	vfkSubscriptions map[string][]projectionSubscription
-	replayMode       bool // true during WAL replay; skips VFK validation
+	replayMode     bool // true during WAL replay; skips VFK validation
 }
 
 type walRecordCache struct {
@@ -374,11 +376,13 @@ func New(ctx context.Context, logStore ports.LogStore, snapDir string, opts ...E
 		perf:                 newPerfStats(),
 		retainWAL:            true, // default: preserve full WAL for compliance
 		timestampIndex:       newTimestampLSNIndex(snapDir),
-		vfkSubscriptions:     make(map[string][]projectionSubscription),
 	}
 
 	for _, opt := range opts {
 		opt(engine)
+	}
+	if engine.auditStore != nil {
+		engine.historyWriter = newHistoryWriter(engine.auditStore)
 	}
 
 	initial := &readableState{
@@ -419,6 +423,17 @@ func (engine *Engine) WaitPendingSnapshots() {
 		engine.groupSync = nil
 	}
 	engine.snapshotWg.Wait()
+
+	// Write the row history queued so far: the shutdown checkpoint waits for
+	// it, and a clean restart then has nothing to regenerate.
+	ctx, cancel := context.WithTimeout(context.Background(), historyCheckpointWait)
+	if err := engine.drainHistory(ctx); err != nil {
+		slog.Warn("history: shutdown before row history was written; replay will regenerate it", "error", err.Error())
+	}
+	cancel()
+	if engine.historyWriter != nil {
+		engine.historyWriter.flush()
+	}
 
 	// Flush remaining in-memory snapshots to disk on shutdown.
 	engine.persistAllSnapshots()

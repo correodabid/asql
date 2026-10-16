@@ -73,6 +73,34 @@ func TestSegmentedTruncateAfterInsideActiveSegment(t *testing.T) {
 	checkTruncatedStore(t, dir, store, all[:20])
 }
 
+// Raft can roll a follower back more than once in a process; each rewrite
+// of the same segment must leave it under its own name.
+func TestSegmentedTruncateAfterTwiceInSameSegment(t *testing.T) {
+	dir := t.TempDir()
+	store := newLedgerStore(t, dir)
+	all := appendTxs(t, store, 0, 10, 40)
+	for _, after := range []uint64{30, 20} {
+		if err := store.TruncateAfter(context.Background(), after); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkTruncatedStore(t, dir, store, all[:20])
+}
+
+// Truncating everything after a rewrite removes the rewritten segment. Its
+// file handle still carried the rewrite's temporary name, which was gone.
+func TestSegmentedTruncateAfterRewriteThenEverything(t *testing.T) {
+	dir := t.TempDir()
+	store := newLedgerStore(t, dir)
+	appendTxs(t, store, 0, 10, 40)
+	for _, after := range []uint64{20, 0} {
+		if err := store.TruncateAfter(context.Background(), after); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkTruncatedStore(t, dir, store, nil)
+}
+
 func TestSegmentedTruncateAfterAcrossSealedSegments(t *testing.T) {
 	dir := t.TempDir()
 	store := newLedgerStore(t, dir, WithSegmentSize(1024))

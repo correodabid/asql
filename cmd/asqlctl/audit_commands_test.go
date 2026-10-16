@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/correodabid/asql/internal/engine/executor"
 	"github.com/correodabid/asql/internal/platform/datadir"
@@ -125,23 +124,11 @@ func seedAuditDataDir(t *testing.T, ctx context.Context) string {
 			t.Fatalf("execute mutation %q: %v", sql, err)
 		}
 	}
-	waitForAuditEntries(t, ctx, store, 1)
+	// Shut down as the server does: queued row history is written and synced
+	// before the audit commands open the data directory.
+	engine.WaitPendingSnapshots()
+	if err := store.Close(); err != nil {
+		t.Fatalf("close audit store: %v", err)
+	}
 	return dataDir
-}
-
-func waitForAuditEntries(t *testing.T, ctx context.Context, store *auditstore.Store, minEntries int) {
-	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		entries, err := store.ReadAll(ctx)
-		if err == nil && len(entries) >= minEntries {
-			return
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	entries, err := store.ReadAll(ctx)
-	if err != nil {
-		t.Fatalf("read audit entries: %v", err)
-	}
-	t.Fatalf("expected at least %d audit entries, got %d", minEntries, len(entries))
 }
