@@ -91,18 +91,9 @@ func loadAuditEntries(ctx context.Context, opts auditCommandOptions) ([]ports.Au
 	if err != nil {
 		return nil, 0, fmt.Errorf("initialize data dir: %w", err)
 	}
-	store, err := auditstore.New(dd.AuditBasePath())
-	if err != nil {
-		return nil, 0, fmt.Errorf("open audit store: %w", err)
-	}
-	defer store.Close()
-
-	sizeBytes, err := store.TotalSize()
-	if err != nil {
-		return nil, 0, fmt.Errorf("audit store size: %w", err)
-	}
-
-	entries, err := store.ReadFromLSN(ctx, opts.FromLSN, 0)
+	// Read without opening the store for writing: the data directory may
+	// belong to a running node.
+	entries, sizeBytes, err := auditstore.ReadReadOnly(dd.AuditBasePath(), opts.FromLSN)
 	if err != nil {
 		return nil, 0, fmt.Errorf("read audit entries: %w", err)
 	}

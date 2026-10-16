@@ -70,11 +70,16 @@ type historyWriter struct {
 	// where it was so that the next start regenerates the rest.
 	failures int
 	stopped  error
+	// wake interrupts the idle wait before a deferred sync; unsynced is set
+	// while written history awaits a sync.
+	wake     chan struct{}
+	lastSync time.Time
+	unsynced bool
 }
 
 func newHistoryWriter(store ports.AuditStore) *historyWriter {
 	covered, _ := store.Covered()
-	return &historyWriter{store: store, through: covered, durable: covered, changed: make(chan struct{})}
+	return &historyWriter{store: store, through: covered, durable: covered, changed: make(chan struct{}), wake: make(chan struct{}, 1)}
 }
 
 // enqueue queues the row changes of the commits up to through.
@@ -89,6 +94,11 @@ func (w *historyWriter) enqueue(entries []ports.AuditEntry, through uint64) {
 	if !w.running {
 		w.running = true
 		go w.run()
+		return
+	}
+	select {
+	case w.wake <- struct{}{}:
+	default:
 	}
 }
 
@@ -96,6 +106,13 @@ func (w *historyWriter) run() {
 	for {
 		w.mu.Lock()
 		if w.durable >= w.through && len(w.pending) == 0 {
+			if w.unsynced {
+				// Idle with unsynced writes: sync once more work stops
+				// arriving for a moment, or the sync interval is up.
+				w.mu.Unlock()
+				w.idleSync()
+				continue
+			}
 			w.running = false
 			w.mu.Unlock()
 			return
@@ -123,10 +140,15 @@ func (w *historyWriter) run() {
 		} else {
 			w.failures = 0
 			w.durable = through
+			w.unsynced = true
 		}
 		close(w.changed)
 		w.changed = make(chan struct{})
+		syncDue := err == nil && time.Since(w.lastSync) >= historySyncInterval
 		w.mu.Unlock()
+		if syncDue {
+			w.sync()
+		}
 		if err != nil {
 			slog.Warn("history: audit append failed; retrying", "error", err.Error(), "entries", len(entries), "through_lsn", through)
 			time.Sleep(historyRetryDelay)
@@ -137,7 +159,46 @@ func (w *historyWriter) run() {
 const (
 	historyRetryDelay  = 100 * time.Millisecond
 	historyMaxFailures = 20
+	// historySyncInterval bounds how often written history is synced, and
+	// so how late readers in other processes (asqlctl audit-*) see it.
+	historySyncInterval = 50 * time.Millisecond
 )
+
+// idleSync waits until no write arrives for the rest of the sync interval,
+// then syncs.
+func (w *historyWriter) idleSync() {
+	w.mu.Lock()
+	wait := max(0, historySyncInterval-time.Since(w.lastSync))
+	w.mu.Unlock()
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-w.wake:
+		return // more work: the next write syncs when the interval is up
+	case <-timer.C:
+	}
+	w.sync()
+}
+
+// flush syncs written history now. Shutdown calls it before the audit store
+// is closed, which leaves an idle writer nothing to sync.
+func (w *historyWriter) flush() { w.sync() }
+
+// sync syncs written history, if any is unsynced, without holding mu: the
+// commit path enqueues under it. A failed sync is only logged: the data is
+// still written, and checkpoints sync again before relying on it.
+func (w *historyWriter) sync() {
+	w.mu.Lock()
+	if !w.unsynced {
+		w.mu.Unlock()
+		return
+	}
+	w.lastSync, w.unsynced = time.Now(), false
+	w.mu.Unlock()
+	if err := w.store.Sync(); err != nil {
+		slog.Warn("history: audit sync failed", "error", err.Error())
+	}
+}
 
 // wait blocks until the store covers lsn, or ctx is done.
 func (w *historyWriter) wait(ctx context.Context, lsn uint64) error {
@@ -186,8 +247,8 @@ func (engine *Engine) enqueueHistory(entries []ports.AuditEntry, through uint64)
 // history to cover it before it is skipped (and retried later).
 const historyCheckpointWait = 10 * time.Second
 
-// historyCovers reports whether row history covers lsn, waiting for queued
-// writes. A disk checkpoint must not get ahead of it: replay regenerates
+// historyCovers reports whether row history durably covers lsn, waiting
+// for queued writes and syncing them. A disk checkpoint must not get ahead of it: replay regenerates
 // missing history only from the WAL after the checkpoint.
 func (engine *Engine) historyCovers(lsn uint64) bool {
 	if engine.historyWriter == nil {
@@ -197,6 +258,10 @@ func (engine *Engine) historyCovers(lsn uint64) bool {
 	defer cancel()
 	if err := engine.historyWriter.wait(ctx, lsn); err != nil {
 		slog.Warn("snapshot: disk checkpoint deferred until row history catches up", "error", err.Error())
+		return false
+	}
+	if err := engine.auditStore.Sync(); err != nil {
+		slog.Warn("snapshot: disk checkpoint deferred; row history sync failed", "error", err.Error())
 		return false
 	}
 	return true

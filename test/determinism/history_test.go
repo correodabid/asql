@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/correodabid/asql/internal/storage/audit"
 	"github.com/correodabid/asql/internal/storage/wal"
@@ -92,4 +93,30 @@ func TestHistoryBeyondTheWALIsDropped(t *testing.T) {
 	n.open()
 	defer n.close()
 	requireSame(t, "restart after the WAL lost its tail", want, n.fingerprint(workloadProbes))
+}
+
+// TestRunningNodeHistoryIsVisibleToOtherReaders: history is appended without
+// a sync per write, but synced shortly after, so tools that open the audit
+// store of a running node (asqlctl audit-report) see recent commits.
+func TestRunningNodeHistoryIsVisibleToOtherReaders(t *testing.T) {
+	n := openNode(t, t.TempDir(), nodeOptions{})
+	defer n.close()
+	n.run(schemaPhase(true)...)
+	n.run(loadPhase()[:3]...)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		entries, _, err := audit.ReadReadOnly(n.auditPath, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// 3 transactions of two items and one stock move each.
+		if len(entries) == 9 {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("another reader sees %d history entries, want 9", len(entries))
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }

@@ -151,6 +151,10 @@ type AuditStore interface {
 	Covered() (lsn uint64, tracked bool)
 	// TruncateAfter drops the row changes of commits after lsn.
 	TruncateAfter(ctx context.Context, lsn uint64) error
+	// Sync makes appended row changes durable and visible to readers in
+	// other processes. Appends are not synced one by one: history lost in
+	// a crash is regenerated from the WAL.
+	Sync() error
 	ReadAll(ctx context.Context) ([]AuditEntry, error)
 	ReadFromLSN(ctx context.Context, fromLSN uint64, limit int) ([]AuditEntry, error)
 	TotalSize() (int64, error)

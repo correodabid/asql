@@ -431,6 +431,9 @@ func (engine *Engine) WaitPendingSnapshots() {
 		slog.Warn("history: shutdown before row history was written; replay will regenerate it", "error", err.Error())
 	}
 	cancel()
+	if engine.historyWriter != nil {
+		engine.historyWriter.flush()
+	}
 
 	// Flush remaining in-memory snapshots to disk on shutdown.
 	engine.persistAllSnapshots()

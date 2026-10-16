@@ -74,6 +74,9 @@ type Store struct {
 	// dirtyTail is set when unmarked entries follow it.
 	markRecord uint64
 	dirtyTail  bool
+	// wrote is set once this instance appended or truncated; only then can
+	// it have unsynced writes.
+	wrote bool
 }
 
 // New opens (or creates) an audit store at basePath (e.g. "<datadir>/audit/audit").
@@ -124,7 +127,8 @@ func (s *Store) Covered() (uint64, bool) {
 }
 
 // AppendCommitted implements ports.AuditStore: it appends the row changes of
-// the commits up to through, then a mark covering through, in one write.
+// the commits up to through, then a mark covering through, in one write
+// that is not synced. Readers in other processes see it after Sync.
 func (s *Store) AppendCommitted(ctx context.Context, entries []ports.AuditEntry, through uint64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -146,13 +150,15 @@ func (s *Store) AppendCommitted(ctx context.Context, entries []ports.AuditEntry,
 	mark[0] = markPayloadVersion
 	binary.LittleEndian.PutUint64(mark[1:], through)
 	records = append(records, ports.WALRecord{Type: recordType, Payload: mark})
-	lsns, err := s.inner.AppendBatch(ctx, records)
+	// Not synced: the engine syncs on its own schedule (see Sync), and
+	// history lost in a crash is regenerated from the WAL.
+	lsns, err := s.inner.AppendBatchNoSync(ctx, records)
 	if err != nil {
 		// Part of the batch may be on disk: drop it before the next write.
-		s.dirtyTail = true
+		s.dirtyTail, s.wrote = true, true
 		return err
 	}
-	s.covered, s.tracked, s.markRecord = max(s.covered, through), true, lsns[len(lsns)-1]
+	s.covered, s.tracked, s.markRecord, s.wrote = max(s.covered, through), true, lsns[len(lsns)-1], true
 	return nil
 }
 
@@ -185,8 +191,19 @@ func (s *Store) TruncateAfter(ctx context.Context, lsn uint64) error {
 		return fmt.Errorf("audit: read records: %w", err)
 	}
 	s.scan(records)
-	s.tracked = true
+	s.tracked, s.wrote = true, true
 	return nil
+}
+
+// Sync implements ports.AuditStore.
+func (s *Store) Sync() error {
+	s.mu.Lock()
+	wrote := s.wrote
+	s.mu.Unlock()
+	if !wrote {
+		return nil
+	}
+	return s.inner.Sync()
 }
 
 func decodeMark(payload []byte) (uint64, bool) {
@@ -208,6 +225,25 @@ func (s *Store) ReadFromLSN(ctx context.Context, fromLSN uint64, limit int) ([]p
 	if err != nil {
 		return nil, fmt.Errorf("audit: read records: %w", err)
 	}
+	return coveredEntries(records, fromLSN, limit)
+}
+
+// ReadReadOnly returns the covered entries with CommitLSN >= fromLSN of the
+// audit store at basePath, and its size in bytes, without opening it for
+// writing: New would repair the tail of a store that a running node is
+// still appending to. Tools that read a live data directory use this.
+func ReadReadOnly(basePath string, fromLSN uint64) ([]ports.AuditEntry, int64, error) {
+	records, size, err := wal.ReadRecordsReadOnly(basePath)
+	if err != nil {
+		return nil, 0, fmt.Errorf("audit: read records: %w", err)
+	}
+	entries, err := coveredEntries(records, fromLSN, 0)
+	return entries, size, err
+}
+
+// coveredEntries decodes the entries that a mark covers, or every entry of
+// a store written before marks existed.
+func coveredEntries(records []ports.WALRecord, fromLSN uint64, limit int) ([]ports.AuditEntry, error) {
 	var out, unmarked []ports.AuditEntry
 	sawMark := false
 	for _, r := range records {
@@ -241,8 +277,11 @@ func (s *Store) ReadFromLSN(ctx context.Context, fromLSN uint64, limit int) ([]p
 // TotalSize returns the on-disk byte size of the audit store.
 func (s *Store) TotalSize() (int64, error) { return s.inner.TotalSize() }
 
-// Close flushes and closes the underlying store.
-func (s *Store) Close() error { return s.inner.Close() }
+// Close syncs unsynced appends, which a reopen would not see otherwise, and
+// closes the underlying store.
+func (s *Store) Close() error {
+	return errors.Join(s.Sync(), s.inner.Close())
+}
 
 func encodeEntry(e ports.AuditEntry) ([]byte, error) {
 	w := &abuf{b: make([]byte, 0, 64)}
