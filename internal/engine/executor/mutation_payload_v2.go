@@ -72,7 +72,8 @@ package executor
 //   0x05 bool false — no payload
 //   0x06 JSON       — [uvarint len][bytes]
 //   0x07 UUID       — [16B binary] (decoded from 36-char UUID string)
-//   0x08 bytes      — [uvarint len][bytes]
+//   0x08 timestamp  — [uvarint len][bytes] (legacy, always empty)
+//   0x09 timestamp  — [8B LE] microseconds since the Unix epoch, UTC
 //
 // Predicate encoding — 1B kind tag:
 //   0x00 nil
@@ -153,7 +154,10 @@ const (
 	litBoolFalse byte = 0x05
 	litJSON      byte = 0x06
 	litUUID      byte = 0x07
-	litTimestamp byte = 0x08 // stored as string (ISO-8601 / epoch-millis string)
+	// litTimestamp wrote the literal's StringValue, which is always empty:
+	// timestamps live in NumberValue. Only old WAL records have it.
+	litTimestamp       byte = 0x08
+	litTimestampMicros byte = 0x09
 )
 
 // predicate kind bytes
@@ -265,8 +269,8 @@ func encodeLit(w *v2Buf, lit ast.Literal) {
 		w.writeByte(litJSON)
 		w.writeStr(lit.StringValue)
 	case ast.LiteralTimestamp:
-		w.writeByte(litTimestamp)
-		w.writeStr(lit.StringValue)
+		w.writeByte(litTimestampMicros)
+		w.writeU64(uint64(lit.NumberValue))
 	default:
 		w.writeByte(litNull) // unknown kind → null; must not happen
 	}
@@ -1059,6 +1063,9 @@ func decodeLit(r *v2Reader) (ast.Literal, error) {
 	case litTimestamp:
 		s, err := r.readStr()
 		return ast.Literal{Kind: ast.LiteralTimestamp, StringValue: s}, err
+	case litTimestampMicros:
+		v, err := r.readU64()
+		return ast.Literal{Kind: ast.LiteralTimestamp, NumberValue: int64(v)}, err
 	default:
 		return ast.Literal{}, fmt.Errorf("payloadv2: unknown literal kind 0x%02x", kind)
 	}

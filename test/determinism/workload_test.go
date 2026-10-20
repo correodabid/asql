@@ -7,7 +7,7 @@ import (
 
 // The workload covers what replay must reproduce: multi-domain and cross-
 // domain transactions, indexes, entities, foreign and versioned foreign keys,
-// literal, autoincrement and volatile (UUID_V7, TX_TIMESTAMP) defaults,
+// timestamp literals, literal, autoincrement and volatile (UUID_V7, TX_TIMESTAMP) defaults,
 // multi-row inserts, predicate UPDATE and DELETE, schema evolution,
 // savepoints, and rolled-back transactions. Phases are meant to be run with
 // restarts or crashes in between.
@@ -37,7 +37,7 @@ func schemaPhase(stable bool) []tx {
 			"CREATE ENTITY item_entity (ROOT items, INCLUDES item_moves)",
 		}},
 		{domains: []string{"quality", "inventory"}, statements: []string{
-			"CREATE TABLE quality.results (id TEXT PRIMARY KEY, item_id INT NOT NULL, item_lsn INT, result TEXT NOT NULL, VERSIONED FOREIGN KEY (item_id) REFERENCES inventory.items(id) AS OF item_lsn)",
+			"CREATE TABLE quality.results (id TEXT PRIMARY KEY, item_id INT NOT NULL, item_lsn INT, result TEXT NOT NULL, tested_at TIMESTAMP, VERSIONED FOREIGN KEY (item_id) REFERENCES inventory.items(id) AS OF item_lsn)",
 		}},
 		{domains: []string{"quality"}, statements: []string{
 			"CREATE ENTITY result_entity (ROOT results)",
@@ -96,12 +96,12 @@ func crossDomainPhase() []tx {
 	var txs []tx
 	for i := 1; i <= 8; i++ {
 		txs = append(txs, tx{domains: []string{"quality", "inventory"}, statements: []string{
-			fmt.Sprintf("INSERT INTO quality.results (id, item_id, result) VALUES ('r-%d', %d, '%s')", i, i, []string{"WITHIN_SPEC", "OUT_OF_SPEC"}[i%2]),
+			fmt.Sprintf("INSERT INTO quality.results (id, item_id, result, tested_at) VALUES ('r-%d', %d, '%s', '2024-03-%02dT10:30:00Z')", i, i, []string{"WITHIN_SPEC", "OUT_OF_SPEC"}[i%2], i),
 			fmt.Sprintf("UPDATE inventory.items SET qty = qty + 1 WHERE id = %d", i),
 		}})
 	}
 	txs = append(txs,
-		tx{domains: []string{"quality"}, statements: []string{"UPDATE results SET result = 'RETESTED' WHERE result = 'OUT_OF_SPEC'"}},
+		tx{domains: []string{"quality"}, statements: []string{"UPDATE results SET result = 'RETESTED', tested_at = '2024-04-01T08:00:00.250Z' WHERE result = 'OUT_OF_SPEC'"}},
 		tx{domains: []string{"quality"}, statements: []string{"DELETE FROM results WHERE id = 'r-8'"}},
 	)
 	return txs

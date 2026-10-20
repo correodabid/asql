@@ -412,15 +412,18 @@ func (r *binReader) readRowColumnIndexed() map[string]ast.Literal {
 
 // ---------- Literal encode/decode ----------
 
-// Literal kind tags for binary encoding.
+// Literal kind tags for binary encoding. litTagTimestamp wrote the literal's
+// StringValue, which is always empty (timestamps live in NumberValue); only
+// old snapshots have it.
 const (
-	litTagNull      byte = 0
-	litTagString    byte = 1
-	litTagNumber    byte = 2
-	litTagBoolean   byte = 3
-	litTagFloat     byte = 4
-	litTagTimestamp byte = 5
-	litTagJSON      byte = 6
+	litTagNull            byte = 0
+	litTagString          byte = 1
+	litTagNumber          byte = 2
+	litTagBoolean         byte = 3
+	litTagFloat           byte = 4
+	litTagTimestamp       byte = 5
+	litTagJSON            byte = 6
+	litTagTimestampMicros byte = 7
 )
 
 func (w *binWriter) literal(lit ast.Literal) {
@@ -440,8 +443,8 @@ func (w *binWriter) literal(lit ast.Literal) {
 		w.u8(litTagFloat)
 		w.f64(lit.FloatValue)
 	case ast.LiteralTimestamp:
-		w.u8(litTagTimestamp)
-		w.str(lit.StringValue)
+		w.u8(litTagTimestampMicros)
+		w.i64(lit.NumberValue)
 	case ast.LiteralJSON:
 		w.u8(litTagJSON)
 		w.str(lit.StringValue)
@@ -467,6 +470,8 @@ func (r *binReader) literal() ast.Literal {
 		return ast.Literal{Kind: ast.LiteralTimestamp, StringValue: r.str()}
 	case litTagJSON:
 		return ast.Literal{Kind: ast.LiteralJSON, StringValue: r.str()}
+	case litTagTimestampMicros:
+		return ast.Literal{Kind: ast.LiteralTimestamp, NumberValue: r.i64()}
 	default:
 		r.err = fmt.Errorf("snapshot binary: unknown literal tag %d", tag)
 		return ast.Literal{Kind: ast.LiteralNull}
