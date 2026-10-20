@@ -106,9 +106,9 @@ func (server *Server) attestQuery(ctx context.Context, sql string, activeDomains
 	return attestationRow(a, rows)
 }
 
-// AttestedRows runs nothing: it validates sql as attestable and orders a
-// result of it as attest_query does, so verify-result can re-execute an
-// attested query and hash the same columns in the same order.
+// AttestedRows checks that sql can be attested and orders a result of it as
+// attest_query does, so verify-result, re-executing an attested query,
+// hashes the same columns in the same order. It executes nothing.
 func AttestedRows(sql string, result []map[string]ast.Literal) ([]string, [][]ast.Literal, error) {
 	sel, err := attestableSelect(sql)
 	if err != nil {
