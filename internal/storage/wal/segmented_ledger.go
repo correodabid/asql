@@ -35,6 +35,22 @@ func (store *SegmentedLogStore) LedgerHead() LedgerHead {
 	return store.ledger.headInfo()
 }
 
+// UnanchoredSegments returns the sequence numbers of segments that hold
+// records but no ledger anchor: written with the ledger off, or before it
+// existed (v3 headers). Their records are still covered by the chain, but
+// only the chain recomputed from them vouches for them.
+func (store *SegmentedLogStore) UnanchoredSegments() []uint32 {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	var seqs []uint32
+	for _, seg := range store.segments {
+		if seg.firstLSN > 0 && seg.ledgerFlags&ledgerFlagBefore == 0 {
+			seqs = append(seqs, seg.seqNum)
+		}
+	}
+	return seqs
+}
+
 // LedgerChainAt returns the chain value at lsn while it is still among the
 // recent points kept in memory. Implements ports.LedgerReader.
 func (store *SegmentedLogStore) LedgerChainAt(lsn uint64) ([32]byte, bool) {

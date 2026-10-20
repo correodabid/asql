@@ -343,6 +343,12 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize wal store: %w", err)
 	}
+	if config.Compliance {
+		if err := checkCompliance(walStore); err != nil {
+			_ = walStore.Close()
+			return nil, err
+		}
+	}
 
 	auditStore, err := audit.New(dd.AuditBasePath())
 	if err != nil {

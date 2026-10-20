@@ -191,9 +191,12 @@ A digest is a signed statement that the chain had value `chain` at a committed `
   without configuration. `signed` maintains the chain exactly like `chain` and needs
   `-ledger-key`. `-ledger-digest-interval` and `-ledger-digest-every` tune the
   checkpoints.
-- A compliance profile refuses to start with `WithWALGC()` unless segments are archived
-  before removal, and refuses to start if any retained segment is unanchored. Not
-  implemented yet.
+- A compliance profile (`asqld -compliance`) refuses to start unless the ledger
+  vouches for the whole retained WAL: the ledger is not `off`, every segment holding
+  records is anchored (none written with the ledger off or before it existed), and the
+  chain reaches back to genesis. The servers never enable `WithWALGC()`, so there is
+  no GC to refuse yet. When WAL GC becomes configurable, the profile must refuse it
+  unless segments are archived before removal.
 
 ## Threat model and current limit
 
