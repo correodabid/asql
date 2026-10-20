@@ -24,6 +24,7 @@ import (
 	"github.com/correodabid/asql/internal/engine/parser"
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 	"github.com/correodabid/asql/internal/platform/clock"
 	"github.com/correodabid/asql/internal/platform/datadir"
 	grpcserver "github.com/correodabid/asql/internal/server/grpc"
@@ -36,6 +37,12 @@ import (
 )
 
 const maxLSN uint64 = ^uint64(0)
+
+// errAsOfWallClock refuses AS OF TIMESTAMP '<date>'. WAL timestamps are a
+// logical counter, not wall-clock time, so a date cannot be resolved to a
+// commit: compared with the counter, any real date lay past the end of the
+// log and the query silently returned the present.
+var errAsOfWallClock = sqlerr.New("0A000", "AS OF TIMESTAMP is not supported: the WAL records logical timestamps, not the wall-clock time of each commit, so a date cannot be resolved to a commit; use AS OF LSN (asql_admin.timeline_commits lists the commits)")
 
 const maxRecentSecurityAuditEvents = 128
 
@@ -1569,7 +1576,7 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 			if selectStatement.AsOfLSN != nil {
 				effKind, effValue = "lsn", *selectStatement.AsOfLSN
 			} else if selectStatement.AsOfTimestampMicros != nil {
-				effKind, effValue = "ts", uint64(*selectStatement.AsOfTimestampMicros)
+				return executor.Result{}, nil, errAsOfWallClock
 			}
 			var result executor.Result
 			var err error
