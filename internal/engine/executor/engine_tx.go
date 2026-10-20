@@ -47,7 +47,7 @@ func (engine *Engine) beginDomain(session *Session, sql string) (Result, error) 
 	txID := engine.newTxID()
 	startLogicalTS := state.logicalTS
 
-	session.activeTx = &transaction{id: txID, domains: []string{domain}, startLogicalTS: startLogicalTS, statements: make([]string, 0), plans: make([]planner.Plan, 0), savepoints: make([]savepointMarker, 0)}
+	session.activeTx = &transaction{id: txID, domains: []string{domain}, startLogicalTS: startLogicalTS, startLSN: state.headLSN, statements: make([]string, 0), plans: make([]planner.Plan, 0), savepoints: make([]savepointMarker, 0)}
 	engine.perf.recordBegin()
 	return Result{Status: "BEGIN", TxID: txID}, nil
 }
@@ -114,7 +114,7 @@ func (engine *Engine) beginCrossDomain(session *Session, sql string) (Result, er
 	txID := engine.newTxID()
 	startLogicalTS := state.logicalTS
 
-	session.activeTx = &transaction{id: txID, domains: domainsList, startLogicalTS: startLogicalTS, statements: make([]string, 0), plans: make([]planner.Plan, 0), savepoints: make([]savepointMarker, 0)}
+	session.activeTx = &transaction{id: txID, domains: domainsList, startLogicalTS: startLogicalTS, startLSN: state.headLSN, statements: make([]string, 0), plans: make([]planner.Plan, 0), savepoints: make([]savepointMarker, 0)}
 	engine.perf.recordBegin()
 	engine.perf.recordCrossDomainBegin(len(domainsList))
 	return Result{Status: "BEGIN", TxID: txID}, nil
@@ -331,43 +331,62 @@ func (engine *Engine) validateWriteConflicts(state *readableState, tx *transacti
 		return nil
 	}
 
-	// Only UPDATE and DELETE require table-level conflict detection.
-	// INSERTs add new rows and never conflict with other mutations at the
-	// data level — PK uniqueness is enforced separately during apply.
-	// DDL (CREATE TABLE, ALTER, CREATE INDEX) is always single-threaded
-	// (schema setup phase), so it doesn't need conflict detection here.
-	writeTargets := make(map[string]struct{})
+	// Only UPDATE and DELETE are checked: they change rows the transaction
+	// selected by its WHERE, and that selection must still hold at commit.
+	// INSERTs add new rows; PK and UNIQUE conflicts are enforced on apply.
+	// DDL runs in its own schema-setup transactions and is not checked.
 	for _, mutation := range mutations {
-		switch mutation.plan.Operation {
-		case planner.OperationUpdate, planner.OperationDelete:
-			key := mutation.plan.DomainName + "." + mutation.plan.TableName
-			if mutation.plan.TableName != "" {
-				writeTargets[key] = struct{}{}
+		plan := mutation.plan
+		if plan.Operation != planner.OperationUpdate && plan.Operation != planner.OperationDelete {
+			continue
+		}
+		domainState, ok := state.domains[plan.DomainName]
+		if !ok {
+			continue
+		}
+		table, ok := domainState.tables[plan.TableName]
+		if !ok || table.lastMutationTS <= tx.startLogicalTS {
+			continue
+		}
+		if err := engine.rowWriteConflict(state, tx, plan, table); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rowWriteConflict reports whether a row the transaction's UPDATE or DELETE
+// selects was changed since the transaction began: a change committed after
+// it whose row before or after the change matches the WHERE. The first is a
+// row the statement would have changed and someone else changed first; the
+// second, a row that now matches and did not. So two transactions that
+// update different rows of a table both commit, and the later of two that
+// update the same row gets 40001, even when its WHERE no longer matches it
+// (claiming a job WHERE state = 'pending').
+//
+// The changeLog is bounded. When entries newer than the transaction's start
+// were trimmed, any change to the table since then is a conflict, as it was
+// before rows were tracked.
+func (engine *Engine) rowWriteConflict(state *readableState, tx *transaction, plan planner.Plan, table *tableState) error {
+	target := plan.DomainName + "." + plan.TableName
+	if table.changeLogTrimmedLSN > tx.startLSN {
+		return fmt.Errorf("%w: table %s changed at ts=%d after tx snapshot ts=%d", errWriteConflict, target, table.lastMutationTS, tx.startLogicalTS)
+	}
+	for i := len(table.changeLog) - 1; i >= 0; i-- {
+		entry := table.changeLog[i]
+		if entry.commitLSN <= tx.startLSN {
+			break
+		}
+		for _, row := range []map[string]ast.Literal{entry.oldRow, entry.newRow} {
+			if row == nil {
+				continue
+			}
+			if plan.Filter == nil || matchPredicate(row, plan.Filter, state, engine) {
+				return fmt.Errorf("%w: a row of %s matching the %s was changed at lsn=%d after tx snapshot lsn=%d",
+					errWriteConflict, target, strings.ToUpper(string(plan.Operation)), entry.commitLSN, tx.startLSN)
 			}
 		}
 	}
-
-	for target := range writeTargets {
-		parts := strings.SplitN(target, ".", 2)
-		if len(parts) != 2 {
-			continue
-		}
-
-		domainState, ok := state.domains[parts[0]]
-		if !ok {
-			continue
-		}
-
-		table, ok := domainState.tables[parts[1]]
-		if !ok {
-			continue
-		}
-
-		if table.lastMutationTS > tx.startLogicalTS {
-			return fmt.Errorf("%w: table %s changed at ts=%d after tx snapshot ts=%d", errWriteConflict, target, table.lastMutationTS, tx.startLogicalTS)
-		}
-	}
-
 	return nil
 }
 

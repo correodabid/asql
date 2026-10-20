@@ -55,6 +55,7 @@ type transaction struct {
 	id             string
 	domains        []string
 	startLogicalTS uint64
+	startLSN       uint64 // committed head when the transaction began
 	statements     []string
 	plans          []planner.Plan // cached plans from Execute-time validation
 	savepoints     []savepointMarker
@@ -258,6 +259,9 @@ type tableState struct {
 	// checkAppendOnly). It is set by CREATE TABLE ... APPEND ONLY or ALTER
 	// TABLE ... SET APPEND ONLY and never cleared.
 	appendOnly bool
+	// changeLogTrimmedLSN is the commit LSN of the newest entry trimChangeLog
+	// dropped: the changeLog is complete only after it.
+	changeLogTrimmedLSN uint64
 	// indexesLoaded is true when all index bucket/entry data was restored from
 	// a v11+ snapshot, meaning rebuildTableIndexes can be skipped on startup.
 	indexesLoaded bool
@@ -339,6 +343,7 @@ func trimChangeLog(table *tableState) {
 		targetLen = maxChangeLogPerTable - changeLogTrimBatch
 	}
 	drop := len(table.changeLog) - targetLen
+	table.changeLogTrimmedLSN = max(table.changeLogTrimmedLSN, table.changeLog[drop-1].commitLSN)
 	// Zero evicted slots so GC can reclaim old/new row maps.
 	for i := 0; i < drop; i++ {
 		table.changeLog[i] = changeLogEntry{}
