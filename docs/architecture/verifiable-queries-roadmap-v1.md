@@ -58,8 +58,10 @@ need to demonstrate compliance without opening their process data. Not consumer 
      ledger vouches for the whole retained WAL.
 2. **Signed query results bound to state.** `SELECT ... AS OF LSN n` can return
    `{rows, lsn, chain/digest, signature}` so a third party can check that the answer comes
-   from a specific, published state. Proposed in
-   [ADR 0006](../adr/0006-signed-query-results.md), pending review.
+   from a specific, published state. Accepted in
+   [ADR 0006](../adr/0006-signed-query-results.md). In progress: `ChainAt` and the
+   attestation format (#60), `SELECT * FROM asql_admin.attest_query WHERE sql = '...'
+   [AND lsn = N]` with `ledger=signed`; `asqlctl attest-query` and `verify-result` next.
 3. **Inclusion and consistency proofs.** Move to an RFC 6962-style append-only Merkle tree
    (leaves are already position-independent for this). Prove "this row existed at state H"
    without revealing the rest, and "today's log extends yesterday's". The audit store's
