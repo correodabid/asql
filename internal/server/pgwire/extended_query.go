@@ -133,15 +133,16 @@ func (server *Server) handleParse(backend *pgproto3.Backend, state *connState, m
 // back to a count-only unspecified-OID slice when type inference is not yet
 // available.
 func (server *Server) inferParamOIDs(sql string) []uint32 {
+	// The placeholders are those outside literals; the hints, read from the
+	// text by pattern, only type them.
+	oids := inferParamOIDCount(sql)
 	merged := mergeParamOIDHints(
 		server.inferInsertParamOIDs(sql),
 		server.inferUpdateParamOIDs(sql),
 		server.inferPredicateParamOIDs(sql),
 	)
-	if len(merged) > 0 {
-		return merged
-	}
-	return inferParamOIDCount(sql)
+	copy(oids, merged)
+	return oids
 }
 
 func mergeParamOIDHints(hints ...[]uint32) []uint32 {
@@ -169,26 +170,57 @@ func mergeParamOIDHints(hints ...[]uint32) []uint32 {
 // slice of that length filled with 0 (unspecified OID).
 func inferParamOIDCount(sql string) []uint32 {
 	max := 0
-	for i := 0; i < len(sql); i++ {
-		if sql[i] != '$' {
-			continue
-		}
-		j := i + 1
-		for j < len(sql) && sql[j] >= '0' && sql[j] <= '9' {
-			j++
-		}
-		if j == i+1 {
-			continue // bare '$', not a placeholder
-		}
-		n, _ := strconv.Atoi(sql[i+1 : j])
+	scanPlaceholders(sql, func(_, _, n int) {
 		if n > max {
 			max = n
 		}
-	}
+	})
 	if max == 0 {
 		return nil
 	}
 	return make([]uint32, max) // all zeros = unspecified type
+}
+
+// scanPlaceholders calls fn with the byte range and number of each $n
+// placeholder of sql, in order. Placeholders inside string literals, quoted
+// identifiers and comments are text, as in PostgreSQL.
+func scanPlaceholders(sql string, fn func(start, end, n int)) {
+	for i := 0; i < len(sql); i++ {
+		switch ch := sql[i]; {
+		case ch == '\'' || ch == '"':
+			for i++; i < len(sql); i++ {
+				if sql[i] == ch {
+					if i+1 < len(sql) && sql[i+1] == ch {
+						i++ // doubled quote
+						continue
+					}
+					break
+				}
+			}
+		case ch == '-' && i+1 < len(sql) && sql[i+1] == '-':
+			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+		case ch == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			if end := strings.Index(sql[i+2:], "*/"); end >= 0 {
+				i += 2 + end + 1
+			} else {
+				i = len(sql)
+			}
+		case ch == '$':
+			j := i + 1
+			for j < len(sql) && sql[j] >= '0' && sql[j] <= '9' {
+				j++
+			}
+			if j == i+1 {
+				continue // bare '$', not a placeholder
+			}
+			if n, err := strconv.Atoi(sql[i+1 : j]); err == nil {
+				fn(i, j, n)
+			}
+			i = j - 1
+		}
+	}
 }
 
 func (server *Server) inferInsertParamOIDs(sql string) []uint32 {
@@ -1953,14 +1985,18 @@ func substituteParams(sql string, params [][]byte, formats []int16, paramOIDs []
 		return sql, nil
 	}
 
-	result := sql
-	// Work backwards so that $10 doesn't match $1.
-	for i := len(params) - 1; i >= 0; i-- {
-		placeholder := fmt.Sprintf("$%d", i+1)
-		if !strings.Contains(result, placeholder) {
-			continue
+	// One pass over sql: a value is never scanned again, so a parameter
+	// whose text contains "$1" stays as it is, and so does a "$1" inside a
+	// string literal of the query.
+	var out strings.Builder
+	out.Grow(len(sql))
+	last := 0
+	var err error
+	scanPlaceholders(sql, func(start, end, n int) {
+		if err != nil || n < 1 || n > len(params) {
+			return
 		}
-
+		i := n - 1
 		// Determine wire format for this parameter.
 		var format int16
 		if len(formats) == 1 {
@@ -1968,21 +2004,27 @@ func substituteParams(sql string, params [][]byte, formats []int16, paramOIDs []
 		} else if i < len(formats) {
 			format = formats[i]
 		}
-
+		var value string
 		if format != 0 {
 			// Binary format: we only decode numeric types; for others we fail.
-			decoded, err := decodeBinaryParam(params[i], paramOIDFor(i, paramOIDs))
-			if err != nil {
-				return "", fmt.Errorf("parameter $%d: binary format not supported for OID %d", i+1, paramOIDFor(i, paramOIDs))
+			decoded, decodeErr := decodeBinaryParam(params[i], paramOIDFor(i, paramOIDs))
+			if decodeErr != nil {
+				err = fmt.Errorf("parameter $%d: binary format not supported for OID %d", n, paramOIDFor(i, paramOIDs))
+				return
 			}
-			result = strings.ReplaceAll(result, placeholder, decoded)
-			continue
+			value = decoded
+		} else {
+			value = quoteParam(string(params[i]), paramOIDFor(i, paramOIDs))
 		}
-
-		val := string(params[i])
-		result = strings.ReplaceAll(result, placeholder, quoteParam(val, paramOIDFor(i, paramOIDs)))
+		out.WriteString(sql[last:start])
+		out.WriteString(value)
+		last = end
+	})
+	if err != nil {
+		return "", err
 	}
-	return result, nil
+	out.WriteString(sql[last:])
+	return out.String(), nil
 }
 
 // paramOIDFor returns the OID hint for the i-th parameter (or 0 if not given).
