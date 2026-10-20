@@ -27,6 +27,10 @@ type Config struct {
 	// that many LSNs. Zero means the defaults (1s and 10,000).
 	LedgerDigestInterval  time.Duration
 	LedgerDigestEveryLSNs uint64
+	// Compliance starts the server only when every retained WAL record is
+	// vouched for by the ledger (ADR 0005): the ledger is on, every segment
+	// is anchored and the chain reaches back to genesis.
+	Compliance bool
 
 	// Cluster fields — optional. When NodeID, Peers, and ClusterGRPCAddr are
 	// all set the server starts the production cluster runtime: pgwire + Raft,
@@ -54,6 +58,27 @@ func (config Config) Validate() error {
 	}
 	if _, _, err := config.ledgerSettings(); err != nil {
 		return fmt.Errorf("ledger: %w", err)
+	}
+	if mode, _, _ := config.ledgerSettings(); config.Compliance && mode == wal.LedgerOff {
+		return errors.New("compliance: the ledger cannot be off")
+	}
+	return nil
+}
+
+// checkCompliance refuses a WAL whose history the ledger does not fully
+// vouch for. Records in an unanchored segment are still chained, but only
+// by a chain recomputed from those same records, so editing them consistently
+// goes unnoticed.
+func checkCompliance(store *wal.SegmentedLogStore) error {
+	head := store.LedgerHead()
+	if !head.Valid {
+		return errors.New("compliance: the ledger is off")
+	}
+	if seqs := store.UnanchoredSegments(); len(seqs) > 0 {
+		return fmt.Errorf("compliance: %d WAL segments have no ledger anchor (first: %06d), because they were written with the ledger off or before it existed; start without compliance to keep serving them", len(seqs), seqs[0])
+	}
+	if !head.Rooted {
+		return errors.New("compliance: the ledger chain does not reach back to genesis, because WAL history was removed before it was anchored")
 	}
 	return nil
 }

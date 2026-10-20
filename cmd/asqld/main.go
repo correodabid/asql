@@ -44,6 +44,7 @@ func main() {
 	ledgerKey := flag.String("ledger-key", "", "Ed25519 private key (PEM, PKCS #8, mode 0600) that signs ledger digests with -ledger=signed")
 	ledgerDigestInterval := flag.Duration("ledger-digest-interval", 0, "with -ledger=signed, sign the committed chain head at most this often (0 = default 1s)")
 	ledgerDigestEvery := flag.Uint64("ledger-digest-every", 0, "with -ledger=signed, also sign after this many committed LSNs (0 = default 10000)")
+	compliance := flag.Bool("compliance", false, "refuse to start unless the ledger vouches for the whole WAL: ledger on, every segment anchored, chain back to genesis (ADR 0005)")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -100,6 +101,7 @@ func main() {
 		LedgerKeyFile:         *ledgerKey,
 		LedgerDigestInterval:  *ledgerDigestInterval,
 		LedgerDigestEveryLSNs: *ledgerDigestEvery,
+		Compliance:            *compliance,
 	}
 
 	if *peers != "" {
