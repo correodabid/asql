@@ -15,7 +15,13 @@ import (
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
-// Binary snapshot format (version 14).
+// Binary snapshot format (version 15).
+//
+// Changes vs v14:
+//   - [4B] num_append_only_tables + [domain][table] each, after last_tx_num:
+//     the append-only tables (ALTER TABLE ... SET APPEND ONLY). A snapshot-
+//     level list rather than a table field, so older versions, which decode
+//     with none, differ only in these bytes.
 //
 // Changes vs v13:
 //   - [8B] last_tx_num after the ledger chain: the highest TxID number in the
@@ -101,7 +107,7 @@ import (
 
 var (
 	snapMagic   = [4]byte{'A', 'S', 'N', 'P'}
-	snapVersion = byte(14)
+	snapVersion = byte(15)
 
 	// snapCRC32C is the CRC32C (Castagnoli) table, hardware-accelerated on x86 (SSE4.2) and ARM.
 	snapCRC32C = crc32.MakeTable(crc32.Castagnoli)
@@ -318,6 +324,33 @@ func (r *binReader) readLedgerChain() ([32]byte, bool) {
 	copy(chain[:], r.data[r.off:r.off+len(chain)])
 	r.off += len(chain)
 	return chain, has
+}
+
+// appendOnlyTables writes the v15 list of append-only tables, sorted.
+func (w *binWriter) appendOnlyTables(domains map[string]*domainState) {
+	refs := appendOnlyTableRefs(domains)
+	w.u32(uint32(len(refs)))
+	for _, ref := range refs {
+		w.str(ref[0])
+		w.str(ref[1])
+	}
+}
+
+// readAppendOnlyTables reads the v15 list of append-only tables; older
+// versions have none.
+func (r *binReader) readAppendOnlyTables() [][2]string {
+	if r.version < 15 {
+		return nil
+	}
+	n := int(r.u32())
+	if n == 0 || !r.need(n) {
+		return nil
+	}
+	refs := make([][2]string, n)
+	for i := range refs {
+		refs[i] = [2]string{r.str(), r.str()}
+	}
+	return refs
 }
 
 // readLastTxNum reads the v14 TxID high-water mark; older versions have none.
@@ -1459,6 +1492,7 @@ func (w *binWriter) snapshot(snap *engineSnapshot, isFull bool, prevLogicalTS ui
 	w.boolean(snap.hasLedgerChain)
 	w.buf.Write(snap.ledgerChain[:])
 	w.u64(snap.lastTxNum)
+	w.appendOnlyTables(snap.state.domains)
 	w.catalog(snap)
 	w.principals(snap.state.principals)
 
@@ -1541,6 +1575,7 @@ type rawSnapshotFileEntry struct {
 	ledgerChain    [32]byte
 	hasLedgerChain bool
 	lastTxNum      uint64
+	appendOnly     [][2]string
 }
 
 // decodeSnapshotFileBinaryRaw decodes a binary snapshot file and returns the raw
@@ -1593,6 +1628,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 		isFull := r.boolean()
 		ledgerChain, hasLedgerChain := r.readLedgerChain()
 		lastTxNum := r.readLastTxNum()
+		appendOnly := r.readAppendOnlyTables()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1610,6 +1646,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 			ledgerChain:    ledgerChain,
 			hasLedgerChain: hasLedgerChain,
 			lastTxNum:      lastTxNum,
+			appendOnly:     appendOnly,
 		})
 	}
 	return entries, nil
@@ -1770,6 +1807,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 		isFull := r.boolean()
 		ledgerChain, hasLedgerChain := r.readLedgerChain()
 		lastTxNum := r.readLastTxNum()
+		appendOnly := r.readAppendOnlyTables()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1794,6 +1832,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 			LedgerChain:    ledgerChain,
 			HasLedgerChain: hasLedgerChain,
 			LastTxNum:      lastTxNum,
+			AppendOnly:     appendOnly,
 		}
 
 		result[i] = marshalableToSnapshot(full)
@@ -1851,6 +1890,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 	}
 	snap.ledgerChain, snap.hasLedgerChain = r.readLedgerChain()
 	snap.lastTxNum = r.readLastTxNum()
+	appendOnly := r.readAppendOnlyTables()
 	snap.catalog = r.readCatalogState()
 	snap.state.principals = principalsStateFromPersisted(r.readPrincipals())
 
@@ -1874,6 +1914,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 	if r.err != nil {
 		return nil, false, r.err
 	}
+	markAppendOnlyTables(snap.state.domains, appendOnly)
 	rebuildAllIndexes(&snap)
 	return []engineSnapshot{snap}, true, nil
 }

@@ -133,6 +133,9 @@ type CreateTableStatement struct {
 	Columns              []ColumnDefinition    `json:"columns"`
 	VersionedForeignKeys []VersionedForeignKey `json:"versioned_foreign_keys,omitempty"`
 	IfNotExists          bool                  `json:"if_not_exists,omitempty"`
+	// AppendOnly makes the table's rows immutable: see
+	// AlterTableSetAppendOnlyStatement.
+	AppendOnly bool `json:"append_only,omitempty"`
 }
 
 func (CreateTableStatement) statementNode() {}
@@ -162,6 +165,20 @@ func (AlterTableDropColumnStatement) statementNode() {}
 
 func (AlterTableDropColumnStatement) Kind() string {
 	return "alter_table_drop_column"
+}
+
+// AlterTableSetAppendOnlyStatement represents ALTER TABLE ... SET APPEND ONLY.
+// An append-only table accepts INSERT and ADD COLUMN only: UPDATE, DELETE,
+// TRUNCATE, DROP TABLE, DROP COLUMN and INSERT ... ON CONFLICT DO UPDATE are
+// rejected for every principal, ADMIN included. It cannot be undone.
+type AlterTableSetAppendOnlyStatement struct {
+	TableName string `json:"table_name"`
+}
+
+func (AlterTableSetAppendOnlyStatement) statementNode() {}
+
+func (AlterTableSetAppendOnlyStatement) Kind() string {
+	return "alter_table_set_append_only"
 }
 
 // AlterTableRenameColumnStatement represents ALTER TABLE ... RENAME COLUMN old TO new

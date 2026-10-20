@@ -254,6 +254,10 @@ type tableState struct {
 	versionedForeignKeys []versionedForeignKeyConstraint
 	lastMutationTS       uint64
 	changeLog            []changeLogEntry
+	// appendOnly rejects every change to existing rows (see
+	// checkAppendOnly). It is set by CREATE TABLE ... APPEND ONLY or ALTER
+	// TABLE ... SET APPEND ONLY and never cleared.
+	appendOnly bool
 	// indexesLoaded is true when all index bucket/entry data was restored from
 	// a v11+ snapshot, meaning rebuildTableIndexes can be skipped on startup.
 	indexesLoaded bool
@@ -993,6 +997,8 @@ type SchemaTable struct {
 	Columns              []SchemaColumn
 	Indexes              []SchemaIndex
 	VersionedForeignKeys []SchemaVersionedFK
+	// AppendOnly is true when the table accepts INSERT only.
+	AppendOnly bool `json:",omitempty"`
 }
 
 type SchemaIndex struct {

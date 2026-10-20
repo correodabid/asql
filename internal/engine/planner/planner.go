@@ -17,20 +17,21 @@ var (
 type Operation string
 
 const (
-	OperationCreateTable            Operation = "create_table"
-	OperationAlterTableAddColumn    Operation = "alter_table_add_column"
-	OperationAlterTableDropColumn   Operation = "alter_table_drop_column"
-	OperationAlterTableRenameColumn Operation = "alter_table_rename_column"
-	OperationCreateIndex            Operation = "create_index"
-	OperationInsert                 Operation = "insert"
-	OperationUpdate                 Operation = "update"
-	OperationDelete                 Operation = "delete"
-	OperationSelect                 Operation = "select"
-	OperationCreateEntity           Operation = "create_entity"
-	OperationDropTable              Operation = "drop_table"
-	OperationDropIndex              Operation = "drop_index"
-	OperationTruncateTable          Operation = "truncate_table"
-	OperationSetOp                  Operation = "set_operation"
+	OperationCreateTable             Operation = "create_table"
+	OperationAlterTableAddColumn     Operation = "alter_table_add_column"
+	OperationAlterTableDropColumn    Operation = "alter_table_drop_column"
+	OperationAlterTableRenameColumn  Operation = "alter_table_rename_column"
+	OperationAlterTableSetAppendOnly Operation = "alter_table_set_append_only"
+	OperationCreateIndex             Operation = "create_index"
+	OperationInsert                  Operation = "insert"
+	OperationUpdate                  Operation = "update"
+	OperationDelete                  Operation = "delete"
+	OperationSelect                  Operation = "select"
+	OperationCreateEntity            Operation = "create_entity"
+	OperationDropTable               Operation = "drop_table"
+	OperationDropIndex               Operation = "drop_index"
+	OperationTruncateTable           Operation = "truncate_table"
+	OperationSetOp                   Operation = "set_operation"
 )
 
 type Plan struct {
@@ -64,6 +65,7 @@ type Plan struct {
 	CaseWhenColumns      []ast.CaseWhenExpression  `json:"case_when_columns,omitempty"`
 	ForHistory           bool                      `json:"for_history,omitempty"`
 	IfNotExists          bool                      `json:"if_not_exists,omitempty"`
+	AppendOnly           bool                      `json:"append_only,omitempty"` // CREATE TABLE ... APPEND ONLY
 	ReturningColumns     []string                  `json:"returning_columns,omitempty"`
 	VersionedForeignKeys []ast.VersionedForeignKey `json:"versioned_foreign_keys,omitempty"`
 	EntityName           string                    `json:"entity_name,omitempty"`
@@ -109,6 +111,7 @@ func BuildForDomains(statement ast.Statement, txDomains []string) (Plan, error) 
 			Schema:               typed.Columns,
 			VersionedForeignKeys: typed.VersionedForeignKeys,
 			IfNotExists:          typed.IfNotExists,
+			AppendOnly:           typed.AppendOnly,
 		}, nil
 	case ast.AlterTableAddColumnStatement:
 		domain, table, err := resolveTableDomain(typed.TableName, allowedDomains)
@@ -132,6 +135,16 @@ func BuildForDomains(statement ast.Statement, txDomains []string) (Plan, error) 
 			DomainName:     domain,
 			TableName:      table,
 			DropColumnName: typed.ColumnName,
+		}, nil
+	case ast.AlterTableSetAppendOnlyStatement:
+		domain, table, err := resolveTableDomain(typed.TableName, allowedDomains)
+		if err != nil {
+			return Plan{}, err
+		}
+		return Plan{
+			Operation:  OperationAlterTableSetAppendOnly,
+			DomainName: domain,
+			TableName:  table,
 		}, nil
 	case ast.AlterTableRenameColumnStatement:
 		domain, table, err := resolveTableDomain(typed.TableName, allowedDomains)
