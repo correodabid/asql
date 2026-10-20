@@ -106,6 +106,18 @@ func (server *Server) attestQuery(ctx context.Context, sql string, activeDomains
 	return attestationRow(a, rows)
 }
 
+// AttestedRows runs nothing: it validates sql as attestable and orders a
+// result of it as attest_query does, so verify-result can re-execute an
+// attested query and hash the same columns in the same order.
+func AttestedRows(sql string, result []map[string]ast.Literal) ([]string, [][]ast.Literal, error) {
+	sel, err := attestableSelect(sql)
+	if err != nil {
+		return nil, nil, err
+	}
+	columns, rows := attestedRows(sel, result)
+	return columns, rows, nil
+}
+
 // attestableSelect parses the SQL to attest: a SELECT that is a function of
 // the state at an LSN, with no placeholders, so its text is the whole
 // question.
