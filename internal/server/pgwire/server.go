@@ -1395,6 +1395,9 @@ func (server *Server) authorizeHistoricalReadPrincipal(principal string, detail 
 // RowDescription + DataRow* + CommandComplete + ReadyForQuery, exactly like
 // the normal simple-query path.  This avoids duplicating the marshal logic.
 func sendInterceptedResult(backend *pgproto3.Backend, session *executor.Session, ir interceptResult) error {
+	if ir.err != nil {
+		return sendErrorAndReady(backend, ir.err, session)
+	}
 	columns := ir.columns
 	rows := ir.result.Rows
 

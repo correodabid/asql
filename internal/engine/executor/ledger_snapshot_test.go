@@ -133,40 +133,57 @@ func TestWALGCKeepsLedgerVerifiableFromSnapshotAnchor(t *testing.T) {
 	}
 }
 
-// Snapshots written before ADR 0005 (format v12) still decode, without an anchor.
-func TestSnapshotV12DecodesWithoutLedgerAnchor(t *testing.T) {
+// Snapshots written before ADR 0005 (format v12) still decode, without an
+// anchor, and ones written before v14 without a TxID high-water mark.
+func TestOlderSnapshotFormatsDecode(t *testing.T) {
 	_, eng := newLedgerTestEngine(t, t.TempDir())
 	execLedgerTx(t, eng, "CREATE TABLE results (id INT, result TEXT)", "INSERT INTO results (id, result) VALUES (1, 'a')")
 	state := eng.readState.Load()
 	snap := captureSnapshotWithCatalog(state, cloneCatalog(eng.catalog))
 	snap.ledgerChain[0], snap.hasLedgerChain = 7, true
+	snap.lastTxNum = 42
 
-	v13, err := encodeSnapshotFileBinary(&snap, true, 0)
+	v14, err := encodeSnapshotFileBinary(&snap, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Rewrite as v12: drop the 33-byte anchor after is_full and fix the CRC.
+	// Older versions lack fields after is_full: the 33-byte anchor (v12) and
+	// the 8-byte last_tx_num after it (v12, v13). Drop them and fix the CRC.
 	off := 5
-	n := int(binary.BigEndian.Uint32(v13[off:]))
+	n := int(binary.BigEndian.Uint32(v14[off:]))
 	off += 4
 	for i := 0; i < n; i++ {
-		off += 2 + int(binary.BigEndian.Uint16(v13[off:]))
+		off += 2 + int(binary.BigEndian.Uint16(v14[off:]))
 	}
 	off += 4 + 8 + 8 + 1 // num_snapshots, lsn, logicalTS, is_full
-	v12 := append(append([]byte{}, v13[:off]...), v13[off+33:len(v13)-4]...)
-	v12[4] = 12
-	v12 = binary.BigEndian.AppendUint32(v12, crc32.Checksum(v12, snapCRC32C))
+	older := func(version byte, from, to int) []byte {
+		data := append(append([]byte{}, v14[:from]...), v14[to:len(v14)-4]...)
+		data[4] = version
+		return binary.BigEndian.AppendUint32(data, crc32.Checksum(data, snapCRC32C))
+	}
+	formats := map[string][]byte{
+		"v14": v14,
+		"v13": older(13, off+33, off+41),
+		"v12": older(12, off, off+41),
+	}
 
-	for name, data := range map[string][]byte{"v13": v13, "v12": v12} {
+	for name, data := range formats {
 		entries, err := decodeSnapshotFileBinaryRaw(data)
 		if err != nil || len(entries) != 1 {
 			t.Fatalf("%s: decode: %v", name, err)
 		}
-		if got, want := entries[0].hasLedgerChain, name == "v13"; got != want || entries[0].lsn != snap.lsn {
+		if got, want := entries[0].hasLedgerChain, name != "v12"; got != want || entries[0].lsn != snap.lsn {
 			t.Fatalf("%s: hasLedgerChain=%v lsn=%d", name, got, entries[0].lsn)
 		}
+		wantTxNum := uint64(0)
+		if name == "v14" {
+			wantTxNum = 42
+		}
+		if entries[0].lastTxNum != wantTxNum {
+			t.Fatalf("%s: lastTxNum=%d, want %d", name, entries[0].lastTxNum, wantTxNum)
+		}
 		snaps, ok, err := decodeSingleFullSnapshotBinary(data)
-		if err != nil || !ok || len(snaps[0].state.domains["lab"].tables["results"].rows) != 1 {
+		if err != nil || !ok || len(snaps[0].state.domains["lab"].tables["results"].rows) != 1 || snaps[0].lastTxNum != wantTxNum {
 			t.Fatalf("%s: full decode: ok=%v err=%v", name, ok, err)
 		}
 	}
