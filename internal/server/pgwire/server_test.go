@@ -19,7 +19,6 @@ import (
 	"github.com/correodabid/asql/internal/engine/ports"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func TestPGWireCurrentReadAllowsAuthenticatedUsersButMutationsRequireAdmin(t *testing.T) {
@@ -4442,16 +4441,10 @@ func TestPGWireAsOfLSNInlineSyntax(t *testing.T) {
 			lsnAfterInsert, past)
 	}
 
-	// AS OF TIMESTAMP is recognised, not mis-parsed as an alias, and
-	// refused: WAL timestamps are logical, so a date cannot be resolved to
-	// a commit. Compared with the counter, a date of 2000 lay past the end
-	// of the log and the query returned the present.
-	for _, ts := range []string{"2000-01-01T00:00:00Z", "2000-01-01 00:00:00", "1970-01-01 00:00:00.000005"} {
-		_, err := conn.Exec(ctx, "SELECT * FROM u AS OF TIMESTAMP '"+ts+"'")
-		var pgErr *pgconn.PgError
-		if !errors.As(err, &pgErr) || pgErr.Code != "0A000" || !strings.Contains(pgErr.Message, "AS OF LSN") {
-			t.Fatalf("AS OF TIMESTAMP '%s': %v, want 0A000 pointing to AS OF LSN", ts, err)
-		}
+	// AS OF TIMESTAMP is recognised, not mis-parsed as an alias. A date
+	// before every commit is the empty database (ADR 0007).
+	if _, err := conn.Exec(ctx, "SELECT * FROM u AS OF TIMESTAMP '2000-01-01T00:00:00Z'"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("AS OF TIMESTAMP before every commit: %v, want table not found", err)
 	}
 
 	if _, err := conn.Exec(ctx, "COMMIT"); err != nil {

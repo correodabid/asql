@@ -83,11 +83,11 @@ func TestAdminTablesApplyTheSelectList(t *testing.T) {
 			sql     string
 			columns []string
 		}{
-			{"SELECT * FROM asql_admin.timeline_commits", []string{"lsn", "tx_id", "timestamp", "mutation_count"}},
+			{"SELECT * FROM asql_admin.timeline_commits", []string{"lsn", "tx_id", "timestamp", "commit_time", "mutation_count"}},
 			{"SELECT lsn FROM asql_admin.timeline_commits", []string{"lsn"}},
 			{"SELECT mutation_count, LSN FROM asql_admin.timeline_commits", []string{"mutation_count", "lsn"}},
 			{`SELECT t.lsn AS commit_lsn, "tx_id" id FROM asql_admin.timeline_commits t`, []string{"commit_lsn", "id"}},
-			{"SELECT tx_id, * FROM asql_admin.timeline_commits", []string{"tx_id", "lsn", "tx_id", "timestamp", "mutation_count"}},
+			{"SELECT tx_id, * FROM asql_admin.timeline_commits", []string{"tx_id", "lsn", "tx_id", "timestamp", "commit_time", "mutation_count"}},
 		} {
 			rows, err := conn.Query(ctx, tc.sql)
 			if err != nil {
