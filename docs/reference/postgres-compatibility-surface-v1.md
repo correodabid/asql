@@ -97,7 +97,7 @@ and current privilege semantics, see
 
 | Pattern | Status | Notes |
 |---|---|---|
-| `SELECT ... WHERE <scalar predicate>` | Supported | Current ASQL SQL subset; with durable principals enabled, any authenticated enabled principal can execute current-state reads. |
+| `SELECT ... WHERE <scalar predicate>` | Supported | Current ASQL SQL subset, with the comparisons `=`, `!=` / `<>`, `<`, `<=`, `>` and `>=`; with durable principals enabled, any authenticated enabled principal can execute current-state reads. |
 | `ORDER BY ... LIMIT n` | Supported | Covered in executor and pgwire tests. |
 | Literal `IN (...)` / `NOT IN (...)` | Supported | Covered in executor tests. |
 | Subquery-based `IN (SELECT ...)` | Supported | Covered in executor tests for current shapes. |
