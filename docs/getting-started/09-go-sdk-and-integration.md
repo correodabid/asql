@@ -27,6 +27,34 @@ The default local runtime started by `go run ./cmd/asqld ...` exposes pgwire on 
 For new application code, a pgwire-first service shape is the right default.
 :::
 
+## Run ASQL inside your process
+
+`pkg/embed` starts the same server `asqld` runs, inside your Go process. Clients still
+talk pgwire, so the SQL, transactions and errors are the same, and code written against
+a separate `asqld` works unchanged. It suits single-process deployments, and CI or
+local development without an `asqld` to start:
+
+```go
+srv, err := embed.Start(ctx, embed.Options{DataDir: "/var/lib/myapp/asql"})
+if err != nil {
+	return err
+}
+defer srv.Close() // final checkpoint; also closes open client connections
+
+pool, err := pgxpool.New(ctx, srv.DSN())
+```
+
+By default the server listens on a random port on `127.0.0.1`. Set `Address` to choose
+one, and `AuthToken` to require a password.
+
+In tests, `servertest.StartForTesting(t, servertest.Options{})` gives each test its own
+server and empty data directory, both removed when the test ends:
+
+```go
+srv := servertest.StartForTesting(t, servertest.Options{})
+conn, err := pgx.Connect(ctx, srv.DSN)
+```
+
 ## Typical integration shape
 
 A Go service usually needs these operations:
