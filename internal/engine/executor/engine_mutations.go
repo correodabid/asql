@@ -593,6 +593,7 @@ func shareTableForInsert(source *tableState, replayMode bool) *tableState {
 		lastMutationTS:       source.lastMutationTS,
 		changeLog:            source.changeLog, // shared — append is safe per slice semantics
 		appendOnly:           source.appendOnly,
+		changeLogTrimmedLSN:  source.changeLogTrimmedLSN,
 		indexesLoaded:        source.indexesLoaded,
 	}
 }
@@ -722,6 +723,7 @@ func cloneTableState(source *tableState) *tableState {
 		lastMutationTS:       source.lastMutationTS,
 		changeLog:            source.changeLog, // shared — append is COW-safe per slice semantics
 		appendOnly:           source.appendOnly,
+		changeLogTrimmedLSN:  source.changeLogTrimmedLSN,
 		indexesLoaded:        source.indexesLoaded,
 	}
 }

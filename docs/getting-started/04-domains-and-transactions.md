@@ -98,6 +98,31 @@ INSERT INTO users (id, email) VALUES (2, 'temp@example.com');
 ROLLBACK;
 ```
 
+## Concurrent writers
+
+Statements are applied when the transaction commits. At that point, an `UPDATE` or
+`DELETE` fails with SQLSTATE `40001` if another transaction committed, after this one
+began, a change to a row its `WHERE` matches, either before or after that change.
+Retry the transaction.
+
+- Transactions that change **different rows** of a table do not conflict.
+- The later of two transactions that change the **same row** gets `40001`, even when the
+  earlier one made its `WHERE` stop matching. That makes optimistic work claiming safe:
+
+  ```sql
+  UPDATE jobs SET state = 'running', lease_owner = 'worker-a'
+  WHERE id = 42 AND state = 'pending';
+  ```
+
+  Two workers claiming job 42 cannot both succeed. Workers claiming different jobs do
+  not slow each other down.
+- A row that **starts matching** the `WHERE` (a new `pending` job) also conflicts.
+- `INSERT`s are not checked this way. Primary key and `UNIQUE` violations are reported
+  at commit.
+- If a table changed so much during the transaction that its in-memory change history no
+  longer reaches back to the transaction's start, any change to the table counts as a
+  conflict. That takes thousands of changes.
+
 ## Querying in a domain context
 
 For unqualified table names, Studio and `asqlctl` generally establish domain context first.
