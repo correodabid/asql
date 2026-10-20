@@ -42,6 +42,8 @@ type persistedSnapshot struct {
 
 	// LastTxNum is the highest TxID number in the WAL up to LSN.
 	LastTxNum uint64
+	// AppendOnly lists the append-only tables as (domain, table).
+	AppendOnly [][2]string
 }
 
 type persistedCatalog struct {
@@ -482,6 +484,7 @@ func marshalableToSnapshot(ps persistedSnapshot) engineSnapshot {
 		snap.state.domains[domainName] = ds
 	}
 
+	markAppendOnlyTables(snap.state.domains, ps.AppendOnly)
 	return snap
 }
 
@@ -1057,6 +1060,7 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 				LedgerChain:    entry.ledgerChain,
 				HasLedgerChain: entry.hasLedgerChain,
 				LastTxNum:      entry.lastTxNum,
+				AppendOnly:     entry.appendOnly,
 			}
 			snap := marshalableToSnapshot(full)
 			rebuildAllIndexes(&snap)

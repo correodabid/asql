@@ -100,6 +100,38 @@ The current documented MVP surface is intentionally narrow.
 This is not full PostgreSQL role/privilege parity.
 It is the current ASQL-documented security surface.
 
+## Append-only tables
+
+Some tables must never change once a row is written, for example evidence or published
+findings. Privileges cannot guarantee that, because any `ADMIN` can run DML. Instead the
+table itself is made append-only:
+
+```sql
+CREATE TABLE artifacts (id TEXT PRIMARY KEY, kind TEXT, meta JSON) APPEND ONLY;
+-- or, for an existing table:
+ALTER TABLE artifacts SET APPEND ONLY;
+```
+
+An append-only table accepts `INSERT`, `INSERT ... ON CONFLICT DO NOTHING` and
+`ALTER TABLE ... ADD COLUMN`. The engine rejects the following with SQLSTATE `42501`, for
+every principal, `ADMIN` included:
+
+- `UPDATE`
+- `DELETE`
+- `TRUNCATE TABLE`
+- `DROP TABLE`
+- `ALTER TABLE ... DROP COLUMN`
+- `INSERT ... ON CONFLICT DO UPDATE`
+
+How the guarantee holds:
+
+- The violation is reported on the statement. It is checked again when the transaction
+  commits, so a change queued before the table became append-only is still rejected.
+- The setting cannot be undone: there is no statement that clears it.
+- The setting is recorded in the WAL like any DDL, so the ledger (ADR 0005) covers it,
+  and it survives replay and snapshots.
+- `SchemaSnapshot` and `asql_admin.schema_snapshot` report it as `append_only`.
+
 ## Historical authorization rule
 
 Historical authorization is evaluated against the **current** durable

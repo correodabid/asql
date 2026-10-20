@@ -843,6 +843,7 @@ type snapTable struct {
 	Columns              []snapColumn      `json:"columns"`
 	Indexes              []snapIndex       `json:"indexes,omitempty"`
 	VersionedForeignKeys []snapVersionedFK `json:"versioned_foreign_keys,omitempty"`
+	AppendOnly           bool              `json:"append_only,omitempty"`
 }
 
 type snapEntity struct {
@@ -950,7 +951,7 @@ func (server *Server) adminSchemaSnapshot(sql string) (interceptResult, bool) {
 					ReferencesColumn: vfk.ReferencesColumn,
 				})
 			}
-			tables = append(tables, snapTable{Name: t.Name, Columns: cols, Indexes: idxs, VersionedForeignKeys: vfks})
+			tables = append(tables, snapTable{Name: t.Name, Columns: cols, Indexes: idxs, VersionedForeignKeys: vfks, AppendOnly: t.AppendOnly})
 		}
 		entities := make([]snapEntity, 0, len(d.Entities))
 		for _, e := range d.Entities {

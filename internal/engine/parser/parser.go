@@ -239,6 +239,16 @@ func findMatchingParen(s string, start int) int {
 func parseAlterTable(sql string) (ast.Statement, error) {
 	rest := strings.TrimSpace(sql[len("ALTER TABLE "):])
 
+	// SET APPEND ONLY
+	if fields := strings.Fields(rest); len(fields) == 4 && strings.EqualFold(fields[1], "SET") &&
+		strings.EqualFold(fields[2], "APPEND") && strings.EqualFold(fields[3], "ONLY") {
+		table := canonicalIdentifier(fields[0])
+		if table == "" {
+			return nil, fmt.Errorf("%w: table name required", errInvalidSQL)
+		}
+		return ast.AlterTableSetAppendOnlyStatement{TableName: table}, nil
+	}
+
 	// DROP COLUMN
 	dropColumnIndex := indexFold(rest, " DROP COLUMN ")
 	if dropColumnIndex > 0 {
@@ -484,6 +494,15 @@ func parseCreateTable(sql string, ifNotExists bool) (ast.Statement, error) {
 		return nil, fmt.Errorf("%w: table name required", errInvalidSQL)
 	}
 
+	appendOnly := false
+	switch trailing := strings.Fields(rest[close+1:]); {
+	case len(trailing) == 0:
+	case len(trailing) == 2 && strings.EqualFold(trailing[0], "APPEND") && strings.EqualFold(trailing[1], "ONLY"):
+		appendOnly = true
+	default:
+		return nil, fmt.Errorf("%w: unexpected %q after the column list (only APPEND ONLY may follow it)", errInvalidSQL, strings.Join(trailing, " "))
+	}
+
 	columnClause := rest[open+1 : close]
 	columnSpecs := splitCSVDepthAware(columnClause)
 	if len(columnSpecs) == 0 {
@@ -615,6 +634,7 @@ func parseCreateTable(sql string, ifNotExists bool) (ast.Statement, error) {
 		Columns:              columns,
 		VersionedForeignKeys: versionedFKs,
 		IfNotExists:          ifNotExists,
+		AppendOnly:           appendOnly,
 	}
 	return stmt, nil
 }

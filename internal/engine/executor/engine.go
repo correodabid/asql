@@ -589,6 +589,9 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 			}
 		}
 
+		if err := checkAppendOnly(engine.committedTable(plan.DomainName, plan.TableName), plan); err != nil {
+			return Result{}, err
+		}
 		session.activeTx.statements = append(session.activeTx.statements, trimmed)
 		session.activeTx.plans = append(session.activeTx.plans, plan)
 		return Result{Status: "QUEUED", Rows: returningRows}, nil

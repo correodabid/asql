@@ -143,28 +143,33 @@ func TestOlderSnapshotFormatsDecode(t *testing.T) {
 	snap.ledgerChain[0], snap.hasLedgerChain = 7, true
 	snap.lastTxNum = 42
 
-	v14, err := encodeSnapshotFileBinary(&snap, true, 0)
+	snap.state.domains["lab"].tables["results"].appendOnly = true
+
+	v15, err := encodeSnapshotFileBinary(&snap, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Older versions lack fields after is_full: the 33-byte anchor (v12) and
-	// the 8-byte last_tx_num after it (v12, v13). Drop them and fix the CRC.
+	// Older versions lack fields after is_full: the 33-byte anchor (v12),
+	// the 8-byte last_tx_num after it (v12, v13) and the append-only table
+	// list after that (v12-v14: a count and one table, 12 bytes). Drop them
+	// and fix the CRC.
 	off := 5
-	n := int(binary.BigEndian.Uint32(v14[off:]))
+	n := int(binary.BigEndian.Uint32(v15[off:]))
 	off += 4
 	for i := 0; i < n; i++ {
-		off += 2 + int(binary.BigEndian.Uint16(v14[off:]))
+		off += 2 + int(binary.BigEndian.Uint16(v15[off:]))
 	}
 	off += 4 + 8 + 8 + 1 // num_snapshots, lsn, logicalTS, is_full
 	older := func(version byte, from, to int) []byte {
-		data := append(append([]byte{}, v14[:from]...), v14[to:len(v14)-4]...)
+		data := append(append([]byte{}, v15[:from]...), v15[to:len(v15)-4]...)
 		data[4] = version
 		return binary.BigEndian.AppendUint32(data, crc32.Checksum(data, snapCRC32C))
 	}
 	formats := map[string][]byte{
-		"v14": v14,
-		"v13": older(13, off+33, off+41),
-		"v12": older(12, off, off+41),
+		"v15": v15,
+		"v14": older(14, off+41, off+53),
+		"v13": older(13, off+33, off+53),
+		"v12": older(12, off, off+53),
 	}
 
 	for name, data := range formats {
@@ -176,15 +181,20 @@ func TestOlderSnapshotFormatsDecode(t *testing.T) {
 			t.Fatalf("%s: hasLedgerChain=%v lsn=%d", name, got, entries[0].lsn)
 		}
 		wantTxNum := uint64(0)
-		if name == "v14" {
+		if name == "v14" || name == "v15" {
 			wantTxNum = 42
 		}
+		wantAppendOnly := name == "v15"
 		if entries[0].lastTxNum != wantTxNum {
 			t.Fatalf("%s: lastTxNum=%d, want %d", name, entries[0].lastTxNum, wantTxNum)
 		}
 		snaps, ok, err := decodeSingleFullSnapshotBinary(data)
-		if err != nil || !ok || len(snaps[0].state.domains["lab"].tables["results"].rows) != 1 || snaps[0].lastTxNum != wantTxNum {
+		results := snaps[0].state.domains["lab"].tables["results"]
+		if err != nil || !ok || len(results.rows) != 1 || snaps[0].lastTxNum != wantTxNum || results.appendOnly != wantAppendOnly {
 			t.Fatalf("%s: full decode: ok=%v err=%v", name, ok, err)
+		}
+		if len(entries[0].appendOnly) > 0 != wantAppendOnly {
+			t.Fatalf("%s: append-only tables %v", name, entries[0].appendOnly)
 		}
 	}
 }
