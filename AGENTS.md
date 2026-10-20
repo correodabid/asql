@@ -55,7 +55,8 @@ internal/
 
 pkg/
   adminapi/           Public admin API types
-  servertest/         Test helpers
+  embed/              Run the ASQL server inside a Go process
+  servertest/         Test helpers (embed with a temporary data directory)
 
 sdk/                  Typed Go client over the gRPC admin surface
 api/proto/            Protobuf definitions

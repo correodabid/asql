@@ -9,14 +9,11 @@ package servertest
 
 import (
 	"context"
-	"io"
 	"log/slog"
-	"net"
 	"path/filepath"
 	"testing"
-	"time"
 
-	pgwireserver "github.com/correodabid/asql/internal/server/pgwire"
+	"github.com/correodabid/asql/pkg/embed"
 )
 
 // Options configures a test server.
@@ -33,58 +30,33 @@ type Options struct {
 type Server struct {
 	// Addr is the listener address ("host:port") accepting pgwire connections.
 	Addr string
+	// DSN is a pgx/libpq connection string for the server.
+	DSN string
 }
 
 // StartForTesting launches a single-node ASQL server bound to a random local
 // port. The caller must pass a *testing.T so the server is shut down and its
-// data directory removed via t.Cleanup.
+// data directory removed via t.Cleanup. It is pkg/embed with a temporary
+// data directory.
 func StartForTesting(t *testing.T, opts Options) *Server {
 	t.Helper()
 
-	logger := opts.Logger
-	if logger == nil {
-		logger = slog.New(slog.NewTextHandler(io.Discard, nil))
-	}
 	dataDir := opts.DataDir
 	if dataDir == "" {
 		dataDir = filepath.Join(t.TempDir(), "data")
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
-	server, err := pgwireserver.New(pgwireserver.Config{
-		Address:     "127.0.0.1:0",
-		DataDirPath: dataDir,
-		Logger:      logger,
-		AuthToken:   opts.AuthToken,
+	srv, err := embed.Start(context.Background(), embed.Options{
+		DataDir:   dataDir,
+		AuthToken: opts.AuthToken,
+		Logger:    opts.Logger,
 	})
 	if err != nil {
-		cancel()
-		t.Fatalf("servertest: new pgwire server: %v", err)
+		t.Fatalf("servertest: %v", err)
 	}
-	t.Cleanup(server.Stop)
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		cancel()
-		t.Fatalf("servertest: listen: %v", err)
-	}
-
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- server.ServeOnListener(ctx, listener)
-	}()
-
 	t.Cleanup(func() {
-		cancel()
-		select {
-		case err := <-errCh:
-			if err != nil {
-				t.Fatalf("servertest: server exited with error: %v", err)
-			}
-		case <-time.After(2 * time.Second):
-			t.Fatal("servertest: timeout waiting for server shutdown")
+		if err := srv.Close(); err != nil {
+			t.Errorf("servertest: %v", err)
 		}
 	})
-
-	return &Server{Addr: listener.Addr().String()}
+	return &Server{Addr: srv.Addr(), DSN: srv.DSN()}
 }
