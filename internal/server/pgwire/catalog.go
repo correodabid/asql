@@ -2066,9 +2066,11 @@ func schemaTypeToOID(t string) int64 {
 		return 21
 	case "BOOL", "BOOLEAN":
 		return 16
-	case "FLOAT", "FLOAT4", "REAL":
+	// ASQL FLOAT is 64-bit: advertise float8, as pgx decodes float4 as
+	// 32 bits.
+	case "FLOAT4", "REAL":
 		return 700
-	case "FLOAT8", "DOUBLE PRECISION":
+	case "FLOAT", "FLOAT8", "DOUBLE", "DOUBLE PRECISION":
 		return 701
 	case "JSON", "JSONB":
 		return 114
