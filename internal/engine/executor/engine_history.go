@@ -406,7 +406,7 @@ func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planne
 	if err := engine.drainHistory(ctx); err != nil {
 		return Result{}, err
 	}
-	entries, err := engine.auditStore.ReadAll(ctx)
+	entries, err := engine.auditStore.ReadTable(ctx, plan.DomainName, plan.TableName)
 	if err != nil {
 		return Result{}, fmt.Errorf("audit store read: %w", err)
 	}
@@ -421,9 +421,6 @@ func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planne
 
 	var historyRows []map[string]ast.Literal
 	for _, e := range entries {
-		if e.Table != plan.TableName || (plan.DomainName != "" && e.Domain != plan.DomainName) {
-			continue
-		}
 		// Use newRow for INSERT/UPDATE, oldRow for DELETE when matching WHERE.
 		matchRow := e.NewRow
 		if e.Operation == "DELETE" {

@@ -113,3 +113,39 @@ func BenchmarkRowHistoryAudited(b *testing.B) {
 		}
 	}
 }
+
+// BenchmarkRowHistoryAuditedManyTables: FOR HISTORY of one row when the
+// store holds 10 tables of 300 inserted and 300 updated rows each.
+func BenchmarkRowHistoryAuditedManyTables(b *testing.B) {
+	ctx := context.Background()
+	engine, closeAll := newAuditedBenchmarkEngine(b)
+	defer closeAll()
+	const tables = 10
+	session := engine.NewSession()
+	mustExecBenchmark(b, ctx, engine, session, "BEGIN DOMAIN bench")
+	for t := 0; t < tables; t++ {
+		mustExecBenchmark(b, ctx, engine, session, fmt.Sprintf("CREATE TABLE t%d (id INT PRIMARY KEY, qty INT, payload TEXT)", t))
+	}
+	mustExecBenchmark(b, ctx, engine, session, "COMMIT")
+	for _, stmt := range []string{"INSERT INTO t%d (id, qty, payload) VALUES (%d, 0, 'seed')", "UPDATE t%d SET qty = 1 WHERE id = %d"} {
+		for i := 0; i < 300; i++ {
+			tx := engine.NewSession()
+			mustExecBenchmark(b, ctx, engine, tx, "BEGIN DOMAIN bench")
+			for t := 0; t < tables; t++ {
+				mustExecBenchmark(b, ctx, engine, tx, fmt.Sprintf(stmt, t, i))
+			}
+			mustExecBenchmark(b, ctx, engine, tx, "COMMIT")
+		}
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		res, err := engine.RowHistory(ctx, "SELECT * FROM t3 FOR HISTORY WHERE id = 7", []string{"bench"})
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(res.Rows) != 2 {
+			b.Fatalf("history rows = %d, want 2", len(res.Rows))
+		}
+	}
+}
