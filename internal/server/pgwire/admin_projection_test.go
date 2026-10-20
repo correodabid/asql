@@ -139,3 +139,12 @@ func TestAdminTablesApplyTheSelectList(t *testing.T) {
 		}
 	}
 }
+
+// The multi-line select lists in the getting-started guides project too.
+func TestAdminProjectionAcceptsMultiLineSelectLists(t *testing.T) {
+	ir := interceptResult{columns: []string{"total_commits", "total_begins", "total_cross_domain_begins"}}
+	got := projectAdminColumns("SELECT\n\ttotal_begins,\n\ttotal_cross_domain_begins\nFROM asql_admin.engine_stats;", ir)
+	if got.err != nil || !reflect.DeepEqual(got.columns, []string{"total_begins", "total_cross_domain_begins"}) {
+		t.Fatalf("columns %v, err %v", got.columns, got.err)
+	}
+}
