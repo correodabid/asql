@@ -99,6 +99,10 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 	sessionPrincipal := server.catalogSessionPrincipal(principal)
 
 	switch {
+	// First: the SQL it attests may mention anything below.
+	case strings.Contains(lower, "asql_admin.attest_query"):
+		return server.adminAttestQuery(ctx, trimmed, activeDomains, sessionPrincipal)
+
 	// ── Scalar utility queries ────────────────────────────────────────────
 
 	case reRowLSN.MatchString(trimmed):

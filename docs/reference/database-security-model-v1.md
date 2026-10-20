@@ -96,6 +96,7 @@ The current documented MVP surface is intentionally narrow.
 | Operator/admin virtual helpers under `asql_admin.*` | `ADMIN`, except historical helpers |
 | Historical reads: `AS OF LSN`, `AS OF TIMESTAMP`, `FOR HISTORY` | `SELECT_HISTORY` |
 | Historical helper views such as `asql_admin.row_history` and `asql_admin.entity_version_history` | `SELECT_HISTORY` |
+| `asql_admin.attest_query` (signed query results, ADR 0006) | the privileges of the query it attests, plus `SELECT_HISTORY` at an LSN other than the head |
 
 This is not full PostgreSQL role/privilege parity.
 It is the current ASQL-documented security surface.

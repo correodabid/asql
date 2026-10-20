@@ -50,84 +50,38 @@ func applyImports(state *readableState, imports []ast.ImportDirective) (*readabl
 	return newState, nil
 }
 
-// materializeCTEs executes each CTE SELECT and injects the results as virtual tables
-// in the domain state, so the main query can reference them by name.
-func materializeCTEs(state *readableState, ctes []ast.CTE, engine *Engine) *readableState {
-	// Create a deep-enough copy of state so we don't mutate the original
-	newDomains := make(map[string]*domainState, len(state.domains))
-	for k, v := range state.domains {
-		// Copy each domainState with a new tables map
-		newTables := make(map[string]*tableState, len(v.tables))
-		for tk, tv := range v.tables {
-			newTables[tk] = tv
-		}
-		newDomains[k] = &domainState{tables: newTables}
-	}
-	newState := &readableState{domains: newDomains}
-
-	for _, cte := range ctes {
-		// Build a plan for the CTE's SELECT
-		ctePlan, err := planner.BuildForDomains(cte.Statement, domainsFromState(newState))
-		if err != nil {
-			continue
-		}
-		cteRows, err := engine.selectRows(context.Background(), newState, ctePlan)
-		if err != nil || len(cteRows) == 0 {
-			// Create empty virtual table
-			cols := cte.Statement.Columns
-			vt := &tableState{
-				columns:           cols,
-				columnDefinitions: make(map[string]ast.ColumnDefinition),
-				rows:              make([][]ast.Literal, 0),
-				columnIndex:       make(map[string]int),
-				indexes:           make(map[string]*indexState),
-				indexedColumns:    make(map[string]string),
-				indexedColumnSets: make(map[string]string),
-				uniqueColumns:     make(map[string]struct{}),
-			}
-			injectVirtualTable(newState, cte.Name, vt)
-			continue
-		}
-
-		// Derive column names from first row
-		columns := make([]string, 0, len(cteRows[0]))
-		for col := range cteRows[0] {
-			columns = append(columns, col)
-		}
-		sort.Strings(columns)
-
-		// Build columnIndex and convert cteRows (maps) to positional slices.
-		colIdx := make(map[string]int, len(columns))
-		for i, col := range columns {
-			colIdx[col] = i
-		}
-		vtRows := make([][]ast.Literal, len(cteRows))
-		for i, m := range cteRows {
-			vtRows[i] = rowFromMap(columns, m)
-		}
-
-		vt := &tableState{
-			columns:           columns,
-			columnDefinitions: make(map[string]ast.ColumnDefinition),
-			rows:              vtRows,
-			columnIndex:       colIdx,
-			indexes:           make(map[string]*indexState),
-			indexedColumns:    make(map[string]string),
-			indexedColumnSets: make(map[string]string),
-			uniqueColumns:     make(map[string]struct{}),
-		}
-		injectVirtualTable(newState, cte.Name, vt)
-	}
-
-	return newState
-}
-
-func domainsFromState(state *readableState) []string {
+// domainsFromState lists the domains of state, first first when it is one
+// of them, then the others sorted: an unqualified table resolves to the
+// first.
+func domainsFromState(state *readableState, first string) []string {
 	domains := make([]string, 0, len(state.domains))
 	for d := range state.domains {
-		domains = append(domains, d)
+		if d != first {
+			domains = append(domains, d)
+		}
+	}
+	sort.Strings(domains)
+	if _, ok := state.domains[first]; ok {
+		domains = append([]string{first}, domains...)
 	}
 	return domains
+}
+
+// queryDomain is the domain a query reads: its own, else the first one a
+// join names, else the first of state.
+func queryDomain(state *readableState, plan planner.Plan) string {
+	if plan.DomainName != "" {
+		return plan.DomainName
+	}
+	for _, join := range plan.Joins {
+		if join.DomainName != "" {
+			return join.DomainName
+		}
+	}
+	if domains := domainsFromState(state, ""); len(domains) > 0 {
+		return domains[0]
+	}
+	return ""
 }
 
 func injectVirtualTable(state *readableState, tableName string, vt *tableState) {

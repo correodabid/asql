@@ -138,10 +138,15 @@ func ParsePredicate(expression string) (*ast.Predicate, error) {
 
 func parseWithCTE(sql string) (ast.Statement, error) {
 	rest := strings.TrimSpace(sql[len("WITH "):])
+	recursive := false
+	if hasPrefixFold(rest, "RECURSIVE ") {
+		recursive = true
+		rest = strings.TrimSpace(rest[len("RECURSIVE "):])
+	}
 	ctes := make([]ast.CTE, 0)
 
 	for {
-		// Parse: name AS (SELECT ...)
+		// Parse: name [(col, ...)] AS (SELECT ...)
 
 		// Find "AS" keyword
 		asIndex := indexFold(rest, " AS ")
@@ -149,9 +154,9 @@ func parseWithCTE(sql string) (ast.Statement, error) {
 			return nil, fmt.Errorf("%w: CTE requires name AS (SELECT ...)", errInvalidSQL)
 		}
 
-		cteName := canonicalIdentifier(strings.TrimSpace(rest[:asIndex]))
-		if cteName == "" {
-			return nil, fmt.Errorf("%w: CTE name required", errInvalidSQL)
+		cteName, cteColumns, err := parseCTEName(strings.TrimSpace(rest[:asIndex]))
+		if err != nil {
+			return nil, err
 		}
 
 		afterAS := strings.TrimSpace(rest[asIndex+len(" AS "):])
@@ -171,12 +176,29 @@ func parseWithCTE(sql string) (ast.Statement, error) {
 			return nil, fmt.Errorf("CTE %q parse error: %w", cteName, err)
 		}
 
-		innerSelect, ok := innerStmt.(ast.SelectStatement)
-		if !ok {
+		cte := ast.CTE{Name: cteName, Columns: cteColumns}
+		switch body := innerStmt.(type) {
+		case ast.SelectStatement:
+			cte.Statement = body
+		case ast.SetOperationStatement:
+			if !recursive {
+				return nil, fmt.Errorf("%w: CTE body must be a SELECT statement", errInvalidSQL)
+			}
+			if !selectReadsTable(body.Right, cteName) {
+				return nil, fmt.Errorf("%w: the second part of recursive CTE %s must read %s in FROM or a JOIN", errInvalidSQL, cteName, cteName)
+			}
+			if body.Op != ast.SetOpUnion && body.Op != ast.SetOpUnionAll {
+				return nil, fmt.Errorf("%w: recursive CTE %s must be anchor UNION [ALL] recursive term, not %s", errInvalidSQL, cteName, body.Op)
+			}
+			if selectReadsTable(body.Left, cteName) {
+				return nil, fmt.Errorf("%w: the first part of recursive CTE %s must not read %s", errInvalidSQL, cteName, cteName)
+			}
+			cte.Statement = body.Left
+			cte.Recursive = &ast.RecursiveTerm{Statement: body.Right, All: body.Op == ast.SetOpUnionAll}
+		default:
 			return nil, fmt.Errorf("%w: CTE body must be a SELECT statement", errInvalidSQL)
 		}
-
-		ctes = append(ctes, ast.CTE{Name: cteName, Statement: innerSelect})
+		ctes = append(ctes, cte)
 
 		// After the closing paren, check for comma (more CTEs) or SELECT
 		rest = strings.TrimSpace(afterAS[closeIndex+1:])
@@ -205,6 +227,42 @@ func parseWithCTE(sql string) (ast.Statement, error) {
 	sel := selectStmt.(ast.SelectStatement)
 	sel.CTEs = append(ctes, sel.CTEs...)
 	return sel, nil
+}
+
+// parseCTEName parses "name" or "name (col, ...)".
+func parseCTEName(raw string) (string, []string, error) {
+	var columns []string
+	if open := strings.IndexByte(raw, '('); open >= 0 {
+		if !strings.HasSuffix(raw, ")") {
+			return "", nil, fmt.Errorf("%w: CTE column list must be parenthesized", errInvalidSQL)
+		}
+		for _, column := range strings.Split(raw[open+1:len(raw)-1], ",") {
+			column = canonicalIdentifier(strings.TrimSpace(column))
+			if column == "" {
+				return "", nil, fmt.Errorf("%w: empty column name in CTE column list", errInvalidSQL)
+			}
+			columns = append(columns, column)
+		}
+		raw = strings.TrimSpace(raw[:open])
+	}
+	name := canonicalIdentifier(raw)
+	if name == "" {
+		return "", nil, fmt.Errorf("%w: CTE name required", errInvalidSQL)
+	}
+	return name, columns, nil
+}
+
+// selectReadsTable reports whether sel reads table in FROM or a JOIN.
+func selectReadsTable(sel ast.SelectStatement, table string) bool {
+	if strings.EqualFold(sel.TableName, table) {
+		return true
+	}
+	for _, join := range sel.Joins {
+		if strings.EqualFold(join.TableName, table) {
+			return true
+		}
+	}
+	return false
 }
 
 // findMatchingParen finds the index of the closing paren matching the open paren at position start.
@@ -2351,7 +2409,10 @@ func parseSimplePredicate(clause string) (*ast.Predicate, error) {
 	if splitIdx >= 0 {
 		left = clause[:splitIdx]
 		rest := clause[splitIdx:]
-		if strings.HasPrefix(rest, ">=") {
+		if strings.HasPrefix(rest, "!=") || strings.HasPrefix(rest, "<>") {
+			operator = "!="
+			right = rest[2:]
+		} else if strings.HasPrefix(rest, ">=") {
 			operator = ">="
 			right = rest[2:]
 		} else if strings.HasPrefix(rest, "<=") {
@@ -2507,6 +2568,10 @@ func findComparisonOperator(clause string) int {
 			return i
 		case '<':
 			return i
+		case '!':
+			if i+1 < len(clause) && clause[i+1] == '=' {
+				return i
+			}
 		}
 	}
 	return -1
