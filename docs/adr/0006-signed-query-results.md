@@ -1,6 +1,6 @@
 # ADR 0006: Sign query results bound to a committed ledger state
 
-- Status: Proposed. Phase 2 of the [verifiable queries roadmap](../architecture/verifiable-queries-roadmap-v1.md).
+- Status: Accepted. Phase 2 of the [verifiable queries roadmap](../architecture/verifiable-queries-roadmap-v1.md).
 - Date: 2026-10-20
 - Decision drivers:
   - an auditor or counterparty should be able to receive the answer to a query and later check which node gave it, against which published state, and whether the answer is right
@@ -75,7 +75,16 @@ Both are fixed big-endian byte strings, not JSON, for the same reason as digests
   engine's order, which is deterministic; a query that wants a particular order says
   `ORDER BY`.
 - **Attestation.** `asql-result-attestation-v1`, a zero byte, then the fields in the
-  order above, strings and lists length-prefixed, `signed_at` as Unix ns.
+  order above, strings and lists length-prefixed, `signed_at` as Unix ns. Lengths and
+  list counts are `u32`.
+- **Rows in transit.** The rows that travel with an attestation are a JSON array of
+  arrays of typed cells, so the hash can be recomputed from them: a JSON number would
+  not tell `1` from `1.0`, and loses 64-bit integers in many readers. A cell is `null`
+  or `[kind, value]`: `["i", "42"]`, `["f", "1.5"]` (shortest form that parses back to
+  the same bits), `["s", "text"]`, `["b", true]`, `["t", "1710498645000000"]` (Unix µs)
+  and `["j", "{...}"]`.
+- **Engine version.** The module version of the binary, or `devel+<commit>` for a
+  build from a source checkout.
 
 ### 3. Where it is computed
 
@@ -149,14 +158,14 @@ so. No new flags.
 - **Accept the current, unapplied WAL head.** Rejected for the same reason as for
   digests (ADR 0005 § 4): a new Raft leader can still replace it.
 
-## Open questions
+## Resolved questions
 
-1. Should attestations also be appended to a sidecar log like digests, so the node
-   keeps evidence of what it attested? The proposal is no: the requester keeps it.
-2. Should `verify-result` step 4 run in-process on a copy of the data directory, as
-   proposed, or against a running replica?
-3. Is the admin HTTP surface needed in v1 for non-pgwire clients, which would require
-   principal authentication there first?
+1. Attestations are not appended to a sidecar log: the requester keeps them, and the
+   node writes nothing per attested query.
+2. `verify-result` step 4 runs in-process on a scratch copy of the data directory, so
+   it depends on no running node.
+3. The admin HTTP surface is not part of v1. It comes once that API authenticates
+   principals.
 
 ## Implementation plan
 

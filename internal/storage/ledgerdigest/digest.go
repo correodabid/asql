@@ -1,7 +1,8 @@
 // Package ledgerdigest implements signed WAL ledger digests (ADR 0005,
 // ledger=signed): the digest format and its canonical encoding, Ed25519 keys,
 // the sidecar digest log, and the checkpointer that signs committed chain
-// heads.
+// heads. It also implements result attestations (ADR 0006), signed with the
+// same keys under their own domain.
 //
 // A digest commits to the ledger chain value at a committed LSN. Verifying
 // one needs a public key obtained outside the digest itself: a digest never
