@@ -17,6 +17,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/correodabid/asql/internal/engine/executor"
 	"github.com/correodabid/asql/internal/engine/parser/ast"
@@ -37,6 +38,26 @@ type node struct {
 	walPath   string
 	auditPath string
 	snapDir   string
+	clock     *stepClock
+}
+
+// stepClock gives commit times (ADR 0007) that are the same on every run of
+// a workload: it starts at a fixed date and advances a second per reading,
+// across restarts of the node. back makes the next reading jump back.
+type stepClock struct {
+	next time.Time
+	back time.Duration
+}
+
+func newStepClock() *stepClock {
+	return &stepClock{next: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}
+}
+
+func (c *stepClock) Now() time.Time {
+	now := c.next.Add(-c.back)
+	c.back = 0
+	c.next = c.next.Add(time.Second)
+	return now
 }
 
 type nodeOptions struct {
@@ -48,7 +69,7 @@ type nodeOptions struct {
 func openNode(t *testing.T, dir string, opts nodeOptions) *node {
 	t.Helper()
 	n := &node{t: t, dir: dir, opts: opts, walPath: filepath.Join(dir, "wal", "wal"),
-		auditPath: filepath.Join(dir, "audit", "audit"), snapDir: filepath.Join(dir, "snap")}
+		auditPath: filepath.Join(dir, "audit", "audit"), snapDir: filepath.Join(dir, "snap"), clock: newStepClock()}
 	for _, d := range []string{filepath.Dir(n.walPath), filepath.Dir(n.auditPath), n.snapDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
@@ -73,7 +94,7 @@ func (n *node) open() {
 		_ = store.Close()
 		n.t.Fatalf("open audit store: %v", err)
 	}
-	opts := append([]executor.EngineOption{executor.WithAuditStore(auditStore)}, n.opts.engine...)
+	opts := append([]executor.EngineOption{executor.WithAuditStore(auditStore), executor.WithClock(n.clock)}, n.opts.engine...)
 	engine, err := executor.New(context.Background(), store, n.snapDir, opts...)
 	if err != nil {
 		_ = store.Close()
@@ -255,6 +276,11 @@ func (n *node) fingerprint(p probes) fingerprint {
 		f.add(fmt.Sprintf("as-of-lsn %d", c.LSN), b.String())
 		lsn, err := e.LSNForTimestamp(ctx, c.Timestamp)
 		f.add(fmt.Sprintf("ts %d", c.Timestamp), fmt.Sprintf("%d err=%v", lsn, err))
+		// A date resolves to the same commit on every path (ADR 0007).
+		for _, micros := range []int64{c.CommitTimeMicros - 1, c.CommitTimeMicros} {
+			lsn, err := e.LSNForCommitTime(micros)
+			f.add(fmt.Sprintf("commit time %d", micros), fmt.Sprintf("%d err=%v", lsn, err))
+		}
 	}
 	return f
 }
