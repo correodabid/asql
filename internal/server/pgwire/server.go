@@ -1396,7 +1396,7 @@ func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connSt
 					values = append(values, []byte(strconv.FormatFloat(literal.FloatValue, 'g', -1, 64)))
 				case ast.LiteralTimestamp:
 					t := time.UnixMicro(literal.NumberValue).UTC()
-					values = append(values, []byte(t.Format("2006-01-02 15:04:05")))
+					values = append(values, []byte(t.Format("2006-01-02 15:04:05.999999")))
 				case ast.LiteralJSON:
 					values = append(values, []byte(literal.StringValue))
 				default:
@@ -1489,7 +1489,7 @@ func sendInterceptedResult(backend *pgproto3.Backend, session *executor.Session,
 					values = append(values, []byte(strconv.FormatFloat(literal.FloatValue, 'g', -1, 64)))
 				case ast.LiteralTimestamp:
 					t := time.UnixMicro(literal.NumberValue).UTC()
-					values = append(values, []byte(t.Format("2006-01-02 15:04:05")))
+					values = append(values, []byte(t.Format("2006-01-02 15:04:05.999999")))
 				case ast.LiteralJSON:
 					values = append(values, []byte(literal.StringValue))
 				default:

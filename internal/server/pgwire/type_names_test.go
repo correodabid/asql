@@ -51,13 +51,12 @@ func TestPostgresTypeNames(t *testing.T) {
 			t.Fatalf("%s: got %d %d %t %v %v %v", mode, id, n, active, cost, temperature, ratio)
 		}
 
-		// Parameters of these types round-trip too. Not over the simple
-		// protocol: pgx sends its arguments as quoted strings there, and ASQL
-		// stores a quoted string in an INT, BOOL or FLOAT column as text.
+		// Parameters of these types round-trip too.
 		if mode == "simple_protocol" {
-			continue
+			id = 3
+		} else {
+			id = 2
 		}
-		id = 2
 		for _, sql := range []string{"BEGIN DOMAIN shop"} {
 			if _, err := c.Exec(ctx, sql); err != nil {
 				t.Fatalf("%s: %v", mode, err)

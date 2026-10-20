@@ -218,6 +218,9 @@ func (engine *Engine) RowHistory(ctx context.Context, sql string, txDomains []st
 		return Result{Status: "OK"}, nil
 	}
 
+	if plan.Filter, err = coercePredicate(plan.Filter, selectColumnType(state, plan)); err != nil {
+		return Result{}, err
+	}
 	prefilter := historyPrefilter(&plan)
 	var historyRows []map[string]ast.Literal
 	for _, entry := range table.changeLog {
@@ -419,6 +422,9 @@ func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planne
 	}
 
 	selectPlan := *plan
+	if selectPlan.Filter, err = coercePredicate(selectPlan.Filter, selectColumnType(state, selectPlan)); err != nil {
+		return Result{}, err
+	}
 	prefilter := historyPrefilter(&selectPlan)
 	var historyRows []map[string]ast.Literal
 	for _, e := range entries {
@@ -501,6 +507,16 @@ func (engine *Engine) selectHistory(ctx context.Context, state *readableState, p
 	for i, column := range columns {
 		history.columnIndex[column] = i
 	}
+	// Typed like the table, so the WHERE's quoted literals are coerced.
+	if original, ok := state.domains[plan.DomainName]; ok {
+		if table, ok := original.tables[plan.TableName]; ok {
+			for name, def := range table.columnDefinitions {
+				history.columnDefinitions[name] = def
+			}
+		}
+	}
+	history.columnDefinitions[HistoryCommitLSNColumnName] = ast.ColumnDefinition{Name: HistoryCommitLSNColumnName, Type: ast.DataTypeInt}
+	history.columnDefinitions[HistoryOperationColumnName] = ast.ColumnDefinition{Name: HistoryOperationColumnName, Type: ast.DataTypeText}
 	for i, row := range historyRows {
 		history.rows[i] = rowFromMap(columns, row)
 	}

@@ -8,7 +8,7 @@ package executor
 // Wire format:
 //   [0x02]                      — version marker
 //   [uvarint domainLen][domain] — domain name
-//   [1B op]                     — 1=INSERT, 2=UPDATE, 3=DELETE, 4=DDL-SQL(legacy), 5=DDL-struct
+//   [1B op]                     — 1=INSERT, 2=UPDATE, 3=DELETE, 4=DDL-SQL(legacy), 5=DDL-struct, 6=DML-SQL
 //   op-specific body (see inline docs below)
 //
 // INSERT body:
@@ -26,6 +26,11 @@ package executor
 // DDL-SQL body (op=0x04, legacy — backward compat only, never written by new code):
 //   [uvarint sqlLen][sql bytes]
 //   (decoded by parsing SQL into a Plan at replay time)
+//
+// DML-SQL body (op=0x06): [uvarint sqlLen][sql bytes], as DDL-SQL. Written
+// for DML whose predicate the binary format cannot hold. Replay coerces its
+// quoted literals to the column types, as the statement was when queued;
+// DML stored under 0x04 by older versions is replayed without coercion.
 //
 // DDL-struct body (op=0x05, current format — parser-free at replay):
 //   [1B ddl_sub_op]  — identifies the DDL operation
@@ -110,6 +115,7 @@ const (
 	v2OpDelete    byte = 0x03
 	v2OpDDL       byte = 0x04 // legacy: SQL text payload (backward compat, never written by new code)
 	v2OpDDLStruct byte = 0x05 // structured DDL: parser-free binary encoding
+	v2OpDMLSQL    byte = 0x06 // DML as SQL text, literals coerced at apply
 )
 
 // DDL sub-operation codes (written after v2OpDDLStruct)
@@ -553,7 +559,7 @@ func encodeMutationPayloadV2(domain string, plan planner.Plan, sql string) []byt
 			return p
 		}
 		// Predicate contained JsonAccess/subquery/LIKE/BETWEEN — store as SQL.
-		return encodeDDLPayload(domain, sql)
+		return encodeSQLPayload(domain, v2OpDMLSQL, sql)
 	case planner.OperationCreateTable,
 		planner.OperationAlterTableAddColumn,
 		planner.OperationAlterTableDropColumn,
@@ -811,15 +817,19 @@ func encodeVersionedFK(w *v2Buf, vfk ast.VersionedForeignKey) {
 	w.writeStr(vfk.ReferencesColumn)
 }
 
-// encodeDDLPayload stores raw SQL text under the legacy op code v2OpDDL.
-// Only used as a fallback for DML statements whose predicates contain
-// non-binary-encodable constructs (LIKE, BETWEEN, JsonAccess, subqueries).
-// DDL operations always use encodeDDLStructPayload instead.
+// encodeDDLPayload stores raw SQL text under the legacy op code v2OpDDL, for
+// statements that are neither DML nor DDL. DML whose predicate contains
+// non-binary-encodable constructs (LIKE, BETWEEN, JsonAccess, subqueries) is
+// stored as SQL under v2OpDMLSQL; DDL always uses encodeDDLStructPayload.
 func encodeDDLPayload(domain, sql string) []byte {
+	return encodeSQLPayload(domain, v2OpDDL, sql)
+}
+
+func encodeSQLPayload(domain string, op byte, sql string) []byte {
 	w := &v2Buf{b: make([]byte, 0, 8+len(domain)+len(sql))}
 	w.writeByte(payloadVersion)
 	w.writeStr(domain)
-	w.writeByte(v2OpDDL)
+	w.writeByte(op)
 	w.writeStr(sql)
 	return w.b
 }
@@ -842,8 +852,9 @@ func decodeMutationPayloadV2(data []byte) (domain string, plan planner.Plan, err
 		return "", planner.Plan{}, fmt.Errorf("payloadv2: read op: %w", err)
 	}
 
-	// Legacy SQL-text DDL (backward compat — old WAL records only).
-	if op == v2OpDDL {
+	// SQL text: legacy DDL and DML, and current DML with a predicate the
+	// binary format cannot hold.
+	if op == v2OpDDL || op == v2OpDMLSQL {
 		sql, err := r.readStr()
 		if err != nil {
 			return "", planner.Plan{}, fmt.Errorf("payloadv2: read DDL sql: %w", err)
@@ -856,6 +867,7 @@ func decodeMutationPayloadV2(data []byte) (domain string, plan planner.Plan, err
 		if err != nil {
 			return "", planner.Plan{}, fmt.Errorf("payloadv2: build DDL plan: %w", err)
 		}
+		plan.CoerceLiterals = op == v2OpDMLSQL
 		return domain, plan, nil
 	}
 

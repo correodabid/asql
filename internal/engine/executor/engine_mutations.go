@@ -873,6 +873,10 @@ func (engine *Engine) applyMutationPlanWithEntityTracking(state *readableState, 
 }
 
 func (engine *Engine) applyMutationPlanWithEntityTrackingTracked(state *readableState, plan planner.Plan, mutationLSN uint64, collector map[string]map[string][]string, clonedTables map[string]struct{}, fkValCache map[string]struct{}) error {
+	// Before the entity tracking below evaluates the WHERE.
+	if err := coerceDecodedPlan(state, &plan); err != nil {
+		return err
+	}
 	domainState := state.domains[plan.DomainName]
 	trackEntities := shouldTrackEntityMutations(domainState, plan.TableName)
 
@@ -952,6 +956,9 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 
 	domainState := getOrCreateDomain(state, plan.DomainName)
 	if err := checkAppendOnly(domainState.tables[plan.TableName], plan); err != nil {
+		return err
+	}
+	if err := coerceDecodedPlan(state, &plan); err != nil {
 		return err
 	}
 

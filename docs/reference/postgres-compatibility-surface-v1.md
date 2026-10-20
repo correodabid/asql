@@ -74,6 +74,8 @@ and current privilege semantics, see
   - `SAVEPOINT <name>` / `ROLLBACK TO [SAVEPOINT] <name>`
   - `CREATE TABLE`, `CREATE INDEX`
   - column types `INT`, `TEXT`, `JSON`, `BOOL`, `FLOAT` and `TIMESTAMP`, with the PostgreSQL names `INTEGER`, `INT4`, `BIGINT`, `INT8`, `BOOLEAN`, `REAL`, `FLOAT4`, `FLOAT8`, `DOUBLE` and `DOUBLE PRECISION` accepted as aliases. `FLOAT` is 64-bit, and aliases are stored under the canonical name
+  - quoted literals take the type of the column they are stored in or compared with, as in PostgreSQL: `'2'` is stored in an `INT` column as 2 and `WHERE id = '2'` finds it. This covers `INT`, `FLOAT`, `BOOL` (`t`, `true`, `yes`, `on`, `1` and their negatives) and `TIMESTAMP` (ISO 8601 with a `T` or a space, optional fraction and zone, UTC when the zone is absent). Text that is not a valid value fails with `22P02` (`22007` for timestamps). pgx over `simple_protocol` relies on this: it sends every argument as a quoted string
+  - timestamps are returned with their microseconds in text format, and accepted as binary parameters (`timestamp`, `timestamptz`)
   - `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE TABLE`
   - `SELECT` (within current ASQL SQL subset)
 - Row encoding: text format (`Format=0`) with deterministic row order driven by ASQL planner/executor semantics.

@@ -8,7 +8,7 @@ import (
 // The workload covers what replay must reproduce: multi-domain and cross-
 // domain transactions, indexes, entities, foreign and versioned foreign keys,
 // timestamp literals, literal, autoincrement and volatile (UUID_V7, TX_TIMESTAMP) defaults,
-// multi-row inserts, predicate UPDATE and DELETE, schema evolution,
+// multi-row inserts, quoted literals in typed columns, predicate UPDATE and DELETE, schema evolution,
 // savepoints, and rolled-back transactions. Phases are meant to be run with
 // restarts or crashes in between.
 
@@ -76,6 +76,9 @@ func evolvePhase() []tx {
 		{domains: []string{"inventory"}, statements: []string{
 			"ALTER TABLE items ADD COLUMN location TEXT",
 			"UPDATE items SET location = 'A1' WHERE qty >= 25",
+			// Quoted literals take the column type; LIKE keeps this one as
+			// SQL text in the WAL, coerced again on replay.
+			"UPDATE items SET qty = '30' WHERE sku LIKE 'SKU-00%' AND qty < '5'",
 		}},
 		// Savepoint: only the statements before ROLLBACK TO survive.
 		{domains: []string{"inventory"}, statements: []string{
