@@ -1072,6 +1072,16 @@ func TestExecuteWriteWriteConflictDetectedBySnapshot(t *testing.T) {
 	if _, err := engine.Execute(ctx, sessionB, "COMMIT"); err == nil {
 		t.Fatal("expected write conflict on sessionB commit")
 	}
+	// The failed COMMIT ended sessionB's transaction, as in PostgreSQL.
+	if sessionB.InTransaction() {
+		t.Fatal("sessionB still has a transaction after its COMMIT failed")
+	}
+	if _, err := engine.Execute(ctx, sessionB, "BEGIN DOMAIN accounts"); err != nil {
+		t.Fatalf("sessionB begin after a failed commit: %v", err)
+	}
+	if _, err := engine.Execute(ctx, sessionB, "ROLLBACK"); err != nil {
+		t.Fatalf("sessionB rollback: %v", err)
+	}
 
 	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT email FROM users WHERE id = 1", []string{"accounts"}, 8192)
 	if err != nil {

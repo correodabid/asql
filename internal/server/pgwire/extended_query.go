@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -995,6 +996,26 @@ func literalToBinary(lit ast.Literal, oid uint32) []byte {
 		buf := make([]byte, 2)
 		binary.BigEndian.PutUint16(buf, uint16(n))
 		return buf
+	case 700, 701: // float4 / float8 – IEEE 754, big-endian
+		var f float64
+		switch lit.Kind {
+		case ast.LiteralFloat:
+			f = lit.FloatValue
+		case ast.LiteralNumber:
+			f = float64(lit.NumberValue)
+		default:
+			if parsed, err := strconv.ParseFloat(lit.StringValue, 64); err == nil {
+				f = parsed
+			}
+		}
+		if oid == 700 {
+			buf := make([]byte, 4)
+			binary.BigEndian.PutUint32(buf, math.Float32bits(float32(f)))
+			return buf
+		}
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, math.Float64bits(f))
+		return buf
 	case 16: // bool – 1 byte
 		switch lit.Kind {
 		case ast.LiteralBoolean:
@@ -1911,6 +1932,25 @@ func decodeBinaryParam(data []byte, oid uint32) (string, error) {
 		}
 		n := int64(binary.BigEndian.Uint64(data))
 		return strconv.FormatInt(n, 10), nil
+	case 700, 701: // float4, float8
+		var f float64
+		switch {
+		case oid == 700 && len(data) == 4:
+			f = float64(math.Float32frombits(binary.BigEndian.Uint32(data)))
+		case oid == 701 && len(data) == 8:
+			f = math.Float64frombits(binary.BigEndian.Uint64(data))
+		default:
+			return "", fmt.Errorf("invalid float binary length %d", len(data))
+		}
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return "", fmt.Errorf("unsupported float value %v", f)
+		}
+		// Plain decimal notation with a point, so the literal parses as a float.
+		text := strconv.FormatFloat(f, 'f', -1, 64)
+		if !strings.Contains(text, ".") {
+			text += ".0"
+		}
+		return text, nil
 	case 16: // bool
 		if len(data) != 1 {
 			return "", fmt.Errorf("invalid bool binary length %d", len(data))
