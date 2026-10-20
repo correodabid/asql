@@ -14,6 +14,7 @@ import (
 
 	"github.com/correodabid/asql/internal/engine/executor"
 	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/ports"
 	"github.com/correodabid/asql/internal/platform/datadir"
 	"github.com/correodabid/asql/internal/storage/ledgerdigest"
 	"github.com/correodabid/asql/internal/storage/wal"
@@ -26,6 +27,13 @@ type ledgerSigning struct {
 	checkpointer *ledgerdigest.Checkpointer
 	logger       *slog.Logger
 
+	// For result attestations (ADR 0006).
+	store    *wal.SegmentedLogStore
+	signer   ports.LedgerSigner
+	nodeID   string
+	recordAt func(ctx context.Context, lsn uint64) (term, timestamp uint64, err error)
+	now      func() time.Time
+
 	mu      sync.Mutex
 	cancel  context.CancelFunc
 	done    chan struct{}
@@ -37,6 +45,16 @@ func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engin
 	if err != nil {
 		return nil, err
 	}
+	recordAt := func(ctx context.Context, lsn uint64) (uint64, uint64, error) {
+		records, err := store.ReadFrom(ctx, lsn, 1)
+		if err != nil {
+			return 0, 0, err
+		}
+		if len(records) == 0 || records[0].LSN != lsn {
+			return 0, 0, fmt.Errorf("WAL record %d not found", lsn)
+		}
+		return records[0].Term, records[0].Timestamp, nil
+	}
 	checkpointer, err := ledgerdigest.NewCheckpointer(ledgerdigest.CheckpointerConfig{
 		NodeID: config.NodeID,
 		Signer: signer,
@@ -47,16 +65,7 @@ func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engin
 			// that a new leader could still replace.
 			CommittedLSN: engine.HeadLSN,
 			ChainAt:      store.LedgerChainAt,
-			RecordAt: func(ctx context.Context, lsn uint64) (uint64, uint64, error) {
-				records, err := store.ReadFrom(ctx, lsn, 1)
-				if err != nil {
-					return 0, 0, err
-				}
-				if len(records) == 0 || records[0].LSN != lsn {
-					return 0, 0, fmt.Errorf("WAL record %d not found", lsn)
-				}
-				return records[0].Term, records[0].Timestamp, nil
-			},
+			RecordAt:     recordAt,
 		},
 		Interval:  config.LedgerDigestInterval,
 		EveryLSNs: config.LedgerDigestEveryLSNs,
@@ -67,7 +76,10 @@ func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engin
 		return nil, err
 	}
 	config.Logger.Info("ledger: signing digests", "key_id", signer.KeyID(), "dir", dd.LedgerDir())
-	return &ledgerSigning{log: digestLog, checkpointer: checkpointer, logger: config.Logger}, nil
+	return &ledgerSigning{
+		log: digestLog, checkpointer: checkpointer, logger: config.Logger,
+		store: store, signer: signer, nodeID: config.NodeID, recordAt: recordAt, now: time.Now,
+	}, nil
 }
 
 func (ls *ledgerSigning) start() {
