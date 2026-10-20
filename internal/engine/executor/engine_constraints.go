@@ -637,7 +637,11 @@ func rebuildInsertSQL(tableName string, columns []string, values []ast.Literal) 
 			} else {
 				b.WriteString("false")
 			}
-		case ast.LiteralString, ast.LiteralTimestamp:
+		case ast.LiteralTimestamp:
+			b.WriteByte('\'')
+			b.WriteString(time.UnixMicro(val.NumberValue).UTC().Format(time.RFC3339Nano))
+			b.WriteByte('\'')
+		case ast.LiteralString:
 			b.WriteByte('\'')
 			b.WriteString(strings.ReplaceAll(val.StringValue, "'", "''"))
 			b.WriteByte('\'')
@@ -688,7 +692,11 @@ func rebuildMultiInsertSQL(tableName string, columns []string, firstValues []ast
 				} else {
 					b.WriteString("false")
 				}
-			case ast.LiteralString, ast.LiteralTimestamp:
+			case ast.LiteralTimestamp:
+				b.WriteByte('\'')
+				b.WriteString(time.UnixMicro(val.NumberValue).UTC().Format(time.RFC3339Nano))
+				b.WriteByte('\'')
+			case ast.LiteralString:
 				b.WriteByte('\'')
 				b.WriteString(strings.ReplaceAll(val.StringValue, "'", "''"))
 				b.WriteByte('\'')

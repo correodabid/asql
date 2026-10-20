@@ -48,7 +48,10 @@ const (
 	litBoolTrue  byte = 0x04
 	litBoolFalse byte = 0x05
 	litJSON      byte = 0x06
-	litTimestamp byte = 0x08
+	// litTimestamp wrote the literal's StringValue, which is always empty:
+	// timestamps live in NumberValue. Only old entries have it.
+	litTimestamp       byte = 0x08
+	litTimestampMicros byte = 0x09
 )
 
 const (
@@ -363,8 +366,8 @@ func encodeLit(w *abuf, lit ast.Literal) {
 		w.byte1(litJSON)
 		w.str(lit.StringValue)
 	case ast.LiteralTimestamp:
-		w.byte1(litTimestamp)
-		w.str(lit.StringValue)
+		w.byte1(litTimestampMicros)
+		w.u64(uint64(lit.NumberValue))
 	default:
 		w.byte1(litNull)
 	}
@@ -494,6 +497,9 @@ func decodeLit(r *areader) (ast.Literal, error) {
 	case litTimestamp:
 		s, err := r.str()
 		return ast.Literal{Kind: ast.LiteralTimestamp, StringValue: s}, err
+	case litTimestampMicros:
+		v, err := r.u64()
+		return ast.Literal{Kind: ast.LiteralTimestamp, NumberValue: int64(v)}, err
 	default:
 		return ast.Literal{}, fmt.Errorf("audit: unknown literal kind 0x%02x", kind)
 	}
