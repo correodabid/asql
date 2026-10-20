@@ -184,6 +184,7 @@ func (engine *Engine) recordMutationPressure(kind mutationPressureKind) {
 type engineSnapshot struct {
 	lsn       uint64
 	logicalTS uint64
+	lastTxNum uint64 // highest TxID number in the WAL up to lsn
 	catalog   *domains.Catalog
 	state     engineState
 
@@ -340,6 +341,7 @@ func captureSnapshotWithCatalog(state *readableState, catalog *domains.Catalog) 
 	return engineSnapshot{
 		lsn:       state.headLSN,
 		logicalTS: state.logicalTS,
+		lastTxNum: state.lastTxNum,
 		catalog:   cloneCatalog(catalog),
 		state:     engineState{domains: domains, principals: clonePrincipals(state.principals)},
 	}
@@ -371,6 +373,7 @@ func readableStateFromSnapshotShared(snap *engineSnapshot) *readableState {
 		domains:    snap.state.domains,
 		principals: snap.state.principals,
 		logicalTS:  snap.logicalTS,
+		lastTxNum:  snap.lastTxNum,
 		headLSN:    snap.lsn,
 	}
 }
@@ -382,6 +385,7 @@ func (engine *Engine) restoreSnapshot(snap *engineSnapshot) {
 	newState := readableStateFromSnapshotShared(snap)
 	engine.readState.Store(newState)
 	engine.logicalTS = snap.logicalTS
+	engine.setLastTxNum(snap.lastTxNum)
 	engine.headLSN = snap.lsn
 }
 

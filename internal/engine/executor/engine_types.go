@@ -77,6 +77,7 @@ type readableState struct {
 	principals map[string]*principalState
 	headLSN    uint64
 	logicalTS  uint64
+	lastTxNum  uint64 // highest TxID number in the WAL up to headLSN
 }
 
 // cloneForMutation creates a shallow copy suitable for mutation.
@@ -96,6 +97,7 @@ func (s *readableState) cloneForMutation(affectedDomains map[string]struct{}) *r
 		principals: clonePrincipals(s.principals),
 		headLSN:    s.headLSN,
 		logicalTS:  s.logicalTS,
+		lastTxNum:  s.lastTxNum,
 	}
 }
 
