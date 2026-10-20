@@ -57,7 +57,7 @@ func literalToText(lit ast.Literal) []byte {
 		return []byte(strconv.FormatFloat(lit.FloatValue, 'g', -1, 64))
 	case ast.LiteralTimestamp:
 		t := time.UnixMicro(lit.NumberValue).UTC()
-		return []byte(t.Format("2006-01-02 15:04:05"))
+		return []byte(t.Format("2006-01-02 15:04:05.999999"))
 	case ast.LiteralJSON:
 		return []byte(lit.StringValue)
 	default:

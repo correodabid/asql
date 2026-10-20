@@ -1991,6 +1991,17 @@ func decodeBinaryParam(data []byte, oid uint32) (string, error) {
 			return "true", nil
 		}
 		return "false", nil
+	case 1114, 1184: // timestamp, timestamptz: microseconds since 2000-01-01 UTC
+		if len(data) != 8 {
+			return "", fmt.Errorf("invalid timestamp binary length %d", len(data))
+		}
+		const pgEpochOffsetMicros = int64(946_684_800_000_000)
+		micros := int64(binary.BigEndian.Uint64(data))
+		if micros == math.MaxInt64 || micros == math.MinInt64 {
+			return "", fmt.Errorf("unsupported infinite timestamp")
+		}
+		// RFC 3339 with a T, which the parser reads as a timestamp literal.
+		return quoteSQLString(time.UnixMicro(micros + pgEpochOffsetMicros).UTC().Format(time.RFC3339Nano)), nil
 	default:
 		return "", fmt.Errorf("unsupported binary OID %d", oid)
 	}
