@@ -78,6 +78,11 @@ type Plan struct {
 	SetOp                ast.SetOpKind             `json:"set_op,omitempty"`
 	LeftPlan             *Plan                     `json:"left_plan,omitempty"`
 	RightPlan            *Plan                     `json:"right_plan,omitempty"`
+	// CoerceLiterals asks the apply to coerce quoted literals to the column
+	// types (see executor.coerceWritePlan). Replay sets it for the DML the
+	// WAL stores as SQL text: the statement was coerced when it was queued,
+	// and its text was not.
+	CoerceLiterals bool `json:"-"`
 }
 
 // Build converts an AST statement into an executable logical plan.

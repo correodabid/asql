@@ -507,6 +507,10 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 		if err := engine.AuthorizePlan(session.Principal(), plan); err != nil {
 			return Result{}, err
 		}
+		columnType := pendingColumnType(engine.committedTable(plan.DomainName, plan.TableName), session.activeTx.plans, plan.DomainName, plan.TableName)
+		if err := coerceWritePlan(&plan, columnType); err != nil {
+			return Result{}, err
+		}
 
 		// Eager default resolution for INSERT ... RETURNING.
 		// Resolve defaults (UUID_V7, autoincrement) and VFK versions now so we

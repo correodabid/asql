@@ -28,6 +28,12 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 		return nil, errTableNotFound
 	}
 
+	filter, err := coercePredicate(plan.Filter, selectColumnType(state, plan))
+	if err != nil {
+		return nil, err
+	}
+	plan.Filter = filter
+
 	matched := make([]map[string]ast.Literal, 0, len(table.rows))
 	orderedByIndex := false
 	selectedStrategy := scanStrategyFullScan
