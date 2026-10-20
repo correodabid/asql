@@ -39,6 +39,9 @@ type persistedSnapshot struct {
 	// LedgerChain is the WAL ledger chain value at LSN (ADR 0005).
 	LedgerChain    [32]byte
 	HasLedgerChain bool
+
+	// LastTxNum is the highest TxID number in the WAL up to LSN.
+	LastTxNum uint64
 }
 
 type persistedCatalog struct {
@@ -404,6 +407,7 @@ func marshalableToSnapshot(ps persistedSnapshot) engineSnapshot {
 		logicalTS:      ps.LogicalTS,
 		ledgerChain:    ps.LedgerChain,
 		hasLedgerChain: ps.HasLedgerChain,
+		lastTxNum:      ps.LastTxNum,
 		state:          engineState{domains: make(map[string]*domainState, len(ps.Domains)), principals: make(map[string]*principalState, len(ps.Principals))},
 	}
 
@@ -1052,6 +1056,7 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 
 				LedgerChain:    entry.ledgerChain,
 				HasLedgerChain: entry.hasLedgerChain,
+				LastTxNum:      entry.lastTxNum,
 			}
 			snap := marshalableToSnapshot(full)
 			rebuildAllIndexes(&snap)
