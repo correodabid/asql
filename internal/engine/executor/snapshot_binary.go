@@ -15,7 +15,12 @@ import (
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
-// Binary snapshot format (version 13).
+// Binary snapshot format (version 14).
+//
+// Changes vs v13:
+//   - [8B] last_tx_num after the ledger chain: the highest TxID number in the
+//     WAL up to the snapshot LSN, so new TxIDs resume after it. Older
+//     versions decode it as 0.
 //
 // Changes vs v12:
 //   - [1B] has_ledger_chain + [32B] ledger chain at the snapshot LSN after
@@ -96,7 +101,7 @@ import (
 
 var (
 	snapMagic   = [4]byte{'A', 'S', 'N', 'P'}
-	snapVersion = byte(13)
+	snapVersion = byte(14)
 
 	// snapCRC32C is the CRC32C (Castagnoli) table, hardware-accelerated on x86 (SSE4.2) and ARM.
 	snapCRC32C = crc32.MakeTable(crc32.Castagnoli)
@@ -313,6 +318,14 @@ func (r *binReader) readLedgerChain() ([32]byte, bool) {
 	copy(chain[:], r.data[r.off:r.off+len(chain)])
 	r.off += len(chain)
 	return chain, has
+}
+
+// readLastTxNum reads the v14 TxID high-water mark; older versions have none.
+func (r *binReader) readLastTxNum() uint64 {
+	if r.version < 14 {
+		return 0
+	}
+	return r.u64()
 }
 
 // str reads a string as a 4-byte dictionary index (v9 format).
@@ -1445,6 +1458,7 @@ func (w *binWriter) snapshot(snap *engineSnapshot, isFull bool, prevLogicalTS ui
 	w.boolean(isFull)
 	w.boolean(snap.hasLedgerChain)
 	w.buf.Write(snap.ledgerChain[:])
+	w.u64(snap.lastTxNum)
 	w.catalog(snap)
 	w.principals(snap.state.principals)
 
@@ -1526,6 +1540,7 @@ type rawSnapshotFileEntry struct {
 
 	ledgerChain    [32]byte
 	hasLedgerChain bool
+	lastTxNum      uint64
 }
 
 // decodeSnapshotFileBinaryRaw decodes a binary snapshot file and returns the raw
@@ -1577,6 +1592,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 		logicalTS := r.u64()
 		isFull := r.boolean()
 		ledgerChain, hasLedgerChain := r.readLedgerChain()
+		lastTxNum := r.readLastTxNum()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1593,6 +1609,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 
 			ledgerChain:    ledgerChain,
 			hasLedgerChain: hasLedgerChain,
+			lastTxNum:      lastTxNum,
 		})
 	}
 	return entries, nil
@@ -1752,6 +1769,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 		logicalTS := r.u64()
 		isFull := r.boolean()
 		ledgerChain, hasLedgerChain := r.readLedgerChain()
+		lastTxNum := r.readLastTxNum()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1775,6 +1793,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 
 			LedgerChain:    ledgerChain,
 			HasLedgerChain: hasLedgerChain,
+			LastTxNum:      lastTxNum,
 		}
 
 		result[i] = marshalableToSnapshot(full)
@@ -1831,6 +1850,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 		return nil, false, nil
 	}
 	snap.ledgerChain, snap.hasLedgerChain = r.readLedgerChain()
+	snap.lastTxNum = r.readLastTxNum()
 	snap.catalog = r.readCatalogState()
 	snap.state.principals = principalsStateFromPersisted(r.readPrincipals())
 

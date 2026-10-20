@@ -45,8 +45,9 @@ func uncommittedRecords(t *testing.T, n *node, txn tx) []ports.WALRecord {
 
 // TestUncommittedTransactionIsNeverApplied: a transaction whose COMMIT never
 // reached the WAL must stay invisible on every path, both while it is the
-// WAL's tail and once later transactions follow it. The process restarts
-// in between, so the next transaction reuses the orphan's TxID.
+// WAL's tail and once later transactions follow it. The replay paths also
+// read the WAL as engines that predate unique TxIDs wrote it, where the
+// next transaction reused the orphan's TxID.
 func TestUncommittedTransactionIsNeverApplied(t *testing.T) {
 	ctx := context.Background()
 	phases := workloadPhases()
@@ -84,11 +85,19 @@ func TestUncommittedTransactionIsNeverApplied(t *testing.T) {
 
 	n.restart()
 	requireSame(t, "restart after an uncommitted transaction", live, n.fingerprint(workloadProbes))
-	records := n.records()
+	records := legacyTxIDs(n.records())
 	n.close()
+	// The timeline shows the renumbered TxIDs; every commit is still checked
+	// by the as-of-LSN sections.
+	isTimeline := func(section string) bool { return section == "timeline" }
+	live = live.without(isTimeline)
 
-	fresh := replayFromWALAlone(t, n, nodeOptions{})
-	requireSame(t, "fresh replay after an uncommitted transaction", live, fresh.fingerprint(workloadProbes))
+	fresh := openNode(t, t.TempDir(), nodeOptions{})
+	if err := fresh.store.AppendReplicatedBatch(ctx, records); err != nil {
+		t.Fatal(err)
+	}
+	fresh.restart()
+	requireSame(t, "fresh replay after an uncommitted transaction", live, fresh.fingerprint(workloadProbes).without(isTimeline))
 	fresh.close()
 
 	follower := openNode(t, t.TempDir(), nodeOptions{})
@@ -102,7 +111,30 @@ func TestUncommittedTransactionIsNeverApplied(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	requireSame(t, "follower after an uncommitted transaction", live, follower.fingerprint(workloadProbes))
+	requireSame(t, "follower after an uncommitted transaction", live, follower.fingerprint(workloadProbes).without(isTimeline))
+}
+
+// legacyTxIDs renumbers records' TxIDs the way engines that restarted their
+// TxID counter on every start wrote them: IDs repeat, and the transaction
+// after an unfinished one takes its TxID.
+func legacyTxIDs(records []ports.WALRecord) []ports.WALRecord {
+	out := append([]ports.WALRecord(nil), records...)
+	num, open := 0, false
+	for i := range out {
+		if out[i].Type == "BEGIN" {
+			if !open {
+				num = num%3 + 1
+			}
+			open = true
+		}
+		if out[i].Type != "SECURITY" {
+			out[i].TxID = fmt.Sprintf("tx-%d", num)
+		}
+		if out[i].Type == "COMMIT" {
+			open = false
+		}
+	}
+	return out
 }
 
 // TestReplayLimitInsideTransactionDefersIt: in cluster mode startup replay

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -43,8 +44,7 @@ func (engine *Engine) beginDomain(session *Session, sql string) (Result, error) 
 		engine.writeMu.Unlock()
 	}
 
-	txNum := atomic.AddUint64(&engine.txCount, 1)
-	txID := fmt.Sprintf("tx-%d", txNum)
+	txID := engine.newTxID()
 	startLogicalTS := state.logicalTS
 
 	session.activeTx = &transaction{id: txID, domains: []string{domain}, startLogicalTS: startLogicalTS, statements: make([]string, 0), plans: make([]planner.Plan, 0), savepoints: make([]savepointMarker, 0)}
@@ -111,14 +111,66 @@ func (engine *Engine) beginCrossDomain(session *Session, sql string) (Result, er
 		engine.writeMu.Unlock()
 	}
 
-	txNum := atomic.AddUint64(&engine.txCount, 1)
-	txID := fmt.Sprintf("tx-%d", txNum)
+	txID := engine.newTxID()
 	startLogicalTS := state.logicalTS
 
 	session.activeTx = &transaction{id: txID, domains: domainsList, startLogicalTS: startLogicalTS, statements: make([]string, 0), plans: make([]planner.Plan, 0), savepoints: make([]savepointMarker, 0)}
 	engine.perf.recordBegin()
 	engine.perf.recordCrossDomainBegin(len(domainsList))
 	return Result{Status: "BEGIN", TxID: txID}, nil
+}
+
+// txIDPrefix starts every TxID: "tx-" and a number.
+const txIDPrefix = "tx-"
+
+// newTxID hands out the next TxID. The counter resumes after the highest
+// TxID in the WAL (see noteTxID), so an ID names one transaction across
+// restarts and leaders. WALs written before that may still repeat IDs, which
+// is why replay matches a record to its commit by position (txCommitLSNs).
+func (engine *Engine) newTxID() string {
+	return txIDPrefix + strconv.FormatUint(atomic.AddUint64(&engine.txCount, 1), 10)
+}
+
+// txNum returns the number in a TxID, or false for an ID not made by
+// newTxID.
+func txNum(id string) (uint64, bool) {
+	if !strings.HasPrefix(id, txIDPrefix) {
+		return 0, false
+	}
+	n, err := strconv.ParseUint(id[len(txIDPrefix):], 10, 64)
+	return n, err == nil
+}
+
+// reserveTxID keeps newTxID from handing out id or anything before it.
+func (engine *Engine) reserveTxID(id string) {
+	if n, ok := txNum(id); ok {
+		engine.reserveTxNum(n)
+	}
+}
+
+func (engine *Engine) reserveTxNum(n uint64) {
+	for {
+		current := atomic.LoadUint64(&engine.txCount)
+		if current >= n || atomic.CompareAndSwapUint64(&engine.txCount, current, n) {
+			return
+		}
+	}
+}
+
+// noteTxID records that a transaction reached the WAL. Callers hold writeMu.
+func (engine *Engine) noteTxID(id string) {
+	n, ok := txNum(id)
+	if !ok {
+		return
+	}
+	engine.lastTxNum = max(engine.lastTxNum, n)
+	engine.reserveTxNum(n)
+}
+
+// setLastTxNum restores lastTxNum from a snapshot. Callers hold writeMu.
+func (engine *Engine) setLastTxNum(n uint64) {
+	engine.lastTxNum = n
+	engine.reserveTxNum(n)
 }
 
 func parseSavepointName(sql string) (string, error) {
