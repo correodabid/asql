@@ -479,11 +479,15 @@ func insertParameterOrder(sql string) []int {
 		expr := strings.TrimSpace(token.String())
 		token.Reset()
 		if exprIndex >= 0 {
+			// One entry per value, 0 for one that is not a placeholder, so
+			// each placeholder keeps the position of its column.
+			n := 0
 			if len(expr) > 1 && expr[0] == '$' {
-				if n, err := strconv.Atoi(expr[1:]); err == nil {
-					order = append(order, n)
+				if parsed, err := strconv.Atoi(expr[1:]); err == nil {
+					n = parsed
 				}
 			}
+			order = append(order, n)
 			exprIndex++
 		}
 	}
@@ -1583,6 +1587,12 @@ func (server *Server) describeSelectColumns(sel ast.SelectStatement, importedTab
 
 	visiting := make(map[string]bool)
 	sources, baseKey := server.describeSelectSources(sel, cteMap, importedTables, visiting)
+	// FOR HISTORY rows also have the history columns, which a select list
+	// or an aggregate may name: MAX(__commit_lsn) is an int8.
+	if source, ok := sources[baseKey]; ok && sel.ForHistory && source.OIDs != nil {
+		source.OIDs[executor.HistoryOperationColumnName] = 25
+		source.OIDs[executor.HistoryCommitLSNColumnName] = 20
+	}
 	windowAliases := make(map[string]ast.WindowFunction, len(sel.WindowFunctions))
 	for _, wf := range sel.WindowFunctions {
 		windowAliases[strings.ToLower(wf.Alias)] = wf
@@ -1997,6 +2007,14 @@ func substituteParams(sql string, params [][]byte, formats []int16, paramOIDs []
 			return
 		}
 		i := n - 1
+		// A NULL parameter has no bytes (length -1 on the wire), whatever
+		// its format or type.
+		if params[i] == nil {
+			out.WriteString(sql[last:start])
+			out.WriteString("NULL")
+			last = end
+			return
+		}
 		// Determine wire format for this parameter.
 		var format int16
 		if len(formats) == 1 {
