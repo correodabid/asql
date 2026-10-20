@@ -2409,7 +2409,10 @@ func parseSimplePredicate(clause string) (*ast.Predicate, error) {
 	if splitIdx >= 0 {
 		left = clause[:splitIdx]
 		rest := clause[splitIdx:]
-		if strings.HasPrefix(rest, ">=") {
+		if strings.HasPrefix(rest, "!=") || strings.HasPrefix(rest, "<>") {
+			operator = "!="
+			right = rest[2:]
+		} else if strings.HasPrefix(rest, ">=") {
 			operator = ">="
 			right = rest[2:]
 		} else if strings.HasPrefix(rest, "<=") {
@@ -2565,6 +2568,10 @@ func findComparisonOperator(clause string) int {
 			return i
 		case '<':
 			return i
+		case '!':
+			if i+1 < len(clause) && clause[i+1] == '=' {
+				return i
+			}
 		}
 	}
 	return -1

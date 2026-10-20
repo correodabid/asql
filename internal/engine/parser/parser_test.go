@@ -2548,3 +2548,23 @@ func TestParseRecursiveCTE(t *testing.T) {
 		}
 	}
 }
+
+func TestParseNotEqualOperators(t *testing.T) {
+	for _, clause := range []string{"b != 'z'", "b <> 'z'", "b!='z'", "b<>'z'"} {
+		p, err := parseWhere(clause)
+		if err != nil {
+			t.Fatalf("%s: %v", clause, err)
+		}
+		if p.Column != "b" || p.Operator != "!=" || p.Value.StringValue != "z" {
+			t.Fatalf("%s: parsed as %+v, want b != 'z'", clause, p)
+		}
+	}
+	p, err := parseWhere("a <> b")
+	if err != nil || p.Column != "a" || p.Operator != "!=" || p.RightColumn != "b" {
+		t.Fatalf("a <> b: %+v, %v", p, err)
+	}
+	p, err = parseWhere("note = 'a != b'")
+	if err != nil || p.Operator != "=" || p.Value.StringValue != "a != b" {
+		t.Fatalf("operator inside a literal: %+v, %v", p, err)
+	}
+}
