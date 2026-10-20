@@ -343,6 +343,12 @@ func New(config Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("initialize wal store: %w", err)
 	}
+	if config.Compliance {
+		if err := checkCompliance(walStore); err != nil {
+			_ = walStore.Close()
+			return nil, err
+		}
+	}
 
 	auditStore, err := audit.New(dd.AuditBasePath())
 	if err != nil {
@@ -1389,6 +1395,9 @@ func (server *Server) authorizeHistoricalReadPrincipal(principal string, detail 
 // RowDescription + DataRow* + CommandComplete + ReadyForQuery, exactly like
 // the normal simple-query path.  This avoids duplicating the marshal logic.
 func sendInterceptedResult(backend *pgproto3.Backend, session *executor.Session, ir interceptResult) error {
+	if ir.err != nil {
+		return sendErrorAndReady(backend, ir.err, session)
+	}
 	columns := ir.columns
 	rows := ir.result.Rows
 

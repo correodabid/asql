@@ -418,6 +418,31 @@ func TestLedgerOffWritesV3HeadersAndChainResumesFromGenesis(t *testing.T) {
 	}
 }
 
+func TestUnanchoredSegmentsAreThoseWrittenWithTheLedgerOff(t *testing.T) {
+	dir := t.TempDir()
+	store := newLedgerStore(t, dir, WithLedgerMode(LedgerOff), WithSegmentSize(1024))
+	appendTxs(t, store, 0, 10, 200)
+	off := len(store.SegmentPaths())
+	if off < 2 {
+		t.Fatalf("want several segments, got %d", off)
+	}
+	_ = store.Close()
+
+	store = newLedgerStore(t, dir, WithSegmentSize(1024))
+	appendTxs(t, store, 10, 30, 200)
+	if got := store.UnanchoredSegments(); len(got) != off || got[0] != 1 {
+		t.Fatalf("unanchored segments %v, want the %d written with the ledger off", got, off)
+	}
+	_ = store.Close()
+
+	fresh := newLedgerStore(t, t.TempDir(), WithSegmentSize(1024))
+	defer fresh.Close()
+	appendTxs(t, fresh, 0, 30, 200)
+	if got := fresh.UnanchoredSegments(); len(got) != 0 {
+		t.Fatalf("a store written with the ledger on has unanchored segments %v", got)
+	}
+}
+
 func TestParseLedgerMode(t *testing.T) {
 	for in, want := range map[string]LedgerMode{"": LedgerChain, "chain": LedgerChain, "off": LedgerOff} {
 		got, err := ParseLedgerMode(in)

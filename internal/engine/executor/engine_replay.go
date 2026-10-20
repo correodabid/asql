@@ -92,6 +92,7 @@ func (engine *Engine) Replay(ctx context.Context) error {
 			if err != nil {
 				return fmt.Errorf("replay read wal delta: %w", err)
 			}
+			engine.reserveWALTxIDs(deltaRecords)
 			deltaRecords = engine.recordsWithinReplayLimit(deltaRecords)
 			if len(deltaRecords) > 0 && deltaRecords[0].LSN != latest.lsn+1 {
 				return fmt.Errorf("%w: snapshot lsn=%d next wal lsn=%d", errSnapshotWALMismatch, latest.lsn, deltaRecords[0].LSN)
@@ -108,11 +109,22 @@ func (engine *Engine) Replay(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("replay read wal: %w", err)
 	}
+	engine.reserveWALTxIDs(records)
 	records = engine.recordsWithinReplayLimit(records)
 	if err := engine.rebuildFromRecords(records, 0, false); err != nil {
 		return err
 	}
 	return engine.ensureTimestampIndex(ctx, loadedTimestampIndex, records, true)
+}
+
+// reserveWALTxIDs keeps newTxID from reusing the TxID of any transaction in
+// records, including ones not applied yet: Raft may still commit them.
+func (engine *Engine) reserveWALTxIDs(records []ports.WALRecord) {
+	for _, record := range records {
+		if record.Type == walTypeBegin {
+			engine.reserveTxID(record.TxID)
+		}
+	}
 }
 
 // recordsWithinReplayLimit returns the prefix of LSN-ordered records allowed
@@ -149,6 +161,7 @@ func (engine *Engine) replayFromSnapshots(snapshots []engineSnapshot, records []
 	newState := readableStateFromSnapshotShared(latest)
 	engine.readState.Store(newState)
 	engine.logicalTS = latest.logicalTS
+	engine.setLastTxNum(latest.lastTxNum)
 	engine.headLSN = latest.lsn
 	engine.mutationCount = 0
 	// Track the logical timestamp of the latest disk snapshot so that the first
@@ -342,6 +355,7 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 	engine.catalog = domains.NewCatalog()
 	newState := &readableState{domains: make(map[string]*domainState)}
 	engine.logicalTS = 0
+	engine.lastTxNum = 0
 	engine.headLSN = 0
 	engine.mutationCount = 0
 	if engine.snapshots != nil {
@@ -368,6 +382,9 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 		if record.Timestamp > engine.logicalTS {
 			engine.logicalTS = record.Timestamp
 		}
+		if record.Type == walTypeBegin {
+			engine.noteTxID(record.TxID)
+		}
 
 		// Record entity versions eagerly on COMMIT so that subsequent
 		// transactions can resolve versioned FK references during replay.
@@ -382,6 +399,7 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 			if snapshotDue {
 				newState.headLSN = engine.headLSN
 				newState.logicalTS = engine.logicalTS
+				newState.lastTxNum = engine.lastTxNum
 				engine.snapshots.add(captureSnapshot(newState, engine.catalog))
 				snapshotDue = false
 			}
@@ -439,6 +457,7 @@ func (engine *Engine) rebuildFromRecordsWithReplayPlans(records []ports.WALRecor
 
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
+	newState.lastTxNum = engine.lastTxNum
 	engine.finishReplayHistory(history)
 
 	// Flatten all index overlay chains produced during replay so that
@@ -521,6 +540,9 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 		if record.Timestamp > engine.logicalTS {
 			engine.logicalTS = record.Timestamp
 		}
+		if record.Type == walTypeBegin {
+			engine.noteTxID(record.TxID)
+		}
 
 		// Record entity versions eagerly on COMMIT (see rebuildFromRecords).
 		if record.Type == walTypeCommit {
@@ -532,6 +554,7 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 			if snapshotDue {
 				newState.headLSN = engine.headLSN
 				newState.logicalTS = engine.logicalTS
+				newState.lastTxNum = engine.lastTxNum
 				engine.snapshots.add(captureSnapshot(newState, engine.catalog))
 				snapshotDue = false
 			}
@@ -588,6 +611,7 @@ func (engine *Engine) rebuildFromRecordsAfterSnapshotWithOptions(records []ports
 
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
+	newState.lastTxNum = engine.lastTxNum
 	engine.finishReplayHistory(history)
 
 	// Incremental follower direct-apply runs on every committed delta, so a
@@ -639,6 +663,7 @@ func (engine *Engine) CatchUp(ctx context.Context, upToLSN uint64) error {
 	if len(records) == 0 {
 		return nil
 	}
+	engine.reserveWALTxIDs(records)
 	// Bound to committed entries only.
 	if upToLSN > 0 {
 		cut := 0
@@ -720,6 +745,7 @@ func (engine *Engine) ApplyCommittedRecords(ctx context.Context, upToLSN uint64,
 		logDirectApplyFallback("empty-records", current.headLSN, upToLSN, records)
 		return engine.CatchUp(ctx, upToLSN)
 	}
+	engine.reserveWALTxIDs(records)
 
 	expected := current.headLSN + 1
 	filtered := make([]ports.WALRecord, 0, len(records))
@@ -806,6 +832,9 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 		if record.Timestamp > engine.logicalTS {
 			engine.logicalTS = record.Timestamp
 		}
+		if record.Type == walTypeBegin {
+			engine.noteTxID(record.TxID)
+		}
 
 		// Record entity versions eagerly on COMMIT (see rebuildFromRecords).
 		if record.Type == walTypeCommit {
@@ -855,6 +884,7 @@ func (engine *Engine) rebuildFromRecordsPartial(records []ports.WALRecord, after
 
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
+	newState.lastTxNum = engine.lastTxNum
 	engine.readState.Store(newState)
 
 	return nil
@@ -872,8 +902,9 @@ func committedWithin(commitLSN, targetLSN uint64, bounded bool) bool {
 // txCommitLSNs maps each record to the LSN of the COMMIT that closes its
 // transaction, or 0 when that COMMIT is not among records.
 //
-// TxIDs are not unique across a WAL: the counter behind them restarts with
-// every process, and each Raft leader has its own. A transaction's records
+// TxIDs are unique in WALs written since newTxID resumes after the WAL's
+// highest one, but older WALs repeat them: the counter restarted with every
+// process, and each Raft leader had its own. A transaction's records
 // follow its BEGIN and precede its COMMIT, so a record belongs to the next
 // COMMIT with its TxID. A BEGIN starts a new transaction: records left open
 // under the same TxID never committed (a crashed process) and resolve to 0.
@@ -941,6 +972,7 @@ func (engine *Engine) RollbackTo(ctx context.Context, lsn uint64) error {
 	engine.catalog = domains.NewCatalog()
 	engine.headLSN = 0
 	engine.logicalTS = 0
+	engine.lastTxNum = 0
 	// Replay re-derives these from the snapshots that survived; with none,
 	// the next checkpoint must not be a delta against a removed one.
 	engine.lastDiskSnapshotLSN = 0

@@ -153,7 +153,8 @@ type Engine struct {
 	snapWriteInFlight             atomic.Bool // true while a disk snapshot goroutine is running
 	lastWriteUnixNano             atomic.Int64
 	catalog                       *domains.Catalog
-	txCount                       uint64
+	txCount                       uint64 // last TxID number handed out (atomic)
+	lastTxNum                     uint64 // highest TxID number in the WAL up to headLSN
 	logicalTS                     uint64
 	headLSN                       uint64
 	statsMu                       sync.Mutex
@@ -857,8 +858,8 @@ func (engine *Engine) TimelineCommits(ctx context.Context, fromLSN, toLSN uint64
 		records = records[:n]
 	}
 
-	// Group mutations under the COMMIT that closes them; TxIDs repeat across
-	// the WAL (see txCommitLSNs).
+	// Group mutations under the COMMIT that closes them; older WALs repeat
+	// TxIDs (see txCommitLSNs).
 	commitLSNs := txCommitLSNs(records)
 	byCommit := make(map[uint64]*TimelineCommit)
 	var commits []TimelineCommit

@@ -450,6 +450,11 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 			}
 		}
 
+		for _, record := range allWALRecords {
+			if record.Type == walTypeBegin {
+				engine.noteTxID(record.TxID)
+			}
+		}
 		// Row history is written off the commit path, in commit order.
 		engine.enqueueHistory(allAuditEntries, engine.headLSN)
 		if engine.timestampIndex != nil {
@@ -463,6 +468,7 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 	// Update state metadata and atomic swap.
 	newState.headLSN = engine.headLSN
 	newState.logicalTS = engine.logicalTS
+	newState.lastTxNum = engine.lastTxNum
 	engine.readState.Store(newState)
 	engine.clearHistoricalStateCache()
 	engine.lastWriteUnixNano.Store(time.Now().UnixNano())
