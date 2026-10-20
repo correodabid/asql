@@ -814,6 +814,10 @@ func (server *Server) handleExtendedExecute(backend *pgproto3.Backend, state *co
 		return nil
 	}
 	if intercepted, ok := server.interceptCatalog(ctx, p.sql, state.session.ActiveDomains(), state.session.Principal()); ok {
+		if intercepted.err != nil {
+			server.extendedError(backend, state, intercepted.err.Error(), mapErrorToSQLState(intercepted.err))
+			return nil
+		}
 		nextRow, _, err := server.streamExtendedResultWithFormats(ctx, backend, state, intercepted.result, intercepted.columns, p.fieldOIDsByName, p.resultFormatCodes, msg.MaxRows, p.nextRow)
 		p.nextRow = nextRow
 		state.portals[msg.Portal] = p
@@ -1366,7 +1370,8 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 		return nil
 	}
 	if intercepted, ok := server.interceptCatalog(context.Background(), trimmed, activeDomains, principal); ok {
-		if len(intercepted.columns) == 0 {
+		// A rejected query has no columns; Execute reports the error.
+		if intercepted.err != nil || len(intercepted.columns) == 0 {
 			return nil
 		}
 		oids := inferColumnTypeOIDs(intercepted.columns, intercepted.result.Rows)

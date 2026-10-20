@@ -29,6 +29,8 @@ import (
 type interceptResult struct {
 	result  executor.Result
 	columns []string
+	// err rejects the query; it is sent as an ErrorResponse.
+	err error
 }
 
 type catalogPrivilegeRequirement struct {
@@ -335,7 +337,24 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 	// ── asql_admin virtual schema ─────────────────────────────────────────
 	// Each sub-table exposes engine internals as SQL rows, allowing admin
 	// operations without a separate HTTP layer.
+	case strings.HasPrefix(lower, "select asql_admin.replay_to_lsn("):
+		return server.adminReplayToLSN(ctx, sql)
 
+	case strings.Contains(lower, "asql_admin."):
+		ir, ok := server.adminTable(ctx, sql, lower, activeDomains)
+		if !ok {
+			return interceptResult{}, false
+		}
+		return projectAdminColumns(trimmed, ir), true
+	}
+
+	return interceptResult{}, false
+}
+
+// adminTable serves a query on an asql_admin virtual table with all of the
+// table's columns; projectAdminColumns then applies the select list.
+func (server *Server) adminTable(ctx context.Context, sql, lower string, activeDomains []string) (interceptResult, bool) {
+	switch {
 	case strings.Contains(lower, "asql_admin.engine_stats"):
 		return server.adminEngineStats()
 
@@ -365,11 +384,7 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 
 	case strings.Contains(lower, "asql_admin.ledger_digest"):
 		return server.adminLedgerDigest(sql)
-
-	case strings.HasPrefix(lower, "select asql_admin.replay_to_lsn("):
-		return server.adminReplayToLSN(ctx, sql)
 	}
-
 	return interceptResult{}, false
 }
 
