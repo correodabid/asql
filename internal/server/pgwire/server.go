@@ -235,6 +235,8 @@ type Server struct {
 	closeCh             chan struct{}
 	closeMux            sync.Once
 	waitConn            sync.WaitGroup
+	connsMu             sync.Mutex
+	conns               map[net.Conn]struct{} // open client connections, closed by Stop
 	cancelMu            sync.Mutex
 	cancelTargets       map[backendCancelKey]*connState
 	nextBackendID       uint32
@@ -631,6 +633,7 @@ func (server *Server) Stop() {
 		if server.listener != nil {
 			_ = server.listener.Close()
 		}
+		server.closeConns()
 		// Stop cluster goroutines before closing storage.
 		if server.clusterCancel != nil {
 			server.clusterCancel()
@@ -735,9 +738,14 @@ func (server *Server) serve(listener net.Listener) error {
 			return fmt.Errorf("accept pgwire connection: %w", err)
 		}
 
+		if !server.trackConn(conn) {
+			_ = conn.Close()
+			return nil
+		}
 		server.waitConn.Add(1)
 		go func(connection net.Conn) {
 			defer server.waitConn.Done()
+			defer server.untrackConn(connection)
 			defer connection.Close()
 			defer func() {
 				if r := recover(); r != nil {
@@ -747,10 +755,50 @@ func (server *Server) serve(listener net.Listener) error {
 					)
 				}
 			}()
-			if err := server.handleConnection(connection); err != nil && !errors.Is(err, io.EOF) {
+			if err := server.handleConnection(connection); err != nil && !errors.Is(err, io.EOF) && !server.stopping() {
 				server.config.Logger.Warn("pgwire connection failed", "error", err.Error())
 			}
 		}(conn)
+	}
+}
+
+// trackConn records an accepted connection so Stop can close it. It returns
+// false once the server is stopping.
+func (server *Server) trackConn(conn net.Conn) bool {
+	server.connsMu.Lock()
+	defer server.connsMu.Unlock()
+	if server.stopping() {
+		return false
+	}
+	if server.conns == nil {
+		server.conns = make(map[net.Conn]struct{})
+	}
+	server.conns[conn] = struct{}{}
+	return true
+}
+
+func (server *Server) untrackConn(conn net.Conn) {
+	server.connsMu.Lock()
+	defer server.connsMu.Unlock()
+	delete(server.conns, conn)
+}
+
+// closeConns closes every open client connection, so Stop does not wait for
+// idle clients such as a connection pool to disconnect on their own.
+func (server *Server) closeConns() {
+	server.connsMu.Lock()
+	defer server.connsMu.Unlock()
+	for conn := range server.conns {
+		_ = conn.Close()
+	}
+}
+
+func (server *Server) stopping() bool {
+	select {
+	case <-server.closeCh:
+		return true
+	default:
+		return false
 	}
 }
 

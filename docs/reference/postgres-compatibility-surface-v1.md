@@ -73,14 +73,16 @@ and current privilege semantics, see
   - `ROLLBACK`
   - `SAVEPOINT <name>` / `ROLLBACK TO [SAVEPOINT] <name>`
   - `CREATE TABLE`, `CREATE INDEX`
+  - column types `INT`, `TEXT`, `JSON`, `BOOL`, `FLOAT` and `TIMESTAMP`, with the PostgreSQL names `INTEGER`, `INT4`, `BIGINT`, `INT8`, `BOOLEAN`, `REAL`, `FLOAT4`, `FLOAT8`, `DOUBLE` and `DOUBLE PRECISION` accepted as aliases. `FLOAT` is 64-bit, and aliases are stored under the canonical name
   - `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE TABLE`
   - `SELECT` (within current ASQL SQL subset)
 - Row encoding: text format (`Format=0`) with deterministic row order driven by ASQL planner/executor semantics.
 - Parameter formats:
   - text parameters supported
-  - binary bind parameters supported for narrow scalar cases currently decoded by the server (`int4`/`int8`/`bool`)
+  - binary bind parameters supported for narrow scalar cases currently decoded by the server (`int4`/`int8`/`bool`/`float4`/`float8`)
 - Type OIDs (current):
   - integers mapped as `INT8` (`OID 20`)
+  - `BOOL` as `bool` (`OID 16`), `FLOAT` as `float8` (`OID 701`), both encodable in binary results
   - strings/default mapped as `TEXT` (`OID 25`)
 - Client/tool validation:
   - `pgx/v5` roundtrip is validated in integration-like tests
