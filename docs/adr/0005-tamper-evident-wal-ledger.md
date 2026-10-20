@@ -1,6 +1,6 @@
 # ADR 0005: Make the WAL tamper-evident with a hash-chained ledger and signed digests
 
-- Status: Accepted. Phase 1 (`ledger=off|chain`, anchors, `verify-ledger`) shipped in #35. Phase 1b (`ledger=signed`, digests and their surfaces) is implemented on `feat/wal-ledger-signed`
+- Status: Accepted. Phase 1 (`ledger=off|chain`, anchors, `verify-ledger`) shipped in #35. Phase 1b (`ledger=signed`, digests and their surfaces) shipped in #42. The compliance profile is #49. Signed query results, which build on these digests, are proposed in [ADR 0006](0006-signed-query-results.md).
 - Date: 2026-10-14
 - Decision drivers:
   - ASQL positions itself as a database teams can reason about under audit; today the WAL detects accidental corruption but not deliberate rewriting
