@@ -336,8 +336,21 @@ func (TruncateTableStatement) Kind() string {
 }
 
 type CTE struct {
-	Name      string          `json:"name"`
+	Name string `json:"name"`
+	// Columns renames the body's columns, in order: WITH name (a, b) AS.
+	Columns   []string        `json:"columns,omitempty"`
 	Statement SelectStatement `json:"statement"`
+	// Recursive is set for WITH RECURSIVE name AS (anchor UNION [ALL]
+	// recursive term); Statement is then the anchor.
+	Recursive *RecursiveTerm `json:"recursive,omitempty"`
+}
+
+// RecursiveTerm is the part of a recursive CTE that reads the CTE itself.
+type RecursiveTerm struct {
+	Statement SelectStatement `json:"statement"`
+	// All keeps duplicate rows (UNION ALL). Without it, rows already
+	// produced are dropped, which ends the recursion over cyclic data.
+	All bool `json:"all,omitempty"`
 }
 
 type CaseWhenBranch struct {

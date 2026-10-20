@@ -332,9 +332,11 @@ func (server *Server) inferPredicateParamOIDs(sql string) []uint32 {
 	}
 
 	var tableName string
+	var cteTables []string
 	switch typed := stmt.(type) {
 	case ast.SelectStatement:
 		tableName = typed.TableName
+		cteTables = cteSourceTables(typed)
 	case ast.UpdateStatement:
 		tableName = typed.TableName
 	case ast.DeleteStatement:
@@ -382,6 +384,14 @@ func (server *Server) inferPredicateParamOIDs(sql string) []uint32 {
 	}
 
 	oids := server.resolveColumnOIDs(tableName, cols)
+	// The parameter may sit in a CTE, over the tables it reads.
+	for _, table := range cteTables {
+		for col, oid := range server.resolveColumnOIDs(table, cols) {
+			if oids[col] == 25 && oid != 25 {
+				oids[col] = oid
+			}
+		}
+	}
 	result := make([]uint32, max)
 	for i, col := range cols {
 		idx := paramIndexes[i] - 1
@@ -393,6 +403,26 @@ func (server *Server) inferPredicateParamOIDs(sql string) []uint32 {
 		}
 	}
 	return result
+}
+
+// cteSourceTables lists the tables the CTEs of sel read, recursive terms
+// included.
+func cteSourceTables(sel ast.SelectStatement) []string {
+	var tables []string
+	add := func(body ast.SelectStatement) {
+		tables = append(tables, body.TableName)
+		for _, join := range body.Joins {
+			tables = append(tables, join.TableName)
+		}
+		tables = append(tables, cteSourceTables(body)...)
+	}
+	for _, cte := range sel.CTEs {
+		add(cte.Statement)
+		if cte.Recursive != nil {
+			add(cte.Recursive.Statement)
+		}
+	}
+	return tables
 }
 
 func insertParameterOrder(sql string) []int {
@@ -1514,9 +1544,9 @@ type describedSource struct {
 }
 
 func (server *Server) describeSelectColumns(sel ast.SelectStatement, importedTables map[string]string) []describedSelectColumn {
-	cteMap := make(map[string]ast.SelectStatement, len(sel.CTEs))
+	cteMap := make(map[string]ast.CTE, len(sel.CTEs))
 	for _, cte := range sel.CTEs {
-		cteMap[strings.ToLower(cte.Name)] = cte.Statement
+		cteMap[strings.ToLower(cte.Name)] = cte
 	}
 
 	visiting := make(map[string]bool)
@@ -1631,7 +1661,7 @@ func splitDescribedColumnAlias(column string) (expr string, alias string) {
 	return expr, alias
 }
 
-func (server *Server) describeSelectSources(sel ast.SelectStatement, cteMap map[string]ast.SelectStatement, importedTables map[string]string, visiting map[string]bool) (map[string]describedSource, string) {
+func (server *Server) describeSelectSources(sel ast.SelectStatement, cteMap map[string]ast.CTE, importedTables map[string]string, visiting map[string]bool) (map[string]describedSource, string) {
 	sources := make(map[string]describedSource)
 	baseKey := strings.ToLower(displaySourceKey(sel.TableName, sel.TableAlias))
 	server.addDescribedSource(sources, sel.TableName, sel.TableAlias, cteMap, importedTables, visiting)
@@ -1648,7 +1678,7 @@ func displaySourceKey(tableName, alias string) string {
 	return strings.ToLower(strings.TrimSpace(tableName))
 }
 
-func (server *Server) addDescribedSource(target map[string]describedSource, tableName, alias string, cteMap map[string]ast.SelectStatement, importedTables map[string]string, visiting map[string]bool) {
+func (server *Server) addDescribedSource(target map[string]describedSource, tableName, alias string, cteMap map[string]ast.CTE, importedTables map[string]string, visiting map[string]bool) {
 	source := server.resolveDescribedSource(tableName, cteMap, importedTables, visiting)
 	if len(source.Columns) == 0 {
 		return
@@ -1663,23 +1693,28 @@ func (server *Server) addDescribedSource(target map[string]describedSource, tabl
 	}
 }
 
-func (server *Server) resolveDescribedSource(tableName string, cteMap map[string]ast.SelectStatement, importedTables map[string]string, visiting map[string]bool) describedSource {
+func (server *Server) resolveDescribedSource(tableName string, cteMap map[string]ast.CTE, importedTables map[string]string, visiting map[string]bool) describedSource {
 	canonical := strings.ToLower(strings.TrimSpace(tableName))
 	if canonical == "" {
 		return describedSource{}
 	}
-	if stmt, ok := cteMap[canonical]; ok {
+	if cte, ok := cteMap[canonical]; ok {
 		if visiting[canonical] {
 			return describedSource{}
 		}
 		visiting[canonical] = true
 		defer delete(visiting, canonical)
-		cols := server.describeSelectColumns(stmt, importedTables)
+		// A recursive CTE's types are its anchor's.
+		cols := server.describeSelectColumns(cte.Statement, importedTables)
 		columnNames := make([]string, 0, len(cols))
 		oids := make(map[string]uint32, len(cols))
-		for _, col := range cols {
-			columnNames = append(columnNames, col.Name)
-			oids[col.Name] = col.OID
+		for i, col := range cols {
+			name := unqualifiedDescribedName(col.Name)
+			if len(cte.Columns) == len(cols) {
+				name = strings.ToLower(cte.Columns[i])
+			}
+			columnNames = append(columnNames, name)
+			oids[name] = col.OID
 		}
 		sortColumns(columnNames)
 		return describedSource{Columns: columnNames, OIDs: oids}
@@ -1698,6 +1733,15 @@ func (server *Server) resolveDescribedSource(tableName string, cteMap map[string
 	sortColumns(cols)
 	oids := server.resolveColumnOIDs(resolved, cols)
 	return describedSource{Columns: cols, OIDs: oids}
+}
+
+// unqualifiedDescribedName is a CTE column's name: a qualified column of its
+// body is named without the qualifier.
+func unqualifiedDescribedName(name string) string {
+	if dot := strings.LastIndexByte(name, '.'); dot >= 0 {
+		return name[dot+1:]
+	}
+	return name
 }
 
 func parseQualifiedStarName(column string) (string, bool) {

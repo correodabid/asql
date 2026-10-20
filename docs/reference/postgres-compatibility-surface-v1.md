@@ -103,7 +103,8 @@ and current privilege semantics, see
 | Subquery-based `IN (SELECT ...)` | Supported | Covered in executor tests for current shapes. |
 | `EXISTS (SELECT ...)` / `NOT EXISTS (SELECT ...)` | Supported | Covered in parser and executor tests. |
 | `LEFT JOIN`, `RIGHT JOIN`, `CROSS JOIN` | Supported | Covered in executor tests for current join shapes. |
-| Simple `WITH` / CTE shapes | Supported | Covered in executor tests for current non-recursive shapes. |
+| Simple `WITH` / CTE shapes | Supported | Covered in executor tests for current non-recursive shapes. A CTE can name its columns (`WITH name (a, b) AS`), and a qualified column of its body (`e.parent_id`) is the CTE column `parent_id`. |
+| `WITH RECURSIVE` | Supported | `name [(cols)] AS (anchor UNION [ALL] recursive term)`, where the recursive term reads the CTE in `FROM` or a `JOIN`. `UNION` drops rows already produced, so it ends on cyclic data; `UNION ALL` keeps them. The select lists take column references only (no `depth + 1`). A query fails after 10,000 rounds or 1,000,000 rows. The recursive term is run from the CTE side of its join; in the query that reads the CTE, put the CTE first too (`FROM lineage l JOIN artifacts a ON ...`), since a join runs from its first table. |
 | `ILIKE` / `NOT ILIKE` | Supported | Covered in executor tests. |
 | `CAST(... AS DATE/TIMESTAMP)` and PostgreSQL-style `::date` / `::timestamp` in current read expressions | Supported | Covered for current projection and grouping read shapes; temporal casts normalize to timestamp values in the current engine. |
 | `DATE_TRUNC('day'|'month'|'week'|...)` for current timestamp-compatible expressions | Supported | Covered in executor tests for current temporal bucketing shapes, including weekly rollups. |
