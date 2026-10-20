@@ -262,7 +262,7 @@ func (engine *Engine) commit(ctx context.Context, session *Session) (Result, err
 	tx := session.activeTx
 	prepared, err := engine.prepareMutations(tx)
 	if err != nil {
-		return Result{}, err
+		return Result{}, engine.failCommit(session, err)
 	}
 
 	// Preserve statement order inside a transaction so later statements can
@@ -310,11 +310,20 @@ func (engine *Engine) commit(ctx context.Context, session *Session) (Result, err
 
 	result := engine.commitQ.submit(job)
 	if result.err != nil {
-		return Result{}, result.err
+		return Result{}, engine.failCommit(session, result.err)
 	}
 
 	session.activeTx = nil
 	return Result{Status: "COMMIT", CommitLSN: result.commitLSN}, nil
+}
+
+// failCommit ends the transaction of a COMMIT that failed, as PostgreSQL
+// does: the COMMIT cannot be retried, and a transaction left open would fail
+// the session's next BEGIN with 25001. That holds even when the outcome is
+// unknown (Raft quorum unreachable): the session must find out by reading.
+func (engine *Engine) failCommit(session *Session, err error) error {
+	engine.rollback(session)
+	return err
 }
 
 func (engine *Engine) validateWriteConflicts(state *readableState, tx *transaction, mutations []preparedMutation) error {

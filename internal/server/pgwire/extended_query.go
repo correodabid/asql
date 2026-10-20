@@ -17,6 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math"
 	"regexp"
 	"strconv"
 	"strings"
@@ -995,6 +996,26 @@ func literalToBinary(lit ast.Literal, oid uint32) []byte {
 		buf := make([]byte, 2)
 		binary.BigEndian.PutUint16(buf, uint16(n))
 		return buf
+	case 700, 701: // float4 / float8 – IEEE 754, big-endian
+		var f float64
+		switch lit.Kind {
+		case ast.LiteralFloat:
+			f = lit.FloatValue
+		case ast.LiteralNumber:
+			f = float64(lit.NumberValue)
+		default:
+			if parsed, err := strconv.ParseFloat(lit.StringValue, 64); err == nil {
+				f = parsed
+			}
+		}
+		if oid == 700 {
+			buf := make([]byte, 4)
+			binary.BigEndian.PutUint32(buf, math.Float32bits(float32(f)))
+			return buf
+		}
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, math.Float64bits(f))
+		return buf
 	case 16: // bool – 1 byte
 		switch lit.Kind {
 		case ast.LiteralBoolean:
@@ -1423,7 +1444,7 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 	// breaks — a TEXT value ends up decoded with an INT OID.  Avoid the
 	// mismatch by using only text (25) for user columns and int8 (20) for
 	// __commit_lsn, which is always present and always numeric.
-	if sel.ForHistory {
+	if sel.ForHistory && selectsStar(sel) {
 		fields := make([]pgproto3.FieldDescription, len(cols))
 		for i, c := range cols {
 			oid := uint32(25) // text
@@ -1452,6 +1473,34 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 		}
 	}
 	return fields
+}
+
+// reDescribedAggregate matches an aggregate call in a select list.
+var reDescribedAggregate = regexp.MustCompile(`^(count|sum|avg|min|max)\s*\(\s*(?:distinct\s+)?(.*?)\s*\)$`)
+
+// describedAggregateOID types an aggregate the way the engine computes it:
+// COUNT is an integer, and SUM, AVG, MIN and MAX keep their argument's type
+// (AVG over integers is integer division).
+func describedAggregateOID(column string, sources map[string]describedSource, baseKey string) (uint32, bool) {
+	m := reDescribedAggregate.FindStringSubmatch(column)
+	if m == nil {
+		return 0, false
+	}
+	if m[1] == "count" {
+		return 20, true
+	}
+	return resolveDescribedColumnOID(m[2], sources, baseKey)
+}
+
+// selectsStar reports whether a select list has * or a qualified star.
+func selectsStar(sel ast.SelectStatement) bool {
+	for _, column := range sel.Columns {
+		canonical := strings.TrimSpace(strings.ToLower(column))
+		if canonical == "*" || isQualifiedStarProjection(canonical) {
+			return true
+		}
+	}
+	return false
 }
 
 type describedSelectColumn struct {
@@ -1521,13 +1570,17 @@ func (server *Server) describeSelectColumns(sel ast.SelectStatement, importedTab
 			}
 		} else if _, ok := caseAliases[column]; ok {
 			oid = 25
+		} else if aggregateOID, ok := describedAggregateOID(column, sources, baseKey); ok {
+			oid = aggregateOID
 		} else if resolvedOID, ok := resolveDescribedColumnOID(column, sources, baseKey); ok {
 			oid = resolvedOID
 		}
 		result = append(result, describedSelectColumn{Name: name, OID: oid})
 	}
 
-	if sel.ForHistory && len(result) > 0 {
+	// A star over FOR HISTORY also returns the history columns; an explicit
+	// list names them if it wants them.
+	if sel.ForHistory && len(result) > 0 && selectsStar(sel) {
 		result = append(result,
 			describedSelectColumn{Name: executor.HistoryOperationColumnName, OID: 25},
 			describedSelectColumn{Name: executor.HistoryCommitLSNColumnName, OID: 20},
@@ -1911,6 +1964,25 @@ func decodeBinaryParam(data []byte, oid uint32) (string, error) {
 		}
 		n := int64(binary.BigEndian.Uint64(data))
 		return strconv.FormatInt(n, 10), nil
+	case 700, 701: // float4, float8
+		var f float64
+		switch {
+		case oid == 700 && len(data) == 4:
+			f = float64(math.Float32frombits(binary.BigEndian.Uint32(data)))
+		case oid == 701 && len(data) == 8:
+			f = math.Float64frombits(binary.BigEndian.Uint64(data))
+		default:
+			return "", fmt.Errorf("invalid float binary length %d", len(data))
+		}
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return "", fmt.Errorf("unsupported float value %v", f)
+		}
+		// Plain decimal notation with a point, so the literal parses as a float.
+		text := strconv.FormatFloat(f, 'f', -1, 64)
+		if !strings.Contains(text, ".") {
+			text += ".0"
+		}
+		return text, nil
 	case 16: // bool
 		if len(data) != 1 {
 			return "", fmt.Errorf("invalid bool binary length %d", len(data))

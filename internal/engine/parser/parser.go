@@ -312,7 +312,7 @@ func parseAlterTable(sql string) (ast.Statement, error) {
 		return nil, fmt.Errorf("%w: column name required", errInvalidSQL)
 	}
 
-	dataType, err := parseDataType(parts[1])
+	dataType, suffix, err := parseColumnType(parts[1:])
 	if err != nil {
 		return nil, err
 	}
@@ -322,7 +322,7 @@ func parseAlterTable(sql string) (ast.Statement, error) {
 		Type: dataType,
 	}
 
-	if err := parseOnlineSafeAddColumnSuffix(parts[2:], &column); err != nil {
+	if err := parseOnlineSafeAddColumnSuffix(suffix, &column); err != nil {
 		return nil, err
 	}
 
@@ -528,7 +528,7 @@ func parseCreateTable(sql string, ifNotExists bool) (ast.Statement, error) {
 			continue
 		}
 
-		dataType, err := parseDataType(parts[1])
+		dataType, suffix, err := parseColumnType(parts[1:])
 		if err != nil {
 			return nil, err
 		}
@@ -538,7 +538,6 @@ func parseCreateTable(sql string, ifNotExists bool) (ast.Statement, error) {
 			Type: dataType,
 		}
 
-		suffix := parts[2:]
 		for index := 0; index < len(suffix); {
 			token := strings.ToUpper(suffix[index])
 			switch token {
@@ -2629,17 +2628,30 @@ func hasOuterParentheses(clause string) bool {
 	return depth == 0
 }
 
+// parseColumnType reads the type at the start of a column definition's
+// tokens and returns the tokens after it. DOUBLE PRECISION is the one
+// two-word type name.
+func parseColumnType(tokens []string) (ast.DataType, []string, error) {
+	if len(tokens) >= 2 && strings.EqualFold(tokens[0], "DOUBLE") && strings.EqualFold(tokens[1], "PRECISION") {
+		return ast.DataTypeFloat, tokens[2:], nil
+	}
+	dataType, err := parseDataType(tokens[0])
+	return dataType, tokens[1:], err
+}
+
+// parseDataType maps a type name to its type. PostgreSQL names for the same
+// types are accepted as aliases and stored under the canonical name.
 func parseDataType(raw string) (ast.DataType, error) {
 	switch strings.ToUpper(strings.TrimSpace(raw)) {
-	case string(ast.DataTypeInt):
+	case string(ast.DataTypeInt), "INTEGER", "INT4", "BIGINT", "INT8":
 		return ast.DataTypeInt, nil
 	case string(ast.DataTypeText):
 		return ast.DataTypeText, nil
 	case string(ast.DataTypeJSON):
 		return ast.DataTypeJSON, nil
-	case string(ast.DataTypeBool):
+	case string(ast.DataTypeBool), "BOOLEAN":
 		return ast.DataTypeBool, nil
-	case string(ast.DataTypeFloat):
+	case string(ast.DataTypeFloat), "REAL", "FLOAT4", "FLOAT8", "DOUBLE":
 		return ast.DataTypeFloat, nil
 	case string(ast.DataTypeTimestamp):
 		return ast.DataTypeTimestamp, nil
