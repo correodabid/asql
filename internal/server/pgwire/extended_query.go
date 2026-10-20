@@ -1444,7 +1444,7 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 	// breaks — a TEXT value ends up decoded with an INT OID.  Avoid the
 	// mismatch by using only text (25) for user columns and int8 (20) for
 	// __commit_lsn, which is always present and always numeric.
-	if sel.ForHistory {
+	if sel.ForHistory && selectsStar(sel) {
 		fields := make([]pgproto3.FieldDescription, len(cols))
 		for i, c := range cols {
 			oid := uint32(25) // text
@@ -1473,6 +1473,34 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 		}
 	}
 	return fields
+}
+
+// reDescribedAggregate matches an aggregate call in a select list.
+var reDescribedAggregate = regexp.MustCompile(`^(count|sum|avg|min|max)\s*\(\s*(?:distinct\s+)?(.*?)\s*\)$`)
+
+// describedAggregateOID types an aggregate the way the engine computes it:
+// COUNT is an integer, and SUM, AVG, MIN and MAX keep their argument's type
+// (AVG over integers is integer division).
+func describedAggregateOID(column string, sources map[string]describedSource, baseKey string) (uint32, bool) {
+	m := reDescribedAggregate.FindStringSubmatch(column)
+	if m == nil {
+		return 0, false
+	}
+	if m[1] == "count" {
+		return 20, true
+	}
+	return resolveDescribedColumnOID(m[2], sources, baseKey)
+}
+
+// selectsStar reports whether a select list has * or a qualified star.
+func selectsStar(sel ast.SelectStatement) bool {
+	for _, column := range sel.Columns {
+		canonical := strings.TrimSpace(strings.ToLower(column))
+		if canonical == "*" || isQualifiedStarProjection(canonical) {
+			return true
+		}
+	}
+	return false
 }
 
 type describedSelectColumn struct {
@@ -1542,13 +1570,17 @@ func (server *Server) describeSelectColumns(sel ast.SelectStatement, importedTab
 			}
 		} else if _, ok := caseAliases[column]; ok {
 			oid = 25
+		} else if aggregateOID, ok := describedAggregateOID(column, sources, baseKey); ok {
+			oid = aggregateOID
 		} else if resolvedOID, ok := resolveDescribedColumnOID(column, sources, baseKey); ok {
 			oid = resolvedOID
 		}
 		result = append(result, describedSelectColumn{Name: name, OID: oid})
 	}
 
-	if sel.ForHistory && len(result) > 0 {
+	// A star over FOR HISTORY also returns the history columns; an explicit
+	// list names them if it wants them.
+	if sel.ForHistory && len(result) > 0 && selectsStar(sel) {
 		result = append(result,
 			describedSelectColumn{Name: executor.HistoryOperationColumnName, OID: 25},
 			describedSelectColumn{Name: executor.HistoryCommitLSNColumnName, OID: 20},

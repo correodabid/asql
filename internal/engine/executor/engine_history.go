@@ -218,27 +218,26 @@ func (engine *Engine) RowHistory(ctx context.Context, sql string, txDomains []st
 		return Result{Status: "OK"}, nil
 	}
 
+	prefilter := historyPrefilter(&plan)
 	var historyRows []map[string]ast.Literal
 	for _, entry := range table.changeLog {
-		// Use newRow for INSERT/UPDATE, oldRow for DELETE when matching WHERE.
-		matchRow := entry.newRow
+		// The row after the change, or before it for a DELETE.
+		row := entry.newRow
 		if entry.operation == "DELETE" {
-			matchRow = entry.oldRow
+			row = entry.oldRow
 		}
-		if matchRow == nil {
+		if row == nil || (prefilter != nil && !matchPredicate(row, prefilter, state, engine)) {
 			continue
 		}
-
-		if plan.Filter != nil && !matchPredicate(matchRow, plan.Filter, state, engine) {
-			continue
-		}
-
-		resultRow := buildHistoryResultRow(matchRow, entry.commitLSN, entry.operation)
-		historyRows = append(historyRows, resultRow)
+		historyRows = append(historyRows, buildHistoryResultRow(row, entry.commitLSN, entry.operation))
 	}
 
+	rows, err := engine.selectHistory(ctx, state, plan, historyRows)
+	if err != nil {
+		return Result{}, err
+	}
 	engine.perf.recordTimeTravel(time.Since(historyStart))
-	return Result{Status: "OK", Rows: historyRows}, nil
+	return Result{Status: "OK", Rows: rows}, nil
 }
 
 // RowHistoryAsPrincipal returns row history only when the authenticated durable
@@ -419,25 +418,111 @@ func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planne
 		}
 	}
 
+	selectPlan := *plan
+	prefilter := historyPrefilter(&selectPlan)
 	var historyRows []map[string]ast.Literal
 	for _, e := range entries {
-		// Use newRow for INSERT/UPDATE, oldRow for DELETE when matching WHERE.
-		matchRow := e.NewRow
+		// The row after the change, or before it for a DELETE.
+		row := e.NewRow
 		if e.Operation == "DELETE" {
-			matchRow = e.OldRow
+			row = e.OldRow
 		}
-		if matchRow == nil {
+		if row == nil || (prefilter != nil && !matchPredicate(row, prefilter, state, engine)) {
 			continue
 		}
-		if plan.Filter != nil && !matchPredicate(matchRow, plan.Filter, state, engine) {
-			continue
+		historyRows = append(historyRows, buildHistoryResultRow(row, e.CommitLSN, e.Operation))
+	}
+
+	rows, err := engine.selectHistory(ctx, state, selectPlan, historyRows)
+	if err != nil {
+		return Result{}, err
+	}
+	return Result{Status: "OK", Rows: rows}, nil
+}
+
+// historyPrefilter moves a WHERE that does not test the history columns out
+// of plan, so it can run on each version's row before that row is copied.
+// It returns nil when the WHERE stays in plan.
+func historyPrefilter(plan *planner.Plan) *ast.Predicate {
+	filter := plan.Filter
+	if filter == nil || predicateMayReadHistoryColumns(filter) {
+		return nil
+	}
+	plan.Filter = nil
+	return filter
+}
+
+// predicateMayReadHistoryColumns reports whether p refers to __operation or
+// __commit_lsn, or might (a subquery).
+func predicateMayReadHistoryColumns(p *ast.Predicate) bool {
+	if p == nil {
+		return false
+	}
+	if p.Subquery != nil {
+		return true
+	}
+	for _, column := range []string{p.Column, p.RightColumn} {
+		if strings.Contains(column, HistoryOperationColumnName) || strings.Contains(column, HistoryCommitLSNColumnName) {
+			return true
 		}
-		historyRows = append(historyRows, buildHistoryResultRow(matchRow, e.CommitLSN, e.Operation))
+	}
+	return predicateMayReadHistoryColumns(p.Left) || predicateMayReadHistoryColumns(p.Right)
+}
+
+// selectHistory runs a FOR HISTORY query's SELECT over its history rows, in
+// commit order, as over a table: WHERE (which can test __operation and
+// __commit_lsn), the select list, aggregates, GROUP BY, ORDER BY, OFFSET and
+// LIMIT all apply.
+func (engine *Engine) selectHistory(ctx context.Context, state *readableState, plan planner.Plan, historyRows []map[string]ast.Literal) ([]map[string]ast.Literal, error) {
+	columnSet := make(map[string]struct{})
+	for _, row := range historyRows {
+		for column := range row {
+			columnSet[column] = struct{}{}
+		}
+	}
+	columnSet[HistoryOperationColumnName] = struct{}{}
+	columnSet[HistoryCommitLSNColumnName] = struct{}{}
+	columns := make([]string, 0, len(columnSet))
+	for column := range columnSet {
+		columns = append(columns, column)
+	}
+	sort.Strings(columns)
+
+	history := &tableState{
+		columns:           columns,
+		columnDefinitions: make(map[string]ast.ColumnDefinition),
+		rows:              make([][]ast.Literal, len(historyRows)),
+		columnIndex:       make(map[string]int, len(columns)),
+		indexes:           make(map[string]*indexState),
+		indexedColumns:    make(map[string]string),
+		indexedColumnSets: make(map[string]string),
+		uniqueColumns:     make(map[string]struct{}),
+	}
+	for i, column := range columns {
+		history.columnIndex[column] = i
+	}
+	for i, row := range historyRows {
+		history.rows[i] = rowFromMap(columns, row)
 	}
 
-	if plan.Limit != nil && len(historyRows) > *plan.Limit {
-		historyRows = historyRows[:*plan.Limit]
+	// A copy of the state where the table is its history.
+	historyState := &readableState{domains: make(map[string]*domainState, len(state.domains)), principals: state.principals, headLSN: state.headLSN, logicalTS: state.logicalTS}
+	for name, domain := range state.domains {
+		historyState.domains[name] = domain
 	}
+	domain := &domainState{tables: make(map[string]*tableState)}
+	if original, ok := state.domains[plan.DomainName]; ok {
+		for name, table := range original.tables {
+			domain.tables[name] = table
+		}
+	}
+	domain.tables[plan.TableName] = history
+	historyState.domains[plan.DomainName] = domain
 
-	return Result{Status: "OK", Rows: historyRows}, nil
+	plan.ForHistory = false
+	rows, err := engine.selectRows(ctx, historyState, plan)
+	if err != nil {
+		return nil, fmt.Errorf("history query: %w", err)
+	}
+	return rows, nil
 }
