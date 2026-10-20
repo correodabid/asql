@@ -50,13 +50,16 @@ need to demonstrate compliance without opening their process data. Not consumer 
      beforehand and kept elsewhere exposes the rewrite
      (`internal/engine/executor/ledger_rewrite_test.go`). Phase 1b exists to close
      that gap.
-   - *Phase 1b, in progress on `feat/wal-ledger-signed`:* `ledger=signed` with
-     checkpointed Ed25519 digests, a digest sidecar log, `GET /ledger/digest`,
-     `SELECT * FROM asql_ledger_digest()` and `verify-ledger --digest`. Digests are
+   - *Phase 1b, shipped (#42):* `ledger=signed` with checkpointed Ed25519 digests, a
+     digest sidecar log, `GET /api/v1/ledger/digest`,
+     `SELECT * FROM asql_admin.ledger_digest` and `verify-ledger -digest`. Digests are
      meant to be published somewhere the operator does not control.
+   - *Compliance profile (#49):* `asqld -compliance` refuses to start unless the
+     ledger vouches for the whole retained WAL.
 2. **Signed query results bound to state.** `SELECT ... AS OF LSN n` can return
    `{rows, lsn, chain/digest, signature}` so a third party can check that the answer comes
-   from a specific, published state.
+   from a specific, published state. Proposed in
+   [ADR 0006](../adr/0006-signed-query-results.md), pending review.
 3. **Inclusion and consistency proofs.** Move to an RFC 6962-style append-only Merkle tree
    (leaves are already position-independent for this). Prove "this row existed at state H"
    without revealing the rest, and "today's log extends yesterday's". The audit store's
