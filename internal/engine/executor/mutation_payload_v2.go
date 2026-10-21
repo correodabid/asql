@@ -42,8 +42,9 @@ package executor
 //   0x05 CreateIndex          0x06 CreateEntity
 //   0x07 DropTable            0x08 DropIndex
 //   0x09 TruncateTable        0x0A AlterTableSetAppendOnly
+//   0x0B AlterTableSetVerifiable
 //
-// CreateTable flags byte: bit0 IfNotExists, bit1 AppendOnly.
+// CreateTable flags byte: bit0 IfNotExists, bit1 AppendOnly, bit2 Verifiable.
 //
 // ColumnDefinition flags byte (bitmask in encodeColumnDef):
 //   bit0 PrimaryKey  bit1 Unique  bit2 NotNull
@@ -130,6 +131,7 @@ const (
 	ddlSubDropIndex         byte = 0x08
 	ddlSubTruncateTable     byte = 0x09
 	ddlSubSetAppendOnly     byte = 0x0A
+	ddlSubSetVerifiable     byte = 0x0B
 )
 
 // ColumnDefinition flag bits (used in encodeColumnDef)
@@ -569,7 +571,8 @@ func encodeMutationPayloadV2(domain string, plan planner.Plan, sql string) []byt
 		planner.OperationDropTable,
 		planner.OperationDropIndex,
 		planner.OperationTruncateTable,
-		planner.OperationAlterTableSetAppendOnly:
+		planner.OperationAlterTableSetAppendOnly,
+		planner.OperationAlterTableSetVerifiable:
 		return encodeDDLStructPayload(domain, plan)
 	default:
 		// SELECT, SetOp, or future ops not yet handled — fall back to SQL.
@@ -652,6 +655,9 @@ func encodeDDLStructPayload(domain string, plan planner.Plan) []byte {
 		}
 		if plan.AppendOnly {
 			flags |= 0x02
+		}
+		if plan.Verifiable {
+			flags |= 0x04
 		}
 		w.writeByte(flags)
 		w.writeStr(plan.TableName)
@@ -742,6 +748,10 @@ func encodeDDLStructPayload(domain string, plan planner.Plan) []byte {
 
 	case planner.OperationAlterTableSetAppendOnly:
 		w.writeByte(ddlSubSetAppendOnly)
+		w.writeStr(plan.TableName)
+
+	case planner.OperationAlterTableSetVerifiable:
+		w.writeByte(ddlSubSetVerifiable)
 		w.writeStr(plan.TableName)
 
 	default:
@@ -1211,6 +1221,7 @@ func decodeDDLStructPayload(r *v2Reader, domain string, plan *planner.Plan) erro
 		plan.Operation = planner.OperationCreateTable
 		plan.IfNotExists = flags&0x01 != 0
 		plan.AppendOnly = flags&0x02 != 0
+		plan.Verifiable = flags&0x04 != 0
 		plan.TableName, err = r.readStr()
 		if err != nil {
 			return fmt.Errorf("payloadv2: CREATE TABLE tableName: %w", err)
@@ -1381,6 +1392,13 @@ func decodeDDLStructPayload(r *v2Reader, domain string, plan *planner.Plan) erro
 		plan.TableName, err = r.readStr()
 		if err != nil {
 			return fmt.Errorf("payloadv2: SET APPEND ONLY tableName: %w", err)
+		}
+
+	case ddlSubSetVerifiable:
+		plan.Operation = planner.OperationAlterTableSetVerifiable
+		plan.TableName, err = r.readStr()
+		if err != nil {
+			return fmt.Errorf("payloadv2: SET VERIFIABLE tableName: %w", err)
 		}
 
 	default:

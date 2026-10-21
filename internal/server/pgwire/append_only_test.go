@@ -49,3 +49,30 @@ func TestAppendOnlyOverPgwire(t *testing.T) {
 		t.Fatalf("schema snapshot does not mark the table append-only: %s", snapshot)
 	}
 }
+
+// TestVerifiableOverPgwire: SET VERIFIABLE restricts nothing, and the schema
+// reports it.
+func TestVerifiableOverPgwire(t *testing.T) {
+	addr := startProjectionTestServer(t)
+	ctx := context.Background()
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+addr+"/asql?sslmode=disable")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	for _, sql := range []string{
+		"BEGIN DOMAIN shop", "ALTER TABLE items SET VERIFIABLE", "COMMIT",
+		"BEGIN DOMAIN shop", "UPDATE items SET name = 'renamed' WHERE id = 1", "COMMIT",
+	} {
+		if _, err := conn.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+	var snapshot string
+	if err := conn.QueryRow(ctx, "SELECT snapshot FROM asql_admin.schema_snapshot").Scan(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(snapshot, `"verifiable":true`) || strings.Contains(snapshot, `"append_only":true`) {
+		t.Fatalf("schema snapshot: %s", snapshot)
+	}
+}
