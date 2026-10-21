@@ -79,6 +79,9 @@ type readableState struct {
 	headLSN    uint64
 	logicalTS  uint64
 	lastTxNum  uint64 // highest TxID number in the WAL up to headLSN
+	// subqueries is set on a query's own copy of the state (see
+	// withSubqueryCache), never on the engine's.
+	subqueries *subqueryCache
 }
 
 // cloneForMutation creates a shallow copy suitable for mutation.

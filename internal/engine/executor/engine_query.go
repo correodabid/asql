@@ -14,6 +14,22 @@ import (
 )
 
 func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan planner.Plan) ([]map[string]ast.Literal, error) {
+	// The query's own subquery cache, and the subquery errors it collects.
+	if state != nil && state.subqueries == nil {
+		state = withSubqueryCache(state)
+		rows, err := engine.selectRowsScoped(ctx, state, plan)
+		if err == nil {
+			err = state.subqueries.err
+		}
+		if err != nil {
+			return nil, err
+		}
+		return rows, nil
+	}
+	return engine.selectRowsScoped(ctx, state, plan)
+}
+
+func (engine *Engine) selectRowsScoped(ctx context.Context, state *readableState, plan planner.Plan) ([]map[string]ast.Literal, error) {
 	// Materialize CTEs and inject as virtual tables
 	if len(plan.CTEs) > 0 {
 		var err error
@@ -39,6 +55,9 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 
 	filter, err := coercePredicate(plan.Filter, selectColumnType(state, plan))
 	if err != nil {
+		return nil, err
+	}
+	if filter, err = engine.inlineInSubqueries(state, filter); err != nil {
 		return nil, err
 	}
 	plan.Filter = filter
@@ -866,13 +885,8 @@ func executeSubquery(sub *ast.Subquery, state *readableState, engine *Engine, ou
 		return nil, fmt.Errorf("subquery requires engine context")
 	}
 
-	// Determine available domains from state.
-	txDomains := make([]string, 0, len(state.domains))
-	for d := range state.domains {
-		txDomains = append(txDomains, d)
-	}
-
-	plan, err := planner.BuildForDomains(sub.Statement, txDomains)
+	// Sorted, so an unqualified table resolves to the same domain each time.
+	plan, err := planner.BuildForDomains(sub.Statement, domainsFromState(state, ""))
 	if err != nil {
 		return nil, fmt.Errorf("subquery plan: %w", err)
 	}
@@ -936,11 +950,11 @@ func decorrelateFilter(pred *ast.Predicate, outerRow map[string]ast.Literal) *as
 // evaluateExistsSubquery evaluates EXISTS (SELECT ...).
 // outerRow provides the enclosing row for correlated subqueries.
 func evaluateExistsSubquery(sub *ast.Subquery, state *readableState, engine *Engine, outerRow map[string]ast.Literal) ternaryResult {
-	rows, err := executeSubquery(sub, state, engine, outerRow)
+	result, err := subqueryRows(sub, state, engine, outerRow)
 	if err != nil {
 		return ternaryFalse
 	}
-	if len(rows) > 0 {
+	if len(result.rows) > 0 {
 		return ternaryTrue
 	}
 	return ternaryFalse
@@ -959,39 +973,25 @@ func evaluateInSubquery(row map[string]ast.Literal, predicate *ast.Predicate, st
 		return ternaryUnknown
 	}
 
-	subRows, err := executeSubquery(predicate.Subquery, state, engine, row)
+	result, err := subqueryRows(predicate.Subquery, state, engine, row)
 	if err != nil {
 		return ternaryFalse
 	}
 
 	// col IN (empty) → FALSE, col NOT IN (empty) → TRUE
-	if len(subRows) == 0 {
+	if len(result.rows) == 0 {
 		if negate {
 			return ternaryTrue
 		}
 		return ternaryFalse
 	}
 
-	// Get the first column name from subquery results.
-	var subCol string
-	for k := range subRows[0] {
-		subCol = k
-		break
+	set, hasNull, err := result.inSet(predicate.Subquery)
+	if err != nil {
+		noteSubqueryError(state, err)
+		return ternaryFalse
 	}
-
-	found := false
-	hasNull := false
-	for _, sr := range subRows {
-		sv := sr[subCol]
-		if sv.Kind == ast.LiteralNull {
-			hasNull = true
-			continue
-		}
-		if compareLiteralByOperator(value, "=", sv) {
-			found = true
-			break
-		}
-	}
+	_, found := set[inKey(value)]
 
 	if negate {
 		// NOT IN
@@ -1016,23 +1016,23 @@ func evaluateInSubquery(row map[string]ast.Literal, predicate *ast.Predicate, st
 
 // evaluateScalarSubquery evaluates col op (SELECT ... LIMIT 1).
 func evaluateScalarSubquery(value ast.Literal, operator string, sub *ast.Subquery, state *readableState, engine *Engine, outerRow map[string]ast.Literal) ternaryResult {
-	subRows, err := executeSubquery(sub, state, engine, outerRow)
+	result, err := subqueryRows(sub, state, engine, outerRow)
 	if err != nil {
 		return ternaryFalse
 	}
 
-	if len(subRows) == 0 {
+	if len(result.rows) == 0 {
 		return ternaryUnknown
 	}
-	if len(subRows) > 1 {
+	if len(result.rows) > 1 {
+		noteSubqueryError(state, sqlerr.New("21000", "more than one row returned by a subquery used as an expression"))
 		return ternaryFalse
 	}
 
-	// Get scalar value from single row.
-	var subVal ast.Literal
-	for _, v := range subRows[0] {
-		subVal = v
-		break
+	subVal, err := subqueryValue(sub, result.rows[0])
+	if err != nil {
+		noteSubqueryError(state, err)
+		return ternaryFalse
 	}
 
 	if subVal.Kind == ast.LiteralNull {
