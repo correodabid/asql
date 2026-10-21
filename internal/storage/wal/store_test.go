@@ -383,6 +383,10 @@ func TestSegmentedLogStoreCompactSealedSegmentsMarksCompressed(t *testing.T) {
 		t.Fatalf("expected second compaction pass to leave size unchanged: got %d want %d", afterSize, beforeSize)
 	}
 
+	// One store per WAL at a time.
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
 	reopened, err := NewSegmentedLogStore(basePath, AlwaysSync{}, WithSegmentSize(256))
 	if err != nil {
 		t.Fatalf("reopen segmented wal store: %v", err)

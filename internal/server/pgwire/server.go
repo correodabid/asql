@@ -227,6 +227,7 @@ type Server struct {
 	clusterCancel    context.CancelFunc // cancels heartbeat + replicator goroutines
 
 	listener            net.Listener
+	listenerMu          sync.Mutex   // guards listener, set by ServeOnListener and read by Stop
 	adminMu             sync.RWMutex // guards adminListener and adminServer
 	adminListener       net.Listener
 	adminServer         *http.Server
@@ -535,7 +536,18 @@ func (server *Server) ServeOnListener(ctx context.Context, listener net.Listener
 	if listener == nil {
 		return errors.New("listener is required")
 	}
+	// Stop may run first, as when an embedded server is closed right after
+	// Start: then there is nothing to serve.
+	server.listenerMu.Lock()
+	select {
+	case <-server.closeCh:
+		server.listenerMu.Unlock()
+		_ = listener.Close()
+		return nil
+	default:
+	}
 	server.listener = listener
+	server.listenerMu.Unlock()
 
 	server.config.Logger.Info("pgwire server listening", "address", listener.Addr().String())
 	server.ledger.start()
@@ -631,8 +643,11 @@ func (server *Server) Stop() {
 		if adminListener != nil {
 			_ = adminListener.Close()
 		}
-		if server.listener != nil {
-			_ = server.listener.Close()
+		server.listenerMu.Lock()
+		listener := server.listener
+		server.listenerMu.Unlock()
+		if listener != nil {
+			_ = listener.Close()
 		}
 		server.closeConns()
 		// Stop cluster goroutines before closing storage.

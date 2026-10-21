@@ -23,7 +23,13 @@ import (
 	"time"
 
 	pgwireserver "github.com/correodabid/asql/internal/server/pgwire"
+	"github.com/correodabid/asql/internal/storage/wal"
 )
+
+// ErrDataDirInUse is returned by Start when another server, embedded or
+// not, in this process or another, already has DataDir open. Two servers on
+// one directory would write diverging histories without an error.
+var ErrDataDirInUse = wal.ErrDataDirInUse
 
 // Options configures an embedded server.
 type Options struct {

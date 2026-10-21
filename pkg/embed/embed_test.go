@@ -2,6 +2,7 @@ package embed_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -113,4 +114,17 @@ func TestStartRequiresADataDir(t *testing.T) {
 	if _, err := embed.Start(context.Background(), embed.Options{}); err == nil {
 		t.Fatal("Start without DataDir succeeded")
 	}
+}
+
+// TestASecondServerOnTheSameDataDirFails (ASQL-11): a data directory has one
+// server at a time; the next Start on it fails until the first is closed.
+func TestASecondServerOnTheSameDataDirFails(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "data")
+	first := start(t, embed.Options{DataDir: dir})
+	if _, err := embed.Start(context.Background(), embed.Options{DataDir: dir}); !errors.Is(err, embed.ErrDataDirInUse) {
+		t.Fatalf("second Start: %v, want ErrDataDirInUse", err)
+	}
+	closeWithin(t, first, 5*time.Second)
+	again := start(t, embed.Options{DataDir: dir})
+	closeWithin(t, again, 5*time.Second)
 }

@@ -1329,7 +1329,10 @@ func TestSnapshotDictionarySizeReduction(t *testing.T) {
 		t.Fatalf("decode roundtrip: %v", err)
 	}
 
-	// Reopen engine and verify data.
+	// Reopen engine and verify data. One store per WAL at a time.
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
 	store2, err := wal.NewSegmentedLogStore(walBasePath, wal.AlwaysSync{})
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
