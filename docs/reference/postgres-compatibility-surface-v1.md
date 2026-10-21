@@ -73,6 +73,7 @@ and current privilege semantics, see
   - `ROLLBACK`
   - `SAVEPOINT <name>` / `ROLLBACK TO [SAVEPOINT] <name>`
   - `CREATE TABLE`, `CREATE INDEX`
+  - primary keys on one column (`id TEXT PRIMARY KEY`) or several, as a table constraint (`PRIMARY KEY (child_id, parent_id)`): the key columns are `NOT NULL` and the tuple is unique (`23505`); `ON CONFLICT (child_id, parent_id)` uses it. `ALTER TABLE t ADD PRIMARY KEY (cols)` adds one to a table without a key when its rows already satisfy it (`23505` or `23502` otherwise, with nothing changed); it works on `APPEND ONLY` tables. Foreign keys, entities and `row_lsn`/`resolve_reference` need a one-column key
   - column types `INT`, `TEXT`, `JSON`, `BOOL`, `FLOAT` and `TIMESTAMP`, with the PostgreSQL names `INTEGER`, `INT4`, `BIGINT`, `INT8`, `BOOLEAN`, `REAL`, `FLOAT4`, `FLOAT8`, `DOUBLE` and `DOUBLE PRECISION` accepted as aliases. `FLOAT` is 64-bit, and aliases are stored under the canonical name
   - quoted literals take the type of the column they are stored in or compared with, as in PostgreSQL: `'2'` is stored in an `INT` column as 2 and `WHERE id = '2'` finds it. This covers `INT`, `FLOAT`, `BOOL` (`t`, `true`, `yes`, `on`, `1` and their negatives) and `TIMESTAMP` (ISO 8601 with a `T` or a space, optional fraction and zone, UTC when the zone is absent). Text that is not a valid value fails with `22P02` (`22007` for timestamps). pgx over `simple_protocol` relies on this: it sends every argument as a quoted string
   - timestamps are returned with their microseconds in text format, and accepted as binary parameters (`timestamp`, `timestamptz`)
@@ -230,6 +231,7 @@ regression-covered` behaviors from items that are only partially evidenced.
 | `INSERT ... RETURNING` | Implemented | Regression-covered | This is the only `RETURNING` path currently documented as supported. |
 | `INSERT ... ON CONFLICT ...` | Implemented | Regression-covered | Current `DO NOTHING` and supported `DO UPDATE` shapes are tested. |
 | `TRUNCATE TABLE` | Implemented | Regression-covered | Covered in parser and executor tests. |
+| Composite `PRIMARY KEY (a, b)` and `ALTER TABLE ... ADD PRIMARY KEY` | Implemented | Regression-covered | Covered in parser, executor (live, snapshot restart and WAL replay) and pgwire tests. No `DROP PRIMARY KEY`, and foreign keys cannot reference a composite key. |
 | `CREATE TABLE IF NOT EXISTS` / `CREATE INDEX IF NOT EXISTS` | Implemented | Regression-covered | Covered by parser tests plus dedicated pgwire end-to-end regression coverage for duplicate-safe create flows. |
 | `UPDATE ... RETURNING` / `DELETE ... RETURNING` | Unsupported | Clear negative status | Do not assume PostgreSQL parity here because `INSERT ... RETURNING` works. |
 
