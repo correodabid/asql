@@ -1,5 +1,48 @@
 # Changelog
 
+## v0.4.0 — 2026-10-21
+
+### Upgrade notes
+
+- **`asql_admin.ledger_digest` has a tenth column, `tree_root`,** last, NULL for
+  version 1 digests. A client that reads the row with `SELECT *` into nine
+  destinations now fails (pgx: "number of field descriptions must equal number of
+  destinations"); name the columns or add one destination (#87).
+- **Digests are version 2 with `ledger=signed`.** Each digest also signs the root of
+  the node's log tree (`tree_root`, also in `GET /api/v1/ledger/digest`). Verifiers
+  from v0.3.0 and earlier reject them (`unsupported version 2`): verify with this
+  release's `asqlctl`, which accepts both versions. Digests signed before keep
+  verifying (#87).
+- **A JSON path compared with a column works.** `payload->>'k' = other_col` and
+  `other_col = payload->>'k'` (and `!=`, `<`, `>`, …) failed with `42601`
+  "unsupported literal"; they now return their rows, in `SELECT`, `UPDATE` and
+  `DELETE`. A row without that path matches nothing, not even with `!=`. Comparing
+  two JSON paths with each other still fails with `42601` (#85).
+- **A new file in the ledger directory**, `log-tree.hashes`, with `ledger=signed`:
+  about 64 bytes per WAL record. The node builds it from the WAL on first start, off
+  the commit path. A node whose WAL does not start at LSN 1 keeps signing version 1
+  digests and logs why.
+- No WAL or snapshot format change. v0.3.0 can still open a v0.4.0 data directory; it
+  ignores the tree file and signs version 1 digests again.
+
+### Verifiable history
+
+- **Log tree** (ADR 0008): an RFC 6962 Merkle tree over every WAL record, built off
+  the commit path; WAL GC never removes records it has not added (#86, #87).
+- **`verify-ledger -digest`** rebuilds the tree from the WAL and checks a version 2
+  digest's `tree_root`: `match`, `mismatch` (failure `digest-tree-mismatch`) or
+  `not-checked` (#87).
+- **Consistency proofs between two signed digests**, which show that the later log
+  extends the earlier one without revealing any record:
+  `SELECT * FROM asql_admin.prove_consistency WHERE from_lsn = A [AND to_lsn = B]`
+  (`ADMIN`), `asqlctl -command prove-consistency` and `verify-consistency`, which
+  needs only the trusted keys (#88).
+
+### Docs
+
+- ADR 0008 accepted, with its decisions: log tree first, proofs at signed digests,
+  salted state tree for `VERIFIABLE` tables later (#84).
+
 ## v0.3.0 — 2026-10-21
 
 ### Upgrade notes
