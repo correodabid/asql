@@ -44,6 +44,8 @@ type persistedSnapshot struct {
 	LastTxNum uint64
 	// AppendOnly lists the append-only tables as (domain, table).
 	AppendOnly [][2]string
+	// Verifiable lists the verifiable tables as (domain, table).
+	Verifiable [][2]string
 }
 
 type persistedCatalog struct {
@@ -485,6 +487,7 @@ func marshalableToSnapshot(ps persistedSnapshot) engineSnapshot {
 	}
 
 	markAppendOnlyTables(snap.state.domains, ps.AppendOnly)
+	markVerifiableTables(snap.state.domains, ps.Verifiable)
 	return snap
 }
 
@@ -1061,6 +1064,7 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 				HasLedgerChain: entry.hasLedgerChain,
 				LastTxNum:      entry.lastTxNum,
 				AppendOnly:     entry.appendOnly,
+				Verifiable:     entry.verifiable,
 			}
 			snap := marshalableToSnapshot(full)
 			rebuildAllIndexes(&snap)

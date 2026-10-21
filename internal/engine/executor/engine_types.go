@@ -262,6 +262,11 @@ type tableState struct {
 	// checkAppendOnly). It is set by CREATE TABLE ... APPEND ONLY or ALTER
 	// TABLE ... SET APPEND ONLY and never cleared.
 	appendOnly bool
+	// verifiable enters the table's rows in the ledger's state tree
+	// (ADR 0008). It does not restrict what the table accepts. It is set by
+	// CREATE TABLE ... VERIFIABLE or ALTER TABLE ... SET VERIFIABLE and
+	// never cleared.
+	verifiable bool
 	// changeLogTrimmedLSN is the commit LSN of the newest entry trimChangeLog
 	// dropped: the changeLog is complete only after it.
 	changeLogTrimmedLSN uint64
@@ -1007,6 +1012,8 @@ type SchemaTable struct {
 	VersionedForeignKeys []SchemaVersionedFK
 	// AppendOnly is true when the table accepts INSERT only.
 	AppendOnly bool `json:",omitempty"`
+	// Verifiable is true when the table's rows enter the ledger's state tree.
+	Verifiable bool `json:",omitempty"`
 }
 
 type SchemaIndex struct {

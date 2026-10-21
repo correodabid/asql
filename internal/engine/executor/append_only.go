@@ -57,10 +57,15 @@ func (engine *Engine) committedTable(domain, table string) *tableState {
 // appendOnlyTableRefs lists the append-only tables as (domain, table),
 // sorted, for snapshots.
 func appendOnlyTableRefs(domains map[string]*domainState) [][2]string {
+	return tableRefs(domains, func(t *tableState) bool { return t.appendOnly })
+}
+
+// tableRefs lists the tables that match as (domain, table), sorted.
+func tableRefs(domains map[string]*domainState, match func(*tableState) bool) [][2]string {
 	var refs [][2]string
 	for domainName, domain := range domains {
 		for tableName, table := range domain.tables {
-			if table.appendOnly {
+			if match(table) {
 				refs = append(refs, [2]string{domainName, tableName})
 			}
 		}
@@ -76,11 +81,27 @@ func appendOnlyTableRefs(domains map[string]*domainState) [][2]string {
 
 // markAppendOnlyTables restores the append-only flags a snapshot recorded.
 func markAppendOnlyTables(domains map[string]*domainState, refs [][2]string) {
+	markTables(domains, refs, func(t *tableState) { t.appendOnly = true })
+}
+
+// markTables applies mark to the tables refs name that exist.
+func markTables(domains map[string]*domainState, refs [][2]string, mark func(*tableState)) {
 	for _, ref := range refs {
 		if domain, ok := domains[ref[0]]; ok {
 			if table, ok := domain.tables[ref[1]]; ok {
-				table.appendOnly = true
+				mark(table)
 			}
 		}
 	}
+}
+
+// verifiableTableRefs lists the verifiable tables (ADR 0008) as (domain,
+// table), sorted, for snapshots.
+func verifiableTableRefs(domains map[string]*domainState) [][2]string {
+	return tableRefs(domains, func(t *tableState) bool { return t.verifiable })
+}
+
+// markVerifiableTables restores the verifiable flags a snapshot recorded.
+func markVerifiableTables(domains map[string]*domainState, refs [][2]string) {
+	markTables(domains, refs, func(t *tableState) { t.verifiable = true })
 }

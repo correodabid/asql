@@ -281,7 +281,8 @@ func planRequiresAdmin(operation planner.Operation) bool {
 		planner.OperationDropTable,
 		planner.OperationDropIndex,
 		planner.OperationTruncateTable,
-		planner.OperationAlterTableSetAppendOnly:
+		planner.OperationAlterTableSetAppendOnly,
+		planner.OperationAlterTableSetVerifiable:
 		return true
 	default:
 		return false
@@ -293,7 +294,7 @@ func describeAuthorizedOperation(operation planner.Operation) string {
 	case planner.OperationCreateTable:
 		return "CREATE TABLE"
 	case planner.OperationAlterTableAddColumn, planner.OperationAlterTableDropColumn, planner.OperationAlterTableRenameColumn,
-		planner.OperationAlterTableSetAppendOnly:
+		planner.OperationAlterTableSetAppendOnly, planner.OperationAlterTableSetVerifiable:
 		return "ALTER TABLE"
 	case planner.OperationCreateIndex:
 		return "CREATE INDEX"
