@@ -54,9 +54,10 @@ func TestSubscribeNotifiesOnAppend(t *testing.T) {
 	}
 }
 
-// TestSubscribeLatency measures the median wake-up latency for the notification
-// path.  It is not a hard pass/fail benchmark – it just prints timing to give
-// visibility into replication propagation delay.
+// TestSubscribeLatency: Append wakes subscribers before it returns, so a
+// replication follower waiting on Subscribe never waits on its own for a
+// record that is already written. It logs how long Append and the wake-up
+// took, which on CI is dominated by fsync and is not asserted.
 func TestSubscribeLatency(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -68,31 +69,21 @@ func TestSubscribeLatency(t *testing.T) {
 
 	ctx := context.Background()
 	const rounds = 20
-	latencies := make([]time.Duration, rounds)
-
-	for i := range rounds {
+	var total time.Duration
+	for range rounds {
 		ch := store.Subscribe()
 		start := time.Now()
 		if _, err := store.Append(ctx, ports.WALRecord{Type: "COMMIT", Payload: []byte(`{}`)}); err != nil {
 			t.Fatal(err)
 		}
-		// The channel should already be closed because notifyWriters() runs
-		// synchronously inside Append() before returning.
+		// notifyWriters() runs synchronously inside Append(), so the channel
+		// is closed by the time it returns.
 		select {
 		case <-ch:
-		case <-time.After(time.Second):
-			t.Fatal("notification not received within 1s")
+		default:
+			t.Fatal("Append returned before waking subscribers")
 		}
-		latencies[i] = time.Since(start)
+		total += time.Since(start)
 	}
-
-	var total time.Duration
-	for _, l := range latencies {
-		total += l
-	}
-	avg := total / rounds
-	t.Logf("Subscribe() avg wake-up latency over %d rounds: %v", rounds, avg)
-	if avg > 5*time.Millisecond {
-		t.Errorf("avg notification latency %v exceeds 5ms threshold", avg)
-	}
+	t.Logf("Append and wake-up: %v on average over %d rounds", total/rounds, rounds)
 }
