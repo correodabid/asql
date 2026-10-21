@@ -29,6 +29,10 @@ Read these before pointing v0.1.0 at a data directory written by an earlier buil
   re-parsed on replay, so one that used `!=` now matches the rows it should have.
 - **`CREATE TABLE` is stricter**: unknown text after the column list is an error
   instead of being ignored.
+- **Queries that silently returned less now fail or answer in full**: a select-list
+  column that does not exist (`42703`), an expression ASQL cannot compute (`0A000`),
+  `FOR HISTORY` on a table that never existed (`42P01`), and failing `asql_admin`
+  queries, which returned an empty result.
 
 ### Verifiable history
 
@@ -58,6 +62,11 @@ Read these before pointing v0.1.0 at a data directory written by an earlier buil
 - **Quoted literals take the type of their column**, as in PostgreSQL; invalid input
   fails with `22P02` (#58).
 - **`!=` and `<>`** in WHERE (#62).
+- **Select-list expressions**: literals and arithmetic are computed, columns are named
+  by their alias also over the simple protocol (where an alias returned NULL), and
+  recursive CTEs can count depth (#70).
+- **`asql_admin` tables** apply `ORDER BY`, `LIMIT` and `OFFSET`, and report errors
+  instead of empty results (#71).
 - **`FOR HISTORY` runs the whole SELECT**: aggregates, `GROUP BY`, `ORDER BY`, and
   `__operation` / `__commit_lsn` in WHERE (#54).
 - **A failed COMMIT ends the transaction**, as in PostgreSQL (#51).
