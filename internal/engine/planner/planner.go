@@ -23,6 +23,7 @@ const (
 	OperationAlterTableRenameColumn  Operation = "alter_table_rename_column"
 	OperationAlterTableSetAppendOnly Operation = "alter_table_set_append_only"
 	OperationAlterTableSetVerifiable Operation = "alter_table_set_verifiable"
+	OperationAlterTableAddPrimaryKey Operation = "alter_table_add_primary_key"
 	OperationCreateIndex             Operation = "create_index"
 	OperationInsert                  Operation = "insert"
 	OperationUpdate                  Operation = "update"
@@ -36,38 +37,41 @@ const (
 )
 
 type Plan struct {
-	Operation            Operation                 `json:"operation"`
-	DomainName           string                    `json:"domain_name,omitempty"`
-	TableName            string                    `json:"table_name"`
-	AlterColumn          *ast.ColumnDefinition     `json:"alter_column,omitempty"`
-	DropColumnName       string                    `json:"drop_column_name,omitempty"`
-	RenameOldColumn      string                    `json:"rename_old_column,omitempty"`
-	RenameNewColumn      string                    `json:"rename_new_column,omitempty"`
-	IndexName            string                    `json:"index_name,omitempty"`
-	IndexColumn          string                    `json:"index_column,omitempty"`
-	IndexColumns         []string                  `json:"index_columns,omitempty"`
-	IndexMethod          string                    `json:"index_method,omitempty"`
-	Columns              []string                  `json:"columns,omitempty"`
-	Distinct             bool                      `json:"distinct,omitempty"`
-	Schema               []ast.ColumnDefinition    `json:"schema,omitempty"`
-	Values               []ast.Literal             `json:"values,omitempty"`
-	MultiValues          [][]ast.Literal           `json:"multi_values,omitempty"`
-	Filter               *ast.Predicate            `json:"filter,omitempty"`
-	Joins                []ast.JoinClause          `json:"joins,omitempty"`
-	TableAlias           string                    `json:"table_alias,omitempty"`
-	GroupBy              []string                  `json:"group_by,omitempty"`
-	Having               *ast.Predicate            `json:"having,omitempty"`
-	OrderBy              []ast.OrderByClause       `json:"order_by,omitempty"`
-	Limit                *int                      `json:"limit,omitempty"`
-	Offset               *int                      `json:"offset,omitempty"`
-	CTEs                 []ast.CTE                 `json:"ctes,omitempty"`
-	WindowFunctions      []ast.WindowFunction      `json:"window_functions,omitempty"`
-	JsonAccessColumns    []ast.JsonAccess          `json:"json_access_columns,omitempty"`
-	CaseWhenColumns      []ast.CaseWhenExpression  `json:"case_when_columns,omitempty"`
-	ForHistory           bool                      `json:"for_history,omitempty"`
-	IfNotExists          bool                      `json:"if_not_exists,omitempty"`
-	AppendOnly           bool                      `json:"append_only,omitempty"` // CREATE TABLE ... APPEND ONLY
-	Verifiable           bool                      `json:"verifiable,omitempty"`  // CREATE TABLE ... VERIFIABLE
+	Operation         Operation                `json:"operation"`
+	DomainName        string                   `json:"domain_name,omitempty"`
+	TableName         string                   `json:"table_name"`
+	AlterColumn       *ast.ColumnDefinition    `json:"alter_column,omitempty"`
+	DropColumnName    string                   `json:"drop_column_name,omitempty"`
+	RenameOldColumn   string                   `json:"rename_old_column,omitempty"`
+	RenameNewColumn   string                   `json:"rename_new_column,omitempty"`
+	IndexName         string                   `json:"index_name,omitempty"`
+	IndexColumn       string                   `json:"index_column,omitempty"`
+	IndexColumns      []string                 `json:"index_columns,omitempty"`
+	IndexMethod       string                   `json:"index_method,omitempty"`
+	Columns           []string                 `json:"columns,omitempty"`
+	Distinct          bool                     `json:"distinct,omitempty"`
+	Schema            []ast.ColumnDefinition   `json:"schema,omitempty"`
+	Values            []ast.Literal            `json:"values,omitempty"`
+	MultiValues       [][]ast.Literal          `json:"multi_values,omitempty"`
+	Filter            *ast.Predicate           `json:"filter,omitempty"`
+	Joins             []ast.JoinClause         `json:"joins,omitempty"`
+	TableAlias        string                   `json:"table_alias,omitempty"`
+	GroupBy           []string                 `json:"group_by,omitempty"`
+	Having            *ast.Predicate           `json:"having,omitempty"`
+	OrderBy           []ast.OrderByClause      `json:"order_by,omitempty"`
+	Limit             *int                     `json:"limit,omitempty"`
+	Offset            *int                     `json:"offset,omitempty"`
+	CTEs              []ast.CTE                `json:"ctes,omitempty"`
+	WindowFunctions   []ast.WindowFunction     `json:"window_functions,omitempty"`
+	JsonAccessColumns []ast.JsonAccess         `json:"json_access_columns,omitempty"`
+	CaseWhenColumns   []ast.CaseWhenExpression `json:"case_when_columns,omitempty"`
+	ForHistory        bool                     `json:"for_history,omitempty"`
+	IfNotExists       bool                     `json:"if_not_exists,omitempty"`
+	AppendOnly        bool                     `json:"append_only,omitempty"` // CREATE TABLE ... APPEND ONLY
+	Verifiable        bool                     `json:"verifiable,omitempty"`  // CREATE TABLE ... VERIFIABLE
+	// PrimaryKeyColumns is a composite primary key in key order: CREATE
+	// TABLE ... PRIMARY KEY (a, b), or ALTER TABLE ... ADD PRIMARY KEY.
+	PrimaryKeyColumns    []string                  `json:"primary_key_columns,omitempty"`
 	ReturningColumns     []string                  `json:"returning_columns,omitempty"`
 	VersionedForeignKeys []ast.VersionedForeignKey `json:"versioned_foreign_keys,omitempty"`
 	EntityName           string                    `json:"entity_name,omitempty"`
@@ -120,6 +124,7 @@ func BuildForDomains(statement ast.Statement, txDomains []string) (Plan, error) 
 			IfNotExists:          typed.IfNotExists,
 			AppendOnly:           typed.AppendOnly,
 			Verifiable:           typed.Verifiable,
+			PrimaryKeyColumns:    typed.PrimaryKeyColumns,
 		}, nil
 	case ast.AlterTableAddColumnStatement:
 		domain, table, err := resolveTableDomain(typed.TableName, allowedDomains)
@@ -153,6 +158,17 @@ func BuildForDomains(statement ast.Statement, txDomains []string) (Plan, error) 
 			Operation:  OperationAlterTableSetAppendOnly,
 			DomainName: domain,
 			TableName:  table,
+		}, nil
+	case ast.AlterTableAddPrimaryKeyStatement:
+		domain, table, err := resolveTableDomain(typed.TableName, allowedDomains)
+		if err != nil {
+			return Plan{}, err
+		}
+		return Plan{
+			Operation:         OperationAlterTableAddPrimaryKey,
+			DomainName:        domain,
+			TableName:         table,
+			PrimaryKeyColumns: typed.Columns,
 		}, nil
 	case ast.AlterTableSetVerifiableStatement:
 		domain, table, err := resolveTableDomain(typed.TableName, allowedDomains)
