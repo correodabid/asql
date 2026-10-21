@@ -1,6 +1,6 @@
 # ADR 0008: Inclusion and consistency proofs
 
-- Status: Proposed. Phase 3 of the [verifiable queries roadmap](../architecture/verifiable-queries-roadmap-v1.md).
+- Status: Accepted. Phase 3 of the [verifiable queries roadmap](../architecture/verifiable-queries-roadmap-v1.md).
 - Date: 2026-10-21
 - Decision drivers:
   - a third party should be able to check that **one row had a given value at a
@@ -46,8 +46,16 @@ the digests, which gain a version 2.
 
 - An RFC 6962 tree over the ledger leaves in LSN order. Tree size `n` equals the LSN
   of the last record covered.
-- Built with `golang.org/x/mod/sumdb/tlog`: tiles of height 8, stored under the ledger
+- Built with `golang.org/x/mod/sumdb/tlog`, taken as a module dependency rather than
+  vendored, so its fixes arrive with a version bump. Tiles of height 8, stored under the ledger
   directory, about 32 bytes per record. Tiles hold hashes only, so they outlive WAL GC.
+- **The tree starts at LSN 1.** WAL GC (`WithWALGC`) never truncates past the last
+  record the builder has added, and backups carry the tiles. A node whose WAL does not
+  start at LSN 1 and has no tiles for the missing part (a data directory truncated
+  before this ADR, or restored without tiles) does not build the tree: it logs why,
+  keeps signing v1 digests, and proof requests fail with a clear error. Starting the
+  tree at the first retained LSN instead would give two nodes different roots for the
+  same LSN.
 - **Digest v2** adds `tree_root` (at `tree_size = lsn`) next to `chain`.
 - Proofs:
   - **consistency**: from digest A (size m) to digest B (size n), O(log n) hashes. It
@@ -56,6 +64,10 @@ the digests, which gain a version 2.
 
 ### 2. State tree: a row's value at a checkpoint
 
+- Only for tables marked for it: `CREATE TABLE … VERIFIABLE` or
+  `ALTER TABLE … SET VERIFIABLE`, as `APPEND ONLY` is declared. Marking an existing
+  table enters its live rows at that LSN; its proofs start at the first checkpoint
+  after it. Other tables pay nothing.
 - A sparse Merkle tree keyed by `SHA-256(domain || table || primary key)`, holding
   `leaf = SHA-256(0x00 || salt || canonical row)` for every live row. The canonical row
   is ADR 0006's typed value encoding, in column order.
@@ -67,9 +79,15 @@ the digests, which gain a version 2.
   can be pruned with their digests.
 - Proofs: **inclusion** of `(key, row, salt)` under `state_root`, and **non-inclusion**
   of a key. Only the proven row's salt is revealed.
-- **Salt**: `HMAC-SHA-256(state key, key || commit LSN of the row version)`, where the
-  state key is a node secret like the ledger key. The salt depends only on the key, the
-  WAL and the secret, so replicas sharing the secret build the same tree.
+- **Salt**: `HMAC-SHA-256(state key, key || commit LSN of the row version)`. The salt
+  depends only on the key, the WAL and the secret, so replicas sharing the secret build
+  the same tree. Leaves are salted from the first release of the state tree: adding
+  salt later would change every leaf and root.
+- **State key**: a 32-byte secret, separate from the signing key so that rotating the
+  signing key does not change the tree. `asqlctl ledger-keygen` writes it next to the
+  private key (`<key>.state`, mode 0600), and `asqld` loads it from there unless
+  `-ledger-state-key` names another file. Replicas need the same file, as they need the
+  same signing key.
 
 ### 3. Surfaces
 
@@ -117,27 +135,30 @@ Following ADR 0006:
 - **A Merkle Patricia trie (Ethereum-style).** More complex and not standard outside
   Ethereum, for the same guarantees as a sparse Merkle tree here.
 
-## Open questions
+## Resolved questions
 
-1. **Order.** Ship the log tree first (smaller, standard, gives consistency proofs and
-   digest v2), and the state tree after? The proposal is yes.
-2. **Proofs at checkpoints only**, as proposed, or at any LSN, which needs a root per
-   commit and more storage?
-3. **Salting.** Is hiding low-entropy neighbouring rows a requirement for the pharma
-   use case, which would add a second node secret, or is unsalted acceptable for now?
-4. **Which tables.** Every table, or only tables marked for it (for example
-   `CREATE TABLE … VERIFIABLE`), so the state tree's cost is paid only where it is
-   needed?
-5. **Dependency.** Adding `golang.org/x/mod` for `sumdb/tlog`, or vendoring the subset
-   used?
+1. **Order.** The log tree ships first: it is smaller and standard, gives consistency
+   proofs on its own, and settles digest v2 before the state tree builds on it.
+2. **Checkpoints only.** Proofs are tied to signed digests, which exist only at
+   checkpoints; a root per commit would cost on every commit for LSNs nobody signs. If
+   a proof is needed right after a given commit, the answer is a checkpoint signed on
+   demand, not a root per commit; that is left for later.
+3. **Salted leaves.** Required: in the pharma use case, values like `WITHIN_SPEC` /
+   `OUT_OF_SPEC` are guessable, and an unsalted proof would let its recipient test
+   neighbouring rows. Retrofitting salt would need a new tree and digest version.
+4. **Only `VERIFIABLE` tables.** Most tables (queues, configuration, scratch) need no
+   proofs, and the persistent nodes' storage grows with every checkpoint.
+5. **`golang.org/x/mod` as a dependency.** It is maintained by the Go team and runs
+   `sum.golang.org`; vendoring would mean tracking its fixes by hand.
 
 ## Implementation plan
 
 1. Log tree builder with `tlog` tiles, and its consistency and inclusion proofs, with
    tests against `tlog`'s own verifiers.
 2. Digest v2 with `tree_root`; `verify-consistency`; v1 digests still verify.
-3. State tree with persistent nodes, built from the audit store, rebuilt from the WAL
+3. `VERIFIABLE` tables, and the state key in `ledger-keygen` and `asqld`.
+4. State tree with persistent nodes, built from the audit store, rebuilt from the WAL
    when the audit store is.
-4. `state_root` in digest v2; `asql_admin.prove_row` and `verify-row`.
-5. Benchmarks for the builder and storage, and confirmation that the commit-path
+5. `state_root` in digest v2; `asql_admin.prove_row` and `verify-row`.
+6. Benchmarks for the builder and storage, and confirmation that the commit-path
    benchmarks are unchanged.
