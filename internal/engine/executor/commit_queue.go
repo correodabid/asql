@@ -202,6 +202,15 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 
 	savedLogicalTS := engine.logicalTS
 
+	// One commit time for the batch (ADR 0007): read once, here on the
+	// leader, and never below the previous commit's, so commit times do not
+	// decrease with the LSN. Replay reads it back from the COMMIT records.
+	commitMicros := engine.clock.Now().UnixMicro()
+	if last := engine.lastCommitMicros.Load(); commitMicros < last {
+		commitMicros = last
+	}
+	commitHeader := encodeCommitHeader(commitMicros)
+
 	// Process each job, collecting WAL records for successful ones.
 	type jobOutcome struct {
 		commitLSN      uint64
@@ -351,7 +360,7 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 		}
 
 		walTS++
-		allWALRecords = append(allWALRecords, ports.WALRecord{TxID: job.tx.id, Type: walTypeCommit, Timestamp: walTS})
+		allWALRecords = append(allWALRecords, ports.WALRecord{TxID: job.tx.id, Type: walTypeCommit, Timestamp: walTS, Payload: commitHeader})
 
 		outcomes[i] = jobOutcome{
 			commitLSN:      predictedCommitLSN,
@@ -462,6 +471,7 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 				slog.Warn("timestamp index append failed", "error", err.Error(), "records", len(allWALRecords))
 			}
 		}
+		engine.indexCommitTimes(allWALRecords)
 		engine.appendWALRecordCache(allWALRecords)
 	}
 

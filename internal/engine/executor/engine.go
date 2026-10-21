@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/correodabid/asql/internal/engine/domains"
 	"github.com/correodabid/asql/internal/engine/parser"
@@ -16,6 +17,7 @@ import (
 	"github.com/correodabid/asql/internal/engine/planner"
 	"github.com/correodabid/asql/internal/engine/ports"
 	"github.com/correodabid/asql/internal/engine/sqlerr"
+	"github.com/correodabid/asql/internal/platform/clock"
 	"github.com/correodabid/asql/internal/storage/wal"
 )
 
@@ -187,7 +189,14 @@ type Engine struct {
 	historyFrom    uint64
 	raftCommitter  ports.RaftCommitter // non-nil in cluster mode; routes every WAL write through Raft quorum
 	timestampIndex *timestampLSNIndex
-	replayMode     bool // true during WAL replay; skips VFK validation
+	// commitTimes maps commit wall-clock times to commit LSNs (ADR 0007).
+	commitTimes *commitTimeIndex
+	// clock gives the time of commits on the leader; replay never reads it.
+	clock interface{ Now() time.Time }
+	// lastCommitMicros is the newest commit time, which the next one never
+	// goes below.
+	lastCommitMicros atomic.Int64
+	replayMode       bool // true during WAL replay; skips VFK validation
 }
 
 type walRecordCache struct {
@@ -287,6 +296,13 @@ type EngineOption func(*Engine)
 
 // WithRetainWAL disables WAL truncation after snapshot persistence.
 // Use in regulated/audit environments where full WAL history must be preserved.
+// WithClock sets the clock that gives commit times (ADR 0007).
+func WithClock(c interface{ Now() time.Time }) EngineOption {
+	return func(engine *Engine) {
+		engine.clock = c
+	}
+}
+
 func WithRetainWAL(retain bool) EngineOption {
 	return func(e *Engine) { e.retainWAL = retain }
 }
@@ -377,6 +393,8 @@ func New(ctx context.Context, logStore ports.LogStore, snapDir string, opts ...E
 		perf:                 newPerfStats(),
 		retainWAL:            true, // default: preserve full WAL for compliance
 		timestampIndex:       newTimestampLSNIndex(snapDir),
+		commitTimes:          newCommitTimeIndex(snapDir),
+		clock:                clock.Realtime{},
 	}
 
 	for _, opt := range opts {
@@ -836,10 +854,13 @@ func (engine *Engine) appendWALRecordCache(records []ports.WALRecord) {
 
 // TimelineCommit describes a single committed transaction for the timeline UI.
 type TimelineCommit struct {
-	LSN       uint64                   `json:"lsn"`
-	TxID      string                   `json:"tx_id"`
-	Timestamp uint64                   `json:"timestamp"`
-	Tables    []TimelineCommitMutation `json:"tables"`
+	LSN       uint64 `json:"lsn"`
+	TxID      string `json:"tx_id"`
+	Timestamp uint64 `json:"timestamp"`
+	// CommitTimeMicros is the wall-clock time of the commit in Unix µs
+	// (ADR 0007), or 0 for a commit written before commits recorded it.
+	CommitTimeMicros int64                    `json:"commit_time_micros,omitempty"`
+	Tables           []TimelineCommitMutation `json:"tables"`
 }
 
 // TimelineCommitMutation describes one mutation within a commit.
@@ -872,7 +893,8 @@ func (engine *Engine) TimelineCommits(ctx context.Context, fromLSN, toLSN uint64
 	var commits []TimelineCommit
 	for i, r := range records {
 		if r.Type == walTypeCommit {
-			commits = append(commits, TimelineCommit{LSN: r.LSN, TxID: r.TxID, Timestamp: r.Timestamp, Tables: []TimelineCommitMutation{}})
+			commitTime, _ := commitTimeOf(r)
+			commits = append(commits, TimelineCommit{LSN: r.LSN, TxID: r.TxID, Timestamp: r.Timestamp, CommitTimeMicros: commitTime, Tables: []TimelineCommitMutation{}})
 			continue
 		}
 		if r.Type != walTypeMutation || commitLSNs[i] == 0 {

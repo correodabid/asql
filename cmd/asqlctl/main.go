@@ -46,30 +46,31 @@ func main() {
 	adminHTTPAddr := flag.String("admin-http", "", "ASQL admin HTTP endpoint for operational/security commands (for example 127.0.0.1:9090)")
 	authToken := flag.String("auth-token", "", "optional bearer token for authenticated APIs")
 	demo := flag.Bool("demo", false, "run end-to-end gRPC demo flow")
-	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|verify-ledger|ledger-keygen|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-show|principal-who-can-history|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-revoke-privilege|principal-grant-role|principal-revoke-role|principal-set-password|principal-disable|principal-enable|principal-delete")
+	command := flag.String("command", "", "operation: shell|begin|execute|commit|rollback|time-travel|replay|migration-preflight|backup-create|backup-manifest|backup-verify|restore-lsn|restore-timestamp|snapshot-catalog|wal-retention|verify-ledger|ledger-keygen|attest-query|verify-result|audit-report|audit-export|fixture-validate|fixture-load|fixture-export|principal-list|principal-show|principal-who-can-history|principal-bootstrap-admin|principal-create-user|principal-create-role|principal-grant-privilege|principal-revoke-privilege|principal-grant-role|principal-revoke-role|principal-set-password|principal-disable|principal-enable|principal-delete")
 	mode := flag.String("mode", "domain", "tx mode for begin: domain|cross")
 	domains := flag.String("domains", "", "comma-separated domains (required for begin and usually for time-travel)")
 	tableName := flag.String("table", "", "table filter for audit commands")
 	operation := flag.String("operation", "", "operation filter for audit commands (INSERT|UPDATE|DELETE)")
 	txID := flag.String("tx-id", "", "transaction id for execute/commit/rollback")
-	sql := flag.String("sql", "", "sql for execute or time-travel")
+	sql := flag.String("sql", "", "sql for execute, time-travel or attest-query")
 	principal := flag.String("principal", "", "principal name for security management commands")
 	password := flag.String("password", "", "principal password for bootstrap/create-user/security user alter (principal-set-password) commands")
 	passwordStdin := flag.Bool("password-stdin", false, "read the principal password from stdin for bootstrap/create-user/security user alter (principal-set-password) commands")
 	role := flag.String("role", "", "role principal for principal-grant-role/principal-revoke-role")
 	privilege := flag.String("privilege", "", "privilege name for principal-grant-privilege (ADMIN|SELECT_HISTORY)")
 	rollbackSQL := flag.String("rollback-sql", "", "semicolon-separated rollback SQL for migration-preflight")
-	lsn := flag.Uint64("lsn", 0, "lsn for replay or time-travel")
+	lsn := flag.Uint64("lsn", 0, "lsn for replay, time-travel or attest-query")
 	limit := flag.Int("limit", 0, "row limit for audit commands (0 = unlimited)")
 	logicalTS := flag.Uint64("logical-ts", 0, "logical timestamp for time-travel when lsn is not provided")
 	dataDir := flag.String("data-dir", "", "local ASQL data directory for backup/restore commands")
 	backupDir := flag.String("backup-dir", "", "backup directory for backup/restore commands")
-	outputPath := flag.String("output", "", "output file for export commands")
+	outputPath := flag.String("output", "", "output file for export commands and attest-query")
 	outputFormat := flag.String("format", "json", "output format for export commands: json|jsonl")
 	fixtureFile := flag.String("fixture-file", "", "path to a deterministic fixture JSON file")
 	fromSnapshot := flag.Bool("from-snapshot", false, "verify-ledger: verify a WAL truncated by WAL GC from its first retained segment, anchored to a snapshot")
-	digestPath := flag.String("digest", "", "verify-ledger: signed ledger digest (JSON) to check against the WAL; needs -pubkey")
-	pubKeyPath := flag.String("pubkey", "", "verify-ledger: trusted Ed25519 public key(s), PEM; one per node")
+	digestPath := flag.String("digest", "", "verify-ledger, verify-result: signed ledger digest (JSON) to check against; needs -pubkey")
+	pubKeyPath := flag.String("pubkey", "", "verify-ledger, verify-result: trusted Ed25519 public key(s), PEM; one per node")
+	resultPath := flag.String("result", "", "verify-result: attested result (JSON) written by attest-query")
 	flag.Parse()
 
 	// Support positional  "asqlctl shell"  syntax in addition to -command.
@@ -125,6 +126,25 @@ func main() {
 
 		if isLedgerKeygenCommand(*command) {
 			if err := runLedgerKeygen(os.Stdout, *outputPath); err != nil {
+				fmt.Fprintf(os.Stderr, "command failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
+
+		if isAttestCommand(*command) {
+			var err error
+			if strings.EqualFold(strings.TrimSpace(*command), "attest-query") {
+				err = runAttestQuery(context.Background(), os.Stdout, attestQueryOptions{
+					PgwireAddr: *pgwireAddr, Principal: *principal, Password: *password, AuthToken: *authToken,
+					SQL: *sql, LSN: *lsn, OutputPath: *outputPath,
+				})
+			} else {
+				err = runVerifyResult(context.Background(), os.Stdout, verifyResultOptions{
+					ResultPath: *resultPath, PubKeyPath: *pubKeyPath, DigestPath: *digestPath, DataDir: *dataDir,
+				})
+			}
+			if err != nil {
 				fmt.Fprintf(os.Stderr, "command failed: %v\n", err)
 				os.Exit(1)
 			}
