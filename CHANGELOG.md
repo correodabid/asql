@@ -1,5 +1,37 @@
 # Changelog
 
+## v0.2.0 — 2026-10-21
+
+### Upgrade notes
+
+- **Joins that filtered on the joined table could return no rows.** When the base
+  table had an index on the join column, a WHERE condition on the joined table other
+  than `=`, `<`, `>`, `<=`, `>=`, `IS NULL` or `IN` (for example `!=`, `LIKE`,
+  `BETWEEN`, `NOT`) dropped every row, without an error. Such queries now return their
+  rows (#75).
+- **Subqueries in WHERE report their errors.** These used to read as false; they now
+  fail:
+  - a scalar subquery that returns more than one row (`21000`);
+  - a subquery with more than one column (`42601`);
+  - a subquery that fails, for example on a missing table (`42P01`) (#74).
+- No format change: v0.2.0 reads and writes the same data as v0.1.0, and v0.1.0 can
+  read what v0.2.0 writes.
+
+### Performance
+
+- **Uncorrelated subqueries run once per query** instead of once per outer row, and an
+  `IN (SELECT …)` uses the index of the outer column. Over 100,000 rows:
+  `IN (SELECT …)` 3.1 s → 65 µs; `IN` over a recursive CTE 930 ms → 135 µs (#74).
+- **A join with the big table first** reads only the rows of the big table that can
+  match, through its index: 39 ms → 0.13 ms, as fast as with the small table first.
+  The rows and their order are unchanged (#76).
+
+### Fixes
+
+- A subquery's value is its select list's first column; it used to come from whichever
+  key a map iteration gave first. Unqualified tables in a subquery resolve to the same
+  domain on every run (#74).
+
 ## v0.1.0 — 2026-10-21
 
 The first tagged release. Earlier builds were taken from `main`; a binary built
