@@ -53,7 +53,7 @@ func (engine *Engine) materializeCTE(ctx context.Context, state *readableState, 
 		return nil
 	}
 
-	columns, rows, err := cteRowsBySelectList(cte.Statement, anchor, cte.Columns, cte.Recursive != nil)
+	columns, rows, err := cteRowsBySelectList(cte.Statement, anchor, cte.Columns)
 	if err != nil {
 		return err
 	}
@@ -85,7 +85,7 @@ func (engine *Engine) materializeCTE(ctx context.Context, state *readableState, 
 		if err != nil {
 			return err
 		}
-		termColumns, next, err := cteRowsBySelectList(term, produced, nil, true)
+		termColumns, next, err := cteRowsBySelectList(term, produced, nil)
 		if err != nil {
 			return err
 		}
@@ -172,9 +172,8 @@ func countUnqualified(keys []string, bare string) int {
 
 // cteRowsBySelectList takes a CTE's columns from its select list, in order,
 // as PostgreSQL does: named by the column list when given, else by each
-// item's alias or column name. strict accepts column references only, which
-// is what the recursive form supports.
-func cteRowsBySelectList(sel ast.SelectStatement, rows []map[string]ast.Literal, names []string, strict bool) ([]string, [][]ast.Literal, error) {
+// item's alias or column name.
+func cteRowsBySelectList(sel ast.SelectStatement, rows []map[string]ast.Literal, names []string) ([]string, [][]ast.Literal, error) {
 	if len(sel.Columns) == 1 && strings.TrimSpace(sel.Columns[0]) == "*" {
 		columns, out := cteRowsByKey(sel, rows)
 		if len(names) > 0 {
@@ -188,11 +187,7 @@ func cteRowsBySelectList(sel ast.SelectStatement, rows []map[string]ast.Literal,
 	keys := make([]string, len(sel.Columns))
 	columns := make([]string, len(sel.Columns))
 	for i, item := range sel.Columns {
-		expr, alias := stripColumnAlias(strings.TrimSpace(item))
-		expr = strings.TrimSpace(expr)
-		if strict && !isColumnReference(expr) {
-			return nil, nil, fmt.Errorf("only column references are supported in the select list of a recursive CTE, not %q", item)
-		}
+		_, alias := stripColumnAlias(strings.TrimSpace(item))
 		keys[i] = strings.TrimSpace(alias)
 		columns[i] = unqualifiedColumn(keys[i])
 	}
@@ -225,18 +220,6 @@ func unqualifiedColumn(column string) string {
 		return column[dot+1:]
 	}
 	return column
-}
-
-func isColumnReference(expr string) bool {
-	if expr == "" {
-		return false
-	}
-	for _, ch := range expr {
-		if !(ch == '_' || ch == '.' || ch == '"' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9') {
-			return false
-		}
-	}
-	return !(expr[0] >= '0' && expr[0] <= '9')
 }
 
 // unseenRows returns the rows not in seen, once each, and adds them to it.

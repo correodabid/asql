@@ -10,6 +10,7 @@ import (
 
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 	"github.com/correodabid/asql/internal/engine/planner"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 )
 
 func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan planner.Plan) ([]map[string]ast.Literal, error) {
@@ -313,7 +314,23 @@ func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan
 			}
 			if value, ok := row[expr]; ok {
 				projected[alias] = value
+				continue
 			}
+			// Literals and arithmetic: 1, 'x', qty * 2.
+			if value, ok := resolvePredicateOperand(row, expr); ok {
+				projected[alias] = value
+				continue
+			}
+			// A column of the tables read, absent from this row because it
+			// was added after the row was written, is NULL. Anything else
+			// fails instead of disappearing from the result.
+			if !isSelectColumnReference(expr) {
+				return nil, sqlerr.New("0A000", fmt.Sprintf("unsupported expression in the select list: %s", strings.TrimSpace(expr)))
+			}
+			if !selectReadsColumn(state, plan, table, expr) {
+				return nil, sqlerr.New("42703", fmt.Sprintf("column %s does not exist", strings.TrimSpace(expr)))
+			}
+			projected[alias] = ast.Literal{Kind: ast.LiteralNull}
 		}
 		result = append(result, projected)
 	}
@@ -1301,4 +1318,48 @@ func setExcept(left, right []map[string]ast.Literal) []map[string]ast.Literal {
 func formatLogicalTimestamp(ts uint64) string {
 	t := time.UnixMicro(int64(ts))
 	return t.UTC().Format(time.RFC3339Nano)
+}
+
+// isSelectColumnReference reports whether a select-list item is a column
+// name, bare or qualified, rather than an expression.
+func isSelectColumnReference(expr string) bool {
+	expr = strings.TrimSpace(expr)
+	if expr == "" || (expr[0] >= '0' && expr[0] <= '9') {
+		return false
+	}
+	for _, ch := range expr {
+		if !(ch == '_' || ch == '.' || ch == '"' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z' || ch >= '0' && ch <= '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// selectReadsColumn reports whether a column, bare or qualified, belongs to
+// one of the tables a SELECT reads.
+func selectReadsColumn(state *readableState, plan planner.Plan, base *tableState, column string) bool {
+	column = strings.ToLower(strings.Trim(strings.TrimSpace(column), `"`))
+	if dot := strings.LastIndexByte(column, '.'); dot >= 0 {
+		column = column[dot+1:]
+	}
+	has := func(table *tableState) bool {
+		if table == nil {
+			return false
+		}
+		_, ok := table.columnIndex[column]
+		return ok
+	}
+	if has(base) {
+		return true
+	}
+	for _, join := range plan.Joins {
+		domain := join.DomainName
+		if domain == "" {
+			domain = plan.DomainName
+		}
+		if ds, ok := state.domains[domain]; ok && has(ds.tables[join.TableName]) {
+			return true
+		}
+	}
+	return false
 }
