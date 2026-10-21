@@ -53,6 +53,12 @@ func isSimplePredicate(predicate *ast.Predicate) bool {
 	if predicate.Left != nil || predicate.Right != nil {
 		return false
 	}
+	// Index lookups compare with Value: a predicate that compares with a
+	// subquery, another column or a JSON path has none, and read through
+	// an index it matched nothing (ASQL-12).
+	if predicate.Subquery != nil || predicate.RightColumn != "" || predicate.JsonAccess != nil {
+		return false
+	}
 
 	switch strings.ToUpper(predicate.Operator) {
 	case "AND", "OR", "NOT":
