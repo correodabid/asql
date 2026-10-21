@@ -155,7 +155,7 @@ ALTER TABLE results SET VERIFIABLE;
 - Marking an existing table enters its live rows at that LSN; proofs start at the first
   signed checkpoint after it.
 
-The state tree and the row proofs (`asql_admin.prove_row`, `asqlctl verify-row`) come
+The state tree and the row proofs (`asql_admin.prove_rows`, `asqlctl verify-rows`) come
 in a later release: for now the flag only records which tables they will cover.
 
 ## Ledger keys
