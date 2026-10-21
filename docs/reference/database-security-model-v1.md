@@ -133,6 +133,37 @@ How the guarantee holds:
   and it survives replay and snapshots.
 - `SchemaSnapshot` and `asql_admin.schema_snapshot` report it as `append_only`.
 
+## Ledger keys
+
+`ledger=signed` needs a signing key; `asqlctl ledger-keygen` writes it with the files
+that go with it, and never overwrites one:
+
+```bash
+asqlctl -command ledger-keygen -output /etc/asql/node.key
+# node.key        Ed25519 private key that signs digests and attestations (0600)
+# node.pub        its public key, for verifiers
+# node.key.state  state key (0600)
+asqld -ledger signed -ledger-key /etc/asql/node.key [-ledger-state-key /other/path]
+```
+
+The **state key** is a 32-byte secret, separate from the signing key, that will salt
+the leaves of the state tree of `VERIFIABLE` tables
+([ADR 0008](../adr/0008-inclusion-and-consistency-proofs.md)), so a proof about one row
+does not let anyone test guesses about its neighbours. It is a PEM block of type
+`ASQL LEDGER STATE KEY`.
+
+- `asqld` loads it from `<ledger-key>.state` unless `-ledger-state-key` names
+  another file (`LedgerStateKeyFile` in `pkg/embed`). A file named with the flag, or a
+  default file that exists, must load: wrong permissions or content stop the node.
+- A missing default file does not: the node starts, warns once, and rows of
+  `VERIFIABLE` tables cannot be proven until it has one. For a node set up before
+  ADR 0008, run `ledger-keygen -output` on its existing private key: it adds only the
+  `.state` file and leaves the key pair as it is.
+- Every node of a cluster needs the same state key, as it needs to trust the same
+  public keys: replicas build the same state tree only with the same secret. Keep it
+  as secret as the private key. Rotating the signing key does not change it; replacing
+  the state key changes every salt, so it is never overwritten.
+
 ## Signed query results
 
 With `ledger=signed`, a node can sign the result of a SELECT at a committed LSN
