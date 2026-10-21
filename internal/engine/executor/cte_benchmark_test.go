@@ -73,3 +73,27 @@ func BenchmarkRecursiveCTELineage(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkInSubquery: a filter IN an uncorrelated subquery over the
+// 100,000-artifact DAG, which runs the subquery once per query.
+func BenchmarkInSubquery(b *testing.B) {
+	engine, closeAll := seedLineageBenchmark(b)
+	defer closeAll()
+	ctx := context.Background()
+	for _, q := range []struct{ name, sql string }{
+		{"subquery", "SELECT id, kind FROM artifacts WHERE id IN (SELECT parent_id FROM artifact_parents WHERE child_id = 83340)"},
+		{"recursive-cte", "WITH RECURSIVE lineage(id) AS (SELECT parent_id FROM artifact_parents WHERE child_id = 83340 UNION SELECT p.parent_id FROM lineage l JOIN artifact_parents p ON p.child_id = l.id) SELECT id, kind FROM artifacts WHERE id IN (SELECT id FROM lineage)"},
+	} {
+		b.Run(q.name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				res, err := engine.Query(ctx, q.sql, []string{"bench"})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(res.Rows) == 0 {
+					b.Fatal("no rows")
+				}
+			}
+		})
+	}
+}
