@@ -378,7 +378,10 @@ func (engine *Engine) tableContainsValueAtLSN(state *readableState, domain, tabl
 }
 
 // resolveDefaults fills in default values for columns not present in the row.
-func resolveDefaults(table *tableState, row map[string]ast.Literal) {
+// txTime gives the value of TX_TIMESTAMP (see txTimestampValue); it is only
+// called when a TX_TIMESTAMP default is missing, so replay, where the WAL
+// holds every one, never reads a clock.
+func resolveDefaults(table *tableState, row map[string]ast.Literal, txTime func() time.Time) {
 	if table == nil {
 		return
 	}
@@ -401,7 +404,7 @@ func resolveDefaults(table *tableState, row map[string]ast.Literal) {
 		case ast.DefaultUUIDv7:
 			row[colName] = ast.Literal{Kind: ast.LiteralString, StringValue: generateUUIDv7()}
 		case ast.DefaultTxTimestamp:
-			row[colName] = ast.Literal{Kind: ast.LiteralString, StringValue: generateTxTimestamp()}
+			row[colName] = txTimestampValue(def, txTime())
 		}
 	}
 }
@@ -409,7 +412,7 @@ func resolveDefaults(table *tableState, row map[string]ast.Literal) {
 // resolveVolatileDefaults fills only non-deterministic defaults that must be
 // materialized into the WAL exactly once so replay/time-travel reproduce the
 // original row values.
-func resolveVolatileDefaults(table *tableState, row map[string]ast.Literal) bool {
+func resolveVolatileDefaults(table *tableState, row map[string]ast.Literal, txTime time.Time) bool {
 	if table == nil {
 		return false
 	}
@@ -430,7 +433,7 @@ func resolveVolatileDefaults(table *tableState, row map[string]ast.Literal) bool
 			row[colName] = ast.Literal{Kind: ast.LiteralString, StringValue: generateUUIDv7()}
 			changed = true
 		case ast.DefaultTxTimestamp:
-			row[colName] = ast.Literal{Kind: ast.LiteralString, StringValue: generateTxTimestamp()}
+			row[colName] = txTimestampValue(def, txTime)
 			changed = true
 		}
 	}
@@ -442,7 +445,7 @@ func resolveVolatileDefaults(table *tableState, row map[string]ast.Literal) bool
 // keeps restart replay, time-travel replay, and entity history/version views
 // stable without changing commit-time resolution of deterministic defaults like
 // AUTO_INCREMENT.
-func materializeVolatileInsertDefaultsInPlan(state *readableState, plan *planner.Plan) bool {
+func materializeVolatileInsertDefaultsInPlan(state *readableState, plan *planner.Plan, txTime time.Time) bool {
 	if state == nil || plan == nil || plan.Operation != planner.OperationInsert {
 		return false
 	}
@@ -467,13 +470,13 @@ func materializeVolatileInsertDefaultsInPlan(state *readableState, plan *planner
 	}
 
 	row := buildRow(plan.Values)
-	if !resolveVolatileDefaults(table, row) {
+	if !resolveVolatileDefaults(table, row, txTime) {
 		return false
 	}
 	plan.Columns, plan.Values = flattenRow(row, table.columns)
 	for i, values := range plan.MultiValues {
 		multiRow := buildRow(values)
-		resolveVolatileDefaults(table, multiRow)
+		resolveVolatileDefaults(table, multiRow, txTime)
 		_, plan.MultiValues[i] = flattenRow(multiRow, table.columns)
 	}
 	return true
@@ -557,11 +560,16 @@ func generateUUIDv7() string {
 	return string(buf[:])
 }
 
-// generateTxTimestamp returns the current wall-clock UTC time as an RFC3339Nano
-// string. The value must be materialized into the WAL payload exactly once so
-// replay reproduces the same value deterministically.
-func generateTxTimestamp() string {
-	return time.Now().UTC().Format(time.RFC3339Nano)
+// txTimestampValue is the TX_TIMESTAMP default of a column: t, the time of
+// the commit (ADR 0007), as a timestamp in a TIMESTAMP column and as RFC 3339
+// text otherwise. It is materialized into the WAL payload once, so replay
+// reproduces it.
+func txTimestampValue(def ast.ColumnDefinition, t time.Time) ast.Literal {
+	t = t.UTC()
+	if def.Type == ast.DataTypeTimestamp {
+		return ast.Literal{Kind: ast.LiteralTimestamp, NumberValue: t.UnixMicro()}
+	}
+	return ast.Literal{Kind: ast.LiteralString, StringValue: t.Format(time.RFC3339Nano)}
 }
 
 // flattenRow converts a row map back into ordered Columns and Values slices,

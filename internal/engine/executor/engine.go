@@ -296,6 +296,15 @@ type EngineOption func(*Engine)
 
 // WithRetainWAL disables WAL truncation after snapshot persistence.
 // Use in regulated/audit environments where full WAL history must be preserved.
+// now reads the engine's clock. Engines built without New, such as the ones
+// that rebuild a past state, have none and use the real one.
+func (engine *Engine) now() time.Time {
+	if engine.clock == nil {
+		return clock.Realtime{}.Now()
+	}
+	return engine.clock.Now()
+}
+
 // WithClock sets the clock that gives commit times (ADR 0007).
 func WithClock(c interface{ Now() time.Time }) EngineOption {
 	return func(engine *Engine) {
@@ -548,12 +557,16 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 				domainFound = true
 				if table, ok := domain.tables[plan.TableName]; ok {
 					tableFound = true
+					// RETURNING hands the row back before the commit, so its
+					// TX_TIMESTAMP is the time the statement runs, not the
+					// commit's.
+					txTime := engine.now()
 					// Handle first row.
 					row := make(map[string]ast.Literal, len(plan.Columns))
 					for i, col := range plan.Columns {
 						row[col] = plan.Values[i]
 					}
-					resolveDefaults(table, row)
+					resolveDefaults(table, row, func() time.Time { return txTime })
 					resolveVFKVersions(snap, table, row)
 					plan.Columns, plan.Values = flattenRow(row, table.columns)
 					returningRows = append(returningRows,
@@ -566,7 +579,7 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 						for j, col := range plan.Columns {
 							mrow[col] = vals[j]
 						}
-						resolveDefaults(table, mrow)
+						resolveDefaults(table, mrow, func() time.Time { return txTime })
 						resolveVFKVersions(snap, table, mrow)
 						_, resolvedVals := flattenRow(mrow, table.columns)
 						plan.MultiValues[i] = resolvedVals

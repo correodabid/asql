@@ -205,7 +205,7 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 	// One commit time for the batch (ADR 0007): read once, here on the
 	// leader, and never below the previous commit's, so commit times do not
 	// decrease with the LSN. Replay reads it back from the COMMIT records.
-	commitMicros := engine.clock.Now().UnixMicro()
+	commitMicros := engine.now().UnixMicro()
 	if last := engine.lastCommitMicros.Load(); commitMicros < last {
 		commitMicros = last
 	}
@@ -266,7 +266,8 @@ func (engine *Engine) processCommitBatch(jobs []*commitJob) {
 		applyFailed := false
 		for mi := range job.ordered {
 			mutation := &job.ordered[mi]
-			if materializeVolatileInsertDefaultsInPlan(newState, &mutation.plan) {
+			// TX_TIMESTAMP is the commit's time.
+			if materializeVolatileInsertDefaultsInPlan(newState, &mutation.plan, time.UnixMicro(commitMicros)) {
 				job.preEncoded[mi] = encodeMutationPayloadV2(mutation.domain, mutation.plan, mutation.sql)
 			}
 
