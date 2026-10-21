@@ -198,9 +198,9 @@ func checkDigestSurfaces(t *testing.T, server *Server, pgwireAddr, adminAddr str
 			var (
 				version, lsn, term, timestamp       int64
 				chain, nodeID, keyID, signedAt, sig string
-				treeRoot                            *string
+				treeRoot, stateRoot                 *string
 			)
-			if err := conn.QueryRow(ctx, sql).Scan(&version, &lsn, &chain, &term, &timestamp, &nodeID, &keyID, &signedAt, &sig, &treeRoot); err != nil {
+			if err := conn.QueryRow(ctx, sql).Scan(&version, &lsn, &chain, &term, &timestamp, &nodeID, &keyID, &signedAt, &sig, &treeRoot, &stateRoot); err != nil {
 				t.Fatalf("%s (%s): %v", sql, mode, err)
 			}
 			if uint64(lsn) != want.LSN || chain != hex.EncodeToString(want.Chain[:]) || keyID != want.KeyID || sig != base64.StdEncoding.EncodeToString(want.Sig) {
@@ -208,6 +208,9 @@ func checkDigestSurfaces(t *testing.T, server *Server, pgwireAddr, adminAddr str
 			}
 			if version != ledgerdigest.Version2 || treeRoot == nil || *treeRoot != hex.EncodeToString(want.TreeRoot[:]) {
 				t.Fatalf("%s (%s): version %d, tree_root %v; want version 2 with %x", sql, mode, version, treeRoot, want.TreeRoot)
+			}
+			if stateRoot != nil {
+				t.Fatalf("%s (%s): a node without a state key returned state_root %s", sql, mode, *stateRoot)
 			}
 		}
 		_ = conn.Close(ctx)

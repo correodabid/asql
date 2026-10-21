@@ -39,6 +39,8 @@ type ledgerSigning struct {
 	// stateKey salts the state tree's leaves (ADR 0008). It is nil when the
 	// node has none; VERIFIABLE tables then cannot be proven.
 	stateKey *ledgerdigest.StateKey
+	// stateTree keeps the state tree when there is a state key.
+	stateTree *stateTreeBuilder
 
 	// For result attestations (ADR 0006).
 	store    *wal.SegmentedLogStore
@@ -117,6 +119,14 @@ func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engin
 		}
 		return uint64(tree.Size()) + 1
 	})
+	// With a state key, digests also sign the state tree of the
+	// VERIFIABLE tables (version 3).
+	var stateTree *stateTreeBuilder
+	var stateSource func(ctx context.Context) (uint64, [32]byte, bool, error)
+	if stateKey != nil {
+		stateTree = newStateTreeBuilder(engine, *stateKey)
+		stateSource = stateTree.State
+	}
 	checkpointer, err := ledgerdigest.NewCheckpointer(ledgerdigest.CheckpointerConfig{
 		NodeID: config.NodeID,
 		Signer: signer,
@@ -132,6 +142,7 @@ func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engin
 				root, ok, err := treeBuilder.RootAt(ctx, lsn)
 				return [32]byte(root), ok, err
 			},
+			State: stateSource,
 		},
 		Interval:  config.LedgerDigestInterval,
 		EveryLSNs: config.LedgerDigestEveryLSNs,
@@ -144,7 +155,7 @@ func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engin
 	}
 	config.Logger.Info("ledger: signing digests", "key_id", signer.KeyID(), "dir", dd.LedgerDir(), "state_key", stateKey != nil)
 	return &ledgerSigning{
-		log: digestLog, checkpointer: checkpointer, logger: config.Logger, tree: tree, treeBuilder: treeBuilder, stateKey: stateKey,
+		log: digestLog, checkpointer: checkpointer, logger: config.Logger, tree: tree, treeBuilder: treeBuilder, stateKey: stateKey, stateTree: stateTree,
 		store: store, signer: signer, nodeID: config.NodeID, recordAt: recordAt, now: time.Now,
 	}, nil
 }
@@ -232,7 +243,7 @@ func (server *Server) handleAdminLedgerDigest(w http.ResponseWriter, r *http.Req
 
 var reLedgerDigestLSN = regexp.MustCompile(`(?i)\blsn\s*>=\s*(\d+)`)
 
-var ledgerDigestColumns = []string{"version", "lsn", "chain", "term", "timestamp", "node_id", "key_id", "signed_at", "sig", "tree_root"}
+var ledgerDigestColumns = []string{"version", "lsn", "chain", "term", "timestamp", "node_id", "key_id", "signed_at", "sig", "tree_root", "state_root"}
 
 // adminLedgerDigest serves SELECT * FROM asql_admin.ledger_digest: one row
 // with the latest digest, or with WHERE lsn >= N the oldest one covering N.
@@ -253,21 +264,25 @@ func (server *Server) adminLedgerDigest(sql string) (interceptResult, bool) {
 	if !ok {
 		return empty, true
 	}
-	treeRoot := ast.Literal{Kind: ast.LiteralNull}
+	treeRoot, stateRoot := ast.Literal{Kind: ast.LiteralNull}, ast.Literal{Kind: ast.LiteralNull}
 	if d.HasTree() {
 		treeRoot = litS(hex.EncodeToString(d.TreeRoot[:]))
 	}
+	if d.HasState() {
+		stateRoot = litS(hex.EncodeToString(d.StateRoot[:]))
+	}
 	row := map[string]ast.Literal{
-		"version":   litU(uint64(d.Version)),
-		"lsn":       litU(d.LSN),
-		"chain":     litS(hex.EncodeToString(d.Chain[:])),
-		"tree_root": treeRoot,
-		"term":      litU(d.Term),
-		"timestamp": litU(d.Timestamp),
-		"node_id":   litS(d.NodeID),
-		"key_id":    litS(d.KeyID),
-		"signed_at": litS(d.SignedAt.UTC().Format(time.RFC3339Nano)),
-		"sig":       litS(base64.StdEncoding.EncodeToString(d.Sig)),
+		"version":    litU(uint64(d.Version)),
+		"lsn":        litU(d.LSN),
+		"chain":      litS(hex.EncodeToString(d.Chain[:])),
+		"tree_root":  treeRoot,
+		"state_root": stateRoot,
+		"term":       litU(d.Term),
+		"timestamp":  litU(d.Timestamp),
+		"node_id":    litS(d.NodeID),
+		"key_id":     litS(d.KeyID),
+		"signed_at":  litS(d.SignedAt.UTC().Format(time.RFC3339Nano)),
+		"sig":        litS(base64.StdEncoding.EncodeToString(d.Sig)),
 	}
 	return interceptResult{result: executor.Result{Status: "OK", Rows: []map[string]ast.Literal{row}}, columns: ledgerDigestColumns}, true
 }
