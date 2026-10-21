@@ -398,35 +398,49 @@ func predicateRejectsNull(predicate *ast.Predicate) bool {
 }
 
 func matchTablePredicateOnRow(table *tableState, row []ast.Literal, predicate *ast.Predicate) bool {
+	return matchTablePredicateOnRowIn(nil, nil, table, row, predicate)
+}
+
+// matchTablePredicateOnRowIn reports whether predicate is true for a row of
+// table, without converting the row to a map for the common comparisons.
+// Anything else, NOT included (NOT of an unknown is unknown, not true), is
+// left to the three-valued evaluator: it used to read as false, so a join
+// filter such as "s.tag != 'b'" or "s.tag LIKE 'a%'" dropped every row.
+func matchTablePredicateOnRowIn(state *readableState, engine *Engine, table *tableState, row []ast.Literal, predicate *ast.Predicate) bool {
 	if predicate == nil {
 		return true
 	}
 
 	switch strings.ToUpper(strings.TrimSpace(predicate.Operator)) {
 	case "AND":
-		return matchTablePredicateOnRow(table, row, predicate.Left) && matchTablePredicateOnRow(table, row, predicate.Right)
+		return matchTablePredicateOnRowIn(state, engine, table, row, predicate.Left) && matchTablePredicateOnRowIn(state, engine, table, row, predicate.Right)
 	case "OR":
-		return matchTablePredicateOnRow(table, row, predicate.Left) || matchTablePredicateOnRow(table, row, predicate.Right)
-	case "NOT":
-		return !matchTablePredicateOnRow(table, row, predicate.Left)
+		return matchTablePredicateOnRowIn(state, engine, table, row, predicate.Left) || matchTablePredicateOnRowIn(state, engine, table, row, predicate.Right)
 	}
 
+	fallback := func() bool {
+		return evaluatePredicate3VL(rowToMap(table, row), predicate, state, engine) == ternaryTrue
+	}
+	if strings.EqualFold(strings.TrimSpace(predicate.Operator), "NOT") ||
+		predicate.Subquery != nil || predicate.JsonAccess != nil || predicate.RightColumn != "" {
+		return fallback()
+	}
 	colPos, ok := table.columnIndex[predicate.Column]
 	if !ok || colPos < 0 || colPos >= len(row) {
-		return false
+		return fallback()
 	}
 	value := row[colPos]
 
 	operator := strings.ToUpper(strings.TrimSpace(predicate.Operator))
 	switch operator {
-	case "IS NULL", "IS NOT NULL", "=", ">", "<", ">=", "<=":
+	case "IS NULL", "IS NOT NULL", "=", "!=", "<>", ">", "<", ">=", "<=":
 		return compareLiteralByOperator(value, operator, predicate.Value)
 	case "IN":
 		return matchLiteralInList(value, predicate.InValues, false)
 	case "NOT IN":
 		return matchLiteralInList(value, predicate.InValues, true)
 	default:
-		return false
+		return fallback()
 	}
 }
 
@@ -1050,7 +1064,7 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 					if len(pipelineByVal[key]) == 0 {
 						continue
 					}
-					if pushRightPredicate && !matchTablePredicateOnRow(rightTable, rightRowSlice, rightPredicate) {
+					if pushRightPredicate && !matchTablePredicateOnRowIn(state, engine, rightTable, rightRowSlice, rightPredicate) {
 						continue
 					}
 					rightRow := rowToMap(rightTable, rightRowSlice)
