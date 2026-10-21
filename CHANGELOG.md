@@ -1,5 +1,51 @@
 # Changelog
 
+## v0.3.0 — 2026-10-21
+
+### Upgrade notes
+
+- **One process per data directory.** A WAL store now takes an exclusive lock on
+  `.<wal base>.lock` next to the segments and holds it until `Close`. A second
+  `asqld`, or a second `embed.Start` in the same process, on a directory in use
+  fails with `wal.ErrDataDirInUse` (`embed.ErrDataDirInUse`), naming the PID that
+  holds it. Before, both started and wrote the same WAL. The OS releases the lock
+  when the process exits, so a crash leaves nothing to clean up. `verify-ledger` and
+  the audit readers do not take the lock and still work on a running node's
+  directory (#80).
+- **`AS OF` applies to the whole query, and only once.** Every table a query reads,
+  in joins, CTEs, subqueries and both sides of `UNION`, `INTERSECT` and `EXCEPT`, is
+  read at its `AS OF`. An `AS OF` written inside a CTE, a subquery or one side of a
+  set operation used to be ignored and answer from the present; it now fails with
+  `0A000`. Write it once, in the outermost `FROM`; it may now come before a `JOIN`
+  (#82).
+- **`TX_TIMESTAMP` is the commit time.** It used to be read from the clock
+  separately; now it is the time the COMMIT record carries, the same for every row
+  of a transaction, and it matches `asql_admin.timeline_commits.commit_time`, so
+  `AS OF TIMESTAMP` with a row's value sees that row. In `TIMESTAMP` columns it is
+  stored as a timestamp; earlier versions stored it as text, and rows written then
+  keep their text values. Text columns keep RFC 3339 text. `INSERT … RETURNING`
+  still returns the statement's time (#78).
+- **Comparisons of an indexed column with a subquery, another column or a JSON path
+  returned no rows**, and `UPDATE`/`DELETE` with them changed nothing, without an
+  error. They now match the rows they should; a scalar subquery with more than one
+  row fails with `21000` (#81).
+- **Set operations outside a transaction work.** `UNION`, `INTERSECT` and `EXCEPT`
+  failed with `25P01` outside a transaction; they now run as reads. Their sides
+  combine by column position, as in PostgreSQL, and sides with a different number
+  of columns fail with `42601`. An unparseable `SELECT` reports its syntax error
+  (`42601`) instead of `25P01` (#82).
+- No format change: v0.3.0 reads and writes the same data as v0.2.0, and v0.2.0 can
+  read what v0.3.0 writes.
+
+### Performance
+
+- An uncorrelated scalar subquery compared with an indexed column runs once and
+  uses the index (#81).
+
+### Docs
+
+- ADR 0008 proposes inclusion and consistency proofs for the ledger (#79).
+
 ## v0.2.0 — 2026-10-21
 
 ### Upgrade notes
