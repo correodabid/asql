@@ -297,6 +297,23 @@ func findMatchingParen(s string, start int) int {
 	return -1
 }
 
+// parseTableOptions reads what may follow CREATE TABLE's column list:
+// APPEND ONLY and VERIFIABLE, each at most once, in any order.
+func parseTableOptions(trailing []string) (appendOnly, verifiable bool, err error) {
+	for i := 0; i < len(trailing); i++ {
+		switch {
+		case !appendOnly && i+1 < len(trailing) && strings.EqualFold(trailing[i], "APPEND") && strings.EqualFold(trailing[i+1], "ONLY"):
+			appendOnly = true
+			i++
+		case !verifiable && strings.EqualFold(trailing[i], "VERIFIABLE"):
+			verifiable = true
+		default:
+			return false, false, fmt.Errorf("%w: unexpected %q after the column list (only APPEND ONLY and VERIFIABLE may follow it)", errInvalidSQL, strings.Join(trailing[i:], " "))
+		}
+	}
+	return appendOnly, verifiable, nil
+}
+
 func parseAlterTable(sql string) (ast.Statement, error) {
 	rest := strings.TrimSpace(sql[len("ALTER TABLE "):])
 
@@ -308,6 +325,16 @@ func parseAlterTable(sql string) (ast.Statement, error) {
 			return nil, fmt.Errorf("%w: table name required", errInvalidSQL)
 		}
 		return ast.AlterTableSetAppendOnlyStatement{TableName: table}, nil
+	}
+
+	// SET VERIFIABLE
+	if fields := strings.Fields(rest); len(fields) == 3 && strings.EqualFold(fields[1], "SET") &&
+		strings.EqualFold(fields[2], "VERIFIABLE") {
+		table := canonicalIdentifier(fields[0])
+		if table == "" {
+			return nil, fmt.Errorf("%w: table name required", errInvalidSQL)
+		}
+		return ast.AlterTableSetVerifiableStatement{TableName: table}, nil
 	}
 
 	// DROP COLUMN
@@ -555,13 +582,9 @@ func parseCreateTable(sql string, ifNotExists bool) (ast.Statement, error) {
 		return nil, fmt.Errorf("%w: table name required", errInvalidSQL)
 	}
 
-	appendOnly := false
-	switch trailing := strings.Fields(rest[close+1:]); {
-	case len(trailing) == 0:
-	case len(trailing) == 2 && strings.EqualFold(trailing[0], "APPEND") && strings.EqualFold(trailing[1], "ONLY"):
-		appendOnly = true
-	default:
-		return nil, fmt.Errorf("%w: unexpected %q after the column list (only APPEND ONLY may follow it)", errInvalidSQL, strings.Join(trailing, " "))
+	appendOnly, verifiable, err := parseTableOptions(strings.Fields(rest[close+1:]))
+	if err != nil {
+		return nil, err
 	}
 
 	columnClause := rest[open+1 : close]
@@ -696,6 +719,7 @@ func parseCreateTable(sql string, ifNotExists bool) (ast.Statement, error) {
 		VersionedForeignKeys: versionedFKs,
 		IfNotExists:          ifNotExists,
 		AppendOnly:           appendOnly,
+		Verifiable:           verifiable,
 	}
 	return stmt, nil
 }

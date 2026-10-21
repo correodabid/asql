@@ -453,6 +453,8 @@ func (engine *Engine) generateRollbackSQL(domain string, forwardSQL []string) ([
 			issues = append(issues, fmt.Sprintf("forward[%d] TRUNCATE TABLE is not auto-reversible", index))
 		case planner.OperationAlterTableSetAppendOnly:
 			issues = append(issues, fmt.Sprintf("forward[%d] SET APPEND ONLY cannot be undone", index))
+		case planner.OperationAlterTableSetVerifiable:
+			issues = append(issues, fmt.Sprintf("forward[%d] SET VERIFIABLE cannot be undone", index))
 		case planner.OperationCreateEntity:
 			issues = append(issues, fmt.Sprintf("forward[%d] CREATE ENTITY requires explicit rollback planning", index))
 		default:
@@ -533,7 +535,8 @@ func isMigrationMutationOperation(operation planner.Operation) bool {
 		planner.OperationDropTable,
 		planner.OperationDropIndex,
 		planner.OperationTruncateTable,
-		planner.OperationAlterTableSetAppendOnly:
+		planner.OperationAlterTableSetAppendOnly,
+		planner.OperationAlterTableSetVerifiable:
 		return true
 	default:
 		return false
@@ -593,6 +596,7 @@ func shareTableForInsert(source *tableState, replayMode bool) *tableState {
 		lastMutationTS:       source.lastMutationTS,
 		changeLog:            source.changeLog, // shared — append is safe per slice semantics
 		appendOnly:           source.appendOnly,
+		verifiable:           source.verifiable,
 		changeLogTrimmedLSN:  source.changeLogTrimmedLSN,
 		indexesLoaded:        source.indexesLoaded,
 	}
@@ -723,6 +727,7 @@ func cloneTableState(source *tableState) *tableState {
 		lastMutationTS:       source.lastMutationTS,
 		changeLog:            source.changeLog, // shared — append is COW-safe per slice semantics
 		appendOnly:           source.appendOnly,
+		verifiable:           source.verifiable,
 		changeLogTrimmedLSN:  source.changeLogTrimmedLSN,
 		indexesLoaded:        source.indexesLoaded,
 	}
@@ -963,12 +968,13 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 	}
 
 	switch plan.Operation {
-	case planner.OperationAlterTableSetAppendOnly:
+	case planner.OperationAlterTableSetAppendOnly, planner.OperationAlterTableSetVerifiable:
 		table, exists := domainState.tables[plan.TableName]
 		if !exists || !engine.catalog.HasTable(plan.DomainName, plan.TableName) {
 			return errTableNotFound
 		}
-		if table.appendOnly {
+		appendOnly := plan.Operation == planner.OperationAlterTableSetAppendOnly
+		if (appendOnly && table.appendOnly) || (!appendOnly && table.verifiable) {
 			return nil
 		}
 		// COW: the flag lives on the table, which other states share.
@@ -981,7 +987,11 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			domainState.tables[plan.TableName] = table
 			clonedTables[tableKey] = struct{}{}
 		}
-		table.appendOnly = true
+		if appendOnly {
+			table.appendOnly = true
+		} else {
+			table.verifiable = true
+		}
 		return nil
 	case planner.OperationCreateTable:
 		if _, exists := domainState.tables[plan.TableName]; exists {
@@ -1114,6 +1124,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			versionedForeignKeys: versionedFKs,
 			lastMutationTS:       engine.logicalTS,
 			appendOnly:           plan.AppendOnly,
+			verifiable:           plan.Verifiable,
 		}
 		rebuildColumnIndex(ts)
 		rebuildNotNullColumns(ts)

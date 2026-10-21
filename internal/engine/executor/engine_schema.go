@@ -62,7 +62,7 @@ func (engine *Engine) SchemaSnapshot(domainsFilter []string) SchemaSnapshot {
 				}
 				columns = append(columns, column)
 			}
-			domain.Tables = append(domain.Tables, SchemaTable{Name: tableName, Columns: columns, Indexes: schemaIndexes(table), VersionedForeignKeys: schemaVersionedFKs(table), AppendOnly: table.appendOnly})
+			domain.Tables = append(domain.Tables, SchemaTable{Name: tableName, Columns: columns, Indexes: schemaIndexes(table), VersionedForeignKeys: schemaVersionedFKs(table), AppendOnly: table.appendOnly, Verifiable: table.verifiable})
 		}
 
 		snapshot.Domains = append(snapshot.Domains, domain)

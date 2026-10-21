@@ -133,6 +133,31 @@ How the guarantee holds:
   and it survives replay and snapshots.
 - `SchemaSnapshot` and `asql_admin.schema_snapshot` report it as `append_only`.
 
+## Verifiable tables
+
+A table marked `VERIFIABLE` will have its rows entered in the ledger's state tree
+([ADR 0008](../adr/0008-inclusion-and-consistency-proofs.md)), so that a node can prove
+one row's value at a signed checkpoint without revealing any other row:
+
+```sql
+CREATE TABLE results (id INT PRIMARY KEY, result TEXT) VERIFIABLE;
+CREATE TABLE evidence (id TEXT PRIMARY KEY, sha256 TEXT) APPEND ONLY VERIFIABLE;
+-- or, for an existing table:
+ALTER TABLE results SET VERIFIABLE;
+```
+
+- It restricts nothing: a verifiable table accepts the same statements as before.
+  Combine it with `APPEND ONLY` for rows that must also never change.
+- It cannot be undone; setting it again is a no-op. Like other `ALTER TABLE`
+  statements it needs `ADMIN`.
+- The WAL and snapshots record it, and `asql_admin.schema_snapshot` reports it as
+  `verifiable`.
+- Marking an existing table enters its live rows at that LSN; proofs start at the first
+  signed checkpoint after it.
+
+The state tree and the row proofs (`asql_admin.prove_rows`, `asqlctl verify-rows`) come
+in a later release: for now the flag only records which tables they will cover.
+
 ## Ledger keys
 
 `ledger=signed` needs a signing key; `asqlctl ledger-keygen` writes it with the files

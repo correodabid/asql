@@ -15,7 +15,12 @@ import (
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
-// Binary snapshot format (version 15).
+// Binary snapshot format (version 16).
+//
+// Changes vs v15:
+//   - [4B] num_verifiable_tables + [domain][table] each, after the
+//     append-only list: the verifiable tables (ALTER TABLE ... SET
+//     VERIFIABLE, ADR 0008), in the same form. Older versions decode none.
 //
 // Changes vs v14:
 //   - [4B] num_append_only_tables + [domain][table] each, after last_tx_num:
@@ -107,7 +112,7 @@ import (
 
 var (
 	snapMagic   = [4]byte{'A', 'S', 'N', 'P'}
-	snapVersion = byte(15)
+	snapVersion = byte(16)
 
 	// snapCRC32C is the CRC32C (Castagnoli) table, hardware-accelerated on x86 (SSE4.2) and ARM.
 	snapCRC32C = crc32.MakeTable(crc32.Castagnoli)
@@ -328,7 +333,15 @@ func (r *binReader) readLedgerChain() ([32]byte, bool) {
 
 // appendOnlyTables writes the v15 list of append-only tables, sorted.
 func (w *binWriter) appendOnlyTables(domains map[string]*domainState) {
-	refs := appendOnlyTableRefs(domains)
+	w.tableRefs(appendOnlyTableRefs(domains))
+}
+
+// verifiableTables writes the v16 list of verifiable tables, sorted.
+func (w *binWriter) verifiableTables(domains map[string]*domainState) {
+	w.tableRefs(verifiableTableRefs(domains))
+}
+
+func (w *binWriter) tableRefs(refs [][2]string) {
 	w.u32(uint32(len(refs)))
 	for _, ref := range refs {
 		w.str(ref[0])
@@ -342,6 +355,19 @@ func (r *binReader) readAppendOnlyTables() [][2]string {
 	if r.version < 15 {
 		return nil
 	}
+	return r.readTableRefs()
+}
+
+// readVerifiableTables reads the v16 list of verifiable tables; older
+// versions have none.
+func (r *binReader) readVerifiableTables() [][2]string {
+	if r.version < 16 {
+		return nil
+	}
+	return r.readTableRefs()
+}
+
+func (r *binReader) readTableRefs() [][2]string {
 	n := int(r.u32())
 	if n == 0 || !r.need(n) {
 		return nil
@@ -1498,6 +1524,7 @@ func (w *binWriter) snapshot(snap *engineSnapshot, isFull bool, prevLogicalTS ui
 	w.buf.Write(snap.ledgerChain[:])
 	w.u64(snap.lastTxNum)
 	w.appendOnlyTables(snap.state.domains)
+	w.verifiableTables(snap.state.domains)
 	w.catalog(snap)
 	w.principals(snap.state.principals)
 
@@ -1581,6 +1608,7 @@ type rawSnapshotFileEntry struct {
 	hasLedgerChain bool
 	lastTxNum      uint64
 	appendOnly     [][2]string
+	verifiable     [][2]string
 }
 
 // decodeSnapshotFileBinaryRaw decodes a binary snapshot file and returns the raw
@@ -1634,6 +1662,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 		ledgerChain, hasLedgerChain := r.readLedgerChain()
 		lastTxNum := r.readLastTxNum()
 		appendOnly := r.readAppendOnlyTables()
+		verifiable := r.readVerifiableTables()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1652,6 +1681,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 			hasLedgerChain: hasLedgerChain,
 			lastTxNum:      lastTxNum,
 			appendOnly:     appendOnly,
+			verifiable:     verifiable,
 		})
 	}
 	return entries, nil
@@ -1813,6 +1843,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 		ledgerChain, hasLedgerChain := r.readLedgerChain()
 		lastTxNum := r.readLastTxNum()
 		appendOnly := r.readAppendOnlyTables()
+		verifiable := r.readVerifiableTables()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1838,6 +1869,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 			HasLedgerChain: hasLedgerChain,
 			LastTxNum:      lastTxNum,
 			AppendOnly:     appendOnly,
+			Verifiable:     verifiable,
 		}
 
 		result[i] = marshalableToSnapshot(full)
@@ -1896,6 +1928,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 	snap.ledgerChain, snap.hasLedgerChain = r.readLedgerChain()
 	snap.lastTxNum = r.readLastTxNum()
 	appendOnly := r.readAppendOnlyTables()
+	verifiable := r.readVerifiableTables()
 	snap.catalog = r.readCatalogState()
 	snap.state.principals = principalsStateFromPersisted(r.readPrincipals())
 
@@ -1920,6 +1953,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 		return nil, false, r.err
 	}
 	markAppendOnlyTables(snap.state.domains, appendOnly)
+	markVerifiableTables(snap.state.domains, verifiable)
 	rebuildAllIndexes(&snap)
 	return []engineSnapshot{snap}, true, nil
 }
