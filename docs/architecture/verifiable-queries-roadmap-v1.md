@@ -71,6 +71,12 @@ need to demonstrate compliance without opening their process data. Not consumer 
    [ADR 0008](../adr/0008-inclusion-and-consistency-proofs.md): an RFC 6962 log tree
    over the ledger leaves first, then a salted sparse Merkle tree of the rows of
    `VERIFIABLE` tables, both built off the commit path and signed in digest v2.
+   - *Log tree (#86), signed in digest v2:* each checkpoint extends the log tree and
+     signs its root at the digest's LSN (`tree_root` in `asql_admin.ledger_digest` and
+     `GET /api/v1/ledger/digest`). `verify-ledger -digest` rebuilds the tree from the
+     WAL and checks it. WAL GC never removes records the tree has not added. Next:
+     consistency proofs between two digests (`prove_consistency`,
+     `verify-consistency`).
 4. **Verifiable computation.** Aggregates over private data executed in a TEE (e.g. AWS
    Nitro Enclaves) with attestation, and ZK only for narrow predicates where it pays off.
 

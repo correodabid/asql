@@ -13,6 +13,7 @@ import (
 	"github.com/correodabid/asql/internal/engine/executor"
 	"github.com/correodabid/asql/internal/platform/datadir"
 	"github.com/correodabid/asql/internal/storage/ledgerdigest"
+	"github.com/correodabid/asql/internal/storage/logtree"
 	"github.com/correodabid/asql/internal/storage/wal"
 )
 
@@ -33,6 +34,7 @@ const (
 	verifyDigestSignature  = "digest-signature"
 	verifyDigestBeyondWAL  = "digest-beyond-wal"
 	verifyDigestNotCovered = "digest-not-covered"
+	verifyDigestTree       = "digest-tree-mismatch"
 )
 
 type verifyLedgerOptions struct {
@@ -67,9 +69,12 @@ type verifyLedgerDigest struct {
 	KeyID    string `json:"key_id"`
 	SignedAt string `json:"signed_at"`
 	// Signature is "valid" or "invalid"; Chain is "match", "mismatch" or
-	// "not-checked".
+	// "not-checked". TreeRoot, for version 2 digests (ADR 0008), compares the
+	// signed log tree root with the one rebuilt from the WAL: "match",
+	// "mismatch" or "not-checked" (the WAL does not start at LSN 1).
 	Signature string `json:"signature"`
 	Chain     string `json:"chain"`
+	TreeRoot  string `json:"tree_root,omitempty"`
 }
 
 type verifyLedgerFailure struct {
@@ -146,7 +151,19 @@ func runVerifyLedger(out io.Writer, opts verifyLedgerOptions) error {
 		}
 	}
 
-	report, err := wal.VerifyLedger(dd.WALBasePath(), wal.VerifyOptions{Anchors: anchors, FromAnchor: opts.FromSnapshot})
+	// Rebuild the log tree up to a version 2 digest's LSN while verifying.
+	var tree *logtree.Frontier
+	verifyOpts := wal.VerifyOptions{Anchors: anchors, FromAnchor: opts.FromSnapshot}
+	if digestOut != nil && digestFailure == nil && digest.HasTree() {
+		digestOut.TreeRoot = "not-checked"
+		tree = &logtree.Frontier{}
+		verifyOpts.OnLeaf = func(lsn uint64, leaf wal.ChainHash) {
+			if lsn <= digest.LSN && uint64(tree.Size())+1 == lsn {
+				tree.Add(logtree.Hash(leaf))
+			}
+		}
+	}
+	report, err := wal.VerifyLedger(dd.WALBasePath(), verifyOpts)
 	if err != nil {
 		return err
 	}
@@ -166,6 +183,15 @@ func runVerifyLedger(out io.Writer, opts verifyLedgerOptions) error {
 				Message: fmt.Sprintf("the retained WAL starts after LSN %d, so the digest at LSN %d cannot be checked", report.StartLSN, digest.LSN)}
 		default:
 			digestOut.Chain = "match"
+		}
+		if tree != nil && digestOut.Chain == "match" && uint64(tree.Size()) == digest.LSN {
+			if root := tree.Root(); root == logtree.Hash(digest.TreeRoot) {
+				digestOut.TreeRoot = "match"
+			} else {
+				digestOut.TreeRoot = "mismatch"
+				digestFailure = &wal.VerifyFailure{Kind: verifyDigestTree, AtLSN: digest.LSN, Anchor: "digest",
+					Message: fmt.Sprintf("the signed log tree root %x is not the root of the WAL's records 1..%d, %x", digest.TreeRoot, digest.LSN, root)}
+			}
 		}
 	}
 	if report.Failure == nil && digestFailure != nil {
