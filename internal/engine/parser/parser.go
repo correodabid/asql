@@ -2498,6 +2498,11 @@ func parseSimplePredicate(clause string) (*ast.Predicate, error) {
 
 		value, err := parseLiteral(right)
 		if err != nil {
+			// col->>'key' = other_col
+			rightCol := canonicalIdentifier(rightTrimmed)
+			if rightCol != "" && isColumnReference(rightCol) {
+				return &ast.Predicate{JsonAccess: &ja, Operator: operator, RightColumn: rightCol}, nil
+			}
 			return nil, err
 		}
 		return &ast.Predicate{
@@ -2510,6 +2515,12 @@ func parseSimplePredicate(clause string) (*ast.Predicate, error) {
 	column := canonicalIdentifier(leftTrimmed)
 	if column == "" {
 		return nil, fmt.Errorf("%w: predicate column is required", errInvalidSQL)
+	}
+
+	// col = other->>'key': the JSON path goes on the left, the operator is
+	// mirrored, so the evaluator has a single JSON-vs-column shape.
+	if ja, ok := parseJsonAccessExpr(rightTrimmed); ok && isColumnReference(column) {
+		return &ast.Predicate{JsonAccess: &ja, Operator: mirrorComparison(operator), RightColumn: column}, nil
 	}
 
 	// Scalar subquery: col = (SELECT ... LIMIT 1)
@@ -2545,6 +2556,23 @@ func parseSimplePredicate(clause string) (*ast.Predicate, error) {
 		Operator: operator,
 		Value:    value,
 	}, nil
+}
+
+// mirrorComparison returns the operator that keeps a comparison true when
+// its operands swap sides: a < b is b > a.
+func mirrorComparison(operator string) string {
+	switch operator {
+	case "<":
+		return ">"
+	case ">":
+		return "<"
+	case "<=":
+		return ">="
+	case ">=":
+		return "<="
+	default:
+		return operator
+	}
 }
 
 // isColumnReference returns true if s looks like a bare identifier or a dotted
