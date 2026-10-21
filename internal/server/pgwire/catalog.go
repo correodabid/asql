@@ -23,6 +23,7 @@ import (
 
 	"github.com/correodabid/asql/internal/engine/executor"
 	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 )
 
 // interceptResult bundles the synthetic result set and its ordered column list.
@@ -663,7 +664,7 @@ func (server *Server) handleRowLSN(sql string) (interceptResult, bool) {
 	primaryKey := strings.ReplaceAll(m[2], "''", "'")
 	rowLSN, ok, err := server.engine.RowLSN(tableRef, primaryKey)
 	if err != nil {
-		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+		return interceptResult{err: err}, true
 	}
 	if !ok {
 		return literalScalarResult("row_lsn", ast.Literal{Kind: ast.LiteralNull})
@@ -681,7 +682,7 @@ func (server *Server) handleEntityVersion(sql string) (interceptResult, bool) {
 	rootPK := strings.ReplaceAll(m[3], "''", "'")
 	version, ok, err := server.engine.EntityVersion(domain, entityName, rootPK)
 	if err != nil {
-		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+		return interceptResult{err: err}, true
 	}
 	if !ok {
 		return literalScalarResult("entity_version", ast.Literal{Kind: ast.LiteralNull})
@@ -699,7 +700,7 @@ func (server *Server) handleEntityHeadLSN(sql string) (interceptResult, bool) {
 	rootPK := strings.ReplaceAll(m[3], "''", "'")
 	headLSN, ok, err := server.engine.EntityHeadLSN(domain, entityName, rootPK)
 	if err != nil {
-		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+		return interceptResult{err: err}, true
 	}
 	if !ok {
 		return literalScalarResult("entity_head_lsn", ast.Literal{Kind: ast.LiteralNull})
@@ -717,11 +718,11 @@ func (server *Server) handleEntityVersionLSN(sql string) (interceptResult, bool)
 	rootPK := strings.ReplaceAll(m[3], "''", "'")
 	version, err := strconv.ParseUint(m[4], 10, 64)
 	if err != nil {
-		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: invalid entity version %q", m[4])}}, true
+		return interceptResult{err: sqlerr.New("22023", fmt.Sprintf("invalid entity version %q", m[4]))}, true
 	}
 	lsn, ok, err := server.engine.EntityVersionLSN(domain, entityName, rootPK, version)
 	if err != nil {
-		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+		return interceptResult{err: err}, true
 	}
 	if !ok {
 		return literalScalarResult("entity_version_lsn", ast.Literal{Kind: ast.LiteralNull})
@@ -738,7 +739,7 @@ func (server *Server) handleResolveReference(sql string) (interceptResult, bool)
 	primaryKey := strings.ReplaceAll(m[2], "''", "'")
 	resolved, ok, err := server.engine.ResolveReference(tableRef, primaryKey)
 	if err != nil {
-		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+		return interceptResult{err: err}, true
 	}
 	if !ok {
 		return literalScalarResult("resolve_reference", ast.Literal{Kind: ast.LiteralNull})
@@ -968,7 +969,7 @@ func (server *Server) adminSchemaSnapshot(sql string) (interceptResult, bool) {
 
 	jsonBytes, err := json.Marshal(resp)
 	if err != nil {
-		return interceptResult{result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)}}, true
+		return interceptResult{err: err}, true
 	}
 	return interceptResult{
 		result:  executor.Result{Status: "OK", Rows: []map[string]ast.Literal{{"snapshot": litS(string(jsonBytes))}}},
@@ -1049,7 +1050,7 @@ func (server *Server) adminEngineStats() (interceptResult, bool) {
 	}, true
 }
 
-// reFromLSN / reTOLSN / reDomain / reLimit extract simple filter literals from
+// reFromLSN / reTOLSN / reDomain extract simple filter literals from
 // a timeline_commits query of the form:
 //
 //	SELECT * FROM asql_admin.timeline_commits
@@ -1058,7 +1059,6 @@ var (
 	reFromLSN     = regexp.MustCompile(`(?i)from_lsn\s*[>=]+\s*(\d+)`)
 	reToLSN       = regexp.MustCompile(`(?i)to_lsn\s*[<=]+\s*(\d+)`)
 	reAdminDomain = regexp.MustCompile(`(?i)domain\s*=\s*'([^']*)'`)
-	reLimit       = regexp.MustCompile(`(?i)\blimit\s+(\d+)`)
 )
 
 // adminTimelineCommits serves SELECT * FROM asql_admin.timeline_commits.
@@ -1078,15 +1078,16 @@ func (server *Server) adminTimelineCommits(ctx context.Context, sql string) (int
 	if m := reAdminDomain.FindStringSubmatch(sql); m != nil {
 		domain = m[1]
 	}
-	if m := reLimit.FindStringSubmatch(sql); m != nil {
-		limit, _ = strconv.Atoi(m[1])
+	// The engine stops after limit commits in LSN order. That is the answer
+	// only without ORDER BY or OFFSET, which projectAdminColumns applies to
+	// all the commits.
+	if tail, err := parseAdminTail(sql); err == nil && len(tail.orderBy) == 0 && tail.offset == 0 && tail.limit >= 0 {
+		limit = tail.limit
 	}
 
 	commits, err := server.engine.TimelineCommits(ctx, fromLSN, toLSN, domain, limit)
 	if err != nil {
-		return interceptResult{
-			result: executor.Result{Status: "ERROR", Rows: nil},
-		}, true
+		return interceptResult{err: err}, true
 	}
 
 	columns := []string{"lsn", "tx_id", "timestamp", "commit_time", "mutation_count"}
@@ -1192,16 +1193,12 @@ var reRowHistorySQL = regexp.MustCompile(`(?i)sql\s*=\s*'((?:[^']|'')*)'`)
 func (server *Server) adminRowHistory(ctx context.Context, sql string, activeDomains []string) (interceptResult, bool) {
 	m := reRowHistorySQL.FindStringSubmatch(sql)
 	if m == nil {
-		return interceptResult{
-			result: executor.Result{Status: "ERROR"},
-		}, true
+		return interceptResult{err: sqlerr.New("22023", "asql_admin.row_history requires WHERE sql = '<SELECT ... FOR HISTORY>'")}, true
 	}
 	innerSQL := strings.ReplaceAll(m[1], "''", "'") // unescape SQL-escaped single quotes
 	result, err := server.engine.RowHistory(ctx, innerSQL, activeDomains)
 	if err != nil {
-		return interceptResult{
-			result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)},
-		}, true
+		return interceptResult{err: err}, true
 	}
 	// allColumnsFromRows returns a SORTED column list which is critical for
 	// the extended query protocol: describeFields and handleExtendedExecute
@@ -1243,9 +1240,7 @@ func (server *Server) adminEntityVersionHistory(ctx context.Context, sql string)
 
 	entries, err := server.engine.EntityVersionHistory(ctx, domain, entity, rootPK)
 	if err != nil {
-		return interceptResult{
-			result: executor.Result{Status: fmt.Sprintf("ERROR: %v", err)},
-		}, true
+		return interceptResult{err: err}, true
 	}
 
 	columns := []string{"version", "commit_lsn", "tables"}
@@ -1270,11 +1265,11 @@ var reReplayLSN = regexp.MustCompile(`(?i)asql_admin\.replay_to_lsn\((\d+)\)`)
 func (server *Server) adminReplayToLSN(ctx context.Context, sql string) (interceptResult, bool) {
 	m := reReplayLSN.FindStringSubmatch(sql)
 	if m == nil {
-		return scalarResult("replay_to_lsn", "ERROR: missing LSN argument")
+		return interceptResult{err: sqlerr.New("22023", "asql_admin.replay_to_lsn requires an LSN argument")}, true
 	}
 	targetLSN, _ := strconv.ParseUint(m[1], 10, 64)
 	if err := server.engine.ReplayToLSN(ctx, targetLSN); err != nil {
-		return scalarResult("replay_to_lsn", fmt.Sprintf("ERROR: %v", err))
+		return interceptResult{err: err}, true
 	}
 	return scalarResult("replay_to_lsn", fmt.Sprintf("OK: replayed to LSN %d", targetLSN))
 }
