@@ -7,6 +7,7 @@ import (
 	"hash/crc32"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/correodabid/asql/internal/storage/wal"
@@ -171,34 +172,37 @@ func TestOlderSnapshotFormatsDecode(t *testing.T) {
 
 	snap.state.domains["lab"].tables["results"].appendOnly = true
 	snap.state.domains["lab"].tables["results"].verifiable = true
+	snap.state.domains["lab"].tables["results"].primaryKeyColumns = []string{"id", "result"}
 
-	v16, err := encodeSnapshotFileBinary(&snap, true, 0)
+	v17, err := encodeSnapshotFileBinary(&snap, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Older versions lack fields after is_full: the 33-byte anchor (v12),
 	// the 8-byte last_tx_num after it (v12, v13), the append-only table
 	// list after that (v12-v14: a count and one table, 12 bytes) and the
-	// verifiable table list after that (v12-v15, also 12 bytes). Drop them
-	// and fix the CRC.
+	// verifiable table list after that (v12-v15, also 12 bytes) and the
+	// composite key list after that (v12-v16: a count and one table with two
+	// columns, 22 bytes). Drop them and fix the CRC.
 	off := 5
-	n := int(binary.BigEndian.Uint32(v16[off:]))
+	n := int(binary.BigEndian.Uint32(v17[off:]))
 	off += 4
 	for i := 0; i < n; i++ {
-		off += 2 + int(binary.BigEndian.Uint16(v16[off:]))
+		off += 2 + int(binary.BigEndian.Uint16(v17[off:]))
 	}
 	off += 4 + 8 + 8 + 1 // num_snapshots, lsn, logicalTS, is_full
 	older := func(version byte, from, to int) []byte {
-		data := append(append([]byte{}, v16[:from]...), v16[to:len(v16)-4]...)
+		data := append(append([]byte{}, v17[:from]...), v17[to:len(v17)-4]...)
 		data[4] = version
 		return binary.BigEndian.AppendUint32(data, crc32.Checksum(data, snapCRC32C))
 	}
 	formats := map[string][]byte{
-		"v16": v16,
-		"v15": older(15, off+53, off+65),
-		"v14": older(14, off+41, off+65),
-		"v13": older(13, off+33, off+65),
-		"v12": older(12, off, off+65),
+		"v17": v17,
+		"v16": older(16, off+65, off+87),
+		"v15": older(15, off+53, off+87),
+		"v14": older(14, off+41, off+87),
+		"v13": older(13, off+33, off+87),
+		"v12": older(12, off, off+87),
 	}
 
 	for name, data := range formats {
@@ -210,17 +214,21 @@ func TestOlderSnapshotFormatsDecode(t *testing.T) {
 			t.Fatalf("%s: hasLedgerChain=%v lsn=%d", name, got, entries[0].lsn)
 		}
 		wantTxNum := uint64(0)
-		if name == "v14" || name == "v15" || name == "v16" {
+		if name == "v14" || name == "v15" || name == "v16" || name == "v17" {
 			wantTxNum = 42
 		}
-		wantAppendOnly := name == "v15" || name == "v16"
-		wantVerifiable := name == "v16"
+		wantAppendOnly := name == "v15" || name == "v16" || name == "v17"
+		wantVerifiable := name == "v16" || name == "v17"
+		wantKey := ""
+		if name == "v17" {
+			wantKey = "id,result"
+		}
 		if entries[0].lastTxNum != wantTxNum {
 			t.Fatalf("%s: lastTxNum=%d, want %d", name, entries[0].lastTxNum, wantTxNum)
 		}
 		snaps, ok, err := decodeSingleFullSnapshotBinary(data)
 		results := snaps[0].state.domains["lab"].tables["results"]
-		if err != nil || !ok || len(results.rows) != 1 || snaps[0].lastTxNum != wantTxNum || results.appendOnly != wantAppendOnly || results.verifiable != wantVerifiable {
+		if err != nil || !ok || len(results.rows) != 1 || snaps[0].lastTxNum != wantTxNum || results.appendOnly != wantAppendOnly || results.verifiable != wantVerifiable || strings.Join(results.primaryKeyColumns, ",") != wantKey {
 			t.Fatalf("%s: full decode: ok=%v err=%v", name, ok, err)
 		}
 		if len(entries[0].appendOnly) > 0 != wantAppendOnly || len(entries[0].verifiable) > 0 != wantVerifiable {

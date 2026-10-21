@@ -139,6 +139,10 @@ type CreateTableStatement struct {
 	// Verifiable enters the table's rows in the ledger's state tree: see
 	// AlterTableSetVerifiableStatement.
 	Verifiable bool `json:"verifiable,omitempty"`
+	// PrimaryKeyColumns is a composite primary key declared as a table
+	// constraint, PRIMARY KEY (a, b, ...), in key order. A single-column
+	// table constraint is folded into that column's PrimaryKey flag instead.
+	PrimaryKeyColumns []string `json:"primary_key_columns,omitempty"`
 }
 
 func (CreateTableStatement) statementNode() {}
@@ -182,6 +186,20 @@ func (AlterTableSetAppendOnlyStatement) statementNode() {}
 
 func (AlterTableSetAppendOnlyStatement) Kind() string {
 	return "alter_table_set_append_only"
+}
+
+// AlterTableAddPrimaryKeyStatement represents ALTER TABLE ... ADD PRIMARY
+// KEY (a, b, ...) on a table that has none. The existing rows must already
+// satisfy it: no NULL and no repeated key.
+type AlterTableAddPrimaryKeyStatement struct {
+	TableName string   `json:"table_name"`
+	Columns   []string `json:"columns"`
+}
+
+func (AlterTableAddPrimaryKeyStatement) statementNode() {}
+
+func (AlterTableAddPrimaryKeyStatement) Kind() string {
+	return "alter_table_add_primary_key"
 }
 
 // AlterTableSetVerifiableStatement represents ALTER TABLE ... SET

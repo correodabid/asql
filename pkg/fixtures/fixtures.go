@@ -350,6 +350,7 @@ type schemaSnapshotTable struct {
 	Columns              []schemaSnapshotColumn `json:"columns"`
 	Indexes              []schemaSnapshotIndex  `json:"indexes,omitempty"`
 	VersionedForeignKeys []schemaSnapshotVFK    `json:"versioned_foreign_keys,omitempty"`
+	PrimaryKey           []string               `json:"primary_key,omitempty"`
 }
 
 type schemaSnapshotColumn struct {
@@ -626,11 +627,14 @@ func buildCreateTableStatements(table exportTable) []string {
 			),
 		)
 	}
+	if len(table.Snapshot.PrimaryKey) > 1 {
+		columnDefs = append(columnDefs, "PRIMARY KEY ("+strings.Join(table.Snapshot.PrimaryKey, ", ")+")")
+	}
 	statements := []string{fmt.Sprintf("CREATE TABLE %s (%s)", table.FullName(), strings.Join(columnDefs, ", "))}
 	indexes := append([]schemaSnapshotIndex(nil), table.Snapshot.Indexes...)
 	sort.Slice(indexes, func(i, j int) bool { return indexes[i].Name < indexes[j].Name })
 	for _, index := range indexes {
-		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(index.Name)), "__auto_") {
+		if name := strings.ToLower(strings.TrimSpace(index.Name)); strings.HasPrefix(name, "__auto_") || strings.HasPrefix(name, "__pk_") {
 			continue
 		}
 		statements = append(statements,

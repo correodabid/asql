@@ -47,6 +47,10 @@ func validateInsertRow(domainState *domainState, table *tableState, row map[stri
 		}
 	}
 
+	if err := validateCompositeKeyInsert(table, row); err != nil {
+		return err
+	}
+
 	// UNIQUE: check each unique column via hash index (pre-computed slice).
 	for _, col := range table.uniqueColumnList {
 		value, exists := row[col]
@@ -749,6 +753,10 @@ func validateConstraints(domainState *domainState, table *tableState, rows []map
 			}
 			seen[key] = rowID
 		}
+	}
+
+	if err := validateCompositeKeyRows(table.primaryKeyColumns, rows); err != nil {
+		return err
 	}
 
 	if len(table.uniqueColumns) == 0 {

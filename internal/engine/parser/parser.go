@@ -314,8 +314,61 @@ func parseTableOptions(trailing []string) (appendOnly, verifiable bool, err erro
 	return appendOnly, verifiable, nil
 }
 
+// parsePrimaryKeyConstraint recognises a PRIMARY KEY (a, b, ...) table
+// constraint. ok reports whether spec is one; the columns are returned in key
+// order, canonical and distinct.
+func parsePrimaryKeyConstraint(spec string) (columns []string, ok bool, err error) {
+	fields := strings.Fields(spec)
+	if len(fields) < 2 || !strings.EqualFold(fields[0], "PRIMARY") || !strings.HasPrefix(strings.ToUpper(fields[1]), "KEY") {
+		return nil, false, nil
+	}
+	rest := strings.TrimSpace(spec)
+	rest = strings.TrimSpace(rest[len("PRIMARY"):])
+	rest = strings.TrimSpace(rest[len("KEY"):])
+	if !strings.HasPrefix(rest, "(") || !strings.HasSuffix(rest, ")") {
+		return nil, true, fmt.Errorf("%w: PRIMARY KEY constraint needs a column list: PRIMARY KEY (a, b)", errInvalidSQL)
+	}
+	columns, err = parseKeyColumnList(rest[1 : len(rest)-1])
+	return columns, true, err
+}
+
+// parseKeyColumnList parses the inside of a key's column list.
+func parseKeyColumnList(list string) ([]string, error) {
+	var columns []string
+	seen := map[string]bool{}
+	for _, raw := range strings.Split(list, ",") {
+		name := canonicalIdentifier(strings.TrimSpace(raw))
+		if name == "" || strings.ContainsAny(name, " \t()") {
+			return nil, fmt.Errorf("%w: invalid key column %q", errInvalidSQL, strings.TrimSpace(raw))
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("%w: key column %q repeated", errInvalidSQL, name)
+		}
+		seen[name] = true
+		columns = append(columns, name)
+	}
+	return columns, nil
+}
+
 func parseAlterTable(sql string) (ast.Statement, error) {
 	rest := strings.TrimSpace(sql[len("ALTER TABLE "):])
+
+	// ADD PRIMARY KEY (a, b, ...)
+	if i := indexFold(rest, " ADD PRIMARY KEY"); i > 0 {
+		table := canonicalIdentifier(strings.TrimSpace(rest[:i]))
+		if table == "" || strings.ContainsAny(table, " \t") {
+			return nil, fmt.Errorf("%w: table name required", errInvalidSQL)
+		}
+		list := strings.TrimSpace(rest[i+len(" ADD PRIMARY KEY"):])
+		if !strings.HasPrefix(list, "(") || !strings.HasSuffix(list, ")") {
+			return nil, fmt.Errorf("%w: ADD PRIMARY KEY needs a column list: ADD PRIMARY KEY (a, b)", errInvalidSQL)
+		}
+		columns, err := parseKeyColumnList(list[1 : len(list)-1])
+		if err != nil {
+			return nil, err
+		}
+		return ast.AlterTableAddPrimaryKeyStatement{TableName: table, Columns: columns}, nil
+	}
 
 	// SET APPEND ONLY
 	if fields := strings.Fields(rest); len(fields) == 4 && strings.EqualFold(fields[1], "SET") &&
@@ -595,9 +648,23 @@ func parseCreateTable(sql string, ifNotExists bool) (ast.Statement, error) {
 
 	columns := make([]ast.ColumnDefinition, 0, len(columnSpecs))
 	var versionedFKs []ast.VersionedForeignKey
+	var tablePrimaryKey []string
 	primaryKeys := 0
 	for _, spec := range columnSpecs {
 		parts := strings.Fields(spec)
+
+		// Table-level PRIMARY KEY (a, b, ...) constraint.
+		if keyColumns, ok, err := parsePrimaryKeyConstraint(spec); ok {
+			if err != nil {
+				return nil, err
+			}
+			if tablePrimaryKey != nil {
+				return nil, fmt.Errorf("%w: only one PRIMARY KEY constraint is supported", errInvalidSQL)
+			}
+			tablePrimaryKey = keyColumns
+			continue
+		}
+
 		if len(parts) < 2 {
 			return nil, fmt.Errorf("%w: invalid column definition %q", errInvalidSQL, spec)
 		}
@@ -710,7 +777,32 @@ func parseCreateTable(sql string, ifNotExists bool) (ast.Statement, error) {
 	}
 
 	if primaryKeys > 1 {
-		return nil, fmt.Errorf("%w: only one PRIMARY KEY column is supported", errInvalidSQL)
+		return nil, fmt.Errorf("%w: only one PRIMARY KEY column is supported; declare a composite key as PRIMARY KEY (a, b)", errInvalidSQL)
+	}
+	var primaryKeyColumns []string
+	if tablePrimaryKey != nil {
+		if primaryKeys > 0 {
+			return nil, fmt.Errorf("%w: a table has one primary key: declare it on a column or as PRIMARY KEY (...), not both", errInvalidSQL)
+		}
+		positions := make(map[string]int, len(columns))
+		for i, column := range columns {
+			positions[column.Name] = i
+		}
+		for _, name := range tablePrimaryKey {
+			if _, ok := positions[name]; !ok {
+				return nil, fmt.Errorf("%w: PRIMARY KEY column %q is not a column of the table", errInvalidSQL, name)
+			}
+		}
+		if len(tablePrimaryKey) == 1 {
+			// Same as declaring it on the column.
+			column := &columns[positions[tablePrimaryKey[0]]]
+			column.PrimaryKey, column.Unique, column.NotNull = true, true, true
+		} else {
+			for _, name := range tablePrimaryKey {
+				columns[positions[name]].NotNull = true
+			}
+			primaryKeyColumns = tablePrimaryKey
+		}
 	}
 
 	stmt := ast.CreateTableStatement{
@@ -720,6 +812,7 @@ func parseCreateTable(sql string, ifNotExists bool) (ast.Statement, error) {
 		IfNotExists:          ifNotExists,
 		AppendOnly:           appendOnly,
 		Verifiable:           verifiable,
+		PrimaryKeyColumns:    primaryKeyColumns,
 	}
 	return stmt, nil
 }
