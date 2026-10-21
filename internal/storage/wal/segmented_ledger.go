@@ -1,6 +1,7 @@
 package wal
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -164,4 +165,102 @@ func (store *SegmentedLogStore) rehashSegment(seg *segment, active bool) error {
 		seg.ledgerFlags |= ledgerFlagLast
 	}
 	return nil
+}
+
+// ErrChainUnavailable reports that the chain value at an LSN cannot be
+// computed: the ledger is off, the LSN is beyond the head or before the
+// retained WAL, or no anchor precedes it.
+var ErrChainUnavailable = errors.New("wal ledger: chain value unavailable")
+
+// ChainAt returns chain_lsn, the chain value after the record at lsn, for any
+// LSN up to the head that the retained WAL covers (ADR 0006). Recent values
+// come from memory. Older ones are recomputed from the nearest anchor before
+// lsn, the chainBeforeFirstLSN of its segment or the chainAtLastLSN of the
+// one before, which rehashes at most one segment. The segment is read
+// through its own file handle without holding the store lock, so appends are
+// not blocked.
+func (store *SegmentedLogStore) ChainAt(lsn uint64) (ChainHash, error) {
+	store.mu.Lock()
+	ls := &store.ledger
+	if !ls.active() {
+		store.mu.Unlock()
+		return ChainHash{}, fmt.Errorf("%w: the ledger is off", ErrChainUnavailable)
+	}
+	if lsn > ls.headLSN {
+		head := ls.headLSN
+		store.mu.Unlock()
+		return ChainHash{}, fmt.Errorf("%w: LSN %d is beyond the head, LSN %d", ErrChainUnavailable, lsn, head)
+	}
+	if chain, ok := ls.chainAt(lsn); ok {
+		store.mu.Unlock()
+		return chain, nil
+	}
+	if lsn == 0 && ls.rooted {
+		store.mu.Unlock()
+		return GenesisChain, nil
+	}
+
+	idx := -1
+	for i, seg := range store.segments {
+		if seg.firstLSN > 0 && seg.firstLSN-1 == lsn && seg.ledgerFlags&ledgerFlagBefore != 0 {
+			chain := seg.chainBefore
+			store.mu.Unlock()
+			return chain, nil
+		}
+		if seg.firstLSN > 0 && seg.firstLSN <= lsn && lsn <= seg.lastLSN {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		store.mu.Unlock()
+		return ChainHash{}, fmt.Errorf("%w: LSN %d is before the retained WAL", ErrChainUnavailable, lsn)
+	}
+	seg := store.segments[idx]
+	var anchor ChainHash
+	switch {
+	case seg.ledgerFlags&ledgerFlagBefore != 0:
+		anchor = seg.chainBefore
+	case idx > 0 && store.segments[idx-1].ledgerFlags&ledgerFlagLast != 0 && store.segments[idx-1].lastLSN == seg.firstLSN-1:
+		anchor = store.segments[idx-1].chainLast
+	case seg.firstLSN == 1:
+		anchor = GenesisChain
+	default:
+		store.mu.Unlock()
+		return ChainHash{}, fmt.Errorf("%w: no ledger anchor precedes LSN %d", ErrChainUnavailable, lsn)
+	}
+	anchorLSN := seg.firstLSN - 1
+	path := store.segmentPath(seg.seqNum)
+	store.mu.Unlock()
+
+	data, err := readVerifySegment(path)
+	if err != nil {
+		return ChainHash{}, err
+	}
+	chain, at := anchor, anchorLSN
+	frames := data.frames
+	for len(frames) >= 4 && at < lsn {
+		n := int(binary.BigEndian.Uint32(frames[:4]))
+		if len(frames) < 4+n {
+			break
+		}
+		r, err := decodeDiskRecord(frames[4 : 4+n])
+		if err != nil {
+			return ChainHash{}, fmt.Errorf("wal ledger: segment %06d after LSN %d: %w", seg.seqNum, at, err)
+		}
+		frames = frames[4+n:]
+		if r.LSN != at+1 {
+			return ChainHash{}, fmt.Errorf("%w: segment %06d: LSN %d follows %d", ErrLedgerMismatch, seg.seqNum, r.LSN, at)
+		}
+		typeEnum, err := typeStringToEnum(r.Type)
+		if err != nil {
+			return ChainHash{}, fmt.Errorf("wal ledger: segment %06d LSN %d: %w", seg.seqNum, r.LSN, err)
+		}
+		chain = ChainStep(chain, r.LSN, ledgerLeaf(r.Term, r.Timestamp, r.TxID, typeEnum, r.Payload))
+		at = r.LSN
+	}
+	if at != lsn {
+		return ChainHash{}, fmt.Errorf("%w: segment %06d ends at LSN %d, before LSN %d", ErrChainUnavailable, seg.seqNum, at, lsn)
+	}
+	return chain, nil
 }

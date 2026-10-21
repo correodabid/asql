@@ -15,7 +15,15 @@ import (
 func (engine *Engine) selectRows(ctx context.Context, state *readableState, plan planner.Plan) ([]map[string]ast.Literal, error) {
 	// Materialize CTEs and inject as virtual tables
 	if len(plan.CTEs) > 0 {
-		state = materializeCTEs(state, plan.CTEs, engine)
+		var err error
+		if state, err = engine.materializeCTEs(ctx, state, plan.CTEs, queryDomain(state, plan)); err != nil {
+			return nil, err
+		}
+		// FROM cte without a domain, outside a transaction: the CTE is in
+		// every domain, read it from the query's.
+		if plan.DomainName == "" {
+			plan.DomainName = queryDomain(state, plan)
+		}
 	}
 
 	domainState, exists := state.domains[plan.DomainName]

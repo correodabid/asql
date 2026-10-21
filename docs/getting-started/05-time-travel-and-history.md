@@ -47,7 +47,8 @@ Studio.
 When the durable principal catalog is enabled, historical reads are authorized against the **current** principal/grant state — not against a reconstructed historical security state.
 
 - Ordinary `SELECT` is not enough for time-travel or history access.
-- `AS OF LSN`, `AS OF TIMESTAMP`, and `FOR HISTORY` require the explicit `SELECT_HISTORY` privilege.
+- `AS OF LSN` and `FOR HISTORY` require the explicit `SELECT_HISTORY` privilege.
+- `AS OF TIMESTAMP '<date>'` is refused: the WAL records logical timestamps, not the wall-clock time of each commit, so a date cannot be resolved to a commit. Use `AS OF LSN`.
 - The data snapshot may be old, but the authorization decision is made using the principal's **current** grants.
 - ASQL does not pretend that a user or role existed in the past just because the query targets an old `LSN` or timestamp.
 :::
@@ -139,8 +140,7 @@ SELECT * FROM app.users FOR HISTORY WHERE id = 1;
 Use this when you want the chronological mutation trail for one row or a filtered set of rows.
 
 When the durable principal catalog is enabled, `FOR HISTORY` is also covered by
-the same explicit `SELECT_HISTORY` authorization rule as `AS OF LSN` and
-`AS OF TIMESTAMP`.
+the same explicit `SELECT_HISTORY` authorization rule as `AS OF LSN`.
 
 ## Practical workflow
 

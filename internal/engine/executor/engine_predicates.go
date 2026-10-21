@@ -30,6 +30,8 @@ func compareLiteralByOperator(left ast.Literal, operator string, right ast.Liter
 	switch operator {
 	case "=":
 		return cmp == 0
+	case "!=", "<>":
+		return cmp != 0
 	case ">":
 		return cmp > 0
 	case "<":

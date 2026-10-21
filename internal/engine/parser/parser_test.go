@@ -2513,3 +2513,58 @@ func TestParseExceptSnapshot(t *testing.T) {
 		t.Fatalf("expected EXCEPT, got %q", setOp.Op)
 	}
 }
+
+func TestParseRecursiveCTE(t *testing.T) {
+	stmt, err := Parse("WITH RECURSIVE lineage (id) AS (SELECT parent_id FROM edges WHERE child_id = 5 UNION ALL SELECT e.parent_id FROM edges e JOIN lineage l ON e.child_id = l.id) SELECT * FROM lineage")
+	if err != nil {
+		t.Fatalf("parse recursive CTE: %v", err)
+	}
+	cte := stmt.(ast.SelectStatement).CTEs[0]
+	if cte.Name != "lineage" || len(cte.Columns) != 1 || cte.Columns[0] != "id" {
+		t.Fatalf("CTE name %q, columns %v; want lineage (id)", cte.Name, cte.Columns)
+	}
+	if cte.Statement.TableName != "edges" || cte.Recursive == nil || !cte.Recursive.All {
+		t.Fatalf("anchor %q, recursive term %+v; want edges and UNION ALL", cte.Statement.TableName, cte.Recursive)
+	}
+	if len(cte.Recursive.Statement.Joins) != 1 || cte.Recursive.Statement.Joins[0].TableName != "lineage" {
+		t.Fatalf("recursive term joins %+v, want lineage", cte.Recursive.Statement.Joins)
+	}
+
+	// WITH RECURSIVE allows CTEs that do not recurse.
+	stmt, err = Parse("WITH RECURSIVE a AS (SELECT id FROM t1) SELECT * FROM a")
+	if err != nil || stmt.(ast.SelectStatement).CTEs[0].Recursive != nil {
+		t.Fatalf("non-recursive CTE under WITH RECURSIVE: %v", err)
+	}
+
+	for _, sql := range []string{
+		"WITH lineage AS (SELECT id FROM t UNION SELECT l.id FROM t JOIN lineage l ON t.id = l.id) SELECT * FROM lineage",
+		"WITH RECURSIVE lineage AS (SELECT id FROM lineage UNION SELECT id FROM t) SELECT * FROM lineage",
+		"WITH RECURSIVE lineage AS (SELECT id FROM t INTERSECT SELECT l.id FROM t JOIN lineage l ON t.id = l.id) SELECT * FROM lineage",
+		"WITH RECURSIVE lineage AS (SELECT id FROM t UNION SELECT id FROM t WHERE id IN (SELECT id FROM lineage)) SELECT * FROM lineage",
+		"WITH RECURSIVE lineage (id, AS (SELECT id FROM t) SELECT * FROM lineage",
+	} {
+		if _, err := Parse(sql); err == nil {
+			t.Fatalf("%s: no error", sql)
+		}
+	}
+}
+
+func TestParseNotEqualOperators(t *testing.T) {
+	for _, clause := range []string{"b != 'z'", "b <> 'z'", "b!='z'", "b<>'z'"} {
+		p, err := parseWhere(clause)
+		if err != nil {
+			t.Fatalf("%s: %v", clause, err)
+		}
+		if p.Column != "b" || p.Operator != "!=" || p.Value.StringValue != "z" {
+			t.Fatalf("%s: parsed as %+v, want b != 'z'", clause, p)
+		}
+	}
+	p, err := parseWhere("a <> b")
+	if err != nil || p.Column != "a" || p.Operator != "!=" || p.RightColumn != "b" {
+		t.Fatalf("a <> b: %+v, %v", p, err)
+	}
+	p, err = parseWhere("note = 'a != b'")
+	if err != nil || p.Operator != "=" || p.Value.StringValue != "a != b" {
+		t.Fatalf("operator inside a literal: %+v, %v", p, err)
+	}
+}
