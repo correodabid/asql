@@ -99,6 +99,7 @@ and current privilege semantics, see
 |---|---|---|
 | `SELECT ... WHERE <scalar predicate>` | Supported | Current ASQL SQL subset, with the comparisons `=`, `!=` / `<>`, `<`, `<=`, `>` and `>=`; with durable principals enabled, any authenticated enabled principal can execute current-state reads. |
 | Select-list expressions | Supported | Aliases (`expr AS name`), literals (`1`, `'x'`), arithmetic (`qty * 2`), `CAST`, `COALESCE`/`NULLIF` and the string functions. A column that does not exist fails with `42703`, and an expression ASQL cannot compute with `0A000`; both used to be left out of the result without an error, and over the simple protocol an alias returned NULL. |
+| Queries on `asql_admin.*` tables | Supported, narrower | The select list takes columns, `*` and aliases; `ORDER BY` columns (`ASC`/`DESC`, NULLs last ascending and first descending), `LIMIT` and `OFFSET` apply. Each table reads its `WHERE` as parameters (`sql = '...'`, `lsn = N`, …), not as a general filter. `GROUP BY`, `HAVING` and expressions fail with `0A000`; a failing query returns an error, not an empty result. |
 | `ORDER BY ... LIMIT n` | Supported | Covered in executor and pgwire tests. |
 | Literal `IN (...)` / `NOT IN (...)` | Supported | Covered in executor tests. |
 | Subquery-based `IN (SELECT ...)` | Supported | Covered in executor tests for current shapes. |

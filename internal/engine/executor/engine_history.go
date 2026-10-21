@@ -211,11 +211,11 @@ func (engine *Engine) RowHistory(ctx context.Context, sql string, txDomains []st
 
 	ds, ok := state.domains[plan.DomainName]
 	if !ok {
-		return Result{Status: "OK"}, nil
+		return Result{}, errTableNotFound
 	}
 	table, ok := ds.tables[plan.TableName]
 	if !ok {
-		return Result{Status: "OK"}, nil
+		return Result{}, errTableNotFound
 	}
 
 	if plan.Filter, err = coercePredicate(plan.Filter, selectColumnType(state, plan)); err != nil {
@@ -418,6 +418,12 @@ func (engine *Engine) rowHistoryFromAuditStore(ctx context.Context, plan *planne
 		state, err = applyImports(state, imports)
 		if err != nil {
 			return Result{}, err
+		}
+	}
+	// A dropped table keeps its history; one that never existed has none.
+	if len(entries) == 0 {
+		if ds, ok := state.domains[plan.DomainName]; !ok || ds.tables[plan.TableName] == nil {
+			return Result{}, errTableNotFound
 		}
 	}
 
