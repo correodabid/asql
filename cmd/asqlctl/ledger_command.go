@@ -250,12 +250,21 @@ func readDigestFile(path string) (*ledgerdigest.Digest, error) {
 type ledgerKeygenOutput struct {
 	PrivateKey string `json:"private_key"`
 	PublicKey  string `json:"public_key"`
+	StateKey   string `json:"state_key"`
 	KeyID      string `json:"key_id"`
+	// Created lists what this run wrote: "private_key", "public_key" and
+	// "state_key", or only "state_key" next to an existing private key.
+	Created []string `json:"created"`
 }
 
-// runLedgerKeygen writes a new Ed25519 key pair for ledger=signed: the
-// private key at privPath (mode 0600) and the public key next to it with a
-// .pub extension.
+// runLedgerKeygen writes the keys for ledger=signed: the Ed25519 private key
+// at privPath (mode 0600), its public key next to it with a .pub extension,
+// and the state key that salts the state tree (ADR 0008) at
+// privPath + ".state" (mode 0600).
+//
+// When privPath already holds a valid private key and its state key is
+// missing, as for a node set up before ADR 0008, it writes only the state
+// key and leaves the key pair alone. It never overwrites a file.
 func runLedgerKeygen(out io.Writer, privPath string) error {
 	if strings.TrimSpace(privPath) == "" {
 		return errors.New("ledger-keygen requires -output (private key path)")
@@ -264,9 +273,34 @@ func runLedgerKeygen(out io.Writer, privPath string) error {
 	if pubPath == privPath {
 		pubPath = privPath + ".pub"
 	}
+	statePath := ledgerdigest.DefaultStateKeyPath(privPath)
+	if _, err := os.Stat(statePath); err == nil {
+		return fmt.Errorf("ledger-keygen: %s already exists; it is never overwritten", statePath)
+	}
+
+	if _, err := os.Stat(privPath); err == nil {
+		signer, err := ledgerdigest.LoadSigner(privPath)
+		if err != nil {
+			return fmt.Errorf("ledger-keygen: %s exists but is not a usable private key: %w", privPath, err)
+		}
+		if err := ledgerdigest.GenerateStateKeyFile(statePath); err != nil {
+			return err
+		}
+		return printJSONTo(out, ledgerKeygenOutput{
+			PrivateKey: privPath, PublicKey: pubPath, StateKey: statePath, KeyID: signer.KeyID(),
+			Created: []string{"state_key"},
+		})
+	}
+
 	pub, err := ledgerdigest.GenerateKeyFiles(privPath, pubPath)
 	if err != nil {
 		return err
 	}
-	return printJSONTo(out, ledgerKeygenOutput{PrivateKey: privPath, PublicKey: pubPath, KeyID: ledgerdigest.KeyID(pub)})
+	if err := ledgerdigest.GenerateStateKeyFile(statePath); err != nil {
+		return err
+	}
+	return printJSONTo(out, ledgerKeygenOutput{
+		PrivateKey: privPath, PublicKey: pubPath, StateKey: statePath, KeyID: ledgerdigest.KeyID(pub),
+		Created: []string{"private_key", "public_key", "state_key"},
+	})
 }
