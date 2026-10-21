@@ -124,6 +124,19 @@ jobs:
           GOOS=darwin GOARCH=arm64 go build -o dist/asqld-darwin-arm64 ./cmd/asqld
           GOOS=darwin GOARCH=arm64 go build -o dist/asqlctl-darwin-arm64 ./cmd/asqlctl
 
+      - name: Check binaries are stamped with the tag
+        # A modified work tree stamps "+dirty" into the version that result
+        # attestations sign (ADR 0006).
+        run: |
+          for binary in dist/asql*; do
+            version=$(go version -m "$binary" | awk '$1 == "mod" { print $3 }')
+            echo "$binary: $version"
+            if [ "$version" != "$GITHUB_REF_NAME" ]; then
+              echo "::error::$binary is stamped $version, not $GITHUB_REF_NAME"
+              exit 1
+            fi
+          done
+
       - name: Generate checksums
         run: |
           cd dist

@@ -33,6 +33,9 @@
 .asql-*
 .demo-asql
 
+# Release builds (ci.yml): untracked files would stamp later binaries +dirty
+/dist/
+
 # Local scratch / benchmark output
 .tmp/
 .bench/
