@@ -1,8 +1,12 @@
 package executor
 
 import (
+	"errors"
 	"os"
+	"strings"
 	"testing"
+
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 )
 
 func schemaTableVerifiable(schema SchemaSnapshot, domain, table string) bool {
@@ -80,6 +84,48 @@ func TestVerifiableOptionsParse(t *testing.T) {
 	} {
 		if err := n.tx(sql); err == nil {
 			t.Fatalf("%s: accepted", sql)
+		}
+	}
+}
+
+// TestVerifiableNeedsAPrimaryKey: rows are proven by primary key, so a table
+// without one cannot be VERIFIABLE, when it is created, set later, or set in
+// the transaction that creates it.
+func TestVerifiableNeedsAPrimaryKey(t *testing.T) {
+	n := openAppendOnlyNode(t, t.TempDir())
+	defer n.close()
+	n.mustTx("CREATE TABLE edges (child_id TEXT, parent_id TEXT, ordinal INT) APPEND ONLY")
+	for _, statements := range [][]string{
+		{"CREATE TABLE loose (a TEXT, b TEXT) VERIFIABLE"},
+		{"ALTER TABLE edges SET VERIFIABLE"},
+		{"CREATE TABLE later (a TEXT, b TEXT)", "ALTER TABLE later SET VERIFIABLE"},
+	} {
+		var sqlErr *sqlerr.SQLError
+		if err := n.tx(statements...); !errors.As(err, &sqlErr) || sqlErr.Code != "42P16" || !strings.Contains(err.Error(), "primary key") {
+			t.Fatalf("%v: %v, want 42P16 about the primary key", statements, err)
+		}
+	}
+	if schemaTableVerifiable(n.engine.SchemaSnapshot(nil), "app", "edges") {
+		t.Fatal("a table without a primary key became verifiable")
+	}
+
+	// The integration's path: a composite key added to the existing
+	// append-only edge table, then VERIFIABLE; and a composite key at
+	// creation.
+	n.mustTx("INSERT INTO edges (child_id, parent_id, ordinal) VALUES ('b', 'a', 1)")
+	n.mustTx("ALTER TABLE edges ADD PRIMARY KEY (child_id, parent_id)")
+	n.mustTx("ALTER TABLE edges SET VERIFIABLE")
+	n.mustTx("CREATE TABLE links (child_id TEXT, parent_id TEXT, ordinal INT, PRIMARY KEY (child_id, parent_id)) APPEND ONLY VERIFIABLE")
+	schema := n.engine.SchemaSnapshot(nil)
+	if !schemaTableVerifiable(schema, "app", "edges") || !schemaTableVerifiable(schema, "app", "links") {
+		t.Fatal("tables with a composite primary key are not verifiable")
+	}
+	// The failed transactions left nothing behind.
+	for _, d := range n.engine.SchemaSnapshot(nil).Domains {
+		for _, tbl := range d.Tables {
+			if tbl.Name == "loose" || tbl.Name == "later" {
+				t.Fatalf("table %s exists after its transaction failed", tbl.Name)
+			}
 		}
 	}
 }
