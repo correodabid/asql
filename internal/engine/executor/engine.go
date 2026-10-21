@@ -175,7 +175,8 @@ type Engine struct {
 	lastDiskSnapshotLSN           uint64 // headLSN of the last successfully written disk snapshot
 	lastDiskSnapshotLogicalTS     uint64 // logicalTS of the last successfully written disk snapshot
 	perf                          *perfStats
-	retainWAL                     bool // when true, WAL is never truncated after snapshot persistence (audit/compliance)
+	retainWAL                     bool          // when true, WAL is never truncated after snapshot persistence (audit/compliance)
+	walGCFloor                    func() uint64 // WAL GC keeps records from this LSN on (ADR 0008 log tree)
 	// replayLimit bounds startup replay when replayLimited (see WithReplayLimit).
 	replayLimit   uint64
 	replayLimited bool
@@ -368,11 +369,26 @@ func (engine *Engine) SetRaftCommitter(c ports.RaftCommitter) {
 	engine.raftCommitter = c
 }
 
+// SetWALGCFloor bounds WAL GC: records at or after floor() are kept even
+// when a snapshot covers them. The ledger's log tree (ADR 0008) uses it so
+// GC never removes records it has not added yet. It is not engine state:
+// nothing replay or queries compute reads it. Call it before the first
+// commit.
+func (engine *Engine) SetWALGCFloor(floor func() uint64) {
+	engine.walGCFloor = floor
+}
+
 // maybeGCWAL truncates WAL records before snapLSN when retainWAL is false.
 // Safe to call after any successful snapshot persist; the audit store (if wired)
 // independently preserves full row-level history.
 func (engine *Engine) maybeGCWAL(snapLSN uint64) {
 	if engine.retainWAL || engine.logStore == nil {
+		return
+	}
+	if engine.walGCFloor != nil {
+		snapLSN = min(snapLSN, engine.walGCFloor())
+	}
+	if snapLSN <= 1 {
 		return
 	}
 	tr, ok := engine.logStore.(ports.Truncator)

@@ -15,6 +15,7 @@ import (
 	"github.com/correodabid/asql/internal/engine/executor"
 	"github.com/correodabid/asql/internal/platform/datadir"
 	"github.com/correodabid/asql/internal/storage/ledgerdigest"
+	"github.com/correodabid/asql/internal/storage/logtree"
 	"github.com/correodabid/asql/internal/storage/wal"
 )
 
@@ -180,5 +181,52 @@ func TestVerifyLedgerDigestDetectsAReplacedHistory(t *testing.T) {
 	result, err = verifyWithDigest(t, verifyLedgerOptions{DataDir: dir, DigestPath: writeDigestFile(t, digest), PubKeyPath: pubPath})
 	if !errors.Is(err, errLedgerVerifyFailed) || result.Failure == nil || result.Failure.Kind != verifyDigestBeyondWAL {
 		t.Fatalf("truncated WAL: err=%v failure=%+v", err, result.Failure)
+	}
+}
+
+// TestVerifyLedgerChecksAVersion2DigestsTreeRoot rebuilds the log tree from
+// the WAL and compares it with the root a version 2 digest signs (ADR 0008).
+func TestVerifyLedgerChecksAVersion2DigestsTreeRoot(t *testing.T) {
+	signer, pubPath := newLedgerKey(t)
+	dir, v1 := makeLedgerDataDir(t, signer, "OUT_OF_SPEC", "WITHIN_SPEC")
+	dd, _ := datadir.New(dir)
+	store, err := wal.NewSegmentedLogStore(dd.WALBasePath(), wal.AlwaysSync{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaves, err := store.LedgerLeaves(context.Background(), 1, v1.LSN)
+	_ = store.Close()
+	if err != nil || uint64(len(leaves)) != v1.LSN {
+		t.Fatalf("%d leaves, %v; want %d", len(leaves), err, v1.LSN)
+	}
+	var tree logtree.Frontier
+	for _, leaf := range leaves {
+		tree.Add(logtree.Hash(leaf))
+	}
+
+	sign := func(root [32]byte) string {
+		d := v1
+		d.Version, d.TreeRoot = ledgerdigest.Version2, root
+		d, err := ledgerdigest.Sign(signer, d)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return writeDigestFile(t, d)
+	}
+	result, err := verifyWithDigest(t, verifyLedgerOptions{DataDir: dir, DigestPath: sign(tree.Root()), PubKeyPath: pubPath})
+	if err != nil || result.Digest.Chain != "match" || result.Digest.TreeRoot != "match" {
+		t.Fatalf("version 2 digest: err=%v digest=%+v", err, result.Digest)
+	}
+
+	wrong := tree.Root()
+	wrong[0] ^= 1
+	result, err = verifyWithDigest(t, verifyLedgerOptions{DataDir: dir, DigestPath: sign(wrong), PubKeyPath: pubPath})
+	if !errors.Is(err, errLedgerVerifyFailed) || result.Failure == nil || result.Failure.Kind != verifyDigestTree || result.Digest.TreeRoot != "mismatch" {
+		t.Fatalf("a signed tree root that is not the WAL's: err=%v failure=%+v digest=%+v", err, result.Failure, result.Digest)
+	}
+
+	result, err = verifyWithDigest(t, verifyLedgerOptions{DataDir: dir, DigestPath: writeDigestFile(t, v1), PubKeyPath: pubPath})
+	if err != nil || result.Digest.TreeRoot != "" {
+		t.Fatalf("version 1 digest: err=%v tree_root %q, want none", err, result.Digest.TreeRoot)
 	}
 }

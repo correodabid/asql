@@ -40,6 +40,8 @@ type Builder struct {
 	poll   time.Duration
 	logger *slog.Logger
 
+	appendMu sync.Mutex // one CatchUp at a time: the tree has one writer
+
 	mu      sync.Mutex
 	err     error // set once the tree is unavailable
 	warned  bool  // a transient error was logged
@@ -90,6 +92,8 @@ func (b *Builder) Run(ctx context.Context) {
 // segment compacted while it was read) is logged once and retried on the
 // next call; one that makes the tree unavailable stops the builder.
 func (b *Builder) CatchUp(ctx context.Context) error {
+	b.appendMu.Lock()
+	defer b.appendMu.Unlock()
 	if err := b.Err(); err != nil {
 		return err
 	}
@@ -125,6 +129,25 @@ func (b *Builder) CatchUp(ctx context.Context) error {
 			return b.transient(err)
 		}
 	}
+}
+
+// RootAt extends the tree to the committed LSN and returns its root at lsn.
+// ok is false when the tree is unavailable; an error is transient.
+func (b *Builder) RootAt(ctx context.Context, lsn uint64) (root Hash, ok bool, err error) {
+	if err := b.CatchUp(ctx); err != nil {
+		if b.Err() != nil {
+			return Hash{}, false, nil
+		}
+		return Hash{}, false, err
+	}
+	if size := b.tree.Size(); int64(lsn) > size {
+		return Hash{}, false, fmt.Errorf("log tree has %d records, behind LSN %d", size, lsn)
+	}
+	root, err = b.tree.Root(int64(lsn))
+	if err != nil {
+		return Hash{}, false, err
+	}
+	return root, true, nil
 }
 
 // checkTail compares the tree's last leaf with the WAL's record at that LSN

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -45,7 +46,7 @@ func TestDigestSignVerifyAndJSONRoundTrip(t *testing.T) {
 	keys := Keyring{}
 	keys.Add(signer.PublicKey())
 	d := testDigest(t, signer)
-	if d.Version != Version || d.KeyID != signer.KeyID() {
+	if d.Version != Version1 || d.KeyID != signer.KeyID() {
 		t.Fatalf("digest version/key id = %d/%q", d.Version, d.KeyID)
 	}
 	if err := d.Verify(keys); err != nil {
@@ -86,6 +87,66 @@ func TestDigestVerifyRejectsAnyChange(t *testing.T) {
 		if err := d.Verify(keys); !errors.Is(err, ErrBadSignature) {
 			t.Errorf("%s changed: err=%v, want ErrBadSignature", name, err)
 		}
+	}
+}
+
+func TestVersion2DigestSignsTheTreeRoot(t *testing.T) {
+	signer := testSigner(t)
+	keys := Keyring{}
+	keys.Add(signer.PublicKey())
+	v1 := testDigest(t, signer)
+	v1Bytes, _ := v1.CanonicalBytes()
+
+	d := v1
+	d.Version, d.TreeRoot = Version2, [32]byte{9, 8, 7}
+	d, err := Sign(signer, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !d.HasTree() || d.Version != Version2 || v1.HasTree() {
+		t.Fatalf("version %d, HasTree %v; version 1 HasTree %v", d.Version, d.HasTree(), v1.HasTree())
+	}
+	if err := d.Verify(keys); err != nil {
+		t.Fatal(err)
+	}
+	// The tree root is signed between the chain and the term; version 1
+	// bytes do not change.
+	v2Bytes, _ := d.CanonicalBytes()
+	if len(v2Bytes) != len(v1Bytes)+32 {
+		t.Fatalf("version 2 encodes %d bytes, version 1 %d", len(v2Bytes), len(v1Bytes))
+	}
+
+	data, err := json.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Digest
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if err := back.Verify(keys); err != nil || back.TreeRoot != d.TreeRoot {
+		t.Fatalf("after a JSON round trip: %v, tree root %x\n%s", err, back.TreeRoot, data)
+	}
+	if data, _ := json.Marshal(v1); strings.Contains(string(data), "tree_root") {
+		t.Fatalf("a version 1 digest carries a tree root: %s", data)
+	}
+
+	for name, mutate := range map[string]func(*Digest){
+		"tree root":              func(d *Digest) { d.TreeRoot[0] ^= 1 },
+		"downgrade to version 1": func(d *Digest) { d.Version = Version1 },
+	} {
+		forged := d
+		mutate(&forged)
+		if err := forged.Verify(keys); !errors.Is(err, ErrBadSignature) {
+			t.Errorf("%s: err=%v, want ErrBadSignature", name, err)
+		}
+	}
+	var stripped map[string]any
+	_ = json.Unmarshal(data, &stripped)
+	delete(stripped, "tree_root")
+	data, _ = json.Marshal(stripped)
+	if err := json.Unmarshal(data, &back); err == nil {
+		t.Fatal("a version 2 digest without its tree root decodes")
 	}
 }
 

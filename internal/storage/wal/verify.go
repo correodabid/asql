@@ -28,6 +28,10 @@ type VerifyOptions struct {
 	// FromAnchor such a WAL fails verification, because it cannot be checked
 	// from genesis.
 	FromAnchor bool
+	// OnLeaf, when set, receives every verified record's ledger leaf in LSN
+	// order, so a caller can rebuild the log tree (ADR 0008) in the same
+	// pass.
+	OnLeaf func(lsn uint64, leaf ChainHash)
 }
 
 // Verification failure kinds.
@@ -152,7 +156,11 @@ func VerifyLedger(basePath string, opts VerifyOptions) (VerifyReport, error) {
 				v.fail(VerifyDecode, v.lsn, r.LSN, seg.name, "", err.Error())
 				break
 			}
-			v.chain = ChainStep(v.chain, r.LSN, ledgerLeaf(r.Term, r.Timestamp, r.TxID, typeEnum, r.Payload))
+			leaf := ledgerLeaf(r.Term, r.Timestamp, r.TxID, typeEnum, r.Payload)
+			v.chain = ChainStep(v.chain, r.LSN, leaf)
+			if opts.OnLeaf != nil {
+				opts.OnLeaf(r.LSN, leaf)
+			}
 			v.lsn = r.LSN
 			report.Records++
 			for _, a := range external[r.LSN] {
