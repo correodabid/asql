@@ -2,6 +2,7 @@ package executor
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strings"
 	"testing"
@@ -74,6 +75,18 @@ func TestRecursiveCTEWalksAGraph(t *testing.T) {
 		t.Fatalf("cycle: %s, want y,z", got)
 	}
 
+	// Depth, counted by an expression in the select list. Each ancestor
+	// appears once per depth it is reached at: a through b and through x.
+	rows = query("WITH RECURSIVE lineage(id, depth) AS (SELECT parent_id, 1 FROM edges WHERE child_id = 'd' UNION SELECT e.parent_id, l.depth + 1 FROM lineage l JOIN edges e ON e.child_id = l.id) SELECT id, depth FROM lineage")
+	var depths []string
+	for _, row := range rows {
+		depths = append(depths, fmt.Sprintf("%s%d", row["id"].StringValue, row["depth"].NumberValue))
+	}
+	sort.Strings(depths)
+	if got := strings.Join(depths, ","); got != "a2,a3,b2,c1,x1" {
+		t.Fatalf("lineage of d with depth: %s, want a2,a3,b2,c1,x1", got)
+	}
+
 	// A later CTE reads an earlier one.
 	rows = query("WITH RECURSIVE lineage(id) AS (SELECT parent_id FROM edges WHERE child_id = 'd' UNION SELECT e.parent_id FROM edges e JOIN lineage l ON e.child_id = l.id), sources AS (SELECT a.id FROM lineage l JOIN artifacts a ON a.id = l.id WHERE a.kind = 'source') SELECT * FROM sources")
 	if got := strings.Join(column(rows, "id"), ","); got != "a" {
@@ -81,10 +94,9 @@ func TestRecursiveCTEWalksAGraph(t *testing.T) {
 	}
 
 	for sql, want := range map[string]string{
-		"WITH RECURSIVE loop AS (SELECT parent_id FROM edges WHERE child_id = 'y' UNION ALL SELECT e.parent_id FROM edges e JOIN loop l ON e.child_id = l.parent_id) SELECT * FROM loop":                      "did not finish",
-		"WITH RECURSIVE lineage(id, depth) AS (SELECT parent_id, 1 FROM edges WHERE child_id = 'd' UNION SELECT e.parent_id, l.depth FROM edges e JOIN lineage l ON e.child_id = l.id) SELECT * FROM lineage": "only column references",
-		"WITH RECURSIVE lineage(id, kind) AS (SELECT parent_id FROM edges WHERE child_id = 'd' UNION SELECT e.parent_id FROM edges e JOIN lineage l ON e.child_id = l.id) SELECT * FROM lineage":              "column list names 2 columns",
-		"WITH RECURSIVE lineage(id) AS (SELECT parent_id FROM edges WHERE child_id = 'd' UNION SELECT e.parent_id, e.child_id FROM edges e JOIN lineage l ON e.child_id = l.id) SELECT * FROM lineage":        "recursive term returns 2 columns",
+		"WITH RECURSIVE loop AS (SELECT parent_id FROM edges WHERE child_id = 'y' UNION ALL SELECT e.parent_id FROM edges e JOIN loop l ON e.child_id = l.parent_id) SELECT * FROM loop":               "did not finish",
+		"WITH RECURSIVE lineage(id, kind) AS (SELECT parent_id FROM edges WHERE child_id = 'd' UNION SELECT e.parent_id FROM edges e JOIN lineage l ON e.child_id = l.id) SELECT * FROM lineage":       "column list names 2 columns",
+		"WITH RECURSIVE lineage(id) AS (SELECT parent_id FROM edges WHERE child_id = 'd' UNION SELECT e.parent_id, e.child_id FROM edges e JOIN lineage l ON e.child_id = l.id) SELECT * FROM lineage": "recursive term returns 2 columns",
 		"WITH missing AS (SELECT id FROM nowhere) SELECT * FROM missing": "table not found",
 	} {
 		if _, err := n.engine.Query(ctx, sql, []string{"app"}); err == nil || !strings.Contains(err.Error(), want) {

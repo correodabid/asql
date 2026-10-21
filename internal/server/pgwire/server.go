@@ -1785,6 +1785,10 @@ func deriveColumns(statement ast.Statement, rows []map[string]ast.Literal) []str
 				if canonical == "" || canonical == "*" || isQualifiedStarProjection(canonical) {
 					continue
 				}
+				// "expr AS name" is named, and keyed in the row, by its alias.
+				if _, alias := splitDescribedColumnAlias(canonical); strings.TrimSpace(alias) != "" {
+					canonical = strings.TrimSpace(alias)
+				}
 				columns = append(columns, canonical)
 			}
 			if len(columns) > 0 {

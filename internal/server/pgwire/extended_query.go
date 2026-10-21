@@ -1558,6 +1558,43 @@ func describedAggregateOID(column string, sources map[string]describedSource, ba
 	return resolveDescribedColumnOID(m[2], sources, baseKey)
 }
 
+// describedExpressionOID types a literal or an arithmetic expression of the
+// select list as the engine computes it: a quoted literal is text, a number
+// int8 or float8, and arithmetic float8 when an operand is, int8 otherwise.
+func describedExpressionOID(expr string, sources map[string]describedSource, baseKey string) (uint32, bool) {
+	expr = strings.TrimSpace(expr)
+	if len(expr) >= 2 && expr[0] == '\'' && expr[len(expr)-1] == '\'' {
+		return 25, true
+	}
+	operands := strings.FieldsFunc(expr, func(r rune) bool { return r == '+' || r == '-' || r == '*' || r == '/' || r == '(' || r == ')' })
+	if len(operands) == 0 {
+		return 0, false
+	}
+	oid := uint32(20)
+	for _, operand := range operands {
+		operand = strings.TrimSpace(operand)
+		if operand == "" {
+			continue
+		}
+		if _, err := strconv.ParseInt(operand, 10, 64); err == nil {
+			continue
+		}
+		if _, err := strconv.ParseFloat(operand, 64); err == nil {
+			oid = 701
+			continue
+		}
+		switch resolved, ok := resolveDescribedColumnOID(operand, sources, baseKey); {
+		case !ok:
+			return 0, false
+		case resolved == 700 || resolved == 701:
+			oid = 701
+		case resolved != 20 && resolved != 21 && resolved != 23:
+			return 0, false
+		}
+	}
+	return oid, true
+}
+
 // selectsStar reports whether a select list has * or a qualified star.
 func selectsStar(sel ast.SelectStatement) bool {
 	for _, column := range sel.Columns {
@@ -1646,6 +1683,8 @@ func (server *Server) describeSelectColumns(sel ast.SelectStatement, importedTab
 			oid = aggregateOID
 		} else if resolvedOID, ok := resolveDescribedColumnOID(column, sources, baseKey); ok {
 			oid = resolvedOID
+		} else if exprOID, ok := describedExpressionOID(column, sources, baseKey); ok {
+			oid = exprOID
 		}
 		result = append(result, describedSelectColumn{Name: name, OID: oid})
 	}
