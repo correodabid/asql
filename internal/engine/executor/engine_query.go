@@ -1212,6 +1212,14 @@ func (engine *Engine) executeSetOp(ctx context.Context, state *readableState, pl
 		return nil, fmt.Errorf("execute right side of %s: %w", plan.SetOp, err)
 	}
 
+	// Sides line up by position, not by name, and the result takes the
+	// left side's names: "SELECT id ... UNION SELECT parent_id ..." used to
+	// keep the rows of each side apart.
+	rightRows, err = alignSetOpRows(*plan.LeftPlan, leftRows, *plan.RightPlan, rightRows)
+	if err != nil {
+		return nil, err
+	}
+
 	switch plan.SetOp {
 	case ast.SetOpUnion:
 		return setUnion(leftRows, rightRows, true), nil
@@ -1362,4 +1370,67 @@ func selectReadsColumn(state *readableState, plan planner.Plan, base *tableState
 		}
 	}
 	return false
+}
+
+// setOpColumns lists the keys of a set operation side's rows in select-list
+// order; for SELECT *, the sorted keys of its first row.
+func setOpColumns(plan planner.Plan, rows []map[string]ast.Literal) []string {
+	if len(plan.Columns) == 1 && strings.TrimSpace(plan.Columns[0]) == "*" {
+		if len(rows) == 0 {
+			return nil
+		}
+		keys := make([]string, 0, len(rows[0]))
+		for key := range rows[0] {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		return keys
+	}
+	keys := make([]string, len(plan.Columns))
+	for i, column := range plan.Columns {
+		_, alias := stripColumnAlias(strings.TrimSpace(column))
+		keys[i] = strings.TrimSpace(alias)
+	}
+	return keys
+}
+
+// alignSetOpRows renames the right side's rows to the left side's columns,
+// by position.
+func alignSetOpRows(leftPlan planner.Plan, leftRows []map[string]ast.Literal, rightPlan planner.Plan, rightRows []map[string]ast.Literal) ([]map[string]ast.Literal, error) {
+	leftCols := setOpColumns(leftPlan, leftRows)
+	rightCols := setOpColumns(rightPlan, rightRows)
+	if leftCols == nil || rightCols == nil {
+		return rightRows, nil
+	}
+	if len(leftCols) != len(rightCols) {
+		return nil, sqlerr.New("42601", fmt.Sprintf("each side of %s must have the same number of columns (%d and %d)", leftPlan.SetOp, len(leftCols), len(rightCols)))
+	}
+	same := true
+	for i := range leftCols {
+		if leftCols[i] != rightCols[i] {
+			same = false
+			break
+		}
+	}
+	if same {
+		return rightRows, nil
+	}
+	aligned := make([]map[string]ast.Literal, len(rightRows))
+	for r, row := range rightRows {
+		out := make(map[string]ast.Literal, len(leftCols))
+		for i, key := range rightCols {
+			value, ok := row[key]
+			if !ok {
+				if dot := strings.LastIndexByte(key, '.'); dot >= 0 {
+					value, ok = row[key[dot+1:]]
+				}
+			}
+			if !ok {
+				value = ast.Literal{Kind: ast.LiteralNull}
+			}
+			out[leftCols[i]] = value
+		}
+		aligned[r] = out
+	}
+	return aligned, nil
 }

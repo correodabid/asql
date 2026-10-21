@@ -37,6 +37,33 @@ SELECT current_lsn();
 SELECT id, email FROM app.users AS OF LSN 4;
 ```
 
+### `AS OF` applies to the whole query
+
+`AS OF` sets the point in time for the entire query, not for one table. Every
+table the query reads, in a join, a CTE, a subquery or either side of a
+`UNION`, is read at that LSN or timestamp:
+
+```sql
+-- Both tables are read at LSN 4.
+SELECT u.id, o.total_cents
+FROM app.users u AS OF LSN 4
+JOIN app.orders o ON o.user_id = u.id;
+
+-- The recursive CTE also walks the state at LSN 4: ancestors that were
+-- linked after LSN 4 do not appear.
+WITH RECURSIVE anc(id) AS (
+  SELECT parent_id FROM lab.artifact_parents WHERE child_id = 'dd'
+  UNION
+  SELECT p.parent_id FROM lab.artifact_parents p JOIN anc ON p.child_id = anc.id
+)
+SELECT a.id FROM lab.artifacts a AS OF LSN 4 JOIN anc ON a.id = anc.id;
+```
+
+Write `AS OF` once, in the outermost `FROM`; a query has at most one. An
+`AS OF` inside a CTE, a subquery or one side of `UNION`, `INTERSECT` or
+`EXCEPT` is rejected with SQLSTATE `0A000` instead of silently answering from
+the present. To compare two points in time, run one query per point.
+
 There are lower-level admin and recovery commands elsewhere in the product, but
 the normal developer path in getting-started should be pgwire queries and
 Studio.

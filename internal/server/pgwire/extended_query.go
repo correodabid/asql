@@ -682,6 +682,11 @@ func (server *Server) handleBind(backend *pgproto3.Backend, state *connState, ms
 			isSelect = true
 			columns = deriveColumns(parsedStmt, nil) // get column names from AST (no rows yet)
 		}
+		// A set operation answers with its left side's columns.
+		if setOp, ok := parsedStmt.(ast.SetOperationStatement); ok {
+			isSelect = true
+			columns = deriveColumns(setOp.Left, nil)
+		}
 	}
 	// If parse failed for reasons other than the comment (e.g. WITH clause),
 	// fall back to a simple prefix check for SELECT / WITH.
@@ -1482,6 +1487,9 @@ func (server *Server) describeFields(sql string, activeDomains []string, princip
 	stmt, err := parser.Parse(normalized)
 	if err != nil {
 		return nil
+	}
+	if setOp, isSetOp := stmt.(ast.SetOperationStatement); isSetOp {
+		stmt = setOp.Left
 	}
 	sel, ok := stmt.(ast.SelectStatement)
 	if !ok {

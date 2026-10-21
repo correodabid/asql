@@ -1598,7 +1598,28 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 	}
 
 	statement, parseErr := parser.Parse(stripped)
+	// A query that does not parse is a syntax error, not a write that needs
+	// a transaction: it used to fail with 25P01 outside one.
+	if parseErr != nil && isReadQuery(stripped) {
+		return executor.Result{}, nil, parseErr
+	}
 	if parseErr == nil {
+		// UNION, INTERSECT and EXCEPT are reads too; they used to go to the
+		// write path and fail outside a transaction.
+		if setOp, isSetOp := statement.(ast.SetOperationStatement); isSetOp {
+			if asOfKind != "" {
+				return executor.Result{}, nil, sqlerr.New("0A000", "AS OF does not apply to UNION, INTERSECT or EXCEPT")
+			}
+			domains := session.ActiveDomains()
+			if _, err := server.engine.AuthorizeSQL(session.Principal(), stripped, domains); err != nil {
+				return executor.Result{}, nil, err
+			}
+			result, err := server.engine.TimeTravelQueryAsOfLSN(ctx, stripped, domains, maxLSN)
+			if err != nil {
+				return executor.Result{}, nil, err
+			}
+			return result, deriveColumns(setOp.Left, result.Rows), nil
+		}
 		if selectStatement, isSelect := statement.(ast.SelectStatement); isSelect {
 			domains := session.ActiveDomains()
 			if _, err := server.engine.AuthorizeSQL(session.Principal(), stripped, domains); err != nil {
@@ -1967,4 +1988,18 @@ func normalizeListenAddr(addr string) string {
 		return "127.0.0.1:" + port
 	}
 	return addr
+}
+
+// isReadQuery reports whether sql is a SELECT or a WITH query by its first
+// word.
+func isReadQuery(sql string) bool {
+	fields := strings.Fields(sql)
+	if len(fields) == 0 {
+		return false
+	}
+	switch strings.ToUpper(fields[0]) {
+	case "SELECT", "WITH":
+		return true
+	}
+	return false
 }
