@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"math"
@@ -16,6 +17,7 @@ import (
 	"github.com/correodabid/asql/internal/engine/executor"
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 	"github.com/correodabid/asql/internal/platform/datadir"
 	"github.com/correodabid/asql/internal/storage/ledgerdigest"
 	"github.com/correodabid/asql/internal/storage/logtree"
@@ -243,4 +245,114 @@ func (server *Server) adminLedgerDigest(sql string) (interceptResult, bool) {
 		"sig":       litS(base64.StdEncoding.EncodeToString(d.Sig)),
 	}
 	return interceptResult{result: executor.Result{Status: "OK", Rows: []map[string]ast.Literal{row}}, columns: ledgerDigestColumns}, true
+}
+
+// Consistency proofs (ADR 0008): SELECT * FROM asql_admin.prove_consistency
+// WHERE from_lsn = A [AND to_lsn = B] proves that the log signed at B
+// extends the log signed at A. Proofs exist between signed checkpoints only.
+var (
+	errConsistency    = sqlerr.New("22023", "prove_consistency")
+	errConsistencyOff = sqlerr.New("55000", "prove_consistency: consistency proofs need ledger mode signed")
+
+	reConsistencyFromLSN = regexp.MustCompile(`(?i)\bfrom_lsn\s*=\s*(\d+)`)
+	reConsistencyToLSN   = regexp.MustCompile(`(?i)\bto_lsn\s*=\s*(\d+)`)
+)
+
+// proveConsistencyColumns are named as the JSON fields of
+// ledgerdigest.ConsistencyProof; each holds that field's JSON.
+var proveConsistencyColumns = []string{"from_digest", "to_digest", "proof"}
+
+func (server *Server) adminProveConsistency(sql string) (interceptResult, bool) {
+	row, err := server.proveConsistency(sql)
+	if err != nil {
+		return interceptResult{err: err}, true
+	}
+	return interceptResult{result: executor.Result{Status: "OK", Rows: []map[string]ast.Literal{row}}, columns: proveConsistencyColumns}, true
+}
+
+func (server *Server) proveConsistency(sql string) (map[string]ast.Literal, error) {
+	if server.ledger == nil {
+		return nil, errConsistencyOff
+	}
+	m := reConsistencyFromLSN.FindStringSubmatch(sql)
+	if m == nil {
+		return nil, fmt.Errorf("%w: WHERE from_lsn = <LSN of a signed digest> is required", errConsistency)
+	}
+	fromLSN, err := strconv.ParseUint(m[1], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("%w: from_lsn: %v", errConsistency, err)
+	}
+	var toLSN uint64
+	if m := reConsistencyToLSN.FindStringSubmatch(sql); m != nil {
+		if toLSN, err = strconv.ParseUint(m[1], 10, 64); err != nil {
+			return nil, fmt.Errorf("%w: to_lsn: %v", errConsistency, err)
+		}
+	}
+	p, err := server.ledger.consistency(fromLSN, toLSN)
+	if err != nil {
+		return nil, err
+	}
+	from, err := json.Marshal(p.From)
+	if err != nil {
+		return nil, err
+	}
+	to, err := json.Marshal(p.To)
+	if err != nil {
+		return nil, err
+	}
+	proof, err := json.Marshal(ledgerdigest.EncodeHashes(p.Proof))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]ast.Literal{"from_digest": litS(string(from)), "to_digest": litS(string(to)), "proof": litS(string(proof))}, nil
+}
+
+// consistency proves that the digest signed at toLSN (0: the latest)
+// extends the one signed at fromLSN.
+func (ls *ledgerSigning) consistency(fromLSN, toLSN uint64) (ledgerdigest.ConsistencyProof, error) {
+	from, err := ls.digestAt(fromLSN)
+	if err != nil {
+		return ledgerdigest.ConsistencyProof{}, err
+	}
+	var to ledgerdigest.Digest
+	if toLSN == 0 {
+		latest, ok := ls.log.Latest()
+		if !ok {
+			return ledgerdigest.ConsistencyProof{}, fmt.Errorf("%w: no digest signed yet", errConsistency)
+		}
+		to = latest
+	} else if to, err = ls.digestAt(toLSN); err != nil {
+		return ledgerdigest.ConsistencyProof{}, err
+	}
+	if from.LSN > to.LSN {
+		return ledgerdigest.ConsistencyProof{}, fmt.Errorf("%w: from_lsn %d is after to_lsn %d", errConsistency, from.LSN, to.LSN)
+	}
+	for _, d := range []ledgerdigest.Digest{from, to} {
+		if !d.HasTree() {
+			return ledgerdigest.ConsistencyProof{}, fmt.Errorf("%w: the digest at LSN %d is version 1 and signs no log tree root", errConsistency, d.LSN)
+		}
+	}
+	proof, err := ls.tree.ConsistencyProof(int64(from.LSN), int64(to.LSN))
+	if err != nil {
+		return ledgerdigest.ConsistencyProof{}, err
+	}
+	return ledgerdigest.ConsistencyProof{From: from, To: to, Proof: proof}, nil
+}
+
+// digestAt returns the digest signed at exactly lsn.
+func (ls *ledgerSigning) digestAt(lsn uint64) (ledgerdigest.Digest, error) {
+	if lsn == 0 {
+		return ledgerdigest.Digest{}, fmt.Errorf("%w: LSN must be positive", errConsistency)
+	}
+	d, ok, err := ls.log.Covering(lsn)
+	if err != nil {
+		return ledgerdigest.Digest{}, err
+	}
+	if !ok {
+		return ledgerdigest.Digest{}, fmt.Errorf("%w: no digest was signed at LSN %d or after it", errConsistency, lsn)
+	}
+	if d.LSN != lsn {
+		return ledgerdigest.Digest{}, fmt.Errorf("%w: no digest was signed at LSN %d; proofs exist between signed digests only, and the next one is at LSN %d", errConsistency, lsn, d.LSN)
+	}
+	return d, nil
 }
