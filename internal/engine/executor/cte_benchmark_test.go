@@ -97,3 +97,28 @@ func BenchmarkInSubquery(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkJoinBigTableFirst: the CTE's few rows joined to the 100,000
+// artifacts, written with the big table first, which used to read all of it.
+func BenchmarkJoinBigTableFirst(b *testing.B) {
+	engine, closeAll := seedLineageBenchmark(b)
+	defer closeAll()
+	ctx := context.Background()
+	const lineage = "WITH RECURSIVE lineage(id) AS (SELECT parent_id FROM artifact_parents WHERE child_id = 83340 UNION SELECT p.parent_id FROM lineage l JOIN artifact_parents p ON p.child_id = l.id) "
+	for _, q := range []struct{ name, sql string }{
+		{"big-first", lineage + "SELECT a.id, a.kind FROM artifacts a JOIN lineage l ON a.id = l.id"},
+		{"small-first", lineage + "SELECT a.id, a.kind FROM lineage l JOIN artifacts a ON a.id = l.id"},
+	} {
+		b.Run(q.name, func(b *testing.B) {
+			for i := 0; i < b.N; i++ {
+				res, err := engine.Query(ctx, q.sql, []string{"bench"})
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(res.Rows) == 0 {
+					b.Fatal("no rows")
+				}
+			}
+		})
+	}
+}

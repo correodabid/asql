@@ -583,7 +583,13 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 	// Materialise the base table with prefixed keys.
 	basePrefix := displayPrefix(plan.TableName, plan.TableAlias)
 	baseQualifiedNames := qualifiedColumnNames(basePrefix, baseTable.columns)
-	baseRows := rowsForPredicate(baseTable, baseJoinPredicate(plan, aliasMap, baseTable), state, engine)
+	basePredicate := baseJoinPredicate(plan, aliasMap, baseTable)
+	var baseRows []map[string]ast.Literal
+	if rowIDs, ok := semiJoinBaseRowIDs(state, baseDomainState, plan, aliasMap, baseTable, basePredicate); ok {
+		baseRows = rowsFromRowIDs(baseTable, rowIDs)
+	} else {
+		baseRows = rowsForPredicate(baseTable, basePredicate, state, engine)
+	}
 	rootPredicate := rootJoinPredicate(plan, aliasMap, baseTable)
 	currentRows := make([]map[string]ast.Literal, 0, len(baseRows))
 	for _, row := range baseRows {
@@ -1156,4 +1162,81 @@ func (engine *Engine) executeJoinPipeline(ctx context.Context, state *readableSt
 	}
 
 	return result, lastStrategy, nil
+}
+
+// semiJoinEnabled turns semiJoinBaseRowIDs off in tests that compare it with
+// the plain pipeline.
+var semiJoinEnabled = true
+
+// semiJoinBaseMinRatio is how many times larger than the table it first
+// joins the base table must be for semiJoinBaseRowIDs to apply.
+const semiJoinBaseMinRatio = 8
+
+// semiJoinBaseRowIDs narrows the base table of "FROM big b JOIN small s ON
+// b.x = s.y" to the rows whose x is one of the y values, read through the
+// index on x, instead of reading every row of big: an inner join drops the
+// other rows anyway. The row IDs are sorted, so the rows come in the order a
+// full scan gives, and the join that follows produces the same rows in the
+// same order. It applies when the first join is inner, the joined table is
+// much smaller, x has an index and nothing else filters the base table.
+func semiJoinBaseRowIDs(state *readableState, baseDomainState *domainState, plan planner.Plan, aliasMap map[string]string, baseTable *tableState, basePredicate *ast.Predicate) ([]int, bool) {
+	if !semiJoinEnabled || basePredicate != nil || len(plan.Joins) == 0 {
+		return nil, false
+	}
+	j := plan.Joins[0]
+	if j.JoinType != "" && j.JoinType != ast.JoinInner {
+		return nil, false
+	}
+	joinDS := baseDomainState
+	if j.DomainName != "" && j.DomainName != plan.DomainName {
+		ds, ok := state.domains[j.DomainName]
+		if !ok {
+			return nil, false
+		}
+		joinDS = ds
+	}
+	rightTable := joinDS.tables[j.TableName]
+	if rightTable == nil || len(rightTable.rows)*semiJoinBaseMinRatio > len(baseTable.rows) {
+		return nil, false
+	}
+
+	basePrefix := displayPrefix(plan.TableName, plan.TableAlias)
+	rightPrefix := displayPrefix(j.TableName, j.Alias)
+	leftPrefixRef, leftCol, leftOK := splitQualifiedColumnRef(resolveJoinColumnRef(j.LeftColumn, aliasMap))
+	rightPrefixRef, rightCol, rightOK := splitQualifiedColumnRef(resolveJoinColumnRef(j.RightColumn, aliasMap))
+	if !leftOK || !rightOK {
+		return nil, false
+	}
+	var baseCol, joinCol string
+	switch {
+	case leftPrefixRef == basePrefix && rightPrefixRef == rightPrefix:
+		baseCol, joinCol = leftCol, rightCol
+	case rightPrefixRef == basePrefix && leftPrefixRef == rightPrefix:
+		baseCol, joinCol = rightCol, leftCol
+	default:
+		return nil, false
+	}
+	index, ok := indexForColumn(baseTable, baseCol)
+	if !ok {
+		return nil, false
+	}
+	position, ok := rightTable.columnIndex[joinCol]
+	if !ok {
+		return nil, false
+	}
+
+	seen := make(map[string]struct{}, len(rightTable.rows))
+	values := make([]ast.Literal, 0, len(rightTable.rows))
+	for _, row := range rightTable.rows {
+		if position >= len(row) || row[position].Kind == ast.LiteralNull {
+			continue
+		}
+		key := literalKey(row[position])
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		values = append(values, row[position])
+	}
+	return rowIDsForInList(index, values), true
 }
