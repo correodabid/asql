@@ -240,6 +240,8 @@ func (seg *segment) applyLedgerHeader(h segmentHeader) {
 // Implements ports.LogStore, ports.BatchAppender, ports.NoSyncBatchAppender,
 // ports.Syncer, and ports.Truncator.
 type SegmentedLogStore struct {
+	// lock keeps a second store, in this process or another, off the WAL.
+	lock                *dirLock
 	mu                  sync.Mutex
 	syncMu              sync.Mutex // serializes fsync and segment-removal ops
 	basePath            string     // e.g. "/data/asql.wal"
@@ -299,27 +301,43 @@ func NewSegmentedLogStore(basePath string, syncStrategy SyncStrategy, opts ...Se
 		opt(store)
 	}
 
+	// One writer per WAL: lock it before touching anything.
+	if dir := filepath.Dir(basePath); dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("create wal directory: %w", err)
+		}
+	}
+	lock, err := acquireDirLock(basePath)
+	if err != nil {
+		return nil, err
+	}
+	store.lock = lock
+	fail := func(err error) (*SegmentedLogStore, error) {
+		store.closeAllSegments()
+		_ = lock.release()
+		return nil, err
+	}
+
 	// Migrate legacy monolithic WAL if it exists.
 	if err := store.migrateLegacy(); err != nil {
-		return nil, fmt.Errorf("migrate legacy wal: %w", err)
+		return fail(fmt.Errorf("migrate legacy wal: %w", err))
 	}
 
 	store.ledger = newLedgerState(store.ledgerMode)
 
 	// Discover existing segments.
 	if err := store.discoverSegments(); err != nil {
-		return nil, fmt.Errorf("discover wal segments: %w", err)
+		return fail(fmt.Errorf("discover wal segments: %w", err))
 	}
 
 	if err := store.restoreLedger(); err != nil {
-		store.closeAllSegments()
-		return nil, err
+		return fail(err)
 	}
 
 	// If no segments exist, create the first one.
 	if len(store.segments) == 0 {
 		if err := store.createSegment(); err != nil {
-			return nil, fmt.Errorf("create initial segment: %w", err)
+			return fail(fmt.Errorf("create initial segment: %w", err))
 		}
 	}
 
@@ -934,7 +952,11 @@ func (store *SegmentedLogStore) Close() error {
 		return nil
 	}
 	store.closed = true
-	return store.closeAllSegments()
+	err := store.closeAllSegments()
+	if lockErr := store.lock.release(); err == nil {
+		err = lockErr
+	}
+	return err
 }
 
 func (store *SegmentedLogStore) closeAllSegments() error {

@@ -47,6 +47,11 @@ pool, err := pgxpool.New(ctx, srv.DSN())
 By default the server listens on a random port on `127.0.0.1`. Set `Address` to choose
 one, and `AuthToken` to require a password.
 
+A data directory has one server at a time. While one, embedded or `asqld`, in this
+process or another, has it open, `Start` fails with `embed.ErrDataDirInUse` naming the
+process that holds it. The lock is a file lock the operating system releases when that
+process exits, so a crash leaves nothing to clean up.
+
 In tests, `servertest.StartForTesting(t, servertest.Options{})` gives each test its own
 server and empty data directory, both removed when the test ends:
 
