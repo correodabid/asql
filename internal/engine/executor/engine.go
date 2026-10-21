@@ -641,7 +641,11 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 			}
 		}
 
-		if err := checkAppendOnly(engine.committedTable(plan.DomainName, plan.TableName), plan); err != nil {
+		committed := engine.committedTable(plan.DomainName, plan.TableName)
+		if err := checkAppendOnly(committed, plan); err != nil {
+			return Result{}, err
+		}
+		if err := checkVerifiable(committed, plan); err != nil {
 			return Result{}, err
 		}
 		session.activeTx.statements = append(session.activeTx.statements, trimmed)

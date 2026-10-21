@@ -977,6 +977,9 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		if (appendOnly && table.appendOnly) || (!appendOnly && table.verifiable) {
 			return nil
 		}
+		if err := checkVerifiable(table, plan); err != nil {
+			return err
+		}
 		// COW: the flag lives on the table, which other states share.
 		tableKey := plan.DomainName + "." + plan.TableName
 		if clonedTables == nil {
@@ -999,6 +1002,9 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 				return nil
 			}
 			return errTableExists
+		}
+		if err := checkVerifiable(nil, plan); err != nil {
+			return err
 		}
 
 		engine.catalog.RegisterTable(plan.DomainName, plan.TableName)
