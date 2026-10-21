@@ -22,6 +22,7 @@ const (
 	OperationAlterTableDropColumn    Operation = "alter_table_drop_column"
 	OperationAlterTableRenameColumn  Operation = "alter_table_rename_column"
 	OperationAlterTableSetAppendOnly Operation = "alter_table_set_append_only"
+	OperationAlterTableSetVerifiable Operation = "alter_table_set_verifiable"
 	OperationCreateIndex             Operation = "create_index"
 	OperationInsert                  Operation = "insert"
 	OperationUpdate                  Operation = "update"
@@ -66,6 +67,7 @@ type Plan struct {
 	ForHistory           bool                      `json:"for_history,omitempty"`
 	IfNotExists          bool                      `json:"if_not_exists,omitempty"`
 	AppendOnly           bool                      `json:"append_only,omitempty"` // CREATE TABLE ... APPEND ONLY
+	Verifiable           bool                      `json:"verifiable,omitempty"`  // CREATE TABLE ... VERIFIABLE
 	ReturningColumns     []string                  `json:"returning_columns,omitempty"`
 	VersionedForeignKeys []ast.VersionedForeignKey `json:"versioned_foreign_keys,omitempty"`
 	EntityName           string                    `json:"entity_name,omitempty"`
@@ -117,6 +119,7 @@ func BuildForDomains(statement ast.Statement, txDomains []string) (Plan, error) 
 			VersionedForeignKeys: typed.VersionedForeignKeys,
 			IfNotExists:          typed.IfNotExists,
 			AppendOnly:           typed.AppendOnly,
+			Verifiable:           typed.Verifiable,
 		}, nil
 	case ast.AlterTableAddColumnStatement:
 		domain, table, err := resolveTableDomain(typed.TableName, allowedDomains)
@@ -148,6 +151,16 @@ func BuildForDomains(statement ast.Statement, txDomains []string) (Plan, error) 
 		}
 		return Plan{
 			Operation:  OperationAlterTableSetAppendOnly,
+			DomainName: domain,
+			TableName:  table,
+		}, nil
+	case ast.AlterTableSetVerifiableStatement:
+		domain, table, err := resolveTableDomain(typed.TableName, allowedDomains)
+		if err != nil {
+			return Plan{}, err
+		}
+		return Plan{
+			Operation:  OperationAlterTableSetVerifiable,
 			DomainName: domain,
 			TableName:  table,
 		}, nil

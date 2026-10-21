@@ -136,6 +136,9 @@ type CreateTableStatement struct {
 	// AppendOnly makes the table's rows immutable: see
 	// AlterTableSetAppendOnlyStatement.
 	AppendOnly bool `json:"append_only,omitempty"`
+	// Verifiable enters the table's rows in the ledger's state tree: see
+	// AlterTableSetVerifiableStatement.
+	Verifiable bool `json:"verifiable,omitempty"`
 }
 
 func (CreateTableStatement) statementNode() {}
@@ -179,6 +182,21 @@ func (AlterTableSetAppendOnlyStatement) statementNode() {}
 
 func (AlterTableSetAppendOnlyStatement) Kind() string {
 	return "alter_table_set_append_only"
+}
+
+// AlterTableSetVerifiableStatement represents ALTER TABLE ... SET
+// VERIFIABLE. A verifiable table's rows enter the ledger's state tree
+// (ADR 0008), so a node can prove a row's value at a signed checkpoint
+// without revealing other rows. It does not restrict what the table accepts,
+// and it cannot be undone.
+type AlterTableSetVerifiableStatement struct {
+	TableName string `json:"table_name"`
+}
+
+func (AlterTableSetVerifiableStatement) statementNode() {}
+
+func (AlterTableSetVerifiableStatement) Kind() string {
+	return "alter_table_set_verifiable"
 }
 
 // AlterTableRenameColumnStatement represents ALTER TABLE ... RENAME COLUMN old TO new
