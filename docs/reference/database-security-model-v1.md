@@ -146,6 +146,8 @@ CREATE TABLE evidence (id TEXT PRIMARY KEY, sha256 TEXT) APPEND ONLY VERIFIABLE;
 ALTER TABLE results SET VERIFIABLE;
 ```
 
+- It needs a primary key, since rows are proven by primary key: a table without one
+  fails with `42P16`.
 - It restricts nothing: a verifiable table accepts the same statements as before.
   Combine it with `APPEND ONLY` for rows that must also never change.
 - It cannot be undone; setting it again is a no-op. Like other `ALTER TABLE`
