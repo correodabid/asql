@@ -150,6 +150,50 @@ func TestVersion2DigestSignsTheTreeRoot(t *testing.T) {
 	}
 }
 
+func TestVersion3DigestSignsTheStateRoot(t *testing.T) {
+	signer := testSigner(t)
+	keys := Keyring{}
+	keys.Add(signer.PublicKey())
+	d := testDigest(t, signer)
+	d.Version, d.TreeRoot, d.StateRoot = Version3, [32]byte{9}, [32]byte{4, 5}
+	d, err := Sign(signer, d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.Verify(keys); err != nil || !d.HasState() || !d.HasTree() {
+		t.Fatalf("verify: %v, HasState %v", err, d.HasState())
+	}
+	v2 := d
+	v2.Version = Version2
+	v2Bytes, _ := v2.CanonicalBytes()
+	v3Bytes, _ := d.CanonicalBytes()
+	if len(v3Bytes) != len(v2Bytes)+32 {
+		t.Fatalf("version 3 encodes %d bytes, version 2 %d", len(v3Bytes), len(v2Bytes))
+	}
+	data, _ := json.Marshal(d)
+	var back Digest
+	if err := json.Unmarshal(data, &back); err != nil || back.Verify(keys) != nil || back.StateRoot != d.StateRoot {
+		t.Fatalf("JSON round trip: %v\n%s", err, data)
+	}
+	for name, mutate := range map[string]func(*Digest){
+		"state root":             func(d *Digest) { d.StateRoot[0] ^= 1 },
+		"downgrade to version 2": func(d *Digest) { d.Version = Version2 },
+	} {
+		forged := d
+		mutate(&forged)
+		if err := forged.Verify(keys); !errors.Is(err, ErrBadSignature) {
+			t.Errorf("%s: err=%v, want ErrBadSignature", name, err)
+		}
+	}
+	if data, _ := json.Marshal(testDigest(t, signer)); strings.Contains(string(data), "state_root") {
+		t.Fatalf("a version 1 digest carries a state root: %s", data)
+	}
+	d.Version = 4
+	if err := d.Verify(keys); err == nil || !strings.Contains(err.Error(), "unsupported version") {
+		t.Fatalf("version 4: %v", err)
+	}
+}
+
 func TestDigestVerifyNeedsATrustedKey(t *testing.T) {
 	signer, other := testSigner(t), testSigner(t)
 	d := testDigest(t, signer)

@@ -39,6 +39,13 @@ type Source struct {
 	// node has no log tree, and digests stay version 1; an error defers
 	// the digest to the next checkpoint.
 	TreeRoot func(ctx context.Context, lsn uint64) (root [32]byte, ok bool, err error)
+	// State, when set, returns the state tree root (ADR 0008) of the
+	// engine's committed head together with that head's LSN, which the
+	// checkpointer then signs at instead of CommittedLSN: a root and its
+	// LSN must come from one state. With a log tree root too, the digest
+	// is version 3. ok false means the node has no state tree; an error
+	// defers the digest.
+	State func(ctx context.Context) (lsn uint64, root [32]byte, ok bool, err error)
 }
 
 // CheckpointerConfig configures a Checkpointer.
@@ -130,6 +137,17 @@ func (c *Checkpointer) Checkpoint(ctx context.Context) (Digest, bool, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	lsn := c.cfg.Source.CommittedLSN()
+	var stateRoot [32]byte
+	hasState := false
+	if c.cfg.Source.State != nil {
+		stateLSN, root, ok, err := c.cfg.Source.State(ctx)
+		if err != nil {
+			return Digest{}, false, fmt.Errorf("state tree root: %w", err)
+		}
+		if ok {
+			lsn, stateRoot, hasState = stateLSN, root, true
+		}
+	}
 	if lsn == 0 || lsn <= c.lastLSN {
 		return Digest{}, false, nil
 	}
@@ -156,11 +174,18 @@ func (c *Checkpointer) Checkpoint(ctx context.Context) (Digest, bool, error) {
 		}
 		if ok {
 			version, treeRoot = Version2, root
+			if hasState {
+				version = Version3
+			}
 		}
+	}
+	if version != Version3 {
+		stateRoot = [32]byte{}
 	}
 	d, err := Sign(c.cfg.Signer, Digest{
 		Version:   version,
 		TreeRoot:  treeRoot,
+		StateRoot: stateRoot,
 		LSN:       lsn,
 		Chain:     chain,
 		Term:      term,
