@@ -32,7 +32,8 @@ func (engine *Engine) materializeCTEs(ctx context.Context, state *readableState,
 		}
 		newDomains[k] = &domainState{tables: newTables}
 	}
-	newState := &readableState{domains: newDomains}
+	// The query's subquery cache carries over to the state its CTEs extend.
+	newState := &readableState{domains: newDomains, subqueries: state.subqueries}
 
 	for _, cte := range ctes {
 		if err := engine.materializeCTE(ctx, newState, cte, domain); err != nil {
