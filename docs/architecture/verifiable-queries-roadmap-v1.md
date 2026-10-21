@@ -67,7 +67,10 @@ need to demonstrate compliance without opening their process data. Not consumer 
    (leaves are already position-independent for this). Prove "this row existed at state H"
    without revealing the rest, and "today's log extends yesterday's". The audit store's
    row images are the natural leaves, because WAL UPDATE/DELETE records are logical
-   (predicates), not row images.
+   (predicates), not row images. Proposed in
+   [ADR 0008](../adr/0008-inclusion-and-consistency-proofs.md): an RFC 6962 log tree
+   over the ledger leaves and a salted sparse Merkle tree of the rows, both built off
+   the commit path and signed in digest v2.
 4. **Verifiable computation.** Aggregates over private data executed in a TEE (e.g. AWS
    Nitro Enclaves) with attestation, and ZK only for narrow predicates where it pays off.
 

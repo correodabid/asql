@@ -1479,7 +1479,9 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			}
 
 			// Resolve default values for columns not present in the INSERT.
-			resolveDefaults(table, row)
+			// TX_TIMESTAMP was materialized by the commit queue; this only
+			// covers paths that did not go through it.
+			resolveDefaults(table, row, engine.now)
 
 			// Coerce string values to JSON for JSON-typed columns.
 			if err := coerceJSONValues(table, row); err != nil {
