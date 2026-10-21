@@ -3,8 +3,8 @@
 - Status: Accepted. Phase 3 of the [verifiable queries roadmap](../architecture/verifiable-queries-roadmap-v1.md).
 - Date: 2026-10-21
 - Decision drivers:
-  - a third party should be able to check that **one row had a given value at a
-    published state** without seeing any other row, and that **today's published log
+  - a third party should be able to check that **a set of rows, cited by primary key,
+    had given values at a published state** without seeing any other row, and that **today's published log
     extends yesterday's** without seeing the records in between
   - proofs must tie to the signed digests of ADR 0005, so they inherit their anchor
   - no measurable cost on the commit path (ADR 0005 § Performance), and nothing the
@@ -32,7 +32,15 @@
    Showing that a version of row 42 was written at LSN 100 does not show that it was
    still current at H = 500. That needs a commitment to the whole state at H, which
    can also prove that a row did *not* exist.
-5. **Row values are often low-entropy.** `result IN ('WITHIN_SPEC', 'OUT_OF_SPEC')`. A
+5. **What is published is a set of rows.** In the pharma integration, a finding is
+   supported by its lineage: tens of artifacts across six levels (sources,
+   extractions, discrepancies, resolutions, runs) and the edges between them, in two
+   tables. Reports cite rows by primary key (UUID v7), not by WAL position. One proof
+   per row means N proofs and N verifications per citation; one proof for the whole
+   set against one digest is what can go into an exported report. The same store
+   holds other questions and unpublished work, so the proof must reveal nothing
+   about rows outside the set.
+6. **Row values are often low-entropy.** `result IN ('WITHIN_SPEC', 'OUT_OF_SPEC')`. A
    proof that reveals the hash of a neighbouring row lets anyone who can guess its key
    test both values offline. Hiding the other rows needs salted leaves.
 
@@ -68,17 +76,27 @@ the digests, which gain a version 2.
   `ALTER TABLE … SET VERIFIABLE`, as `APPEND ONLY` is declared. Marking an existing
   table enters its live rows at that LSN; its proofs start at the first checkpoint
   after it. Other tables pay nothing.
-- A sparse Merkle tree keyed by `SHA-256(domain || table || primary key)`, holding
-  `leaf = SHA-256(0x00 || salt || canonical row)` for every live row. The canonical row
-  is ADR 0006's typed value encoding, in column order.
+- A sparse Merkle tree of depth 256 keyed by
+  `SHA-256(domain || table || canonical primary key)`, holding
+  `leaf = SHA-256(0x00 || salt || canonical row)` for every live row. The canonical
+  primary key and row are ADR 0006's typed value encoding: the primary key columns in
+  key order (so composite keys work), and the row's columns in column order. A row is
+  found by its primary key, as reports cite it.
 - Updated from the audit store's row images in commit order: INSERT and UPDATE set the
   key, DELETE clears it. The tree is persistent (copy-on-write nodes), so every
   checkpoint root stays provable.
 - **Digest v2** adds `state_root` at the digest's LSN. Roots are kept, and proofs
   served, at **checkpoint LSNs only**: the LSNs digests are signed at. Old checkpoints
   can be pruned with their digests.
-- Proofs: **inclusion** of `(key, row, salt)` under `state_root`, and **non-inclusion**
-  of a key. Only the proven row's salt is revealed.
+- Proofs are **batch proofs**: one proof for a set of keys, in any verifiable tables,
+  under one `state_root`. For each key it shows either the row (inclusion of
+  `(key, row, salt)`) or that no row has that key (non-inclusion). The paths share
+  their upper nodes, so each sibling hash appears once, and siblings that are empty
+  subtrees are marked in a bitmap instead of sent. A single row is a batch of one.
+- What a batch proof reveals: the proven keys, their rows and salts, and hashes of
+  other subtrees, which are salted and say nothing about the rows below them, not even
+  how many there are (the depth is fixed). The digest it is checked against carries
+  its LSN, so it reveals how many WAL records the node had written.
 - **Salt**: `HMAC-SHA-256(state key, key || commit LSN of the row version)`. The salt
   depends only on the key, the WAL and the secret, so replicas sharing the secret build
   the same tree. Leaves are salted from the first release of the state tree: adding
@@ -92,23 +110,27 @@ the digests, which gain a version 2.
 ### 3. Surfaces
 
 Following ADR 0006:
-- SQL: `asql_admin.prove_row WHERE domain = … AND table = … AND pk = … [AND lsn = N]`
-  returns the row, its salt, the proof and the signed digest at that checkpoint;
-  `asql_admin.prove_consistency WHERE from_lsn = … AND to_lsn = …`.
-- CLI: `asqlctl verify-row` and `verify-consistency`, which check proofs against
-  digests and trusted keys only, with no data directory.
+- SQL: `asql_admin.prove_rows WHERE keys = '<JSON list of {domain, table, pk}>'
+  [AND lsn = N]` returns the rows, their salts, one batch proof and the signed digest
+  at that checkpoint; `asql_admin.prove_consistency WHERE from_lsn = … AND to_lsn = …`.
+- CLI: `asqlctl prove-rows`, `verify-rows` and `verify-consistency`, which check
+  proofs against digests and trusted keys only, with no data directory.
 - It needs `ledger=signed`, like ADR 0006.
 
 ## What this proves, and what it does not
 
-- **Proves**: node N signed that its state at LSN H had row R with these values (or
-  no row with that key), and that the log of a later digest extends the log of an
-  earlier one. Nothing else about the state or the log is revealed beyond the proven
-  key's existence and the tree sizes.
+- **Proves**: node N signed that its state at LSN H had these rows with these values,
+  and no row with the other keys asked for, and that the log of a later digest extends
+  the log of an earlier one. Nothing else about the state or the log is revealed beyond
+  the proven keys and the log's size.
 - **Does not prove** that the values are true, nor that the state root was computed
   correctly from the log. A verifier with the data directory can rebuild the trees and
   compare roots, as `verify-result` re-executes a query.
-- **Does not hide** the key that is proven, or the number of records.
+- **Does not prove completeness.** A batch proof shows that the rows it names exist
+  with those values; it does not show that they are all the rows of some kind, for
+  example that an artifact has no parents besides the edges shown. Proving that would
+  need a commitment ordered by the relation, not by hashed key; it is out of scope.
+- **Does not hide** the keys that are proven, or the number of WAL records.
 
 ## Performance
 
@@ -159,6 +181,7 @@ Following ADR 0006:
 3. `VERIFIABLE` tables, and the state key in `ledger-keygen` and `asqld`.
 4. State tree with persistent nodes, built from the audit store, rebuilt from the WAL
    when the audit store is.
-5. `state_root` in digest v2; `asql_admin.prove_row` and `verify-row`.
+5. `state_root` in digest v2; batch proofs, `asql_admin.prove_rows`, `prove-rows` and
+   `verify-rows`.
 6. Benchmarks for the builder and storage, and confirmation that the commit-path
    benchmarks are unchanged.
