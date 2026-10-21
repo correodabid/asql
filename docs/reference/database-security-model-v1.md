@@ -133,6 +133,37 @@ How the guarantee holds:
   and it survives replay and snapshots.
 - `SchemaSnapshot` and `asql_admin.schema_snapshot` report it as `append_only`.
 
+## Signed query results
+
+With `ledger=signed`, a node can sign the result of a SELECT at a committed LSN
+([ADR 0006](../adr/0006-signed-query-results.md)), so a third party can check later
+which node gave it, against which history, and whether it is right:
+
+```bash
+# Ask the node: rows plus a signed attestation, as JSON.
+asqlctl -command attest-query -pgwire 127.0.0.1:5433 \
+  -sql "SELECT id, result FROM lab.results ORDER BY id" [-lsn 42] -output result.json
+
+# Check it: signature, rows, chain (with a digest), re-execution (with the data).
+asqlctl -command verify-result -result result.json -pubkey node.pub \
+  [-digest digest.json] [-data-dir /copy/of/data]
+```
+
+`verify-result` reports each check apart and exits non-zero if one fails:
+
+- **signature**: against the trusted keys in `-pubkey` only;
+- **rows**: the rows in the file against the attested hash, row count and columns;
+- **chain**: the attested chain value against a digest at the same LSN, or, with
+  `-data-dir`, against the WAL, which must also match the digest when one is given;
+- **reexecution**: with `-data-dir`, the query re-executed at the LSN on a scratch copy
+  gives the attested rows. A different engine version that gives other rows is
+  reported as `version-mismatch`.
+
+Without `-data-dir`, a verifier relies on the node for the rows themselves: the
+signature proves the node said so, and a digest proves which history it said it
+about. `attest_query` needs the privileges of the query it attests, plus
+`SELECT_HISTORY` at an LSN other than the head.
+
 ## Historical authorization rule
 
 Historical authorization is evaluated against the **current** durable
