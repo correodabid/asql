@@ -5,10 +5,12 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"sync"
@@ -34,6 +36,9 @@ type ledgerSigning struct {
 	logger       *slog.Logger
 	tree         *logtree.Tree
 	treeBuilder  *logtree.Builder
+	// stateKey salts the state tree's leaves (ADR 0008). It is nil when the
+	// node has none; VERIFIABLE tables then cannot be proven.
+	stateKey *ledgerdigest.StateKey
 
 	// For result attestations (ADR 0006).
 	store    *wal.SegmentedLogStore
@@ -48,7 +53,27 @@ type ledgerSigning struct {
 	stopped bool
 }
 
-func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engine, store *wal.SegmentedLogStore, signer *ledgerdigest.Ed25519Signer) (*ledgerSigning, error) {
+// loadLedgerStateKey loads the state key (ADR 0008). A file named in the
+// config must load; the default one next to the signing key may be missing,
+// as on nodes set up before ADR 0008, and the node then starts without it.
+func loadLedgerStateKey(config Config) (*ledgerdigest.StateKey, error) {
+	path := config.LedgerStateKeyFile
+	if path == "" {
+		path = ledgerdigest.DefaultStateKeyPath(config.LedgerKeyFile)
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			config.Logger.Warn("ledger: no state key; rows of VERIFIABLE tables cannot be proven until one exists (asqlctl -command ledger-keygen -output <the -ledger-key file> writes it)",
+				"path", path)
+			return nil, nil
+		}
+	}
+	key, err := ledgerdigest.LoadStateKey(path)
+	if err != nil {
+		return nil, err
+	}
+	return &key, nil
+}
+
+func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engine, store *wal.SegmentedLogStore, signer *ledgerdigest.Ed25519Signer, stateKey *ledgerdigest.StateKey) (*ledgerSigning, error) {
 	digestLog, err := ledgerdigest.OpenLog(dd.LedgerDir(), 0)
 	if err != nil {
 		return nil, err
@@ -117,9 +142,9 @@ func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engin
 		_ = digestLog.Close()
 		return nil, err
 	}
-	config.Logger.Info("ledger: signing digests", "key_id", signer.KeyID(), "dir", dd.LedgerDir())
+	config.Logger.Info("ledger: signing digests", "key_id", signer.KeyID(), "dir", dd.LedgerDir(), "state_key", stateKey != nil)
 	return &ledgerSigning{
-		log: digestLog, checkpointer: checkpointer, logger: config.Logger, tree: tree, treeBuilder: treeBuilder,
+		log: digestLog, checkpointer: checkpointer, logger: config.Logger, tree: tree, treeBuilder: treeBuilder, stateKey: stateKey,
 		store: store, signer: signer, nodeID: config.NodeID, recordAt: recordAt, now: time.Now,
 	}, nil
 }

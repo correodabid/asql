@@ -42,6 +42,7 @@ func main() {
 	pprofAddr := flag.String("pprof-addr", "", "pprof HTTP listen address (e.g. :6060)")
 	ledgerMode := flag.String("ledger", "chain", "WAL ledger mode: chain (hash-chain every WAL record, ADR 0005), signed (chain plus signed digests; needs -ledger-key) or off")
 	ledgerKey := flag.String("ledger-key", "", "Ed25519 private key (PEM, PKCS #8, mode 0600) that signs ledger digests with -ledger=signed")
+	ledgerStateKey := flag.String("ledger-state-key", "", "with -ledger=signed, the state key (mode 0600) that salts the state tree of VERIFIABLE tables; default: the -ledger-key file plus .state, optional there")
 	ledgerDigestInterval := flag.Duration("ledger-digest-interval", 0, "with -ledger=signed, sign the committed chain head at most this often (0 = default 1s)")
 	ledgerDigestEvery := flag.Uint64("ledger-digest-every", 0, "with -ledger=signed, also sign after this many committed LSNs (0 = default 10000)")
 	compliance := flag.Bool("compliance", false, "refuse to start unless the ledger vouches for the whole WAL: ledger on, every segment anchored, chain back to genesis (ADR 0005)")
@@ -99,6 +100,7 @@ func main() {
 		LedgerMode:       *ledgerMode,
 
 		LedgerKeyFile:         *ledgerKey,
+		LedgerStateKeyFile:    *ledgerStateKey,
 		LedgerDigestInterval:  *ledgerDigestInterval,
 		LedgerDigestEveryLSNs: *ledgerDigestEvery,
 		Compliance:            *compliance,

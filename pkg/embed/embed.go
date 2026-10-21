@@ -46,6 +46,9 @@ type Options struct {
 	LedgerMode string
 	// LedgerKeyFile is the Ed25519 private key for LedgerMode "signed".
 	LedgerKeyFile string
+	// LedgerStateKeyFile is the state key for LedgerMode "signed" (ADR 0008).
+	// Empty means LedgerKeyFile + ".state", which may be missing.
+	LedgerStateKeyFile string
 	// Compliance refuses to start unless the ledger vouches for the whole WAL.
 	Compliance bool
 	// Logger receives the server's logs. Nil discards them.
@@ -87,13 +90,14 @@ func Start(ctx context.Context, opts Options) (*Server, error) {
 		return nil, fmt.Errorf("embed: listen %s: %w", address, err)
 	}
 	server, err := pgwireserver.New(pgwireserver.Config{
-		Address:       listener.Addr().String(),
-		DataDirPath:   opts.DataDir,
-		Logger:        logger,
-		AuthToken:     opts.AuthToken,
-		LedgerMode:    opts.LedgerMode,
-		LedgerKeyFile: opts.LedgerKeyFile,
-		Compliance:    opts.Compliance,
+		Address:            listener.Addr().String(),
+		DataDirPath:        opts.DataDir,
+		Logger:             logger,
+		AuthToken:          opts.AuthToken,
+		LedgerMode:         opts.LedgerMode,
+		LedgerKeyFile:      opts.LedgerKeyFile,
+		LedgerStateKeyFile: opts.LedgerStateKeyFile,
+		Compliance:         opts.Compliance,
 	})
 	if err != nil {
 		_ = listener.Close()

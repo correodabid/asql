@@ -22,6 +22,12 @@ type Config struct {
 	// LedgerKeyFile is the node's Ed25519 private key (PEM, PKCS #8) used to
 	// sign ledger digests. Required with LedgerMode "signed".
 	LedgerKeyFile string
+	// LedgerStateKeyFile is the secret that salts the state tree's leaves
+	// (ADR 0008), separate from the signing key. Empty means the file next
+	// to LedgerKeyFile (LedgerKeyFile + ".state"), which may be missing:
+	// the node then starts without it and warns. A file named here must
+	// load. Only used with LedgerMode "signed".
+	LedgerStateKeyFile string
 	// LedgerDigestInterval and LedgerDigestEveryLSNs set how often the
 	// committed chain head is signed: at most every interval, or sooner after
 	// that many LSNs. Zero means the defaults (1s and 10,000).
@@ -98,6 +104,9 @@ func (config Config) ledgerSettings() (mode wal.LedgerMode, signed bool, err err
 	}
 	if config.LedgerKeyFile != "" {
 		return 0, false, errors.New("a ledger key file is only used with ledger mode signed")
+	}
+	if config.LedgerStateKeyFile != "" {
+		return 0, false, errors.New("a ledger state key file is only used with ledger mode signed")
 	}
 	return mode, false, nil
 }

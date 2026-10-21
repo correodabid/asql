@@ -230,3 +230,92 @@ func TestVerifyLedgerChecksAVersion2DigestsTreeRoot(t *testing.T) {
 		t.Fatalf("version 1 digest: err=%v tree_root %q, want none", err, result.Digest.TreeRoot)
 	}
 }
+
+func keygen(t *testing.T, privPath string) (ledgerKeygenOutput, error) {
+	t.Helper()
+	var out bytes.Buffer
+	err := runLedgerKeygen(&out, privPath)
+	var result ledgerKeygenOutput
+	if out.Len() > 0 {
+		if jerr := json.Unmarshal(out.Bytes(), &result); jerr != nil {
+			t.Fatalf("decode keygen output: %v\n%s", jerr, out.String())
+		}
+	}
+	return result, err
+}
+
+func TestLedgerKeygenWritesTheStateKey(t *testing.T) {
+	priv := filepath.Join(t.TempDir(), "node.key")
+	result, err := keygen(t, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.StateKey != priv+".state" || strings.Join(result.Created, ",") != "private_key,public_key,state_key" {
+		t.Fatalf("keygen output %+v", result)
+	}
+	if _, err := ledgerdigest.LoadStateKey(result.StateKey); err != nil {
+		t.Fatalf("the state key it wrote: %v", err)
+	}
+
+	// A second run overwrites nothing.
+	before := readFiles(t, priv, result.PublicKey, result.StateKey)
+	if _, err := keygen(t, priv); err == nil || !strings.Contains(err.Error(), "never overwritten") {
+		t.Fatalf("keygen over existing keys: %v", err)
+	}
+	if after := readFiles(t, priv, result.PublicKey, result.StateKey); after != before {
+		t.Fatal("a second keygen changed the keys")
+	}
+}
+
+// A node set up before ADR 0008 has a key pair and no state key: keygen
+// adds the state key and leaves the pair alone.
+func TestLedgerKeygenAddsAStateKeyToAnExistingKey(t *testing.T) {
+	dir := t.TempDir()
+	priv, pub := filepath.Join(dir, "node.key"), filepath.Join(dir, "node.pub")
+	if _, err := ledgerdigest.GenerateKeyFiles(priv, pub); err != nil {
+		t.Fatal(err)
+	}
+	signer, err := ledgerdigest.LoadSigner(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := readFiles(t, priv, pub)
+	result, err := keygen(t, priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(result.Created, ",") != "state_key" || result.KeyID != signer.KeyID() {
+		t.Fatalf("keygen next to an existing key: %+v", result)
+	}
+	if readFiles(t, priv, pub) != before {
+		t.Fatal("keygen changed the existing key pair")
+	}
+	if _, err := ledgerdigest.LoadStateKey(priv + ".state"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Something that is not a private key is not given a state key.
+	bogus := filepath.Join(dir, "bogus.key")
+	if err := os.WriteFile(bogus, []byte("not a key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := keygen(t, bogus); err == nil || !strings.Contains(err.Error(), "not a usable private key") {
+		t.Fatalf("keygen next to a bogus key: %v", err)
+	}
+	if _, err := os.Stat(bogus + ".state"); !os.IsNotExist(err) {
+		t.Fatalf("a state key was written next to a bogus key: %v", err)
+	}
+}
+
+func readFiles(t *testing.T, paths ...string) string {
+	t.Helper()
+	var all strings.Builder
+	for _, p := range paths {
+		data, err := os.ReadFile(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		all.Write(data)
+	}
+	return all.String()
+}

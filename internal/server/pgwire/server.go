@@ -338,8 +338,12 @@ func New(config Config) (*Server, error) {
 		return nil, fmt.Errorf("invalid ledger mode: %w", err)
 	}
 	var ledgerSigner *ledgerdigest.Ed25519Signer
+	var ledgerStateKey *ledgerdigest.StateKey
 	if ledgerSigned {
 		if ledgerSigner, err = ledgerdigest.LoadSigner(config.LedgerKeyFile); err != nil {
+			return nil, err
+		}
+		if ledgerStateKey, err = loadLedgerStateKey(config); err != nil {
 			return nil, err
 		}
 	}
@@ -514,7 +518,7 @@ func New(config Config) (*Server, error) {
 	}
 
 	if ledgerSigner != nil {
-		if srv.ledger, err = newLedgerSigning(config, dd, engine, walStore, ledgerSigner); err != nil {
+		if srv.ledger, err = newLedgerSigning(config, dd, engine, walStore, ledgerSigner, ledgerStateKey); err != nil {
 			_ = walStore.Close()
 			_ = auditStore.Close()
 			return nil, fmt.Errorf("initialize ledger signing: %w", err)
