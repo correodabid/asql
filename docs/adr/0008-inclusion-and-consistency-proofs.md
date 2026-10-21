@@ -49,6 +49,13 @@ the digests, which gain a version 2.
 - Built with `golang.org/x/mod/sumdb/tlog`, taken as a module dependency rather than
   vendored, so its fixes arrive with a version bump. Tiles of height 8, stored under the ledger
   directory, about 32 bytes per record. Tiles hold hashes only, so they outlive WAL GC.
+- **The tree starts at LSN 1.** WAL GC (`WithWALGC`) never truncates past the last
+  record the builder has added, and backups carry the tiles. A node whose WAL does not
+  start at LSN 1 and has no tiles for the missing part (a data directory truncated
+  before this ADR, or restored without tiles) does not build the tree: it logs why,
+  keeps signing v1 digests, and proof requests fail with a clear error. Starting the
+  tree at the first retained LSN instead would give two nodes different roots for the
+  same LSN.
 - **Digest v2** adds `tree_root` (at `tree_size = lsn`) next to `chain`.
 - Proofs:
   - **consistency**: from digest A (size m) to digest B (size n), O(log n) hashes. It
