@@ -74,9 +74,10 @@ need to demonstrate compliance without opening their process data. Not consumer 
    - *Log tree (#86), signed in digest v2:* each checkpoint extends the log tree and
      signs its root at the digest's LSN (`tree_root` in `asql_admin.ledger_digest` and
      `GET /api/v1/ledger/digest`). `verify-ledger -digest` rebuilds the tree from the
-     WAL and checks it. WAL GC never removes records the tree has not added. Next:
-     consistency proofs between two digests (`prove_consistency`,
-     `verify-consistency`).
+     WAL and checks it. WAL GC never removes records the tree has not added.
+   - *Consistency proofs:* `asql_admin.prove_consistency`, `asqlctl prove-consistency`
+     and `verify-consistency`, which checks a proof between two signed digests with the
+     trusted keys alone. Next: the state tree of `VERIFIABLE` tables.
 4. **Verifiable computation.** Aggregates over private data executed in a TEE (e.g. AWS
    Nitro Enclaves) with attestation, and ZK only for narrow predicates where it pays off.
 

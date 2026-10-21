@@ -164,6 +164,36 @@ signature proves the node said so, and a digest proves which history it said it
 about. `attest_query` needs the privileges of the query it attests, plus
 `SELECT_HISTORY` at an LSN other than the head.
 
+## Consistency proofs between digests
+
+With `ledger=signed`, each digest also signs the root of the node's log tree, an
+RFC 6962 Merkle tree over every WAL record up to the digest's LSN
+([ADR 0008](../adr/0008-inclusion-and-consistency-proofs.md)). Whoever keeps an
+earlier digest can then check that a later one extends the same history, without
+seeing any record:
+
+```bash
+# Ask the node for a proof from the digest at LSN 120 to the one at LSN 980
+# (without -to-lsn, to the latest digest).
+asqlctl -command prove-consistency -pgwire 127.0.0.1:5433 \
+  -from-lsn 120 [-to-lsn 980] -output proof.json
+
+# Check it with the trusted keys alone: both signatures and the proof.
+asqlctl -command verify-consistency -proof proof.json -pubkey node.pub
+```
+
+The same proof is `SELECT * FROM asql_admin.prove_consistency WHERE from_lsn = 120
+[AND to_lsn = 980]`, one row with `from_digest`, `to_digest` and `proof` as JSON; it
+needs `ADMIN`, like `asql_admin.ledger_digest`. Proofs exist only between LSNs where a
+digest was signed; asking for another LSN names the next signed one.
+
+- The proof file carries both digests. Compare its `from_digest` with the copy you
+  kept: a node that rewrote its history after it cannot produce a valid proof to it.
+- `verify-ledger -digest` rebuilds the tree from a data directory and checks the
+  digest's `tree_root` too.
+- A node whose WAL does not start at LSN 1 (truncated before it had a tree) has no
+  tree: it signs version 1 digests, without `tree_root`, and proofs are refused.
+
 ## Historical authorization rule
 
 Historical authorization is evaluated against the **current** durable

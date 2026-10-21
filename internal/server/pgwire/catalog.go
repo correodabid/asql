@@ -389,6 +389,9 @@ func (server *Server) adminTable(ctx context.Context, sql, lower string, activeD
 
 	case strings.Contains(lower, "asql_admin.ledger_digest"):
 		return server.adminLedgerDigest(sql)
+
+	case strings.Contains(lower, "asql_admin.prove_consistency"):
+		return server.adminProveConsistency(sql)
 	}
 	return interceptResult{}, false
 }
@@ -443,6 +446,8 @@ func catalogPrivilegeForQuery(sql string) (catalogPrivilegeRequirement, bool) {
 		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.cluster_members"}, true
 	case strings.Contains(lower, "asql_admin.ledger_digest"):
 		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.ledger_digest"}, true
+	case strings.Contains(lower, "asql_admin.prove_consistency"):
+		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.prove_consistency"}, true
 	case strings.HasPrefix(lower, "select asql_admin.replay_to_lsn("):
 		return catalogPrivilegeRequirement{privilege: executor.PrincipalPrivilegeAdmin, capability: "asql_admin.replay_to_lsn"}, true
 	default:
