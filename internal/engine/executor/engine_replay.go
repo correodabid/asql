@@ -27,6 +27,12 @@ func (engine *Engine) Replay(ctx context.Context) error {
 		}
 	}()
 
+	loadedCommitTimes, err := engine.commitTimes.load()
+	if err != nil {
+		slog.Warn("failed to load commit time index; rebuilding from wal", "error", err.Error())
+		loadedCommitTimes = false
+	}
+
 	loadedTimestampIndex := false
 	if engine.timestampIndex != nil {
 		loaded, err := engine.timestampIndex.load()
@@ -100,6 +106,9 @@ func (engine *Engine) Replay(ctx context.Context) error {
 			if err := engine.replayFromSnapshots(snapshots, deltaRecords); err != nil {
 				return err
 			}
+			if err := engine.ensureCommitTimeIndex(ctx, loadedCommitTimes, deltaRecords, false); err != nil {
+				return err
+			}
 			return engine.ensureTimestampIndex(ctx, loadedTimestampIndex, deltaRecords, false)
 		}
 	}
@@ -112,6 +121,9 @@ func (engine *Engine) Replay(ctx context.Context) error {
 	engine.reserveWALTxIDs(records)
 	records = engine.recordsWithinReplayLimit(records)
 	if err := engine.rebuildFromRecords(records, 0, false); err != nil {
+		return err
+	}
+	if err := engine.ensureCommitTimeIndex(ctx, loadedCommitTimes, records, true); err != nil {
 		return err
 	}
 	return engine.ensureTimestampIndex(ctx, loadedTimestampIndex, records, true)
@@ -241,6 +253,14 @@ func (engine *Engine) readAllReplayRecords(ctx context.Context) ([]ports.WALReco
 	}
 	engine.walReplayPlansCache.Store(&walReplayPlanCache{headLSN: headLSN, entries: entries})
 	return records, entries, nil
+}
+
+// LSNForCommitTime resolves a wall-clock time, in Unix µs, to the LSN of the
+// last commit at or before it (ADR 0007): the state of the database at that
+// time. It returns 0 when no commit is that old, and ErrCommitTimeUnknown
+// when the commits before the time recorded none.
+func (engine *Engine) LSNForCommitTime(micros int64) (uint64, error) {
+	return engine.commitTimes.resolve(micros)
 }
 
 // LSNForTimestamp resolves the latest LSN whose timestamp is <= logicalTimestamp.
@@ -725,6 +745,60 @@ func (engine *Engine) indexAppliedRecords(records []ports.WALRecord) {
 	if err := engine.timestampIndex.append(records); err != nil {
 		slog.Warn("timestamp index append failed", "error", err.Error(), "records", len(records))
 	}
+	engine.indexCommitTimes(records)
+}
+
+// indexCommitTimes adds the commit times of records to the index and keeps
+// the newest one, which the next local commit never goes below.
+func (engine *Engine) indexCommitTimes(records []ports.WALRecord) {
+	if err := engine.commitTimes.append(records); err != nil {
+		slog.Warn("commit time index append failed", "error", err.Error(), "records", len(records))
+	}
+	engine.noteCommitTime(engine.commitTimes.last())
+}
+
+func (engine *Engine) noteCommitTime(micros int64) {
+	for {
+		current := engine.lastCommitMicros.Load()
+		if micros <= current || engine.lastCommitMicros.CompareAndSwap(current, micros) {
+			return
+		}
+	}
+}
+
+// ensureCommitTimeIndex brings the commit time index up to the head at
+// startup, like ensureTimestampIndex: records are the replayed WAL, the
+// whole retained WAL when full.
+func (engine *Engine) ensureCommitTimeIndex(ctx context.Context, loaded bool, records []ports.WALRecord, full bool) error {
+	defer func() { engine.noteCommitTime(engine.commitTimes.last()) }()
+	switch {
+	case full:
+		if err := engine.commitTimes.rebuild(records); err != nil {
+			slog.Warn("failed to persist rebuilt commit time index", "error", err.Error())
+		}
+		return nil
+	case loaded:
+		scanned := engine.commitTimes.scannedLSN()
+		if scanned >= engine.headLSN {
+			return nil
+		}
+		missing, err := engine.logStore.ReadFrom(ctx, scanned+1, 0)
+		if err != nil {
+			return fmt.Errorf("read wal for commit time index catch-up: %w", err)
+		}
+		if err := engine.commitTimes.append(missing); err != nil {
+			slog.Warn("failed to persist commit time index catch-up", "error", err.Error())
+		}
+		return nil
+	}
+	all, err := engine.readAllRecords(ctx)
+	if err != nil {
+		return fmt.Errorf("read wal for commit time index rebuild: %w", err)
+	}
+	if err := engine.commitTimes.rebuild(all); err != nil {
+		slog.Warn("failed to persist rebuilt commit time index", "error", err.Error())
+	}
+	return nil
 }
 
 // ApplyCommittedRecords applies a directly supplied committed WAL delta when it
@@ -954,6 +1028,9 @@ func (engine *Engine) RollbackTo(ctx context.Context, lsn uint64) error {
 	}
 	if err := engine.timestampIndex.truncateAfter(lsn); err != nil {
 		return fmt.Errorf("rollback timestamp index: %w", err)
+	}
+	if err := engine.commitTimes.truncateAfter(lsn); err != nil {
+		return fmt.Errorf("rollback commit time index: %w", err)
 	}
 	if engine.historyWriter != nil {
 		if err := engine.drainHistory(ctx); err != nil {

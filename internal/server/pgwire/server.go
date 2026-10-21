@@ -24,6 +24,7 @@ import (
 	"github.com/correodabid/asql/internal/engine/parser"
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 	"github.com/correodabid/asql/internal/engine/ports"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 	"github.com/correodabid/asql/internal/platform/clock"
 	"github.com/correodabid/asql/internal/platform/datadir"
 	grpcserver "github.com/correodabid/asql/internal/server/grpc"
@@ -1293,10 +1294,37 @@ func (server *Server) handleShowParam(backend *pgproto3.Backend, session *execut
 	return backend.Flush()
 }
 
+// onlyComments reports whether sql holds nothing but comments, semicolons
+// and whitespace.
+func onlyComments(sql string) bool {
+	for rest := sql; ; {
+		rest = strings.TrimLeft(rest, " \t\r\n;")
+		switch {
+		case rest == "":
+			return true
+		case strings.HasPrefix(rest, "--"):
+			end := strings.IndexByte(rest, '\n')
+			if end < 0 {
+				return true
+			}
+			rest = rest[end+1:]
+		case strings.HasPrefix(rest, "/*"):
+			end := strings.Index(rest, "*/")
+			if end < 0 {
+				return true
+			}
+			rest = rest[end+2:]
+		default:
+			return false
+		}
+	}
+}
+
 func (server *Server) handleSimpleQuery(backend *pgproto3.Backend, state *connState, sql string) error {
 	session := state.session
 	trimmed := strings.TrimSpace(sql)
-	if trimmed == "" {
+	// Only comments, like pgx's Ping ("-- ping"), is an empty query.
+	if trimmed == "" || onlyComments(trimmed) {
 		return sendMessages(backend, &pgproto3.EmptyQueryResponse{}, &pgproto3.ReadyForQuery{TxStatus: txStatus(session)})
 	}
 
@@ -1569,7 +1597,7 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 			if selectStatement.AsOfLSN != nil {
 				effKind, effValue = "lsn", *selectStatement.AsOfLSN
 			} else if selectStatement.AsOfTimestampMicros != nil {
-				effKind, effValue = "ts", uint64(*selectStatement.AsOfTimestampMicros)
+				effKind, effValue = "date", uint64(*selectStatement.AsOfTimestampMicros)
 			}
 			var result executor.Result
 			var err error
@@ -1580,6 +1608,18 @@ func (server *Server) executeSQL(ctx context.Context, session *executor.Session,
 				result, err = server.engine.RowHistory(ctx, stripped, domains)
 			} else {
 				switch effKind {
+				case "date":
+					// A date resolves to the last commit at or before it, by the
+					// wall-clock times commits record (ADR 0007).
+					micros := int64(effValue)
+					if err = server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "as_of_timestamp", targetKind: "timestamp", targetTimestampMicros: effValue}); err != nil {
+						return executor.Result{}, nil, err
+					}
+					var lsn uint64
+					if lsn, err = server.engine.LSNForCommitTime(micros); err != nil {
+						return executor.Result{}, nil, sqlerr.New("22023", fmt.Sprintf("AS OF TIMESTAMP %s: %v; use AS OF LSN", time.UnixMicro(micros).UTC().Format(time.RFC3339Nano), err))
+					}
+					result, err = server.engine.TimeTravelQueryAsOfLSN(ctx, stripped, domains, lsn)
 				case "ts":
 					if err = server.authorizeHistoricalRead(session, historicalReadAuditDetail{queryKind: "as_of_timestamp", targetKind: "timestamp", targetTimestampMicros: effValue}); err != nil {
 						return executor.Result{}, nil, err

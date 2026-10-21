@@ -1089,13 +1089,14 @@ func (server *Server) adminTimelineCommits(ctx context.Context, sql string) (int
 		}, true
 	}
 
-	columns := []string{"lsn", "tx_id", "timestamp", "mutation_count"}
+	columns := []string{"lsn", "tx_id", "timestamp", "commit_time", "mutation_count"}
 	rows := make([]map[string]ast.Literal, 0, len(commits))
 	for _, c := range commits {
 		rows = append(rows, map[string]ast.Literal{
 			"lsn":            litU(c.LSN),
 			"tx_id":          litS(c.TxID),
 			"timestamp":      litU(c.Timestamp),
+			"commit_time":    commitTimeLiteral(c.CommitTimeMicros),
 			"mutation_count": lit(int64(len(c.Tables))),
 		})
 	}
@@ -2086,4 +2087,13 @@ func schemaTypeToOID(t string) int64 {
 	default:
 		return 25 // text
 	}
+}
+
+// commitTimeLiteral is a commit's wall-clock time (ADR 0007), or NULL for a
+// commit written before commits recorded it.
+func commitTimeLiteral(micros int64) ast.Literal {
+	if micros == 0 {
+		return ast.Literal{Kind: ast.LiteralNull}
+	}
+	return ast.Literal{Kind: ast.LiteralTimestamp, NumberValue: micros}
 }

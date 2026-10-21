@@ -4441,18 +4441,10 @@ func TestPGWireAsOfLSNInlineSyntax(t *testing.T) {
 			lsnAfterInsert, past)
 	}
 
-	// AS OF TIMESTAMP must parse cleanly (the exact historical match
-	// depends on the clock; the guard here is that the clause is
-	// recognised and the query runs without being mis-parsed as an alias).
-	if _, err := conn.Exec(ctx,
-		"SELECT * FROM u AS OF TIMESTAMP '2000-01-01T00:00:00Z'"); err != nil {
-		// We expect either a successful empty result or an error about
-		// the timestamp being before the engine's genesis; we do NOT
-		// expect a parse error like "table not found" for "u AS of"
-		// interpreting the clause as an alias.
-		if strings.Contains(err.Error(), "as") && strings.Contains(err.Error(), "alias") {
-			t.Fatalf("AS OF TIMESTAMP was mis-parsed as alias: %v", err)
-		}
+	// AS OF TIMESTAMP is recognised, not mis-parsed as an alias. A date
+	// before every commit is the empty database (ADR 0007).
+	if _, err := conn.Exec(ctx, "SELECT * FROM u AS OF TIMESTAMP '2000-01-01T00:00:00Z'"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("AS OF TIMESTAMP before every commit: %v, want table not found", err)
 	}
 
 	if _, err := conn.Exec(ctx, "COMMIT"); err != nil {

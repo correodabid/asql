@@ -48,6 +48,7 @@ When the durable principal catalog is enabled, historical reads are authorized a
 
 - Ordinary `SELECT` is not enough for time-travel or history access.
 - `AS OF LSN`, `AS OF TIMESTAMP`, and `FOR HISTORY` require the explicit `SELECT_HISTORY` privilege.
+- `AS OF TIMESTAMP '<date>'` reads the state after the last commit at or before that date, by the wall-clock time each commit records (UTC when the date has no zone). Commits written by versions that did not record it cannot be placed in time; a date that depends on them fails, and `AS OF LSN` still works. `asql_admin.timeline_commits` shows each commit's `commit_time`.
 - The data snapshot may be old, but the authorization decision is made using the principal's **current** grants.
 - ASQL does not pretend that a user or role existed in the past just because the query targets an old `LSN` or timestamp.
 :::
