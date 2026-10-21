@@ -89,6 +89,12 @@ func encodeResult(h hash.Hash, columns []string, rows [][]ast.Literal) error {
 	return nil
 }
 
+// AppendValue appends value's canonical encoding (the one HashResult uses)
+// to b. The state tree of ADR 0008 encodes keys and rows with it.
+func AppendValue(b []byte, value ast.Literal) ([]byte, error) {
+	return appendResultValue(b, value)
+}
+
 func appendResultValue(b []byte, value ast.Literal) ([]byte, error) {
 	switch value.Kind {
 	case ast.LiteralNull, "":
