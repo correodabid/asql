@@ -39,7 +39,10 @@
    per row means N proofs and N verifications per citation; one proof for the whole
    set against one digest is what can go into an exported report. The same store
    holds other questions and unpublished work, so the proof must reveal nothing
-   about rows outside the set.
+   about rows outside the set. Later, a report must also be able to show that it
+   lists *all* the parents of an artifact (completeness upwards), never all its
+   children: hiding a disagreeing input is what provenance exists to prevent, while
+   other uses of a source are none of the report's business.
 6. **Row values are often low-entropy.** `result IN ('WITHIN_SPEC', 'OUT_OF_SPEC')`. A
    proof that reveals the hash of a neighbouring row lets anyone who can guess its key
    test both values offline. Hiding the other rows needs salted leaves.
@@ -76,12 +79,16 @@ the digests, which gain a version 2.
   `ALTER TABLE … SET VERIFIABLE`, as `APPEND ONLY` is declared. Marking an existing
   table enters its live rows at that LSN; its proofs start at the first checkpoint
   after it. Other tables pay nothing.
-- A sparse Merkle tree of depth 256 keyed by
-  `SHA-256(domain || table || canonical primary key)`, holding
-  `leaf = SHA-256(0x00 || salt || canonical row)` for every live row. The canonical
-  primary key and row are ADR 0006's typed value encoding: the primary key columns in
-  key order (so composite keys work), and the row's columns in column order. A row is
-  found by its primary key, as reports cite it.
+- Only tables with a primary key can be verifiable: rows are found and proven by it,
+  as reports cite them.
+- A sparse Merkle tree of depth 256. Keys and leaves carry a type byte, so other kinds
+  of leaf can join the tree later without changing how rows are cited or hashed:
+  - row key `SHA-256(0x01 || domain || table || canonical primary key)`, row leaf
+    `SHA-256(0x00 || 0x01 || salt || canonical row)`, for every live row;
+  - the canonical primary key and row are ADR 0006's typed value encoding: the primary
+    key columns in key order (composite keys included), and every column of the row
+    in column order, so a value outside the key, such as a parent's `ordinal`, is
+    proven with the row.
 - Updated from the audit store's row images in commit order: INSERT and UPDATE set the
   key, DELETE clears it. The tree is persistent (copy-on-write nodes), so every
   checkpoint root stays provable.
@@ -94,9 +101,21 @@ the digests, which gain a version 2.
   their upper nodes, so each sibling hash appears once, and siblings that are empty
   subtrees are marked in a bitmap instead of sent. A single row is a batch of one.
 - What a batch proof reveals: the proven keys, their rows and salts, and hashes of
-  other subtrees, which are salted and say nothing about the rows below them, not even
-  how many there are (the depth is fixed). The digest it is checked against carries
-  its LSN, so it reveals how many WAL records the node had written.
+  other subtrees, which are salted and say nothing about the rows below them. Which
+  siblings are empty does show roughly how many rows the tree holds: about log2 of
+  it, an order of magnitude. That is accepted: the digest it is checked against
+  carries its LSN, which already shows how many WAL records the node had written.
+  Hiding it would mean making empty subtrees indistinguishable, with proofs several
+  times larger.
+- **Completeness upwards, later: group leaves.** A verifiable table may later declare
+  a group (for `artifact_parents`, `child_id`). Each group gets a leaf of type `0x02`
+  under `SHA-256(0x02 || domain || table || group column || canonical value)`, whose
+  value hashes the sorted list of its rows' keys and leaves. Adding that leaf to a
+  batch proves that the rows shown are all the group's rows. It is not built now; the
+  type bytes keep it possible without changing rows or citations. A range proof over
+  leaves ordered by primary key would do the same, but it must reveal the two keys
+  bounding the range, such as the next artifact's UUID v7 and the time it carries;
+  group leaves reveal nothing beyond the group.
 - **Salt**: `HMAC-SHA-256(state key, key || commit LSN of the row version)`. The salt
   depends only on the key, the WAL and the secret, so replicas sharing the secret build
   the same tree. Leaves are salted from the first release of the state tree: adding
@@ -126,10 +145,10 @@ Following ADR 0006:
 - **Does not prove** that the values are true, nor that the state root was computed
   correctly from the log. A verifier with the data directory can rebuild the trees and
   compare roots, as `verify-result` re-executes a query.
-- **Does not prove completeness.** A batch proof shows that the rows it names exist
-  with those values; it does not show that they are all the rows of some kind, for
-  example that an artifact has no parents besides the edges shown. Proving that would
-  need a commitment ordered by the relation, not by hashed key; it is out of scope.
+- **Does not prove completeness, yet.** A batch proof shows that the rows it names
+  exist with those values; it does not show that they are all the rows of some kind,
+  for example that an artifact has no parents besides the edges shown. Group leaves
+  (above) will add that for declared groups.
 - **Does not hide** the keys that are proven, or the number of WAL records.
 
 ## Performance
