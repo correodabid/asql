@@ -63,8 +63,7 @@ Notes:
 
 ## 5. Signatures
 
-- `dist/checksums.txt.sig` generated: `yes | no`
-- `dist/checksums.txt.pem` generated: `yes | no`
+- `dist/checksums.txt.sigstore.json` (signature and certificate bundle) generated: `yes | no`
 - signature outputs included in uploaded/published assets: `yes | no`
 
 Notes:

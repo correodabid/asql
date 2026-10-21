@@ -69,9 +69,20 @@ syft dir:. -o spdx-json > /tmp/asql-release-rehearsal/sbom.spdx.json
 
 ```bash
 cosign sign-blob --yes \
-  --output-signature /tmp/asql-release-rehearsal/checksums.txt.sig \
-  --output-certificate /tmp/asql-release-rehearsal/checksums.txt.pem \
+  --bundle /tmp/asql-release-rehearsal/checksums.txt.sigstore.json \
   /tmp/asql-release-rehearsal/checksums.txt
+```
+
+The bundle holds the signature and the certificate (cosign v3). To verify a
+published release:
+
+```bash
+cosign verify-blob \
+  --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/correodabid/asql/\.github/workflows/ci\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  checksums.txt
+sha256sum -c checksums.txt
 ```
 
 ## Current local rehearsal note

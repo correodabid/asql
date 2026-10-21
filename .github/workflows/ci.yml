@@ -140,7 +140,10 @@ jobs:
         uses: sigstore/cosign-installer@v4.1.1
 
       - name: Sign checksums with keyless Sigstore
-        run: cosign sign-blob --yes --output-signature dist/checksums.txt.sig --output-certificate dist/checksums.txt.pem dist/checksums.txt
+        # cosign v3 writes the signature and certificate as one Sigstore
+        # bundle; the separate --output-signature/--output-certificate files
+        # are gone.
+        run: cosign sign-blob --yes --bundle dist/checksums.txt.sigstore.json dist/checksums.txt
 
       - name: Upload release bundle artifact
         uses: actions/upload-artifact@v7
