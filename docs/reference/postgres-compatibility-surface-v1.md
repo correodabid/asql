@@ -97,7 +97,7 @@ and current privilege semantics, see
 
 | Pattern | Status | Notes |
 |---|---|---|
-| `SELECT ... WHERE <scalar predicate>` | Supported | Current ASQL SQL subset; with durable principals enabled, any authenticated enabled principal can execute current-state reads. |
+| `SELECT ... WHERE <scalar predicate>` | Supported | Current ASQL SQL subset, with the comparisons `=`, `!=` / `<>`, `<`, `<=`, `>` and `>=`; with durable principals enabled, any authenticated enabled principal can execute current-state reads. |
 | `ORDER BY ... LIMIT n` | Supported | Covered in executor and pgwire tests. |
 | Literal `IN (...)` / `NOT IN (...)` | Supported | Covered in executor tests. |
 | Subquery-based `IN (SELECT ...)` | Supported | Covered in executor tests for current shapes. |
@@ -119,7 +119,8 @@ and current privilege semantics, see
 | Narrow BI-lite read-only datasource flow over pgwire | Supported with explicit translation | Use explicit custom SQL, read-only current-state queries, and the documented `information_schema` subset; builder-mode, macro, and broad time-series claims remain out of scope. |
 | Cross-domain transactions via `BEGIN CROSS DOMAIN ...` | Supported | ASQL-native transaction model. |
 | Temporal helpers like `current_lsn()` / `row_lsn(...)` | Supported | ASQL-native surface over SQL/pgwire. |
-| `AS OF LSN` / `AS OF TIMESTAMP` / `FOR HISTORY` with durable-principal authz | Supported | Requires explicit `SELECT_HISTORY`; authorization is evaluated against the current principal/grant state, not a historical grant snapshot. |
+| `AS OF LSN` / `FOR HISTORY` with durable-principal authz | Supported | Requires explicit `SELECT_HISTORY`; authorization is evaluated against the current principal/grant state, not a historical grant snapshot. |
+| `AS OF TIMESTAMP '<date>'` | Refused (`0A000`) | The WAL records logical timestamps, not the wall-clock time of each commit, so a date cannot be resolved to a commit. Use `AS OF LSN`; `asql_admin.timeline_commits` lists the commits. Compared with the logical counter, any real date used to lie past the end of the log and silently returned the present. |
 | `LIMIT ... OFFSET ...` pagination | Supported | Supported in the current SQL subset; keyset pagination is still recommended for large scans. |
 | `GROUP BY` using a select-list alias in the same current query block | Supported | Covered for current aggregate read shapes such as temporal bucket aliases. |
 | PostgreSQL role/user SQL such as `CREATE ROLE`, `CREATE USER`, `ALTER ROLE`, `ALTER USER`, `DROP ROLE`, `DROP USER` | Unsupported | Durable-principal lifecycle is not managed through SQL role DDL today; use Studio, `asqlctl`, or admin HTTP security endpoints. |
