@@ -244,11 +244,14 @@ type tableState struct {
 	// Index i in a row corresponds to columns[i]. This eliminates the
 	// per-row map overhead (~240 B/row) and reduces stored-data memory by
 	// ~40-50% for typical 10-column tables compared to map[string]ast.Literal.
-	rows                 [][]ast.Literal
-	indexes              map[string]*indexState
-	indexedColumns       map[string]string
-	indexedColumnSets    map[string]string
-	primaryKey           string
+	rows              [][]ast.Literal
+	indexes           map[string]*indexState
+	indexedColumns    map[string]string
+	indexedColumnSets map[string]string
+	primaryKey        string
+	// primaryKeyColumns is a composite primary key in key order (two or
+	// more columns); primaryKey is empty then. See composite_primary_key.go.
+	primaryKeyColumns    []string
 	uniqueColumns        map[string]struct{}
 	uniqueColumnList     []string // pre-computed: unique columns excluding PK (avoids map iteration)
 	notNullColumns       []string // pre-computed: NOT NULL columns excluding PK (avoids map iteration)
@@ -1014,6 +1017,10 @@ type SchemaTable struct {
 	AppendOnly bool `json:",omitempty"`
 	// Verifiable is true when the table's rows enter the ledger's state tree.
 	Verifiable bool `json:",omitempty"`
+	// PrimaryKey lists the primary key columns in key order: one for a
+	// single-column key (also flagged on that column), several for a
+	// composite one, none without a key.
+	PrimaryKey []string `json:",omitempty"`
 }
 
 type SchemaIndex struct {

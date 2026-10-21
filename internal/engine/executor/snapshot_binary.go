@@ -15,7 +15,13 @@ import (
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
-// Binary snapshot format (version 16).
+// Binary snapshot format (version 17).
+//
+// Changes vs v16:
+//   - [4B] num_composite_keys + [domain][table][2B n][column]... each, after
+//     the verifiable list: the composite primary keys, columns in key order.
+//     Their implicit __pk_ indexes are ordinary indexes of the table. Older
+//     versions decode none.
 //
 // Changes vs v15:
 //   - [4B] num_verifiable_tables + [domain][table] each, after the
@@ -112,7 +118,7 @@ import (
 
 var (
 	snapMagic   = [4]byte{'A', 'S', 'N', 'P'}
-	snapVersion = byte(16)
+	snapVersion = byte(17)
 
 	// snapCRC32C is the CRC32C (Castagnoli) table, hardware-accelerated on x86 (SSE4.2) and ARM.
 	snapCRC32C = crc32.MakeTable(crc32.Castagnoli)
@@ -375,6 +381,42 @@ func (r *binReader) readTableRefs() [][2]string {
 	refs := make([][2]string, n)
 	for i := range refs {
 		refs[i] = [2]string{r.str(), r.str()}
+	}
+	return refs
+}
+
+// compositeKeys writes the v17 list of composite primary keys, sorted by
+// table.
+func (w *binWriter) compositeKeys(domains map[string]*domainState) {
+	refs := compositeKeyRefs(domains)
+	w.u32(uint32(len(refs)))
+	for _, ref := range refs {
+		w.str(ref.domain)
+		w.str(ref.table)
+		w.u16(uint16(len(ref.columns)))
+		for _, column := range ref.columns {
+			w.str(column)
+		}
+	}
+}
+
+// readCompositeKeys reads the v17 list of composite primary keys; older
+// versions have none.
+func (r *binReader) readCompositeKeys() []compositeKeyRef {
+	if r.version < 17 {
+		return nil
+	}
+	n := int(r.u32())
+	if n == 0 || !r.need(n) {
+		return nil
+	}
+	refs := make([]compositeKeyRef, n)
+	for i := range refs {
+		refs[i].domain, refs[i].table = r.str(), r.str()
+		refs[i].columns = make([]string, int(r.u16()))
+		for j := range refs[i].columns {
+			refs[i].columns[j] = r.str()
+		}
 	}
 	return refs
 }
@@ -1525,6 +1567,7 @@ func (w *binWriter) snapshot(snap *engineSnapshot, isFull bool, prevLogicalTS ui
 	w.u64(snap.lastTxNum)
 	w.appendOnlyTables(snap.state.domains)
 	w.verifiableTables(snap.state.domains)
+	w.compositeKeys(snap.state.domains)
 	w.catalog(snap)
 	w.principals(snap.state.principals)
 
@@ -1609,6 +1652,7 @@ type rawSnapshotFileEntry struct {
 	lastTxNum      uint64
 	appendOnly     [][2]string
 	verifiable     [][2]string
+	compositeKeys  []compositeKeyRef
 }
 
 // decodeSnapshotFileBinaryRaw decodes a binary snapshot file and returns the raw
@@ -1663,6 +1707,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 		lastTxNum := r.readLastTxNum()
 		appendOnly := r.readAppendOnlyTables()
 		verifiable := r.readVerifiableTables()
+		compositeKeys := r.readCompositeKeys()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1682,6 +1727,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 			lastTxNum:      lastTxNum,
 			appendOnly:     appendOnly,
 			verifiable:     verifiable,
+			compositeKeys:  compositeKeys,
 		})
 	}
 	return entries, nil
@@ -1844,6 +1890,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 		lastTxNum := r.readLastTxNum()
 		appendOnly := r.readAppendOnlyTables()
 		verifiable := r.readVerifiableTables()
+		compositeKeys := r.readCompositeKeys()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1870,6 +1917,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 			LastTxNum:      lastTxNum,
 			AppendOnly:     appendOnly,
 			Verifiable:     verifiable,
+			CompositeKeys:  compositeKeys,
 		}
 
 		result[i] = marshalableToSnapshot(full)
@@ -1929,6 +1977,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 	snap.lastTxNum = r.readLastTxNum()
 	appendOnly := r.readAppendOnlyTables()
 	verifiable := r.readVerifiableTables()
+	compositeKeys := r.readCompositeKeys()
 	snap.catalog = r.readCatalogState()
 	snap.state.principals = principalsStateFromPersisted(r.readPrincipals())
 
@@ -1954,6 +2003,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 	}
 	markAppendOnlyTables(snap.state.domains, appendOnly)
 	markVerifiableTables(snap.state.domains, verifiable)
+	markCompositeKeys(snap.state.domains, compositeKeys)
 	rebuildAllIndexes(&snap)
 	return []engineSnapshot{snap}, true, nil
 }

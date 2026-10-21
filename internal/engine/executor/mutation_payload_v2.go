@@ -42,9 +42,12 @@ package executor
 //   0x05 CreateIndex          0x06 CreateEntity
 //   0x07 DropTable            0x08 DropIndex
 //   0x09 TruncateTable        0x0A AlterTableSetAppendOnly
-//   0x0B AlterTableSetVerifiable
+//   0x0B AlterTableSetVerifiable 0x0C AlterTableAddPrimaryKey
 //
-// CreateTable flags byte: bit0 IfNotExists, bit1 AppendOnly, bit2 Verifiable.
+// CreateTable flags byte: bit0 IfNotExists, bit1 AppendOnly, bit2 Verifiable,
+// bit3 composite primary key: [uv n][str column]... after the versioned
+// foreign keys, in key order. AlterTableAddPrimaryKey is [str table][uv n]
+// [str column]..., in key order.
 //
 // ColumnDefinition flags byte (bitmask in encodeColumnDef):
 //   bit0 PrimaryKey  bit1 Unique  bit2 NotNull
@@ -132,6 +135,7 @@ const (
 	ddlSubTruncateTable     byte = 0x09
 	ddlSubSetAppendOnly     byte = 0x0A
 	ddlSubSetVerifiable     byte = 0x0B
+	ddlSubAddPrimaryKey     byte = 0x0C
 )
 
 // ColumnDefinition flag bits (used in encodeColumnDef)
@@ -572,7 +576,8 @@ func encodeMutationPayloadV2(domain string, plan planner.Plan, sql string) []byt
 		planner.OperationDropIndex,
 		planner.OperationTruncateTable,
 		planner.OperationAlterTableSetAppendOnly,
-		planner.OperationAlterTableSetVerifiable:
+		planner.OperationAlterTableSetVerifiable,
+		planner.OperationAlterTableAddPrimaryKey:
 		return encodeDDLStructPayload(domain, plan)
 	default:
 		// SELECT, SetOp, or future ops not yet handled — fall back to SQL.
@@ -659,6 +664,9 @@ func encodeDDLStructPayload(domain string, plan planner.Plan) []byte {
 		if plan.Verifiable {
 			flags |= 0x04
 		}
+		if len(plan.PrimaryKeyColumns) > 0 {
+			flags |= 0x08
+		}
 		w.writeByte(flags)
 		w.writeStr(plan.TableName)
 		w.writeUv(uint64(len(plan.Schema)))
@@ -668,6 +676,9 @@ func encodeDDLStructPayload(domain string, plan planner.Plan) []byte {
 		w.writeUv(uint64(len(plan.VersionedForeignKeys)))
 		for _, vfk := range plan.VersionedForeignKeys {
 			encodeVersionedFK(w, vfk)
+		}
+		if len(plan.PrimaryKeyColumns) > 0 {
+			writeStrList(w, plan.PrimaryKeyColumns)
 		}
 
 	case planner.OperationAlterTableAddColumn:
@@ -753,6 +764,11 @@ func encodeDDLStructPayload(domain string, plan planner.Plan) []byte {
 	case planner.OperationAlterTableSetVerifiable:
 		w.writeByte(ddlSubSetVerifiable)
 		w.writeStr(plan.TableName)
+
+	case planner.OperationAlterTableAddPrimaryKey:
+		w.writeByte(ddlSubAddPrimaryKey)
+		w.writeStr(plan.TableName)
+		writeStrList(w, plan.PrimaryKeyColumns)
 
 	default:
 		// should not happen: caller must only pass DDL operations
@@ -1248,6 +1264,11 @@ func decodeDDLStructPayload(r *v2Reader, domain string, plan *planner.Plan) erro
 				return fmt.Errorf("payloadv2: CREATE TABLE vfk[%d]: %w", i, err)
 			}
 		}
+		if flags&0x08 != 0 {
+			if plan.PrimaryKeyColumns, err = readStrList(r); err != nil {
+				return fmt.Errorf("payloadv2: CREATE TABLE primary key: %w", err)
+			}
+		}
 
 	case ddlSubAlterAddColumn:
 		plan.Operation = planner.OperationAlterTableAddColumn
@@ -1394,6 +1415,15 @@ func decodeDDLStructPayload(r *v2Reader, domain string, plan *planner.Plan) erro
 			return fmt.Errorf("payloadv2: SET APPEND ONLY tableName: %w", err)
 		}
 
+	case ddlSubAddPrimaryKey:
+		plan.Operation = planner.OperationAlterTableAddPrimaryKey
+		if plan.TableName, err = r.readStr(); err != nil {
+			return fmt.Errorf("payloadv2: ADD PRIMARY KEY tableName: %w", err)
+		}
+		if plan.PrimaryKeyColumns, err = readStrList(r); err != nil {
+			return fmt.Errorf("payloadv2: ADD PRIMARY KEY columns: %w", err)
+		}
+
 	case ddlSubSetVerifiable:
 		plan.Operation = planner.OperationAlterTableSetVerifiable
 		plan.TableName, err = r.readStr()
@@ -1502,4 +1532,30 @@ func decodeVersionedFK(r *v2Reader) (ast.VersionedForeignKey, error) {
 		return vfk, fmt.Errorf("vfk references_column: %w", err)
 	}
 	return vfk, nil
+}
+
+// writeStrList writes [uv n][str]... .
+func writeStrList(w *v2Buf, list []string) {
+	w.writeUv(uint64(len(list)))
+	for _, s := range list {
+		w.writeStr(s)
+	}
+}
+
+// readStrList reads what writeStrList writes.
+func readStrList(r *v2Reader) ([]string, error) {
+	n, err := r.readUv()
+	if err != nil {
+		return nil, err
+	}
+	if n > 1<<16 {
+		return nil, fmt.Errorf("list of %d strings", n)
+	}
+	list := make([]string, n)
+	for i := range list {
+		if list[i], err = r.readStr(); err != nil {
+			return nil, err
+		}
+	}
+	return list, nil
 }

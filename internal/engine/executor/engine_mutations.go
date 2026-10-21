@@ -2,6 +2,7 @@ package executor
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -95,7 +96,7 @@ func tableStatesEqual(a, b *tableState) bool {
 	if a == nil || b == nil {
 		return false
 	}
-	if len(a.columns) != len(b.columns) || a.primaryKey != b.primaryKey {
+	if len(a.columns) != len(b.columns) || a.primaryKey != b.primaryKey || !slices.Equal(a.primaryKeyColumns, b.primaryKeyColumns) {
 		return false
 	}
 	for i, col := range a.columns {
@@ -455,6 +456,8 @@ func (engine *Engine) generateRollbackSQL(domain string, forwardSQL []string) ([
 			issues = append(issues, fmt.Sprintf("forward[%d] SET APPEND ONLY cannot be undone", index))
 		case planner.OperationAlterTableSetVerifiable:
 			issues = append(issues, fmt.Sprintf("forward[%d] SET VERIFIABLE cannot be undone", index))
+		case planner.OperationAlterTableAddPrimaryKey:
+			issues = append(issues, fmt.Sprintf("forward[%d] ADD PRIMARY KEY cannot be undone", index))
 		case planner.OperationCreateEntity:
 			issues = append(issues, fmt.Sprintf("forward[%d] CREATE ENTITY requires explicit rollback planning", index))
 		default:
@@ -536,7 +539,8 @@ func isMigrationMutationOperation(operation planner.Operation) bool {
 		planner.OperationDropIndex,
 		planner.OperationTruncateTable,
 		planner.OperationAlterTableSetAppendOnly,
-		planner.OperationAlterTableSetVerifiable:
+		planner.OperationAlterTableSetVerifiable,
+		planner.OperationAlterTableAddPrimaryKey:
 		return true
 	default:
 		return false
@@ -586,6 +590,7 @@ func shareTableForInsert(source *tableState, replayMode bool) *tableState {
 		indexedColumns:       source.indexedColumns,
 		indexedColumnSets:    source.indexedColumnSets,
 		primaryKey:           source.primaryKey,
+		primaryKeyColumns:    source.primaryKeyColumns,
 		uniqueColumns:        source.uniqueColumns,
 		uniqueColumnList:     source.uniqueColumnList,
 		notNullColumns:       source.notNullColumns,
@@ -720,6 +725,7 @@ func cloneTableState(source *tableState) *tableState {
 		indexedColumns:       indexedColumns,
 		indexedColumnSets:    indexedColumnSets,
 		primaryKey:           source.primaryKey,
+		primaryKeyColumns:    source.primaryKeyColumns,
 		uniqueColumns:        uniqueColumns,
 		foreignKeys:          foreignKeys,
 		checkConstraints:     checkConstraints,
@@ -968,6 +974,8 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 	}
 
 	switch plan.Operation {
+	case planner.OperationAlterTableAddPrimaryKey:
+		return engine.applyAddPrimaryKey(domainState, plan, clonedTables)
 	case planner.OperationAlterTableSetAppendOnly, planner.OperationAlterTableSetVerifiable:
 		table, exists := domainState.tables[plan.TableName]
 		if !exists || !engine.catalog.HasTable(plan.DomainName, plan.TableName) {
@@ -1006,6 +1014,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		columns := make([]string, 0, len(plan.Schema))
 		columnDefinitions := make(map[string]ast.ColumnDefinition, len(plan.Schema))
 		primaryKey := ""
+		var primaryKeyColumns []string
 		uniqueColumns := make(map[string]struct{})
 		foreignKeys := make([]foreignKeyConstraint, 0)
 		checkConstraints := make([]checkConstraint, 0)
@@ -1037,6 +1046,19 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			if column.Check != nil {
 				checkConstraints = append(checkConstraints, checkConstraint{column: column.Name, predicate: column.Check})
 			}
+		}
+
+		if len(plan.PrimaryKeyColumns) > 0 {
+			if primaryKey != "" {
+				return fmt.Errorf("%w: a table has one primary key: declare it on a column or as PRIMARY KEY (...), not both", errConstraintGeneric)
+			}
+			if err := checkPrimaryKeyColumns(plan.PrimaryKeyColumns, columnDefinitions); err != nil {
+				return err
+			}
+			if len(plan.PrimaryKeyColumns) < 2 {
+				return fmt.Errorf("%w: a one-column primary key is declared on the column", errConstraintGeneric)
+			}
+			primaryKeyColumns = append([]string(nil), plan.PrimaryKeyColumns...)
 		}
 
 		if err := validateForeignKeyDefinitions(domainState, plan.TableName, uniqueColumns, foreignKeys); err != nil {
@@ -1110,7 +1132,13 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			indexedColumns[col] = idxName
 		}
 
+		if len(primaryKeyColumns) > 0 {
+			index := newCompositePKIndex(plan.TableName, primaryKeyColumns)
+			indexes[index.name] = index
+		}
+
 		ts := &tableState{
+			primaryKeyColumns:    primaryKeyColumns,
 			columns:              columns,
 			columnDefinitions:    columnDefinitions,
 			rows:                 make([][]ast.Literal, 0),
@@ -1221,7 +1249,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		}
 
 		// Prevent dropping primary key columns.
-		if table.primaryKey == column {
+		if table.primaryKey == column || slices.Contains(table.primaryKeyColumns, column) {
 			return fmt.Errorf("cannot drop primary key column %q", column)
 		}
 
@@ -1324,6 +1352,14 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		// Update primary key if renamed.
 		if table.primaryKey == oldCol {
 			table.primaryKey = newCol
+		}
+		if slices.Contains(table.primaryKeyColumns, oldCol) {
+			renamed := renameInList(table.primaryKeyColumns, oldCol, newCol)
+			if idx := compositePKIndex(table); idx != nil {
+				idx.columns = renamed
+				idx.column = renamed[0]
+			}
+			table.primaryKeyColumns = renamed
 		}
 
 		// Move column definition.
@@ -2133,6 +2169,21 @@ func findConflictingRow(table *tableState, row map[string]ast.Literal, conflictC
 				}
 				return -1
 			}
+		}
+	}
+
+	// A target that is the composite primary key, in any order: its index.
+	if len(table.primaryKeyColumns) > 0 && len(conflictColumns) == len(table.primaryKeyColumns) {
+		target := slices.Clone(conflictColumns)
+		key := slices.Clone(table.primaryKeyColumns)
+		slices.Sort(target)
+		slices.Sort(key)
+		if slices.Equal(target, key) {
+			pk, ok := compositeKey(table.primaryKeyColumns, row)
+			if !ok {
+				return -1
+			}
+			return findCompositeKeyRow(table, row, pk)
 		}
 	}
 

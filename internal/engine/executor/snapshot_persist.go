@@ -46,6 +46,8 @@ type persistedSnapshot struct {
 	AppendOnly [][2]string
 	// Verifiable lists the verifiable tables as (domain, table).
 	Verifiable [][2]string
+	// CompositeKeys lists the composite primary keys.
+	CompositeKeys []compositeKeyRef
 }
 
 type persistedCatalog struct {
@@ -488,6 +490,7 @@ func marshalableToSnapshot(ps persistedSnapshot) engineSnapshot {
 
 	markAppendOnlyTables(snap.state.domains, ps.AppendOnly)
 	markVerifiableTables(snap.state.domains, ps.Verifiable)
+	markCompositeKeys(snap.state.domains, ps.CompositeKeys)
 	return snap
 }
 
@@ -1065,6 +1068,7 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 				LastTxNum:      entry.lastTxNum,
 				AppendOnly:     entry.appendOnly,
 				Verifiable:     entry.verifiable,
+				CompositeKeys:  entry.compositeKeys,
 			}
 			snap := marshalableToSnapshot(full)
 			rebuildAllIndexes(&snap)
