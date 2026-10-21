@@ -133,6 +133,32 @@ func TestWALGCKeepsLedgerVerifiableFromSnapshotAnchor(t *testing.T) {
 	}
 }
 
+// WAL GC keeps every record from the floor on, even when a snapshot covers
+// them: the log tree (ADR 0008) has not added them yet.
+func TestWALGCStopsAtTheFloor(t *testing.T) {
+	dir := t.TempDir()
+	base := filepath.Join(dir, "asql.wal")
+	store, eng := newLedgerTestEngine(t, dir, WithWALGC())
+	eng.SetWALGCFloor(func() uint64 { return 40 })
+	execLedgerTx(t, eng, "CREATE TABLE results (id INT, result TEXT)")
+	for i := 0; i < 200; i++ {
+		execLedgerTx(t, eng, fmt.Sprintf("INSERT INTO results (id, result) VALUES (%d, 'value-%d')", i, i))
+		if i == 150 {
+			captureLedgerTestSnapshot(eng)
+		}
+	}
+	eng.WaitPendingSnapshots()
+	_ = store.Close()
+
+	catalog, err := wal.CatalogSegments(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog) == 0 || catalog[0].FirstLSN > 40 {
+		t.Fatalf("WAL GC removed records at or after the floor, LSN 40: %+v", catalog[0])
+	}
+}
+
 // Snapshots written before ADR 0005 (format v12) still decode, without an
 // anchor, and ones written before v14 without a TxID high-water mark.
 func TestOlderSnapshotFormatsDecode(t *testing.T) {
