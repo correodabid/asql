@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"math"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -17,15 +18,20 @@ import (
 	"github.com/correodabid/asql/internal/engine/ports"
 	"github.com/correodabid/asql/internal/platform/datadir"
 	"github.com/correodabid/asql/internal/storage/ledgerdigest"
+	"github.com/correodabid/asql/internal/storage/logtree"
 	"github.com/correodabid/asql/internal/storage/wal"
 )
 
 // ledgerSigning runs ledger=signed (ADR 0005): a checkpointer signs the
 // committed chain head into the sidecar digest log, off the commit path.
+// Each checkpoint first extends the log tree (ADR 0008) and signs its root
+// too, as a version 2 digest.
 type ledgerSigning struct {
 	log          *ledgerdigest.Log
 	checkpointer *ledgerdigest.Checkpointer
 	logger       *slog.Logger
+	tree         *logtree.Tree
+	treeBuilder  *logtree.Builder
 
 	// For result attestations (ADR 0006).
 	store    *wal.SegmentedLogStore
@@ -55,6 +61,35 @@ func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engin
 		}
 		return records[0].Term, records[0].Timestamp, nil
 	}
+	tree, err := logtree.Open(dd.LedgerDir())
+	if err != nil {
+		_ = digestLog.Close()
+		return nil, err
+	}
+	treeBuilder, err := logtree.NewBuilder(tree, logtree.Source{
+		CommittedLSN: engine.HeadLSN,
+		Leaves: func(ctx context.Context, from, to uint64) ([]logtree.Hash, error) {
+			leaves, err := store.LedgerLeaves(ctx, from, to)
+			out := make([]logtree.Hash, len(leaves))
+			for i, leaf := range leaves {
+				out[i] = logtree.Hash(leaf)
+			}
+			return out, err
+		},
+	}, 0, config.Logger)
+	if err != nil {
+		_ = tree.Close()
+		_ = digestLog.Close()
+		return nil, err
+	}
+	// WAL GC never removes records the tree has not added: the tree starts
+	// at LSN 1 and is never rebuilt from a truncated WAL.
+	engine.SetWALGCFloor(func() uint64 {
+		if treeBuilder.Err() != nil {
+			return math.MaxUint64
+		}
+		return uint64(tree.Size()) + 1
+	})
 	checkpointer, err := ledgerdigest.NewCheckpointer(ledgerdigest.CheckpointerConfig{
 		NodeID: config.NodeID,
 		Signer: signer,
@@ -66,18 +101,23 @@ func newLedgerSigning(config Config, dd *datadir.DataDir, engine *executor.Engin
 			CommittedLSN: engine.HeadLSN,
 			ChainAt:      store.LedgerChainAt,
 			RecordAt:     recordAt,
+			TreeRoot: func(ctx context.Context, lsn uint64) ([32]byte, bool, error) {
+				root, ok, err := treeBuilder.RootAt(ctx, lsn)
+				return [32]byte(root), ok, err
+			},
 		},
 		Interval:  config.LedgerDigestInterval,
 		EveryLSNs: config.LedgerDigestEveryLSNs,
 		Logger:    config.Logger,
 	})
 	if err != nil {
+		_ = tree.Close()
 		_ = digestLog.Close()
 		return nil, err
 	}
 	config.Logger.Info("ledger: signing digests", "key_id", signer.KeyID(), "dir", dd.LedgerDir())
 	return &ledgerSigning{
-		log: digestLog, checkpointer: checkpointer, logger: config.Logger,
+		log: digestLog, checkpointer: checkpointer, logger: config.Logger, tree: tree, treeBuilder: treeBuilder,
 		store: store, signer: signer, nodeID: config.NodeID, recordAt: recordAt, now: time.Now,
 	}, nil
 }
@@ -118,6 +158,7 @@ func (ls *ledgerSigning) stop() {
 		ls.logger.Warn("ledger: final digest failed", "error", err.Error())
 	}
 	_ = ls.log.Close()
+	_ = ls.tree.Close()
 }
 
 // digest returns the latest digest, or with lsn > 0 the oldest one covering
@@ -164,7 +205,7 @@ func (server *Server) handleAdminLedgerDigest(w http.ResponseWriter, r *http.Req
 
 var reLedgerDigestLSN = regexp.MustCompile(`(?i)\blsn\s*>=\s*(\d+)`)
 
-var ledgerDigestColumns = []string{"version", "lsn", "chain", "term", "timestamp", "node_id", "key_id", "signed_at", "sig"}
+var ledgerDigestColumns = []string{"version", "lsn", "chain", "term", "timestamp", "node_id", "key_id", "signed_at", "sig", "tree_root"}
 
 // adminLedgerDigest serves SELECT * FROM asql_admin.ledger_digest: one row
 // with the latest digest, or with WHERE lsn >= N the oldest one covering N.
@@ -185,10 +226,15 @@ func (server *Server) adminLedgerDigest(sql string) (interceptResult, bool) {
 	if !ok {
 		return empty, true
 	}
+	treeRoot := ast.Literal{Kind: ast.LiteralNull}
+	if d.HasTree() {
+		treeRoot = litS(hex.EncodeToString(d.TreeRoot[:]))
+	}
 	row := map[string]ast.Literal{
 		"version":   litU(uint64(d.Version)),
 		"lsn":       litU(d.LSN),
 		"chain":     litS(hex.EncodeToString(d.Chain[:])),
+		"tree_root": treeRoot,
 		"term":      litU(d.Term),
 		"timestamp": litU(d.Timestamp),
 		"node_id":   litS(d.NodeID),

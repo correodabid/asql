@@ -15,6 +15,7 @@ import (
 
 	"github.com/correodabid/asql/internal/platform/datadir"
 	"github.com/correodabid/asql/internal/storage/ledgerdigest"
+	"github.com/correodabid/asql/internal/storage/logtree"
 	"github.com/correodabid/asql/internal/storage/wal"
 
 	"github.com/jackc/pgx/v5"
@@ -105,8 +106,15 @@ func TestSignedLedgerDigestsMatchTheWAL(t *testing.T) {
 	if err := latest.Verify(keys); err != nil {
 		t.Fatalf("latest digest: %v", err)
 	}
+	// Rebuild the log tree from the WAL alone: roots[n] is its root at LSN n.
+	var tree logtree.Frontier
+	roots := []logtree.Hash{{}}
 	report, err := wal.VerifyLedger(dd.WALBasePath(), wal.VerifyOptions{
 		Anchors: []wal.LedgerAnchor{{LSN: latest.LSN, Chain: latest.Chain, Source: "digest"}},
+		OnLeaf: func(_ uint64, leaf wal.ChainHash) {
+			tree.Add(logtree.Hash(leaf))
+			roots = append(roots, tree.Root())
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -114,6 +122,25 @@ func TestSignedLedgerDigestsMatchTheWAL(t *testing.T) {
 	// Shutdown signs the final head, so the newest digest covers the whole WAL.
 	if !report.OK || latest.LSN != report.LastLSN || latest.NodeID != "node-a" {
 		t.Fatalf("digest LSN %d, WAL last LSN %d, ok=%v failure=%v", latest.LSN, report.LastLSN, report.OK, report.Failure)
+	}
+	// Every digest signs the log tree root at its LSN (ADR 0008).
+	for _, lsn := range []uint64{1, 3, latest.LSN / 2, latest.LSN} {
+		d, ok, err := digestLog.Covering(lsn)
+		if err != nil || !ok {
+			t.Fatalf("no digest covers LSN %d: %v", lsn, err)
+		}
+		if d.Version != ledgerdigest.Version2 || logtree.Hash(d.TreeRoot) != roots[d.LSN] {
+			t.Fatalf("digest at LSN %d: version %d, tree root %x; the WAL's is %x", d.LSN, d.Version, d.TreeRoot, roots[d.LSN])
+		}
+	}
+	// The node's own tree holds the whole WAL.
+	nodeTree, err := logtree.Open(dd.LedgerDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nodeTree.Close()
+	if root, err := nodeTree.Root(int64(latest.LSN)); err != nil || root != roots[latest.LSN] {
+		t.Fatalf("node's tree at LSN %d: %x, %v; want %x", latest.LSN, root, err, roots[latest.LSN])
 	}
 }
 
@@ -171,12 +198,16 @@ func checkDigestSurfaces(t *testing.T, server *Server, pgwireAddr, adminAddr str
 			var (
 				version, lsn, term, timestamp       int64
 				chain, nodeID, keyID, signedAt, sig string
+				treeRoot                            *string
 			)
-			if err := conn.QueryRow(ctx, sql).Scan(&version, &lsn, &chain, &term, &timestamp, &nodeID, &keyID, &signedAt, &sig); err != nil {
+			if err := conn.QueryRow(ctx, sql).Scan(&version, &lsn, &chain, &term, &timestamp, &nodeID, &keyID, &signedAt, &sig, &treeRoot); err != nil {
 				t.Fatalf("%s (%s): %v", sql, mode, err)
 			}
 			if uint64(lsn) != want.LSN || chain != hex.EncodeToString(want.Chain[:]) || keyID != want.KeyID || sig != base64.StdEncoding.EncodeToString(want.Sig) {
 				t.Fatalf("%s (%s): lsn=%d chain=%s, want lsn=%d", sql, mode, lsn, chain, want.LSN)
+			}
+			if version != ledgerdigest.Version2 || treeRoot == nil || *treeRoot != hex.EncodeToString(want.TreeRoot[:]) {
+				t.Fatalf("%s (%s): version %d, tree_root %v; want version 2 with %x", sql, mode, version, treeRoot, want.TreeRoot)
 			}
 		}
 		_ = conn.Close(ctx)
