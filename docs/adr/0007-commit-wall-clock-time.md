@@ -1,6 +1,6 @@
 # ADR 0007: Record the wall-clock time of each commit
 
-- Status: Proposed.
+- Status: Accepted.
 - Date: 2026-10-20
 - Decision drivers:
   - `AS OF TIMESTAMP '<date>'` must answer with the state at that date, or fail; it
@@ -75,9 +75,13 @@ commit a date resolves to.
 ## Consequences
 
 - **Format.** COMMIT records written from now on carry 9 payload bytes. Older WAL
-  records keep an empty payload and have no time. A version of ASQL that predates
-  this change must ignore the payload of a COMMIT record to read a newer WAL; the
-  implementation checks that, and documents it if it does not.
+  records keep an empty payload and have no time. Versions that predate this change
+  ignore the payload of a COMMIT record: checked by opening a data directory written
+  with commit times, from its snapshots and from its WAL alone, with the version
+  before this change, which read it and wrote to it.
+- **Downgrade and upgrade again.** Commits an older version writes have no time,
+  after commits that do. A date that falls among them fails like a date before the
+  first recorded commit, instead of resolving to the timed commit before them.
 - **Precision and trust.** The time is the leader's clock, asserted by the node. It
   is as good as that clock, and the clamp in § 2 means it can lag after a clock jumps
   back. Proving that a state existed by a date to a third party still needs a signed
