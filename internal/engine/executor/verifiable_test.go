@@ -108,6 +108,18 @@ func TestVerifiableNeedsAPrimaryKey(t *testing.T) {
 	if schemaTableVerifiable(n.engine.SchemaSnapshot(nil), "app", "edges") {
 		t.Fatal("a table without a primary key became verifiable")
 	}
+
+	// The integration's path: a composite key added to the existing
+	// append-only edge table, then VERIFIABLE; and a composite key at
+	// creation.
+	n.mustTx("INSERT INTO edges (child_id, parent_id, ordinal) VALUES ('b', 'a', 1)")
+	n.mustTx("ALTER TABLE edges ADD PRIMARY KEY (child_id, parent_id)")
+	n.mustTx("ALTER TABLE edges SET VERIFIABLE")
+	n.mustTx("CREATE TABLE links (child_id TEXT, parent_id TEXT, ordinal INT, PRIMARY KEY (child_id, parent_id)) APPEND ONLY VERIFIABLE")
+	schema := n.engine.SchemaSnapshot(nil)
+	if !schemaTableVerifiable(schema, "app", "edges") || !schemaTableVerifiable(schema, "app", "links") {
+		t.Fatal("tables with a composite primary key are not verifiable")
+	}
 	// The failed transactions left nothing behind.
 	for _, d := range n.engine.SchemaSnapshot(nil).Domains {
 		for _, tbl := range d.Tables {

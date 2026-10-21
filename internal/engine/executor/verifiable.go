@@ -15,6 +15,9 @@ import (
 func checkVerifiable(table *tableState, plan planner.Plan) error {
 	switch {
 	case plan.Operation == planner.OperationCreateTable && plan.Verifiable:
+		if len(plan.PrimaryKeyColumns) > 0 {
+			return nil
+		}
 		for _, column := range plan.Schema {
 			if column.PrimaryKey {
 				return nil
@@ -32,5 +35,5 @@ func checkVerifiable(table *tableState, plan planner.Plan) error {
 
 // tableHasPrimaryKey reports whether table declares a primary key.
 func tableHasPrimaryKey(table *tableState) bool {
-	return table.primaryKey != ""
+	return table.primaryKey != "" || len(table.primaryKeyColumns) > 0
 }
