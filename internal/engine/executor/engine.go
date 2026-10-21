@@ -518,13 +518,14 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 	case equalsCI(trimmed, "ROLLBACK") || equalsCI(trimmed, "ROLLBACK;"):
 		return engine.rollback(session), nil
 	default:
-		if session.activeTx == nil {
-			return Result{}, errTxRequired
-		}
-
+		// Parse first: a statement that does not parse is a syntax error,
+		// whether or not a transaction is open.
 		statement, err := parser.Parse(trimmed)
 		if err != nil {
 			return Result{}, fmt.Errorf("parse sql %q: %w", trimmed, err)
+		}
+		if session.activeTx == nil {
+			return Result{}, errTxRequired
 		}
 
 		plan, err := planner.BuildForDomains(statement, session.activeTx.domains)
