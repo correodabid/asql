@@ -189,3 +189,15 @@ func TestSizeForStoredHashes(t *testing.T) {
 		}
 	}
 }
+
+func TestFrontierMatchesRFC6962(t *testing.T) {
+	var f Frontier
+	var leaves []Hash
+	for i := range 300 {
+		leaves = append(leaves, leafFor(i))
+		f.Add(leaves[i])
+		if f.Size() != int64(i+1) || f.Root() != rfc6962Root(leaves) {
+			t.Fatalf("frontier root after %d records differs from RFC 6962", i+1)
+		}
+	}
+}

@@ -34,6 +34,11 @@ type Source struct {
 	// RecordAt returns the term and logical timestamp of the WAL record at
 	// lsn.
 	RecordAt func(ctx context.Context, lsn uint64) (term, timestamp uint64, err error)
+	// TreeRoot, when set, returns the log tree root of LSNs 1..lsn
+	// (ADR 0008), so digests are signed as version 2. ok false means the
+	// node has no log tree, and digests stay version 1; an error defers
+	// the digest to the next checkpoint.
+	TreeRoot func(ctx context.Context, lsn uint64) (root [32]byte, ok bool, err error)
 }
 
 // CheckpointerConfig configures a Checkpointer.
@@ -143,7 +148,19 @@ func (c *Checkpointer) Checkpoint(ctx context.Context) (Digest, bool, error) {
 	if err != nil {
 		return Digest{}, false, fmt.Errorf("read record at LSN %d: %w", lsn, err)
 	}
+	version, treeRoot := uint8(Version1), [32]byte{}
+	if c.cfg.Source.TreeRoot != nil {
+		root, ok, err := c.cfg.Source.TreeRoot(ctx, lsn)
+		if err != nil {
+			return Digest{}, false, fmt.Errorf("log tree root at LSN %d: %w", lsn, err)
+		}
+		if ok {
+			version, treeRoot = Version2, root
+		}
+	}
 	d, err := Sign(c.cfg.Signer, Digest{
+		Version:   version,
+		TreeRoot:  treeRoot,
 		LSN:       lsn,
 		Chain:     chain,
 		Term:      term,
