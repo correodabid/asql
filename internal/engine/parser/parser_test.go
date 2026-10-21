@@ -2,10 +2,12 @@ package parser
 
 import (
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 )
 
 func TestParseCreateTableSnapshot(t *testing.T) {
@@ -2566,5 +2568,43 @@ func TestParseNotEqualOperators(t *testing.T) {
 	p, err = parseWhere("note = 'a != b'")
 	if err != nil || p.Operator != "=" || p.Value.StringValue != "a != b" {
 		t.Fatalf("operator inside a literal: %+v, %v", p, err)
+	}
+}
+
+func TestParseAsOfPlacement(t *testing.T) {
+	for _, sql := range []string{
+		"SELECT a.id FROM artifacts a AS OF LSN 7 JOIN anc ON a.id = anc.id",
+		"SELECT a.id FROM artifacts a JOIN anc ON a.id = anc.id AS OF LSN 7",
+		"SELECT id FROM artifacts AS OF LSN 7 WHERE id = 'x'",
+	} {
+		stmt, err := Parse(sql)
+		if err != nil {
+			t.Fatalf("%s: %v", sql, err)
+		}
+		sel := stmt.(ast.SelectStatement)
+		if sel.AsOfLSN == nil || *sel.AsOfLSN != 7 {
+			t.Fatalf("%s: AS OF LSN %v, want 7", sql, sel.AsOfLSN)
+		}
+		if len(sel.Joins) > 0 && (sel.TableAlias != "a" || sel.Joins[0].TableName != "anc") {
+			t.Fatalf("%s: from %q alias %q joins %+v", sql, sel.TableName, sel.TableAlias, sel.Joins)
+		}
+	}
+	if _, err := Parse("SELECT a.id FROM artifacts a AS OF LSN 7 JOIN anc ON a.id = anc.id AS OF LSN 8"); err == nil {
+		t.Fatal("two AS OF: no error")
+	}
+
+	// AS OF applies to the whole query; inside, it used to read the present.
+	for _, sql := range []string{
+		"WITH old(id) AS (SELECT id FROM artifacts AS OF LSN 7) SELECT id FROM old",
+		"SELECT id FROM artifacts WHERE id IN (SELECT id FROM artifacts AS OF LSN 7)",
+		"SELECT id FROM artifacts WHERE id IN (SELECT id FROM artifacts AS OF TIMESTAMP '2000-01-01')",
+		"SELECT o.id FROM (SELECT id FROM artifacts AS OF LSN 7) o",
+		"SELECT id FROM artifacts AS OF LSN 7 UNION SELECT id FROM artifacts",
+	} {
+		_, err := Parse(sql)
+		var sqlErr *sqlerr.SQLError
+		if !errors.As(err, &sqlErr) || sqlErr.Code != "0A000" || !strings.Contains(err.Error(), "whole query") {
+			t.Fatalf("%s: %v, want 0A000 about the whole query", sql, err)
+		}
 	}
 }

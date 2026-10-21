@@ -179,6 +179,9 @@ func parseWithCTE(sql string) (ast.Statement, error) {
 		cte := ast.CTE{Name: cteName, Columns: cteColumns}
 		switch body := innerStmt.(type) {
 		case ast.SelectStatement:
+			if hasAsOf(body) {
+				return nil, errNestedAsOf
+			}
 			cte.Statement = body
 		case ast.SetOperationStatement:
 			if !recursive {
@@ -1921,64 +1924,102 @@ func parseGroupBy(clause string) ([]string, error) {
 // is stripped at transport level before the parser sees the SQL); this
 // function adds the native SQL form.
 func extractTrailingAsOf(fromSpec string) (string, *uint64, *int64, error) {
-	// Walk backwards from the right looking for " AS OF " with a valid
-	// tail. Done textually rather than with a regex so we only match
-	// when the clause is outside any quoted literal. We accept these
-	// shapes (case-insensitive):
+	// The clause may come after the first table or after the joins: it
+	// applies to the whole query either way. It is looked for outside
+	// quotes and parentheses, so a subquery's own clause is its own (and
+	// rejected there, see errNestedAsOf). The shapes accepted are
+	// (case-insensitive):
 	//   AS OF LSN <digits>
 	//   AS OF TIMESTAMP '<iso timestamp>'
 	trimmed := strings.TrimRight(fromSpec, " \t\r\n")
 	upper := strings.ToUpper(trimmed)
 
-	// Find the last occurrence of " AS OF " that is not inside quotes.
-	asOfIdx := -1
-	inQuote := false
+	type clause struct{ start, end int }
+	var found []clause
+	depth, inQuote := 0, false
 	for i := 0; i < len(trimmed); i++ {
-		if trimmed[i] == '\'' {
+		switch ch := trimmed[i]; {
+		case ch == '\'':
 			inQuote = !inQuote
 			continue
-		}
-		if inQuote {
+		case inQuote:
+			continue
+		case ch == '(':
+			depth++
+			continue
+		case ch == ')':
+			if depth > 0 {
+				depth--
+			}
 			continue
 		}
-		if i+len(" AS OF ") <= len(upper) && upper[i:i+len(" AS OF ")] == " AS OF " {
-			asOfIdx = i
+		if depth != 0 || !strings.HasPrefix(upper[i:], " AS OF ") {
+			continue
+		}
+		rest := i + len(" AS OF ")
+		switch {
+		case strings.HasPrefix(upper[rest:], "LSN "):
+			j := rest + len("LSN ")
+			for j < len(trimmed) && trimmed[j] == ' ' {
+				j++
+			}
+			k := j
+			for k < len(trimmed) && trimmed[k] >= '0' && trimmed[k] <= '9' {
+				k++
+			}
+			if k == j || (k < len(trimmed) && trimmed[k] != ' ') {
+				return "", nil, nil, fmt.Errorf("%w: AS OF LSN requires an unsigned integer, got %q", errInvalidSQL, strings.Fields(trimmed[j:] + " ")[0])
+			}
+			found = append(found, clause{i, k})
+		case strings.HasPrefix(upper[rest:], "TIMESTAMP "):
+			j := rest + len("TIMESTAMP ")
+			for j < len(trimmed) && trimmed[j] == ' ' {
+				j++
+			}
+			if j >= len(trimmed) || trimmed[j] != '\'' {
+				return "", nil, nil, fmt.Errorf("%w: AS OF TIMESTAMP requires a quoted ISO-8601 timestamp", errInvalidSQL)
+			}
+			k := strings.IndexByte(trimmed[j+1:], '\'')
+			if k < 0 {
+				return "", nil, nil, fmt.Errorf("%w: AS OF TIMESTAMP requires a quoted ISO-8601 timestamp", errInvalidSQL)
+			}
+			found = append(found, clause{i, j + 1 + k + 1})
 		}
 	}
-	if asOfIdx < 0 {
+	if len(found) == 0 {
 		return trimmed, nil, nil, nil
 	}
+	if len(found) > 1 {
+		return "", nil, nil, fmt.Errorf("%w: a query takes one AS OF, which applies to all of it", errInvalidSQL)
+	}
 
-	clause := strings.TrimSpace(trimmed[asOfIdx+len(" AS OF "):])
-	head := strings.TrimSpace(trimmed[:asOfIdx])
-
-	upperClause := strings.ToUpper(clause)
-	switch {
-	case strings.HasPrefix(upperClause, "LSN "):
-		value := strings.TrimSpace(clause[len("LSN "):])
-		n, err := strconv.ParseUint(value, 10, 64)
+	c := found[0]
+	text := strings.TrimSpace(trimmed[c.start+len(" AS OF ") : c.end])
+	head := strings.TrimSpace(trimmed[:c.start] + trimmed[c.end:])
+	if strings.HasPrefix(strings.ToUpper(text), "LSN") {
+		n, err := strconv.ParseUint(strings.TrimSpace(text[len("LSN"):]), 10, 64)
 		if err != nil {
-			return "", nil, nil, fmt.Errorf("%w: AS OF LSN requires an unsigned integer, got %q", errInvalidSQL, value)
+			return "", nil, nil, fmt.Errorf("%w: AS OF LSN requires an unsigned integer", errInvalidSQL)
 		}
 		return head, &n, nil, nil
-	case strings.HasPrefix(upperClause, "TIMESTAMP "):
-		value := strings.TrimSpace(clause[len("TIMESTAMP "):])
-		if len(value) < 2 || value[0] != '\'' || value[len(value)-1] != '\'' {
-			return "", nil, nil, fmt.Errorf("%w: AS OF TIMESTAMP requires a quoted ISO-8601 timestamp, got %q", errInvalidSQL, value)
-		}
-		iso := value[1 : len(value)-1]
-		ts, err := parseIsoTimestamp(iso)
-		if err != nil {
-			return "", nil, nil, fmt.Errorf("%w: AS OF TIMESTAMP could not parse %q: %v", errInvalidSQL, iso, err)
-		}
-		micros := ts.UnixMicro()
-		return head, nil, &micros, nil
 	}
-	// Any other token sequence after AS OF is either a versioned FK
-	// clause (shouldn't appear here) or a malformed request. Returning
-	// the original spec lets callers that don't care about time-travel
-	// continue to work.
-	return trimmed, nil, nil, nil
+	value := strings.TrimSpace(text[len("TIMESTAMP"):])
+	iso := value[1 : len(value)-1]
+	ts, err := parseIsoTimestamp(iso)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("%w: AS OF TIMESTAMP could not parse %q: %v", errInvalidSQL, iso, err)
+	}
+	micros := ts.UnixMicro()
+	return head, nil, &micros, nil
+}
+
+// errNestedAsOf rejects AS OF inside a CTE, a subquery or a side of a set
+// operation: it applies to the whole query, so there it read the present
+// (ASQL-13).
+var errNestedAsOf = sqlerr.New("0A000", "AS OF applies to the whole query: put it in the outermost FROM, not inside a CTE, a subquery or a side of UNION, INTERSECT or EXCEPT")
+
+func hasAsOf(sel ast.SelectStatement) bool {
+	return sel.AsOfLSN != nil || sel.AsOfTimestampMicros != nil
 }
 
 // parseIsoTimestamp accepts a handful of ISO-8601 shapes that a user is
@@ -2094,6 +2135,9 @@ func parseSubqueryExpression(text string) (ast.SelectStatement, error) {
 	sel, ok := stmt.(ast.SelectStatement)
 	if !ok {
 		return ast.SelectStatement{}, fmt.Errorf("%w: subquery must be a SELECT statement", errInvalidSQL)
+	}
+	if hasAsOf(sel) {
+		return ast.SelectStatement{}, errNestedAsOf
 	}
 	return sel, nil
 }
@@ -3751,6 +3795,9 @@ func parseSetOperation(sql string, op ast.SetOpKind, pos int) (ast.SetOperationS
 		return ast.SetOperationStatement{}, fmt.Errorf("%w: right side of %s must be SELECT", errInvalidSQL, opStr)
 	}
 
+	if hasAsOf(leftSel) || hasAsOf(rightSel) {
+		return ast.SetOperationStatement{}, errNestedAsOf
+	}
 	return ast.SetOperationStatement{
 		Op:    op,
 		Left:  leftSel,
