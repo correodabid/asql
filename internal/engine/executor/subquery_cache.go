@@ -167,8 +167,14 @@ func (engine *Engine) inlineInSubqueries(state *readableState, pred *ast.Predica
 		copied.Left, copied.Right = left, right
 		out = &copied
 	}
-	if !strings.EqualFold(strings.TrimSpace(pred.Operator), "IN") || pred.Subquery == nil || pred.Column == "" ||
-		pred.JsonAccess != nil || subqueryComparesColumns(pred.Subquery.Statement.Where) {
+	if pred.Subquery == nil || pred.Column == "" || pred.JsonAccess != nil || subqueryComparesColumns(pred.Subquery.Statement.Where) {
+		return out, nil
+	}
+	switch strings.ToUpper(strings.TrimSpace(pred.Operator)) {
+	case "IN":
+	case "=", "!=", "<>", "<", "<=", ">", ">=":
+		return engine.inlineScalarSubquery(state, out)
+	default:
 		return out, nil
 	}
 	result, err := subqueryRows(pred.Subquery, state, engine, nil)
@@ -197,6 +203,34 @@ func (engine *Engine) inlineInSubqueries(state *readableState, pred *ast.Predica
 	}
 	inlined := *out
 	inlined.Subquery, inlined.InValues = nil, values
+	return &inlined, nil
+}
+
+// inlineScalarSubquery replaces "x op (SELECT ...)", whose subquery cannot
+// refer to an outer row, with "x op value", run once, so the comparison can
+// use an index on x. With no row or a NULL the comparison is unknown for
+// every row, which per-row evaluation already answers; more than one row is
+// an error.
+func (engine *Engine) inlineScalarSubquery(state *readableState, pred *ast.Predicate) (*ast.Predicate, error) {
+	result, err := subqueryRows(pred.Subquery, state, engine, nil)
+	if err != nil {
+		return nil, err
+	}
+	switch {
+	case len(result.rows) == 0:
+		return pred, nil
+	case len(result.rows) > 1:
+		return nil, sqlerr.New("21000", "more than one row returned by a subquery used as an expression")
+	}
+	v, err := subqueryValue(pred.Subquery, result.rows[0])
+	if err != nil {
+		return nil, err
+	}
+	if v.Kind == ast.LiteralNull {
+		return pred, nil
+	}
+	inlined := *pred
+	inlined.Subquery, inlined.Value = nil, v
 	return &inlined, nil
 }
 
