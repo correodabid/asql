@@ -239,3 +239,61 @@ func viewGroups(table *tableState) []VerifiableGroup {
 	}
 	return out
 }
+
+// RowVersion is a live row seen cheaply: its primary key values and the
+// LSN of its version, read in place. Row builds the whole row, which a
+// caller only needs when the version changed. A RowVersion and its Key are
+// reused across a Versions scan; copy what you keep.
+type RowVersion struct {
+	Key []ast.Literal
+	LSN uint64
+
+	table  *tableState
+	keys   []string
+	values []ast.Literal
+}
+
+// Row returns the whole row.
+func (r *RowVersion) Row() VerifiableRow { return verifiableRow(r.table, r.keys, r.values) }
+
+// Versions calls fn for every live row of a verifiable table without
+// building the rows: the state tree builder hashes only rows whose version
+// changed since its last checkpoint.
+func (v VerifiableView) Versions(domain, name string, fn func(*RowVersion) error) error {
+	table, err := v.table(domain, name)
+	if err != nil {
+		return err
+	}
+	keys := primaryKeyColumnsOf(table)
+	positions := make([]int, len(keys))
+	for i, column := range keys {
+		pos, ok := table.columnIndex[column]
+		if !ok {
+			return fmt.Errorf("%s.%s: primary key column %s is missing", domain, name, column)
+		}
+		positions[i] = pos
+	}
+	lsnPos, hasLSN := table.columnIndex["_lsn"]
+	rv := &RowVersion{Key: make([]ast.Literal, len(keys)), table: table, keys: keys}
+	for _, values := range table.rows {
+		if values == nil {
+			continue
+		}
+		for i, pos := range positions {
+			if pos < len(values) {
+				rv.Key[i] = values[pos]
+			} else {
+				rv.Key[i] = ast.Literal{Kind: ast.LiteralNull}
+			}
+		}
+		rv.LSN = 0
+		if hasLSN && lsnPos < len(values) && values[lsnPos].Kind == ast.LiteralNumber && values[lsnPos].NumberValue > 0 {
+			rv.LSN = uint64(values[lsnPos].NumberValue)
+		}
+		rv.values = values
+		if err := fn(rv); err != nil {
+			return err
+		}
+	}
+	return nil
+}
