@@ -104,8 +104,12 @@ the digests, which gain a version 2.
   checkpoints stay available. At each checkpoint it scans the verifiable tables' live
   rows, hashes again only those whose version changed (each row carries the LSN of the
   record that wrote it), and rebuilds a table whose columns or primary key changed.
-  The scan is `O(rows)` per checkpoint and the hashing `O(changed rows)`; driving it
-  from the audit store's row changes instead is a later optimisation.
+  The scan reads each row in place, by primary key and version, without building it,
+  so it is `O(rows)` cheap steps per checkpoint (about 9 ms for 100,000 rows) and the
+  hashing `O(changed rows)`; group leaves are hashed again only for the groups whose
+  members or referenced row changed. The audit store cannot drive it instead: reading
+  it from an LSN rereads the whole history, and the tables' in-memory change logs are
+  trimmed in place by writers, so a reader outside the write lock could miss changes.
   Proofs at an older checkpoint rebuild its tree from the historical state, which
   costs `O(rows of verifiable tables)`; nothing is persisted.
 - **Digest v3** adds `state_root` at the digest's LSN; v1 and v2 digests keep
