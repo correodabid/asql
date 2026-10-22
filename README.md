@@ -1,10 +1,10 @@
 # ASQL
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![Go Version](https://img.shields.io/badge/Go-1.25%2B-00ADD8)](go.mod)
+[![Go Version](https://img.shields.io/badge/Go-1.26%2B-00ADD8)](go.mod)
 [![Contributor Covenant](https://img.shields.io/badge/Contributor%20Covenant-2.1-4baaaa.svg)](CODE_OF_CONDUCT.md)
 
-**A deterministic SQL engine built in Go.** Domain isolation, append-only WAL, replay-safe history, and optional clustered operation through pgwire + Raft.
+**A deterministic SQL engine built in Go.** Domain isolation, append-only WAL, replay-safe history that a third party can verify, and optional clustered operation through pgwire + Raft.
 
 Canonical runtime path:
 - `cmd/asqld` for the server,
@@ -33,6 +33,7 @@ ASQL is designed for teams that want a database they can reason about under audi
 | You need to debug production issues by reproducing exact state | **Deterministic replay** -- same WAL input produces the same state and query-visible results |
 | You need to track aggregate versions across related tables | **Entity versioning** -- automatic version tracking with versioned foreign keys |
 | You need a database you can reason about | **Append-only WAL** -- the log is truth, materialized state is derived |
+| You need to prove what your data was to someone who does not trust you | **Verifiable history** -- a hash-chained WAL, signed digests, signed query results, and proofs of rows and of complete lineages that a public key checks |
 
 ---
 
@@ -43,6 +44,22 @@ The primary onboarding path is [docs/getting-started/README.md](docs/getting-sta
 This README keeps the front door short. For the full canonical path, use the getting-started guide and follow the pgwire runtime first.
 
 Short local path:
+
+### 0. Or install a release
+
+Tagged releases ship `asqld` and `asqlctl` for linux/amd64 and darwin/arm64, a
+signed checksum file and an SBOM. Check them before running them:
+
+```bash
+gh release download -R correodabid/asql   # the latest release
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/correodabid/asql/\.github/workflows/ci\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+sha256sum -c checksums.txt
+```
+
+Every release has upgrade notes in the [changelog](CHANGELOG.md): read them before
+pointing a new version at an existing data directory.
 
 ### 1. Start ASQL locally
 
@@ -190,6 +207,46 @@ statements in the same transaction can reference rows or entity versions
 created earlier in that transaction, and replay reconstructs the same captured
 tokens deterministically from WAL order.
 
+### Verifiable history
+
+A node can prove what its history was to someone who does not trust it, with nothing
+but its public key.
+
+```bash
+go run ./cmd/asqlctl -command ledger-keygen -output node.key     # node.key, node.pub, node.key.state
+go run ./cmd/asqld -data-dir .asql -ledger signed -ledger-key node.key
+```
+
+- **Hash-chained WAL** (on by default): `asqlctl -command verify-ledger` detects any
+  edited, removed or reordered record.
+- **Signed digests**: with `-ledger signed` the node signs the chain head at
+  checkpoints (`asql_admin.ledger_digest`, `GET /api/v1/ledger/digest`). A digest kept
+  elsewhere exposes a rewritten history.
+- **Signed query results**: `SELECT * FROM asql_admin.attest_query WHERE sql = '...'`
+  returns a SELECT's rows with a signature tied to the chain at a committed LSN.
+- **Consistency proofs**: `asql_admin.prove_consistency` shows that today's signed log
+  extends yesterday's, without revealing any record.
+- **Row proofs**: rows of `VERIFIABLE` tables, cited by primary key, are proven in one
+  batch against a signed digest without revealing any other row. A verifiable group
+  proves that a report lists *all* the parents of an artifact, and none for a source:
+
+```sql
+CREATE TABLE artifacts (id TEXT PRIMARY KEY, kind TEXT) VERIFIABLE;
+CREATE TABLE artifact_parents (child_id TEXT, parent_id TEXT, ordinal INT,
+  PRIMARY KEY (child_id, parent_id)) APPEND ONLY VERIFIABLE;
+ALTER TABLE artifact_parents ADD VERIFIABLE GROUP (child_id) REFERENCES artifacts (id);
+```
+
+```bash
+asqlctl -command prove-rows -keys lineage.json -output proof.json
+asqlctl -command verify-rows -proof proof.json -pubkey node.pub
+```
+
+The step-by-step path is [docs/getting-started/13-verifiable-history.md](docs/getting-started/13-verifiable-history.md);
+the formats are in ADRs [0005](docs/adr/0005-tamper-evident-wal-ledger.md),
+[0006](docs/adr/0006-signed-query-results.md) and
+[0008](docs/adr/0008-inclusion-and-consistency-proofs.md).
+
 ### SQL support
 
 **DDL**
@@ -315,11 +372,13 @@ CREATE TABLE accounts (
 );
 ```
 
-- **PRIMARY KEY** -- unique row identity
+- **PRIMARY KEY** -- unique row identity, on one column or, as `PRIMARY KEY (a, b)`, on several; `ALTER TABLE ... ADD PRIMARY KEY (...)` adds one to an existing table
 - **UNIQUE** -- enforced via index
 - **FOREIGN KEY** -- referential integrity within domain
 - **CHECK** -- expression validation on write
 - **VERSIONED FOREIGN KEY** -- cross-domain reference with entity version capture
+- **APPEND ONLY** -- `CREATE TABLE ... APPEND ONLY` or `ALTER TABLE ... SET APPEND ONLY`: rows can be added, never changed or removed, for every principal including `ADMIN`
+- **VERIFIABLE** -- the table's rows can be proven by primary key against signed digests (see [Verifiable history](#verifiable-history))
 
 ---
 
@@ -503,6 +562,11 @@ When the durable principal catalog is enabled:
 For the practical onboarding flow, see [docs/getting-started/08-studio-cli-and-daily-workflow.md](docs/getting-started/08-studio-cli-and-daily-workflow.md).
 For the durable-principal model, bootstrap rules, password rotation path, and privilege semantics, see [docs/reference/database-security-model-v1.md](docs/reference/database-security-model-v1.md).
 
+With `-ledger signed`, the node also holds signing material: `node.key` signs digests
+and query results, and `node.key.state` salts row proofs. Keep both as secret as any
+credential, give verifiers only `node.pub`, and give every node of a cluster the same
+files. See the "Ledger keys" section of the security model.
+
 TLS transport is not part of the current local pgwire runtime surface.
 See [docs/reference/postgres-compatibility-surface-v1.md](docs/reference/postgres-compatibility-surface-v1.md) for the current compatibility stance.
 
@@ -525,7 +589,7 @@ Uses `gcr.io/distroless/static-debian12` as runtime base for minimal attack surf
 
 **Multi-tenant SaaS** -- Each tenant gets a domain with isolated schema and constraints. Cross-tenant operations use explicit cross-domain transactions.
 
-**Audit and compliance** -- `FOR HISTORY` queries provide row-level change tracking with old/new values and commit LSNs. Deterministic replay proves data integrity.
+**Audit and compliance** -- `FOR HISTORY` queries provide row-level change tracking with old/new values and commit LSNs. Signed digests, signed query results and row proofs let an auditor check what the database held, and that a report's lineage is complete, with a public key.
 
 **Edge and offline-first** -- Single-binary deployment with embedded WAL. No external dependencies. Sync via WAL replication when connectivity returns.
 
@@ -559,6 +623,10 @@ make seed-domains-10x  # 10x scale: 1K recipes, 3K orders
 |----------|-------------|
 | [Changelog](CHANGELOG.md) | Releases, with upgrade notes on formats and behavior changes |
 | [Getting started guide](docs/getting-started/README.md) | Primary onboarding path from first run to integration |
+| [Verifiable history](docs/getting-started/13-verifiable-history.md) | From a signed ledger to a report whose rows and lineage anyone can check |
+| [Security model](docs/reference/database-security-model-v1.md) | Principals, privileges, append-only and verifiable tables, ledger keys, and every proof surface |
+| [Verifiable queries roadmap](docs/architecture/verifiable-queries-roadmap-v1.md) | What is shipped and what comes next for verifiable history |
+| [Architecture decisions](docs/adr/) | ADRs, including the ledger (0005), signed results (0006), commit time (0007) and proofs (0008) |
 | [Go SDK cookbook](docs/reference/cookbook-go-sdk.md) | Code recipes for common operations |
 | [Architecture one-pager](docs/architecture/architecture-one-pager-v1.md) | System design overview |
 | [Fixture format and lifecycle](docs/reference/fixture-format-and-lifecycle-v1.md) | Deterministic scenario file contract and loader workflow |
