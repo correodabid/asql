@@ -48,12 +48,42 @@ func (r ProvenRow) Entry() (Entry, error) {
 	return Entry{Key: key, Leaf: leaf}, nil
 }
 
+// ProvenGroup is a group a RowsProof shows complete: every row of Table
+// whose Columns equal Values is among the proof's rows, and no other one
+// exists. For artifact_parents GROUP (child_id) REFERENCES artifacts (id)
+// and Values ["X"], the proof's rows are all of X's parent edges, none if
+// X has no parents.
+type ProvenGroup struct {
+	Domain   string
+	Table    string
+	Columns  []string
+	RefTable string
+	Values   []ast.Literal
+}
+
+// Entry returns the group's key and the leaf its members among rows give.
+func (g ProvenGroup) Entry(rows []ProvenRow, entries []Entry) (Entry, error) {
+	key, err := GroupKey(g.Domain, g.Table, g.Columns, g.RefTable, g.Values)
+	if err != nil {
+		return Entry{}, err
+	}
+	var members []Entry
+	for i, row := range rows {
+		if row.Domain == g.Domain && row.Table == g.Table && InGroup(row.Row, g.Columns, g.Values) {
+			members = append(members, entries[i])
+		}
+	}
+	return Entry{Key: key, Leaf: GroupLeaf(members)}, nil
+}
+
 // RowsProof shows that a node's state at a signed digest's LSN held these
-// rows (ADR 0008): the digest, the rows with their salts, and one batch
-// proof under the digest's state root. It reveals nothing about other rows.
+// rows (ADR 0008), and that each of Groups has no rows besides the ones
+// shown: the digest, the rows with their salts, and one batch proof under
+// the digest's state root. It reveals nothing about other rows.
 type RowsProof struct {
 	Digest ledgerdigest.Digest
 	Rows   []ProvenRow
+	Groups []ProvenGroup
 	Proof  Proof
 }
 
@@ -66,7 +96,7 @@ func (p RowsProof) Verify(keys ledgerdigest.Keyring) error {
 	if !p.Digest.HasState() {
 		return ErrNoState
 	}
-	if len(p.Rows) == 0 {
+	if len(p.Rows) == 0 && len(p.Groups) == 0 {
 		return errors.New("row proof: no rows")
 	}
 	entries := make([]Entry, len(p.Rows))
@@ -77,7 +107,15 @@ func (p RowsProof) Verify(keys ledgerdigest.Keyring) error {
 		}
 		entries[i] = entry
 	}
-	return Verify(p.Digest.StateRoot, entries, p.Proof)
+	all := entries
+	for _, g := range p.Groups {
+		entry, err := g.Entry(p.Rows, entries)
+		if err != nil {
+			return err
+		}
+		all = append(all, entry)
+	}
+	return Verify(p.Digest.StateRoot, all, p.Proof)
 }
 
 type provenRowJSON struct {
@@ -94,9 +132,18 @@ type proofJSON struct {
 	Siblings []string `json:"siblings"`
 }
 
+type provenGroupJSON struct {
+	Domain   string            `json:"domain"`
+	Table    string            `json:"table"`
+	Columns  []string          `json:"columns"`
+	RefTable string            `json:"references"`
+	Values   []json.RawMessage `json:"values"`
+}
+
 type rowsProofJSON struct {
 	Digest ledgerdigest.Digest `json:"digest"`
 	Rows   []provenRowJSON     `json:"rows"`
+	Groups []provenGroupJSON   `json:"groups,omitempty"`
 	Proof  proofJSON           `json:"proof"`
 }
 
@@ -121,6 +168,17 @@ func (p RowsProof) MarshalJSON() ([]byte, error) {
 			j.Row[column] = raw
 		}
 		out.Rows[i] = j
+	}
+	for _, g := range p.Groups {
+		j := provenGroupJSON{Domain: g.Domain, Table: g.Table, Columns: g.Columns, RefTable: g.RefTable}
+		for _, value := range g.Values {
+			raw, err := marshalValue(value)
+			if err != nil {
+				return nil, err
+			}
+			j.Values = append(j.Values, raw)
+		}
+		out.Groups = append(out.Groups, j)
 	}
 	out.Proof.Depths = p.Proof.Depths
 	out.Proof.Siblings = make([]string, len(p.Proof.Siblings))
@@ -159,6 +217,17 @@ func (p *RowsProof) UnmarshalJSON(data []byte) error {
 		}
 		row.Salt = salt
 		out.Rows[i] = row
+	}
+	for i, j := range in.Groups {
+		g := ProvenGroup{Domain: j.Domain, Table: j.Table, Columns: j.Columns, RefTable: j.RefTable}
+		for _, raw := range j.Values {
+			value, err := ledgerdigest.UnmarshalValue(raw)
+			if err != nil {
+				return fmt.Errorf("row proof: group %d value: %w", i, err)
+			}
+			g.Values = append(g.Values, value)
+		}
+		out.Groups = append(out.Groups, g)
 	}
 	for _, s := range in.Proof.Siblings {
 		h, err := decodeHash(s)
