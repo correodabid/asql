@@ -1,5 +1,53 @@
 # Changelog
 
+## v0.7.0 — 2026-10-22
+
+### Upgrade notes
+
+- **Row helpers fail on tables without a single-column key.** `row_lsn`,
+  `resolve_reference`, `entity_version`, `entity_head_lsn` and `entity_version_lsn`
+  returned `NULL` on a table with a composite primary key or none, or an entity whose
+  root table has one, which a client could not tell from a missing row. They now fail
+  with `0A000` naming the table and its key; a missing row, table or entity is still
+  `NULL` (#105).
+- **The schema reports `NOT NULL`.** `schema_snapshot` columns gain `not_null`, true
+  for columns declared `NOT NULL` and for every column of a primary key, single or
+  composite. Through pgwire, `pg_attribute.attnotnull`,
+  `information_schema.columns.is_nullable` and the JDBC metadata now report the real
+  `NOT NULL` instead of the primary-key flag, so they can answer differently for
+  columns declared `NOT NULL`; `pg_constraint` shows a composite primary key as one
+  `_pkey` constraint with all its columns (#107).
+- **`pkg/adminapi` catches up with the engine.** `SchemaSnapshotTable` gains
+  `PrimaryKey` (key columns in key order), `AppendOnly`, `Verifiable` and
+  `VerifiableGroups`; `SchemaSnapshotColumn` gains `NotNull`; `TimelineCommitEntry`
+  gains `CommitTime` (`commit_time`, RFC 3339 UTC, absent for commits that predate it).
+  The HTTP and gRPC admin APIs fill them, and gRPC now uses the `adminapi` types. A Go
+  client built against these types no longer drops the fields added since v0.1.0. The
+  per-column `PrimaryKey` flag stays `false` in a composite key: read the table's
+  `PrimaryKey` list (#107).
+- No format change: v0.7.0 reads and writes the same data as v0.6.0, and v0.6.0 can
+  read what v0.7.0 writes.
+
+### Fixes
+
+- **Fixtures keep table options.** `fixture-export` writes `APPEND ONLY`, `VERIFIABLE`
+  and verifiable groups, and exports tables with a composite primary key, which failed
+  with "table has no primary key for deterministic ordering" (#102).
+
+### Performance
+
+- **State tree checkpoints hash only what changed.** Rows are read in place by key and
+  version, and only changed rows and the groups they touch are hashed again: one
+  checkpoint over 100,000 rows with 10 changed went from 38 ms and 87 MB to 9 ms and
+  43 KB. The roots are the same (#103).
+
+### Docs
+
+- A verifiable history guide (getting-started chapter 13), and verifiable history,
+  releases and their verification in the README and on the site (#104).
+- The v0.5.0 note on `primary_key` now says that each column's flag stays `false` in
+  a composite key (#106).
+
 ## v0.6.0 — 2026-10-22
 
 ### Upgrade notes
