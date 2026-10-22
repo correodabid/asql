@@ -93,6 +93,12 @@ func (p RowsProof) Verify(keys ledgerdigest.Keyring) error {
 	if err := p.Digest.Verify(keys); err != nil {
 		return err
 	}
+	return p.CheckRoot()
+}
+
+// CheckRoot checks the rows and groups against the digest's state root,
+// without checking the digest's signature: Verify does both.
+func (p RowsProof) CheckRoot() error {
 	if !p.Digest.HasState() {
 		return ErrNoState
 	}
