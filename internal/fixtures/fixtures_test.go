@@ -293,7 +293,7 @@ func TestExportKeepsTableOptions(t *testing.T) {
 	defer conn.Close(ctx)
 	for _, sql := range []string{
 		"BEGIN DOMAIN lab",
-		"CREATE TABLE artifacts (id TEXT PRIMARY KEY, kind TEXT) VERIFIABLE",
+		"CREATE TABLE artifacts (id TEXT PRIMARY KEY, kind TEXT NOT NULL, note TEXT) VERIFIABLE",
 		"CREATE TABLE artifact_parents (child_id TEXT, parent_id TEXT, ordinal INT, PRIMARY KEY (child_id, parent_id)) APPEND ONLY VERIFIABLE",
 		"CREATE TABLE notes (id INT PRIMARY KEY, body TEXT)",
 		"COMMIT",
@@ -344,11 +344,19 @@ func TestExportKeepsTableOptions(t *testing.T) {
 		References        string   `json:"references"`
 		ReferencedColumns []string `json:"referenced_columns"`
 	}
+	type column struct {
+		Name       string `json:"name"`
+		Type       string `json:"type"`
+		PrimaryKey bool   `json:"primary_key"`
+		Unique     bool   `json:"unique"`
+		NotNull    bool   `json:"not_null"`
+	}
 	type options struct {
 		AppendOnly bool     `json:"append_only"`
 		Verifiable bool     `json:"verifiable"`
 		PrimaryKey []string `json:"primary_key"`
 		Groups     []group  `json:"verifiable_groups"`
+		Columns    []column `json:"columns"`
 	}
 	var source struct {
 		Domains []struct {
@@ -377,7 +385,11 @@ func TestExportKeepsTableOptions(t *testing.T) {
 			for _, g := range tbl.VerifiableGroups {
 				groups = append(groups, group{Columns: g.Columns, References: g.References, ReferencedColumns: g.ReferencedColumns})
 			}
-			got[tbl.Name] = options{AppendOnly: tbl.AppendOnly, Verifiable: tbl.Verifiable, PrimaryKey: tbl.PrimaryKey, Groups: groups}
+			var columns []column
+			for _, c := range tbl.Columns {
+				columns = append(columns, column{Name: c.Name, Type: c.Type, PrimaryKey: c.PrimaryKey, Unique: c.Unique, NotNull: c.NotNull})
+			}
+			got[tbl.Name] = options{AppendOnly: tbl.AppendOnly, Verifiable: tbl.Verifiable, PrimaryKey: tbl.PrimaryKey, Groups: groups, Columns: columns}
 		}
 	}
 	wantJSON, _ := json.Marshal(want)
@@ -387,6 +399,21 @@ func TestExportKeepsTableOptions(t *testing.T) {
 	}
 	if !got["artifact_parents"].AppendOnly || !got["artifact_parents"].Verifiable || len(got["artifact_parents"].Groups) != 1 || got["notes"].Verifiable {
 		t.Fatalf("unexpected options: %s", gotJSON)
+	}
+	// One _lsn per table, and NOT NULL outside the key kept.
+	for table, opts := range got {
+		lsn := 0
+		for _, c := range opts.Columns {
+			if c.Name == "_lsn" {
+				lsn++
+			}
+			if table == "artifacts" && c.Name == "kind" && !c.NotNull {
+				t.Fatalf("artifacts.kind lost NOT NULL: %s", gotJSON)
+			}
+		}
+		if lsn != 1 {
+			t.Fatalf("%s has %d _lsn columns after export and load", table, lsn)
+		}
 	}
 	for table, rows := range map[string]int{"artifacts": 3, "artifact_parents": 2, "notes": 1} {
 		result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT * FROM "+table, []string{"lab"}, ^uint64(0))

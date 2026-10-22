@@ -379,6 +379,7 @@ type schemaSnapshotColumn struct {
 	Type             string `json:"type"`
 	PrimaryKey       bool   `json:"primary_key,omitempty"`
 	Unique           bool   `json:"unique,omitempty"`
+	NotNull          bool   `json:"not_null,omitempty"`
 	ReferencesTable  string `json:"references_table,omitempty"`
 	ReferencesColumn string `json:"references_column,omitempty"`
 	DefaultValue     string `json:"default_value,omitempty"`
@@ -619,12 +620,25 @@ func topologicalTableOrder(tables map[string]exportTable) ([]exportTable, error)
 
 func buildCreateTableStatements(table exportTable) []string {
 	columnDefs := make([]string, 0, len(table.Snapshot.Columns)+len(table.Snapshot.VersionedForeignKeys))
+	inCompositeKey := map[string]bool{}
+	if len(table.Snapshot.PrimaryKey) > 1 {
+		for _, column := range table.Snapshot.PrimaryKey {
+			inCompositeKey[column] = true
+		}
+	}
 	for _, column := range table.Snapshot.Columns {
+		if column.Name == "_lsn" {
+			continue // the engine's row-version column: every table gets its own
+		}
 		parts := []string{column.Name, normalizeColumnType(column.Type)}
 		if column.PrimaryKey {
 			parts = append(parts, "PRIMARY KEY")
 		} else if column.Unique {
 			parts = append(parts, "UNIQUE")
+		}
+		// A primary key's columns are NOT NULL already.
+		if column.NotNull && !column.PrimaryKey && !inCompositeKey[column.Name] {
+			parts = append(parts, "NOT NULL")
 		}
 		if strings.TrimSpace(column.DefaultValue) != "" {
 			parts = append(parts, "DEFAULT "+column.DefaultValue)
