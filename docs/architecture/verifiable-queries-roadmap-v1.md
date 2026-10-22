@@ -77,7 +77,11 @@ need to demonstrate compliance without opening their process data. Not consumer 
      WAL and checks it. WAL GC never removes records the tree has not added.
    - *Consistency proofs:* `asql_admin.prove_consistency`, `asqlctl prove-consistency`
      and `verify-consistency`, which checks a proof between two signed digests with the
-     trusted keys alone. Next: the state tree of `VERIFIABLE` tables.
+     trusted keys alone.
+   - *State tree and row proofs:* `VERIFIABLE` tables (with a primary key, composite
+     ones included), digest v3 signing the state root, and batch row proofs:
+     `asql_admin.prove_rows`, `asqlctl prove-rows` and `verify-rows`. Next: group leaves,
+     to prove that a report lists all the parents of an artifact.
 4. **Verifiable computation.** Aggregates over private data executed in a TEE (e.g. AWS
    Nitro Enclaves) with attestation, and ZK only for narrow predicates where it pays off.
 

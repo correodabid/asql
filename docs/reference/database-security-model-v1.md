@@ -161,8 +161,36 @@ With `ledger=signed` and a state key, every digest is version 3: besides the cha
 the log tree root it signs `state_root`, the root of the state tree of the verifiable
 tables' live rows at its LSN (`asql_admin.ledger_digest` and `GET /api/v1/ledger/digest`
 show it). The node keeps the tree off the commit path. `verify-ledger -digest` reports
-`state_root` as `not-checked`: rebuilding it needs the secret state key. The row proofs
-against it (`asql_admin.prove_rows`, `asqlctl verify-rows`) come next.
+`state_root` as `not-checked`: rebuilding it needs the secret state key.
+
+### Row proofs
+
+A set of rows of verifiable tables, cited by primary key, is proven in one batch against
+a version 3 digest, without revealing any other row:
+
+```bash
+# lineage.json: the rows a report cites, in any verifiable tables.
+# [{"domain": "lab", "table": "artifacts", "pk": ["0192…"]},
+#  {"domain": "lab", "table": "artifact_parents", "pk": ["0192…", "0191…"]}]
+asqlctl -command prove-rows -pgwire 127.0.0.1:5433 -keys lineage.json [-lsn 980] -output proof.json
+
+# Check it with the trusted keys alone: the digest's signature and every row.
+asqlctl -command verify-rows -proof proof.json -pubkey node.pub
+```
+
+- The same proof is `SELECT * FROM asql_admin.prove_rows WHERE keys = '<that JSON>'
+  [AND lsn = N]`, one row with `digest`, `rows` and `proof` as JSON. Without `lsn` it is
+  proven at the latest digest; with it, at the digest signed at exactly that LSN.
+- It needs the privileges of reading those tables, plus `SELECT_HISTORY` at an LSN other
+  than the head, like `attest_query`.
+- The proof carries the digest, each row with its primary key columns, every column's
+  typed value and its salt, and the hashes that link them to the digest's
+  `state_root`. Changing any value, dropping a row from the batch or citing a row by
+  another key makes `verify-rows` fail.
+- What it reveals beyond the rows: the digest's LSN, and roughly the order of magnitude
+  of the number of rows in the verifiable tables. It cannot prove that a row is absent,
+  nor (yet) that the rows shown are all of some kind, such as all of an artifact's
+  parents (ADR 0008).
 
 ## Ledger keys
 

@@ -103,6 +103,9 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 	// First: the SQL it attests may mention anything below.
 	case strings.Contains(lower, "asql_admin.attest_query"):
 		return server.adminAttestQuery(ctx, trimmed, activeDomains, sessionPrincipal)
+	// The keys it proves may mention anything below too.
+	case strings.Contains(lower, "asql_admin.prove_rows"):
+		return server.adminProveRows(ctx, trimmed, sessionPrincipal)
 
 	// ── Scalar utility queries ────────────────────────────────────────────
 
