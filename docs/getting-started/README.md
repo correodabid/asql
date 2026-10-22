@@ -40,6 +40,7 @@ Use this rule from the start:
 10. [10-adoption-playbook.md](10-adoption-playbook.md) — how to roll ASQL into an existing app
 11. [11-troubleshooting.md](11-troubleshooting.md) — common problems and fixes
 12. [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md) — first successful PostgreSQL-oriented service flow on ASQL
+13. [13-verifiable-history.md](13-verifiable-history.md) — signed ledger, signed results, and proofs of rows and lineages that anyone can check
 
 ## Fast paths
 
@@ -48,6 +49,7 @@ Use this rule from the start:
 - Migrating an existing PostgreSQL-oriented service one workflow at a time? Read [12-first-postgres-service-flow.md](12-first-postgres-service-flow.md).
 - Want reproducible demo/test data? Jump to [07-fixtures-and-seeding.md](07-fixtures-and-seeding.md).
 - Want to understand ASQL's differentiators before coding? Start with [01-overview.md](01-overview.md).
+- Need to prove your data to an auditor or a report's reader? Read [13-verifiable-history.md](13-verifiable-history.md).
 
 ## Fixture-first onboarding path
 

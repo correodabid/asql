@@ -4,7 +4,7 @@
 
 Minimum local setup:
 
-- Go `1.24.x`
+- Go `1.26` or newer (or a release binary, below)
 - a shell with `make` available
 - optional: Docker
 
@@ -25,6 +25,17 @@ go run ./cmd/asqld -addr :5433 -data-dir .asql
 ```
 
 Starts the engine, persists WAL and snapshots in `.asql`, and exposes the pgwire endpoint on `127.0.0.1:5433`. Keep this process running while you work.
+:::tab[Release binary]
+```bash
+gh release download -R correodabid/asql      # the latest release
+cosign verify-blob --bundle checksums.txt.sigstore.json \
+  --certificate-identity-regexp '^https://github.com/correodabid/asql/\.github/workflows/ci\.yml@refs/tags/v' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com checksums.txt
+sha256sum -c checksums.txt
+chmod +x asqld-linux-amd64 && ./asqld-linux-amd64 -addr :5433 -data-dir .asql
+```
+
+Releases ship `asqld` and `asqlctl` for linux/amd64 and darwin/arm64, with checksums signed by the release workflow. Read the [changelog](../../CHANGELOG.md)'s upgrade notes before pointing a new version at an existing data directory.
 :::tab[Docker]
 ```bash
 docker build -t asql:local .

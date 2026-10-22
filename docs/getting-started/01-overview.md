@@ -11,6 +11,7 @@ It combines:
 - append-only WAL as source of truth,
 - time-travel and replay,
 - entity versioning for aggregate-oriented workflows,
+- verifiable history: signed digests, signed query results, and proofs of rows and lineages that a public key checks,
 - optional distributed operation through the pgwire + Raft runtime.
 
 ## When ASQL is a good fit
@@ -18,6 +19,7 @@ It combines:
 ASQL is a strong fit when your application needs one or more of these:
 
 - reproducible debugging and auditability,
+- evidence that a third party can check without trusting the database,
 - explicit boundaries between domains or modules,
 - time-travel reads,
 - aggregate/version-aware references,
@@ -66,7 +68,14 @@ That is why replay and historical reads are first-class concepts rather than sid
 
 You can query past state by `LSN` or logical timestamp and inspect row/entity evolution with supported helpers.
 
-### 4. Entity versioning exists above raw rows
+### 4. History can be proven to others
+
+The WAL is hash-chained by default. With a signed ledger, the node signs its history at
+checkpoints and can prove a query's result, that its log only grew, and which rows it
+held, down to "these are all the inputs of this result". See
+[13-verifiable-history.md](13-verifiable-history.md).
+
+### 5. Entity versioning exists above raw rows
 
 ASQL still exposes rows and `LSN`s, but application-facing workflows can also use:
 
