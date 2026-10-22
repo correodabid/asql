@@ -47,3 +47,16 @@ func TestExportKeepsTableOptions(t *testing.T) {
 		t.Fatalf("groups: %q", got)
 	}
 }
+
+func TestOldFixturesDropTheDeclaredRowVersionColumn(t *testing.T) {
+	for in, want := range map[string]string{
+		"CREATE TABLE lab.a (id TEXT PRIMARY KEY, kind TEXT DEFAULT 'x,y', _lsn TEXT)":              "CREATE TABLE lab.a (id TEXT PRIMARY KEY, kind TEXT DEFAULT 'x,y')",
+		"CREATE TABLE lab.p (_lsn TEXT, c TEXT, p TEXT, PRIMARY KEY (c, p)) APPEND ONLY VERIFIABLE": "CREATE TABLE lab.p (c TEXT, p TEXT, PRIMARY KEY (c, p)) APPEND ONLY VERIFIABLE",
+		"CREATE TABLE lab.n (id INT PRIMARY KEY, lsn_note TEXT)":                                    "CREATE TABLE lab.n (id INT PRIMARY KEY, lsn_note TEXT)",
+		"INSERT INTO lab.a (id, _lsn) VALUES ('a', '1')":                                            "INSERT INTO lab.a (id, _lsn) VALUES ('a', '1')",
+	} {
+		if got := dropRowVersionColumn(in); got != want {
+			t.Errorf("%s\n got %s\nwant %s", in, got, want)
+		}
+	}
+}

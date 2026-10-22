@@ -540,6 +540,9 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 		if err != nil {
 			return Result{}, fmt.Errorf("parse sql %q: %w", trimmed, err)
 		}
+		if err := rejectReservedColumns(statement); err != nil {
+			return Result{}, err
+		}
 		if session.activeTx == nil {
 			return Result{}, errTxRequired
 		}
