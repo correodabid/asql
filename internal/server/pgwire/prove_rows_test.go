@@ -102,9 +102,11 @@ func TestProveRows(t *testing.T) {
 			if strings.Join(edge.PrimaryKeyColumns, ",") != "child_id,parent_id" || edge.Row["ordinal"].NumberValue != 1 {
 				t.Fatalf("%s: edge %+v", mode, edge)
 			}
-			// Nothing about rows outside the lineage travels with it.
-			data, _ := json.Marshal(p)
-			if strings.Contains(string(data), "zz") || strings.Contains(string(data), "unpublished") {
+			// Nothing about rows outside the lineage travels with it. Only
+			// the rows carry values: the rest is hashes, salts and the
+			// signature, whose base64 may spell anything.
+			data, _ := json.Marshal(p.Rows)
+			if strings.Contains(string(data), `"zz"`) || strings.Contains(string(data), "unpublished") {
 				t.Fatalf("%s: the proof mentions a row it does not prove: %s", mode, data)
 			}
 		}
