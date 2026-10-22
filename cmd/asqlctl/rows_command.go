@@ -144,8 +144,11 @@ type verifyRowsOutput struct {
 	LSN    uint64 `json:"lsn"`
 	NodeID string `json:"node_id"`
 	// Rows names each proven row as a report cites it: table and key.
-	Rows  []string `json:"rows"`
-	Error string   `json:"error,omitempty"`
+	Rows []string `json:"rows"`
+	// Groups names each group shown complete, with how many rows it has:
+	// for parents, all of an artifact's parents.
+	Groups []string `json:"groups,omitempty"`
+	Error  string   `json:"error,omitempty"`
 }
 
 // runVerifyRows checks a proof written by prove-rows: the digest's
@@ -181,6 +184,23 @@ func runVerifyRows(out io.Writer, opts verifyRowsOptions) error {
 			parts[i] = column + "=" + value
 		}
 		result.Rows = append(result.Rows, fmt.Sprintf("%s.%s(%s)", row.Domain, row.Table, strings.Join(parts, ", ")))
+	}
+	for _, g := range proof.Groups {
+		parts := make([]string, len(g.Columns))
+		for i, column := range g.Columns {
+			value := ""
+			if i < len(g.Values) {
+				value = literalText(g.Values[i])
+			}
+			parts[i] = column + "=" + value
+		}
+		members := 0
+		for _, row := range proof.Rows {
+			if row.Domain == g.Domain && row.Table == g.Table && statetree.InGroup(row.Row, g.Columns, g.Values) {
+				members++
+			}
+		}
+		result.Groups = append(result.Groups, fmt.Sprintf("%s.%s(%s): all %d rows", g.Domain, g.Table, strings.Join(parts, ", "), members))
 	}
 	verifyErr := proof.Verify(keys)
 	if verifyErr != nil {
