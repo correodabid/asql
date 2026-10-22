@@ -367,6 +367,13 @@ func (rows Rows) MarshalJSON() ([]byte, error) {
 	return json.Marshal(out)
 }
 
+// MarshalValue returns value's typed JSON form: null, or [kind, value]
+// with kind i, f, s, b, t or j. Row proofs (ADR 0008) use it too.
+func MarshalValue(value ast.Literal) (any, error) { return marshalCell(value) }
+
+// UnmarshalValue is the inverse of MarshalValue.
+func UnmarshalValue(cell json.RawMessage) (ast.Literal, error) { return unmarshalCell(cell) }
+
 func marshalCell(value ast.Literal) (any, error) {
 	switch value.Kind {
 	case ast.LiteralNull, "":
