@@ -3,6 +3,8 @@
 // endpoints and are suitable for use by external clients.
 package adminapi
 
+import "time"
+
 // ─── Transaction request/response types ─────────────────────────────────────
 
 type ExecuteRequest struct {
@@ -249,9 +251,16 @@ type SchemaSnapshotRequest struct {
 }
 
 type SchemaSnapshotColumn struct {
-	Name             string `json:"name"`
-	Type             string `json:"type"`
-	PrimaryKey       bool   `json:"primary_key,omitempty"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+	// PrimaryKey is true only for the column of a single-column primary
+	// key. The columns of a composite key leave it false, so that a DDL
+	// generator does not declare several keys: SchemaSnapshotTable's
+	// PrimaryKey, the key columns in key order, is the source of truth.
+	PrimaryKey bool `json:"primary_key,omitempty"`
+	// NotNull is true for a column declared NOT NULL and for every column
+	// of the primary key, single or composite.
+	NotNull          bool   `json:"not_null,omitempty"`
 	Unique           bool   `json:"unique,omitempty"`
 	ReferencesTable  string `json:"references_table,omitempty"`
 	ReferencesColumn string `json:"references_column,omitempty"`
@@ -277,6 +286,25 @@ type SchemaSnapshotTable struct {
 	Columns              []SchemaSnapshotColumn      `json:"columns"`
 	Indexes              []SchemaSnapshotIndex       `json:"indexes,omitempty"`
 	VersionedForeignKeys []SchemaSnapshotVersionedFK `json:"versioned_foreign_keys,omitempty"`
+	// PrimaryKey is the primary key's columns in key order, one for a
+	// single-column key, several for a composite one.
+	PrimaryKey []string `json:"primary_key,omitempty"`
+	// AppendOnly tables accept INSERT only.
+	AppendOnly bool `json:"append_only,omitempty"`
+	// Verifiable tables' rows can be proven against signed digests
+	// (ADR 0008).
+	Verifiable bool `json:"verifiable,omitempty"`
+	// VerifiableGroups are the table's verifiable groups (ADR 0008).
+	VerifiableGroups []SchemaSnapshotVerifiableGroup `json:"verifiable_groups,omitempty"`
+}
+
+// SchemaSnapshotVerifiableGroup is a verifiable group: for every row of the
+// referenced table, the rows of this table whose Columns equal that row's
+// primary key (ReferencedColumns).
+type SchemaSnapshotVerifiableGroup struct {
+	Columns           []string `json:"columns"`
+	References        string   `json:"references"`
+	ReferencedColumns []string `json:"referenced_columns"`
 }
 
 type SchemaSnapshotDomain struct {
@@ -310,10 +338,14 @@ type TimelineCommitsResponse struct {
 }
 
 type TimelineCommitEntry struct {
-	LSN       uint64                        `json:"lsn"`
-	TxID      string                        `json:"tx_id"`
-	Timestamp uint64                        `json:"timestamp"`
-	Tables    []TimelineCommitMutationEntry `json:"tables"`
+	LSN       uint64 `json:"lsn"`
+	TxID      string `json:"tx_id"`
+	Timestamp uint64 `json:"timestamp"`
+	// CommitTime is the wall-clock time the commit recorded (ADR 0007), in
+	// UTC, as asql_admin.timeline_commits.commit_time reports it. It is
+	// nil for commits written before commit times were recorded.
+	CommitTime *time.Time                    `json:"commit_time,omitempty"`
+	Tables     []TimelineCommitMutationEntry `json:"tables"`
 }
 
 type TimelineCommitMutationEntry struct {
