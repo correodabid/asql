@@ -831,6 +831,7 @@ type snapColumn struct {
 	Name             string `json:"name"`
 	Type             string `json:"type"`
 	PrimaryKey       bool   `json:"primary_key,omitempty"`
+	NotNull          bool   `json:"not_null,omitempty"`
 	Unique           bool   `json:"unique,omitempty"`
 	ReferencesTable  string `json:"references_table,omitempty"`
 	ReferencesColumn string `json:"references_column,omitempty"`
@@ -953,6 +954,7 @@ func (server *Server) adminSchemaSnapshot(sql string) (interceptResult, bool) {
 					Name:             c.Name,
 					Type:             c.Type,
 					PrimaryKey:       c.PrimaryKey,
+					NotNull:          c.NotNull,
 					Unique:           c.Unique,
 					ReferencesTable:  c.ReferencesTable,
 					ReferencesColumn: c.ReferencesColumn,
@@ -1387,7 +1389,7 @@ func (server *Server) catalogAttributes() (interceptResult, bool) {
 					"attname":       {Kind: ast.LiteralString, StringValue: c.Name},
 					"atttypid":      {Kind: ast.LiteralNumber, NumberValue: schemaTypeToOID(c.Type)},
 					"attnum":        {Kind: ast.LiteralNumber, NumberValue: ordinal},
-					"attnotnull":    {Kind: ast.LiteralBoolean, BoolValue: c.PrimaryKey},
+					"attnotnull":    {Kind: ast.LiteralBoolean, BoolValue: c.NotNull},
 					"atthasdef":     {Kind: ast.LiteralBoolean, BoolValue: false},
 					"attisdropped":  litB(false),
 					"atttypmod":     lit(int64(-1)),
@@ -1445,7 +1447,7 @@ func (server *Server) catalogColumns() (interceptResult, bool) {
 					continue
 				}
 				nullable := "YES"
-				if c.PrimaryKey {
+				if c.NotNull {
 					nullable = "NO"
 				}
 				rows = append(rows, map[string]ast.Literal{
@@ -1657,7 +1659,7 @@ func (server *Server) catalogPostgreSchemaColumnRows() []map[string]ast.Literal 
 					"attname":       litS(c.Name),
 					"atttypid":      lit(schemaTypeToOID(c.Type)),
 					"attnum":        lit(ordinal),
-					"attnotnull":    litB(c.PrimaryKey),
+					"attnotnull":    litB(c.NotNull),
 					"atthasdef":     litB(false),
 					"attisdropped":  litB(false),
 					"atttypmod":     lit(int64(-1)),
@@ -1706,12 +1708,17 @@ func (server *Server) catalogConstraintRows() []map[string]ast.Literal {
 		for tableIndex, t := range d.Tables {
 			relationOID := syntheticRelationOID(domainIndex, tableIndex)
 			ordinals := tableOrdinals[t.Name]
-			if pkColumn := primaryKeyColumn(t.Columns); pkColumn != "" {
+			// The primary key, single or composite, in key order.
+			if len(t.PrimaryKey) > 0 {
+				keyOrdinals := make([]int64, len(t.PrimaryKey))
+				for i, column := range t.PrimaryKey {
+					keyOrdinals[i] = ordinals[column]
+				}
 				constraintIndex++
 				rows = append(rows, buildConstraintRow(
 					syntheticConstraintOID(domainIndex, tableIndex, constraintIndex),
 					fmt.Sprintf("%s_pkey", t.Name), namespaceOID, "p", relationOID, 0,
-					arrayLiteralFromOrdinals(ordinals[pkColumn]), "{}", t.Name, 0,
+					arrayLiteralFromOrdinals(keyOrdinals...), "{}", t.Name, 0,
 				))
 			}
 			for _, c := range t.Columns {
@@ -1790,15 +1797,6 @@ func buildConstraintRow(oid int64, name string, namespaceOID int64, contype stri
 		row["refnamespace"] = lit(int64(0))
 	}
 	return row
-}
-
-func primaryKeyColumn(columns []executor.SchemaColumn) string {
-	for _, c := range columns {
-		if c.PrimaryKey {
-			return c.Name
-		}
-	}
-	return ""
 }
 
 func arrayLiteralFromOrdinals(ordinals ...int64) string {
@@ -1913,7 +1911,7 @@ func (server *Server) catalogJDBCColumns() (interceptResult, bool) {
 				}
 				nullable := int64(1)
 				isNullable := "YES"
-				if c.PrimaryKey {
+				if c.NotNull {
 					nullable = 0
 					isNullable = "NO"
 				}

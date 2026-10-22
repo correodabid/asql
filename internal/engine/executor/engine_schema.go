@@ -52,9 +52,12 @@ func (engine *Engine) SchemaSnapshot(domainsFilter []string) SchemaSnapshot {
 					columnType = strings.ToUpper(strings.TrimSpace(string(definition.Type)))
 				}
 				column := SchemaColumn{
-					Name:             columnName,
-					Type:             columnType,
-					PrimaryKey:       table.primaryKey == columnName,
+					Name:       columnName,
+					Type:       columnType,
+					PrimaryKey: table.primaryKey == columnName,
+					// Primary key columns, single or composite, carry NotNull
+					// in their definition (CREATE TABLE and ADD PRIMARY KEY).
+					NotNull:          definition.NotNull,
 					Unique:           table.columnIsUnique(columnName),
 					ReferencesTable:  strings.TrimSpace(definition.ReferencesTable),
 					ReferencesColumn: strings.TrimSpace(definition.ReferencesColumn),
