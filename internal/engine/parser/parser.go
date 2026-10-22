@@ -350,8 +350,53 @@ func parseKeyColumnList(list string) ([]string, error) {
 	return columns, nil
 }
 
+// parseAddVerifiableGroup parses what follows ALTER TABLE t ADD VERIFIABLE
+// GROUP: (a, ...) REFERENCES r (k, ...).
+func parseAddVerifiableGroup(tablePart, rest string) (ast.Statement, error) {
+	usage := fmt.Errorf("%w: ADD VERIFIABLE GROUP needs (columns) REFERENCES table (columns)", errInvalidSQL)
+	table := canonicalIdentifier(strings.TrimSpace(tablePart))
+	if table == "" || strings.ContainsAny(table, " \t") {
+		return nil, fmt.Errorf("%w: table name required", errInvalidSQL)
+	}
+	rest = strings.TrimSpace(rest)
+	if !strings.HasPrefix(rest, "(") {
+		return nil, usage
+	}
+	closeIdx := strings.Index(rest, ")")
+	if closeIdx < 0 {
+		return nil, usage
+	}
+	columns, err := parseKeyColumnList(rest[1:closeIdx])
+	if err != nil {
+		return nil, err
+	}
+	rest = strings.TrimSpace(rest[closeIdx+1:])
+	if len(rest) < len("REFERENCES ") || !strings.EqualFold(rest[:len("REFERENCES ")], "REFERENCES ") {
+		return nil, usage
+	}
+	rest = strings.TrimSpace(rest[len("REFERENCES "):])
+	open := strings.Index(rest, "(")
+	if open <= 0 || !strings.HasSuffix(rest, ")") {
+		return nil, usage
+	}
+	refTable := canonicalIdentifier(strings.TrimSpace(rest[:open]))
+	if refTable == "" || strings.ContainsAny(refTable, " \t") {
+		return nil, usage
+	}
+	refColumns, err := parseKeyColumnList(rest[open+1 : len(rest)-1])
+	if err != nil {
+		return nil, err
+	}
+	return ast.AlterTableAddVerifiableGroupStatement{TableName: table, Columns: columns, ReferencesTable: refTable, ReferencesColumns: refColumns}, nil
+}
+
 func parseAlterTable(sql string) (ast.Statement, error) {
 	rest := strings.TrimSpace(sql[len("ALTER TABLE "):])
+
+	// ADD VERIFIABLE GROUP (a, ...) REFERENCES r (k, ...)
+	if i := indexFold(rest, " ADD VERIFIABLE GROUP"); i > 0 {
+		return parseAddVerifiableGroup(rest[:i], rest[i+len(" ADD VERIFIABLE GROUP"):])
+	}
 
 	// ADD PRIMARY KEY (a, b, ...)
 	if i := indexFold(rest, " ADD PRIMARY KEY"); i > 0 {

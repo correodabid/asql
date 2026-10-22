@@ -202,6 +202,24 @@ func (AlterTableAddPrimaryKeyStatement) Kind() string {
 	return "alter_table_add_primary_key"
 }
 
+// AlterTableAddVerifiableGroupStatement represents ALTER TABLE t ADD
+// VERIFIABLE GROUP (c1, ...) REFERENCES r (k1, ...): for every row of r, the
+// rows of t whose columns equal that row's primary key form a group whose
+// completeness the ledger's state tree can prove (ADR 0008). It cannot be
+// undone.
+type AlterTableAddVerifiableGroupStatement struct {
+	TableName         string   `json:"table_name"`
+	Columns           []string `json:"columns"`
+	ReferencesTable   string   `json:"references_table"`
+	ReferencesColumns []string `json:"references_columns"`
+}
+
+func (AlterTableAddVerifiableGroupStatement) statementNode() {}
+
+func (AlterTableAddVerifiableGroupStatement) Kind() string {
+	return "alter_table_add_verifiable_group"
+}
+
 // AlterTableSetVerifiableStatement represents ALTER TABLE ... SET
 // VERIFIABLE. A verifiable table's rows enter the ledger's state tree
 // (ADR 0008), so a node can prove a row's value at a signed checkpoint

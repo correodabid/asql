@@ -174,35 +174,44 @@ func TestOlderSnapshotFormatsDecode(t *testing.T) {
 	snap.state.domains["lab"].tables["results"].verifiable = true
 	snap.state.domains["lab"].tables["results"].primaryKeyColumns = []string{"id", "result"}
 
-	v17, err := encodeSnapshotFileBinary(&snap, true, 0)
+	withoutGroups, err := encodeSnapshotFileBinary(&snap, true, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
+	snap.state.domains["lab"].tables["results"].verifiableGroups = []verifiableGroup{{columns: []string{"result"}, refTable: "results", refColumns: []string{"id"}}}
+	v18, err := encodeSnapshotFileBinary(&snap, true, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The group list (v18) is its 4-byte count plus the group.
+	groups := 4 + len(v18) - len(withoutGroups)
 	// Older versions lack fields after is_full: the 33-byte anchor (v12),
 	// the 8-byte last_tx_num after it (v12, v13), the append-only table
 	// list after that (v12-v14: a count and one table, 12 bytes) and the
 	// verifiable table list after that (v12-v15, also 12 bytes) and the
 	// composite key list after that (v12-v16: a count and one table with two
-	// columns, 22 bytes). Drop them and fix the CRC.
+	// columns, 22 bytes) and the verifiable group list after that (v12-v17).
+	// Drop them and fix the CRC.
 	off := 5
-	n := int(binary.BigEndian.Uint32(v17[off:]))
+	n := int(binary.BigEndian.Uint32(v18[off:]))
 	off += 4
 	for i := 0; i < n; i++ {
-		off += 2 + int(binary.BigEndian.Uint16(v17[off:]))
+		off += 2 + int(binary.BigEndian.Uint16(v18[off:]))
 	}
 	off += 4 + 8 + 8 + 1 // num_snapshots, lsn, logicalTS, is_full
 	older := func(version byte, from, to int) []byte {
-		data := append(append([]byte{}, v17[:from]...), v17[to:len(v17)-4]...)
+		data := append(append([]byte{}, v18[:from]...), v18[to:len(v18)-4]...)
 		data[4] = version
 		return binary.BigEndian.AppendUint32(data, crc32.Checksum(data, snapCRC32C))
 	}
 	formats := map[string][]byte{
-		"v17": v17,
-		"v16": older(16, off+65, off+87),
-		"v15": older(15, off+53, off+87),
-		"v14": older(14, off+41, off+87),
-		"v13": older(13, off+33, off+87),
-		"v12": older(12, off, off+87),
+		"v18": v18,
+		"v17": older(17, off+87, off+87+groups),
+		"v16": older(16, off+65, off+87+groups),
+		"v15": older(15, off+53, off+87+groups),
+		"v14": older(14, off+41, off+87+groups),
+		"v13": older(13, off+33, off+87+groups),
+		"v12": older(12, off, off+87+groups),
 	}
 
 	for name, data := range formats {
@@ -214,14 +223,18 @@ func TestOlderSnapshotFormatsDecode(t *testing.T) {
 			t.Fatalf("%s: hasLedgerChain=%v lsn=%d", name, got, entries[0].lsn)
 		}
 		wantTxNum := uint64(0)
-		if name == "v14" || name == "v15" || name == "v16" || name == "v17" {
+		if name == "v14" || name == "v15" || name == "v16" || name == "v17" || name == "v18" {
 			wantTxNum = 42
 		}
-		wantAppendOnly := name == "v15" || name == "v16" || name == "v17"
-		wantVerifiable := name == "v16" || name == "v17"
+		wantAppendOnly := name == "v15" || name == "v16" || name == "v17" || name == "v18"
+		wantVerifiable := name == "v16" || name == "v17" || name == "v18"
 		wantKey := ""
-		if name == "v17" {
+		if name == "v17" || name == "v18" {
 			wantKey = "id,result"
+		}
+		wantGroups := 0
+		if name == "v18" {
+			wantGroups = 1
 		}
 		if entries[0].lastTxNum != wantTxNum {
 			t.Fatalf("%s: lastTxNum=%d, want %d", name, entries[0].lastTxNum, wantTxNum)
@@ -230,6 +243,12 @@ func TestOlderSnapshotFormatsDecode(t *testing.T) {
 		results := snaps[0].state.domains["lab"].tables["results"]
 		if err != nil || !ok || len(results.rows) != 1 || snaps[0].lastTxNum != wantTxNum || results.appendOnly != wantAppendOnly || results.verifiable != wantVerifiable || strings.Join(results.primaryKeyColumns, ",") != wantKey {
 			t.Fatalf("%s: full decode: ok=%v err=%v", name, ok, err)
+		}
+		if len(results.verifiableGroups) != wantGroups || len(entries[0].groups) != wantGroups {
+			t.Fatalf("%s: groups %+v, raw %+v, want %d", name, results.verifiableGroups, entries[0].groups, wantGroups)
+		}
+		if wantGroups == 1 && (results.verifiableGroups[0].refTable != "results" || strings.Join(results.verifiableGroups[0].refColumns, ",") != "id") {
+			t.Fatalf("%s: group %+v", name, results.verifiableGroups[0])
 		}
 		if len(entries[0].appendOnly) > 0 != wantAppendOnly || len(entries[0].verifiable) > 0 != wantVerifiable {
 			t.Fatalf("%s: append-only tables %v, verifiable tables %v", name, entries[0].appendOnly, entries[0].verifiable)

@@ -859,6 +859,13 @@ type snapTable struct {
 	AppendOnly           bool              `json:"append_only,omitempty"`
 	Verifiable           bool              `json:"verifiable,omitempty"`
 	PrimaryKey           []string          `json:"primary_key,omitempty"`
+	VerifiableGroups     []snapGroup       `json:"verifiable_groups,omitempty"`
+}
+
+type snapGroup struct {
+	Columns           []string `json:"columns"`
+	References        string   `json:"references"`
+	ReferencedColumns []string `json:"referenced_columns"`
 }
 
 type snapEntity struct {
@@ -966,7 +973,7 @@ func (server *Server) adminSchemaSnapshot(sql string) (interceptResult, bool) {
 					ReferencesColumn: vfk.ReferencesColumn,
 				})
 			}
-			tables = append(tables, snapTable{Name: t.Name, Columns: cols, Indexes: idxs, VersionedForeignKeys: vfks, AppendOnly: t.AppendOnly, Verifiable: t.Verifiable, PrimaryKey: t.PrimaryKey})
+			tables = append(tables, snapTable{Name: t.Name, Columns: cols, Indexes: idxs, VersionedForeignKeys: vfks, AppendOnly: t.AppendOnly, Verifiable: t.Verifiable, PrimaryKey: t.PrimaryKey, VerifiableGroups: snapGroups(t.VerifiableGroups)})
 		}
 		entities := make([]snapEntity, 0, len(d.Entities))
 		for _, e := range d.Entities {
@@ -2101,4 +2108,12 @@ func commitTimeLiteral(micros int64) ast.Literal {
 		return ast.Literal{Kind: ast.LiteralNull}
 	}
 	return ast.Literal{Kind: ast.LiteralTimestamp, NumberValue: micros}
+}
+
+func snapGroups(groups []executor.SchemaVerifiableGroup) []snapGroup {
+	var out []snapGroup
+	for _, g := range groups {
+		out = append(out, snapGroup{Columns: g.Columns, References: g.References, ReferencedColumns: g.ReferencedColumns})
+	}
+	return out
 }

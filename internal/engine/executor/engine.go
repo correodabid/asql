@@ -648,6 +648,9 @@ func (engine *Engine) Execute(ctx context.Context, session *Session, sql string)
 		if err := checkVerifiable(committed, plan); err != nil {
 			return Result{}, err
 		}
+		if err := checkVerifiableGroup(engine.committedDomain(plan.DomainName), plan, false); err != nil {
+			return Result{}, err
+		}
 		session.activeTx.statements = append(session.activeTx.statements, trimmed)
 		session.activeTx.plans = append(session.activeTx.plans, plan)
 		return Result{Status: "QUEUED", Rows: returningRows}, nil

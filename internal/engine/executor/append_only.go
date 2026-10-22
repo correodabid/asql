@@ -41,6 +41,15 @@ func checkAppendOnly(table *tableState, plan planner.Plan) error {
 	return sqlerr.New("42501", fmt.Sprintf("permission denied: table %s.%s is append-only and does not allow %s", plan.DomainName, plan.TableName, what))
 }
 
+// committedDomain returns a domain of the committed state, or nil.
+func (engine *Engine) committedDomain(domain string) *domainState {
+	state := engine.readState.Load()
+	if state == nil {
+		return nil
+	}
+	return state.domains[domain]
+}
+
 // committedTable returns a table of the committed state, or nil.
 func (engine *Engine) committedTable(domain, table string) *tableState {
 	state := engine.readState.Load()

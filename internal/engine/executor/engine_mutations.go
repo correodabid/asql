@@ -458,6 +458,8 @@ func (engine *Engine) generateRollbackSQL(domain string, forwardSQL []string) ([
 			issues = append(issues, fmt.Sprintf("forward[%d] SET VERIFIABLE cannot be undone", index))
 		case planner.OperationAlterTableAddPrimaryKey:
 			issues = append(issues, fmt.Sprintf("forward[%d] ADD PRIMARY KEY cannot be undone", index))
+		case planner.OperationAlterTableAddVerifiableGroup:
+			issues = append(issues, fmt.Sprintf("forward[%d] ADD VERIFIABLE GROUP cannot be undone", index))
 		case planner.OperationCreateEntity:
 			issues = append(issues, fmt.Sprintf("forward[%d] CREATE ENTITY requires explicit rollback planning", index))
 		default:
@@ -540,7 +542,8 @@ func isMigrationMutationOperation(operation planner.Operation) bool {
 		planner.OperationTruncateTable,
 		planner.OperationAlterTableSetAppendOnly,
 		planner.OperationAlterTableSetVerifiable,
-		planner.OperationAlterTableAddPrimaryKey:
+		planner.OperationAlterTableAddPrimaryKey,
+		planner.OperationAlterTableAddVerifiableGroup:
 		return true
 	default:
 		return false
@@ -602,6 +605,7 @@ func shareTableForInsert(source *tableState, replayMode bool) *tableState {
 		changeLog:            source.changeLog, // shared — append is safe per slice semantics
 		appendOnly:           source.appendOnly,
 		verifiable:           source.verifiable,
+		verifiableGroups:     source.verifiableGroups,
 		changeLogTrimmedLSN:  source.changeLogTrimmedLSN,
 		indexesLoaded:        source.indexesLoaded,
 	}
@@ -734,6 +738,7 @@ func cloneTableState(source *tableState) *tableState {
 		changeLog:            source.changeLog, // shared — append is COW-safe per slice semantics
 		appendOnly:           source.appendOnly,
 		verifiable:           source.verifiable,
+		verifiableGroups:     source.verifiableGroups,
 		changeLogTrimmedLSN:  source.changeLogTrimmedLSN,
 		indexesLoaded:        source.indexesLoaded,
 	}
@@ -976,6 +981,8 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 	switch plan.Operation {
 	case planner.OperationAlterTableAddPrimaryKey:
 		return engine.applyAddPrimaryKey(domainState, plan, clonedTables)
+	case planner.OperationAlterTableAddVerifiableGroup:
+		return engine.applyAddVerifiableGroup(domainState, plan, clonedTables)
 	case planner.OperationAlterTableSetAppendOnly, planner.OperationAlterTableSetVerifiable:
 		table, exists := domainState.tables[plan.TableName]
 		if !exists || !engine.catalog.HasTable(plan.DomainName, plan.TableName) {
@@ -1258,6 +1265,9 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 		if table.primaryKey == column || slices.Contains(table.primaryKeyColumns, column) {
 			return fmt.Errorf("cannot drop primary key column %q", column)
 		}
+		if err := checkDropGroupColumn(table, plan.TableName, column); err != nil {
+			return err
+		}
 
 		// COW
 		tableKey := plan.DomainName + "." + plan.TableName
@@ -1388,6 +1398,7 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 			table.indexedColumns[newCol] = idxName
 			delete(table.indexedColumns, oldCol)
 		}
+		renameGroupColumns(domainState, plan.DomainName, plan.TableName, oldCol, newCol, clonedTables)
 
 		table.lastMutationTS = engine.logicalTS
 		return nil
@@ -1881,6 +1892,10 @@ func (engine *Engine) applyPlanToStateTracked(state *readableState, plan planner
 				return nil
 			}
 			return errTableNotFound
+		}
+
+		if err := checkDropGroupReference(domainState, plan.TableName); err != nil {
+			return err
 		}
 
 		// Check if any other table in this domain references this table via FK.

@@ -48,6 +48,8 @@ type persistedSnapshot struct {
 	Verifiable [][2]string
 	// CompositeKeys lists the composite primary keys.
 	CompositeKeys []compositeKeyRef
+	// Groups lists the verifiable groups.
+	Groups []verifiableGroupRef
 }
 
 type persistedCatalog struct {
@@ -491,6 +493,7 @@ func marshalableToSnapshot(ps persistedSnapshot) engineSnapshot {
 	markAppendOnlyTables(snap.state.domains, ps.AppendOnly)
 	markVerifiableTables(snap.state.domains, ps.Verifiable)
 	markCompositeKeys(snap.state.domains, ps.CompositeKeys)
+	markVerifiableGroups(snap.state.domains, ps.Groups)
 	return snap
 }
 
@@ -1069,6 +1072,7 @@ func readAllSnapshotsFromDir(snapDir string) ([]engineSnapshot, uint64, error) {
 				AppendOnly:     entry.appendOnly,
 				Verifiable:     entry.verifiable,
 				CompositeKeys:  entry.compositeKeys,
+				Groups:         entry.groups,
 			}
 			snap := marshalableToSnapshot(full)
 			rebuildAllIndexes(&snap)

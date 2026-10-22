@@ -17,23 +17,24 @@ var (
 type Operation string
 
 const (
-	OperationCreateTable             Operation = "create_table"
-	OperationAlterTableAddColumn     Operation = "alter_table_add_column"
-	OperationAlterTableDropColumn    Operation = "alter_table_drop_column"
-	OperationAlterTableRenameColumn  Operation = "alter_table_rename_column"
-	OperationAlterTableSetAppendOnly Operation = "alter_table_set_append_only"
-	OperationAlterTableSetVerifiable Operation = "alter_table_set_verifiable"
-	OperationAlterTableAddPrimaryKey Operation = "alter_table_add_primary_key"
-	OperationCreateIndex             Operation = "create_index"
-	OperationInsert                  Operation = "insert"
-	OperationUpdate                  Operation = "update"
-	OperationDelete                  Operation = "delete"
-	OperationSelect                  Operation = "select"
-	OperationCreateEntity            Operation = "create_entity"
-	OperationDropTable               Operation = "drop_table"
-	OperationDropIndex               Operation = "drop_index"
-	OperationTruncateTable           Operation = "truncate_table"
-	OperationSetOp                   Operation = "set_operation"
+	OperationCreateTable                  Operation = "create_table"
+	OperationAlterTableAddColumn          Operation = "alter_table_add_column"
+	OperationAlterTableDropColumn         Operation = "alter_table_drop_column"
+	OperationAlterTableRenameColumn       Operation = "alter_table_rename_column"
+	OperationAlterTableSetAppendOnly      Operation = "alter_table_set_append_only"
+	OperationAlterTableSetVerifiable      Operation = "alter_table_set_verifiable"
+	OperationAlterTableAddPrimaryKey      Operation = "alter_table_add_primary_key"
+	OperationAlterTableAddVerifiableGroup Operation = "alter_table_add_verifiable_group"
+	OperationCreateIndex                  Operation = "create_index"
+	OperationInsert                       Operation = "insert"
+	OperationUpdate                       Operation = "update"
+	OperationDelete                       Operation = "delete"
+	OperationSelect                       Operation = "select"
+	OperationCreateEntity                 Operation = "create_entity"
+	OperationDropTable                    Operation = "drop_table"
+	OperationDropIndex                    Operation = "drop_index"
+	OperationTruncateTable                Operation = "truncate_table"
+	OperationSetOp                        Operation = "set_operation"
 )
 
 type Plan struct {
@@ -71,19 +72,24 @@ type Plan struct {
 	Verifiable        bool                     `json:"verifiable,omitempty"`  // CREATE TABLE ... VERIFIABLE
 	// PrimaryKeyColumns is a composite primary key in key order: CREATE
 	// TABLE ... PRIMARY KEY (a, b), or ALTER TABLE ... ADD PRIMARY KEY.
-	PrimaryKeyColumns    []string                  `json:"primary_key_columns,omitempty"`
-	ReturningColumns     []string                  `json:"returning_columns,omitempty"`
-	VersionedForeignKeys []ast.VersionedForeignKey `json:"versioned_foreign_keys,omitempty"`
-	EntityName           string                    `json:"entity_name,omitempty"`
-	EntityRootTable      string                    `json:"entity_root_table,omitempty"`
-	EntityTables         []string                  `json:"entity_tables,omitempty"`
-	IfExists             bool                      `json:"if_exists,omitempty"`
-	Cascade              bool                      `json:"cascade,omitempty"`
-	UpdateExprs          []ast.UpdateExpr          `json:"update_exprs,omitempty"`
-	OnConflict           *ast.OnConflictClause     `json:"on_conflict,omitempty"`
-	SetOp                ast.SetOpKind             `json:"set_op,omitempty"`
-	LeftPlan             *Plan                     `json:"left_plan,omitempty"`
-	RightPlan            *Plan                     `json:"right_plan,omitempty"`
+	PrimaryKeyColumns []string `json:"primary_key_columns,omitempty"`
+	// GroupColumns, GroupReferencesTable and GroupReferencesColumns are
+	// ALTER TABLE ... ADD VERIFIABLE GROUP (cols) REFERENCES table (cols).
+	GroupColumns           []string                  `json:"group_columns,omitempty"`
+	GroupReferencesTable   string                    `json:"group_references_table,omitempty"`
+	GroupReferencesColumns []string                  `json:"group_references_columns,omitempty"`
+	ReturningColumns       []string                  `json:"returning_columns,omitempty"`
+	VersionedForeignKeys   []ast.VersionedForeignKey `json:"versioned_foreign_keys,omitempty"`
+	EntityName             string                    `json:"entity_name,omitempty"`
+	EntityRootTable        string                    `json:"entity_root_table,omitempty"`
+	EntityTables           []string                  `json:"entity_tables,omitempty"`
+	IfExists               bool                      `json:"if_exists,omitempty"`
+	Cascade                bool                      `json:"cascade,omitempty"`
+	UpdateExprs            []ast.UpdateExpr          `json:"update_exprs,omitempty"`
+	OnConflict             *ast.OnConflictClause     `json:"on_conflict,omitempty"`
+	SetOp                  ast.SetOpKind             `json:"set_op,omitempty"`
+	LeftPlan               *Plan                     `json:"left_plan,omitempty"`
+	RightPlan              *Plan                     `json:"right_plan,omitempty"`
 	// CoerceLiterals asks the apply to coerce quoted literals to the column
 	// types (see executor.coerceWritePlan). Replay sets it for the DML the
 	// WAL stores as SQL text: the statement was coerced when it was queued,
@@ -158,6 +164,26 @@ func BuildForDomains(statement ast.Statement, txDomains []string) (Plan, error) 
 			Operation:  OperationAlterTableSetAppendOnly,
 			DomainName: domain,
 			TableName:  table,
+		}, nil
+	case ast.AlterTableAddVerifiableGroupStatement:
+		domain, table, err := resolveTableDomain(typed.TableName, allowedDomains)
+		if err != nil {
+			return Plan{}, err
+		}
+		refDomain, refTable, err := resolveTableDomain(typed.ReferencesTable, allowedDomains)
+		if err != nil {
+			return Plan{}, err
+		}
+		if refDomain != domain {
+			return Plan{}, fmt.Errorf("verifiable group: %s.%s and %s.%s are in different domains", domain, table, refDomain, refTable)
+		}
+		return Plan{
+			Operation:              OperationAlterTableAddVerifiableGroup,
+			DomainName:             domain,
+			TableName:              table,
+			GroupColumns:           typed.Columns,
+			GroupReferencesTable:   refTable,
+			GroupReferencesColumns: typed.ReferencesColumns,
 		}, nil
 	case ast.AlterTableAddPrimaryKeyStatement:
 		domain, table, err := resolveTableDomain(typed.TableName, allowedDomains)

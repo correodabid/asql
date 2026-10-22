@@ -157,6 +157,32 @@ ALTER TABLE results SET VERIFIABLE;
 - Marking an existing table enters its live rows at that LSN; proofs start at the first
   signed checkpoint after it.
 
+### Verifiable groups
+
+A row proof shows the rows it names, not that they are all of some kind. A **verifiable
+group** declares a kind whose completeness will be provable: for every row of a
+referenced table, the rows of a table whose columns equal that row's primary key.
+
+```sql
+-- For every artifact, the set of its parent edges, empty when it has none.
+ALTER TABLE artifact_parents ADD VERIFIABLE GROUP (child_id) REFERENCES artifacts (id);
+```
+
+- Both tables must be `VERIFIABLE` and in the same domain, the referenced columns must
+  be the referenced table's primary key in key order (composite ones included), and
+  each group column must have the type of its key column; otherwise it fails with
+  `42P16` (`42703` for a missing column, `42P01` for a missing table).
+- A table may have several groups; declaring the same one twice fails. It needs
+  `ADMIN` and cannot be undone.
+- A group keeps the columns it names: `DROP COLUMN` of a group column and `DROP TABLE`
+  of a referenced table fail with `42P16`, even with `CASCADE`; `RENAME COLUMN` follows
+  on either side. Dropping the group's own table drops its groups.
+- The WAL and snapshots record it, and `asql_admin.schema_snapshot` reports it under
+  `verifiable_groups`.
+
+The group leaves and the proofs that a set of rows is a whole group come in the next
+release; for now the declaration only records which groups they will cover.
+
 With `ledger=signed` and a state key, every digest is version 3: besides the chain and
 the log tree root it signs `state_root`, the root of the state tree of the verifiable
 tables' live rows at its LSN (`asql_admin.ledger_digest` and `GET /api/v1/ledger/digest`
