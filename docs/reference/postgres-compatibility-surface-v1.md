@@ -47,7 +47,10 @@ and current privilege semantics, see
   - `has_schema_privilege()`, `has_table_privilege()`, `has_database_privilege()` stay compatibility-oriented, but become principal-aware when the durable principal catalog is present
   - current grant-aware subset: `CREATE` follows `ADMIN`, `SELECT_HISTORY` follows the explicit temporal privilege, and common introspection privileges such as database `CONNECT`, schema `USAGE`, and mainstream table-operation probes reflect the current authenticated principal instead of always returning `true`
   - synthetic catalog coverage for `pg_catalog.pg_tables`, `pg_catalog.pg_namespace`, `pg_catalog.pg_class`, `pg_catalog.pg_attribute`, `pg_catalog.pg_type`, `pg_catalog.pg_settings`, `pg_catalog.pg_database`, `information_schema.tables`, `information_schema.columns`, and `information_schema.schemata`
-  - a smaller set of PostgreSQL catalog tables (`pg_index`, `pg_constraint`, `pg_proc`, `pg_am`, `pg_extension`, `pg_roles`, `pg_authid`, `pg_user`) is intercepted with empty result sets to keep mainstream tool flows moving without claiming full parity
+  - `pg_catalog.pg_constraint` is synthesized from primary keys (a composite key is one constraint, its columns in key order in `conkey`), unique columns and foreign keys
+  - `pg_attribute.attnotnull`, `information_schema.columns.is_nullable` and the JDBC column metadata report every `NOT NULL` column, declared or part of a primary key, single or composite
+  - a smaller set of PostgreSQL catalog tables (`pg_index`, `pg_proc`, `pg_am`, `pg_extension`, `pg_roles`, `pg_authid`, `pg_user`) is intercepted with empty result sets to keep mainstream tool flows moving without claiming full parity
+  - `asql_admin.schema_snapshot`, and the same snapshot over the HTTP and gRPC admin APIs (`pkg/adminapi` types), report per table `primary_key` (the key columns in key order), `append_only`, `verifiable` and `verifiable_groups`, and per column `not_null`. A column's own `primary_key` flag is set only for a single-column key: the columns of a composite key leave it false, so read the table-level `primary_key`
 - Query mode:
   - simple query protocol
   - extended query protocol for the current ASQL SQL subset
