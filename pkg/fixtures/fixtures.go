@@ -150,6 +150,18 @@ func ExportFromPGWire(ctx context.Context, conn *pgx.Conn, options ExportOptions
 		})
 	}
 
+	// Verifiable groups need both tables, so they follow every CREATE TABLE.
+	for _, table := range orderedTables {
+		if statements := buildGroupStatements(table); len(statements) > 0 {
+			steps = append(steps, Step{
+				Name:       "groups " + table.FullName(),
+				Mode:       "domain",
+				Domains:    []string{table.Domain},
+				Statements: statements,
+			})
+		}
+	}
+
 	for _, table := range orderedTables {
 		inserts, err := exportTableRows(ctx, conn, table)
 		if err != nil {
@@ -351,6 +363,15 @@ type schemaSnapshotTable struct {
 	Indexes              []schemaSnapshotIndex  `json:"indexes,omitempty"`
 	VersionedForeignKeys []schemaSnapshotVFK    `json:"versioned_foreign_keys,omitempty"`
 	PrimaryKey           []string               `json:"primary_key,omitempty"`
+	AppendOnly           bool                   `json:"append_only,omitempty"`
+	Verifiable           bool                   `json:"verifiable,omitempty"`
+	VerifiableGroups     []schemaSnapshotGroup  `json:"verifiable_groups,omitempty"`
+}
+
+type schemaSnapshotGroup struct {
+	Columns           []string `json:"columns"`
+	References        string   `json:"references"`
+	ReferencedColumns []string `json:"referenced_columns"`
 }
 
 type schemaSnapshotColumn struct {
@@ -387,7 +408,8 @@ type exportTable struct {
 	Domain    string
 	Snapshot  schemaSnapshotTable
 	DependsOn []string
-	PKColumn  string
+	// PKColumns is the primary key in key order, which rows are exported in.
+	PKColumns []string
 }
 
 func (t exportTable) FullName() string {
@@ -489,11 +511,11 @@ func buildExportCatalog(snapshot *schemaSnapshotResponse, domains []string) (map
 			continue
 		}
 		for _, table := range domain.Tables {
-			pk := ""
+			pk := table.PrimaryKey
 			deps := make([]string, 0)
 			for _, column := range table.Columns {
-				if column.PrimaryKey {
-					pk = column.Name
+				if column.PrimaryKey && len(pk) == 0 {
+					pk = []string{column.Name}
 				}
 				dep, hasDep := resolveReferenceTable(domainName, column.ReferencesTable)
 				if hasDep && dep != domainName+"."+table.Name {
@@ -515,7 +537,7 @@ func buildExportCatalog(snapshot *schemaSnapshotResponse, domains []string) (map
 				Domain:    domainName,
 				Snapshot:  table,
 				DependsOn: uniqueSorted(deps),
-				PKColumn:  pk,
+				PKColumns: pk,
 			}
 		}
 		for _, entity := range domain.Entities {
@@ -541,7 +563,7 @@ func buildExportCatalog(snapshot *schemaSnapshotResponse, domains []string) (map
 				return nil, nil, fmt.Errorf("cannot export %s: referenced table %s is outside the selected domains", name, dep)
 			}
 		}
-		if table.PKColumn == "" {
+		if len(table.PKColumns) == 0 {
 			return nil, nil, fmt.Errorf("cannot export %s: table has no primary key for deterministic ordering", name)
 		}
 	}
@@ -630,7 +652,17 @@ func buildCreateTableStatements(table exportTable) []string {
 	if len(table.Snapshot.PrimaryKey) > 1 {
 		columnDefs = append(columnDefs, "PRIMARY KEY ("+strings.Join(table.Snapshot.PrimaryKey, ", ")+")")
 	}
-	statements := []string{fmt.Sprintf("CREATE TABLE %s (%s)", table.FullName(), strings.Join(columnDefs, ", "))}
+	// APPEND ONLY and VERIFIABLE go in the CREATE TABLE: an append-only
+	// table still takes the INSERTs the data steps load, and a verifiable
+	// one needs only its primary key, which the CREATE declares.
+	var options string
+	if table.Snapshot.AppendOnly {
+		options += " APPEND ONLY"
+	}
+	if table.Snapshot.Verifiable {
+		options += " VERIFIABLE"
+	}
+	statements := []string{fmt.Sprintf("CREATE TABLE %s (%s)%s", table.FullName(), strings.Join(columnDefs, ", "), options)}
 	indexes := append([]schemaSnapshotIndex(nil), table.Snapshot.Indexes...)
 	sort.Slice(indexes, func(i, j int) bool { return indexes[i].Name < indexes[j].Name })
 	for _, index := range indexes {
@@ -644,6 +676,16 @@ func buildCreateTableStatements(table exportTable) []string {
 	return statements
 }
 
+// buildGroupStatements declares a table's verifiable groups.
+func buildGroupStatements(table exportTable) []string {
+	statements := make([]string, 0, len(table.Snapshot.VerifiableGroups))
+	for _, g := range table.Snapshot.VerifiableGroups {
+		statements = append(statements, fmt.Sprintf("ALTER TABLE %s ADD VERIFIABLE GROUP (%s) REFERENCES %s (%s)",
+			table.Snapshot.Name, strings.Join(g.Columns, ", "), g.References, strings.Join(g.ReferencedColumns, ", ")))
+	}
+	return statements
+}
+
 func exportTableRows(ctx context.Context, conn *pgx.Conn, table exportTable) ([]string, error) {
 	columns := make([]schemaSnapshotColumn, len(table.Snapshot.Columns))
 	copy(columns, table.Snapshot.Columns)
@@ -653,7 +695,7 @@ func exportTableRows(ctx context.Context, conn *pgx.Conn, table exportTable) ([]
 		columnNames = append(columnNames, column.Name)
 		columnTypes[column.Name] = column.Type
 	}
-	query := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s", strings.Join(columnNames, ", "), table.FullName(), table.PKColumn)
+	query := fmt.Sprintf("SELECT %s FROM %s ORDER BY %s", strings.Join(columnNames, ", "), table.FullName(), strings.Join(table.PKColumns, ", "))
 	rows, err := conn.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("export rows from %s: %w", table.FullName(), err)
