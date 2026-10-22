@@ -160,6 +160,11 @@
           <p>Start local. Add replication. Form a Raft cluster. Same API, same semantics, no migration.</p>
         </div>
         <div class="value-card">
+          <div class="value-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg></div>
+          <h3>Prove it to an auditor</h3>
+          <p>A hash-chained WAL and signed digests. Hand over a query's result, the rows a report cites, or proof that a lineage is complete, and anyone checks it with a public key.</p>
+        </div>
+        <div class="value-card">
           <div class="value-icon"><svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M5.6 18.4l2.8-2.8M15.6 8.4l2.8-2.8"/></svg></div>
           <h3>AI-native by default</h3>
           <p>Ships with its own <a href="https://github.com/correodabid/asql/blob/main/cmd/asql-mcp/README.md" target="_blank" rel="noopener" style="color:#a5b4fc">MCP server</a>. Claude Desktop, Cursor, and Zed can query your data, inspect row history, and time-travel to any commit — natively, without a custom integration.</p>
@@ -447,6 +452,47 @@
     <span class="k">REFERENCES</span> master.ingredients(id)
     <span class="k">AS OF</span> recipe_version
 );</code></pre>
+          </div>
+        </div>
+      </div>
+
+      <!-- Feature: Verifiable History -->
+      <div class="feature-block">
+        <div class="feature-text">
+          <div class="feature-label">Verifiable History</div>
+          <h3>Don't ask them to trust you.<br>Give them a proof.</h3>
+          <p>
+            Every WAL record is hash-chained, and with a signed ledger the node signs its
+            history at checkpoints. Prove a query's result, that the log only grew, and
+            which rows a report cites, down to <em>all</em> the inputs of a result, without
+            revealing anything else.
+          </p>
+          <ul class="feature-list">
+            <li>Signed digests and signed query results</li>
+            <li>Consistency proofs between published digests</li>
+            <li>Batch row proofs by primary key, salted against guessing</li>
+            <li>Complete lineages: all of an artifact's parents, none for a source</li>
+          </ul>
+        </div>
+        <div class="feature-code">
+          <div class="code-window">
+            <div class="code-bar">
+              <span class="code-dot"></span><span class="code-dot"></span><span class="code-dot"></span>
+              <span class="code-lang">SQL + CLI</span>
+            </div>
+            <pre><code><span class="k">CREATE TABLE</span> artifact_parents (
+  child_id <span class="t">TEXT</span>, parent_id <span class="t">TEXT</span>, ordinal <span class="t">INT</span>,
+  <span class="k">PRIMARY KEY</span> (child_id, parent_id)
+) <span class="k">APPEND ONLY VERIFIABLE</span>;
+
+<span class="k">ALTER TABLE</span> artifact_parents
+  <span class="k">ADD VERIFIABLE GROUP</span> (child_id)
+  <span class="k">REFERENCES</span> artifacts (id);
+
+<span class="c">-- Prove a report's lineage; check it with node.pub</span>
+$ asqlctl -command <span class="f">prove-rows</span> -keys lineage.json -output proof.json
+$ asqlctl -command <span class="f">verify-rows</span> -proof proof.json -pubkey node.pub
+<span class="c">  lab.artifact_parents(child_id=run-1): all 2 rows</span></code></pre>
           </div>
         </div>
       </div>
