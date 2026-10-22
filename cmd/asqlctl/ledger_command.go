@@ -75,6 +75,9 @@ type verifyLedgerDigest struct {
 	Signature string `json:"signature"`
 	Chain     string `json:"chain"`
 	TreeRoot  string `json:"tree_root,omitempty"`
+	// StateRoot, for version 3 digests, is always "not-checked": rebuilding
+	// the state tree needs the node's secret state key.
+	StateRoot string `json:"state_root,omitempty"`
 }
 
 type verifyLedgerFailure struct {
@@ -154,6 +157,9 @@ func runVerifyLedger(out io.Writer, opts verifyLedgerOptions) error {
 	// Rebuild the log tree up to a version 2 digest's LSN while verifying.
 	var tree *logtree.Frontier
 	verifyOpts := wal.VerifyOptions{Anchors: anchors, FromAnchor: opts.FromSnapshot}
+	if digestOut != nil && digest.HasState() {
+		digestOut.StateRoot = "not-checked"
+	}
 	if digestOut != nil && digestFailure == nil && digest.HasTree() {
 		digestOut.TreeRoot = "not-checked"
 		tree = &logtree.Frontier{}

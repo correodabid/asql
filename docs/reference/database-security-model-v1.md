@@ -157,8 +157,12 @@ ALTER TABLE results SET VERIFIABLE;
 - Marking an existing table enters its live rows at that LSN; proofs start at the first
   signed checkpoint after it.
 
-The state tree and the row proofs (`asql_admin.prove_rows`, `asqlctl verify-rows`) come
-in a later release: for now the flag only records which tables they will cover.
+With `ledger=signed` and a state key, every digest is version 3: besides the chain and
+the log tree root it signs `state_root`, the root of the state tree of the verifiable
+tables' live rows at its LSN (`asql_admin.ledger_digest` and `GET /api/v1/ledger/digest`
+show it). The node keeps the tree off the commit path. `verify-ledger -digest` reports
+`state_root` as `not-checked`: rebuilding it needs the secret state key. The row proofs
+against it (`asql_admin.prove_rows`, `asqlctl verify-rows`) come next.
 
 ## Ledger keys
 

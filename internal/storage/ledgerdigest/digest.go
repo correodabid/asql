@@ -24,11 +24,13 @@ import (
 	"github.com/correodabid/asql/internal/engine/ports"
 )
 
-// Digest format versions. Both are Ed25519 over the canonical encoding
-// below; version 2 (ADR 0008) also signs the log tree root at LSN.
+// Digest format versions, all Ed25519 over the canonical encoding below.
+// Version 2 (ADR 0008) also signs the log tree root at LSN, and version 3
+// the state tree root of the VERIFIABLE tables at LSN.
 const (
 	Version1 = 1
 	Version2 = 2
+	Version3 = 3
 )
 
 // signingDomain separates digest signatures from any other use of the key.
@@ -56,8 +58,11 @@ type Digest struct {
 	// TreeRoot is the root of the RFC 6962 log tree of LSNs 1..LSN
 	// (ADR 0008). Only version 2 digests carry it.
 	TreeRoot [32]byte
-	NodeID   string
-	KeyID    string
+	// StateRoot is the root of the state tree at LSN (ADR 0008). Only
+	// version 3 digests carry it.
+	StateRoot [32]byte
+	NodeID    string
+	KeyID     string
 	// SignedAt is the signer's wall clock. It is signed but only asserted by
 	// the node: proving that a state existed by some time needs the digest
 	// published or time-stamped elsewhere.
@@ -72,7 +77,7 @@ func (d Digest) CanonicalBytes() ([]byte, error) {
 	if len(d.NodeID) > math.MaxUint16 || len(d.KeyID) > math.MaxUint16 {
 		return nil, errors.New("ledger digest: node or key id too long")
 	}
-	b := make([]byte, 0, len(signingDomain)+1+1+8+32+32+8+8+8+2+len(d.NodeID)+2+len(d.KeyID))
+	b := make([]byte, 0, len(signingDomain)+1+1+8+32+32+32+8+8+8+2+len(d.NodeID)+2+len(d.KeyID))
 	b = append(b, signingDomain...)
 	b = append(b, 0)
 	b = append(b, d.Version)
@@ -80,6 +85,9 @@ func (d Digest) CanonicalBytes() ([]byte, error) {
 	b = append(b, d.Chain[:]...)
 	if d.Version >= Version2 {
 		b = append(b, d.TreeRoot[:]...)
+	}
+	if d.Version >= Version3 {
+		b = append(b, d.StateRoot[:]...)
 	}
 	b = binary.BigEndian.AppendUint64(b, d.Term)
 	b = binary.BigEndian.AppendUint64(b, d.Timestamp)
@@ -93,7 +101,7 @@ func (d Digest) CanonicalBytes() ([]byte, error) {
 
 // Verify checks d's signature against a trusted key set indexed by key id.
 func (d Digest) Verify(keys Keyring) error {
-	if d.Version != Version1 && d.Version != Version2 {
+	if d.Version < Version1 || d.Version > Version3 {
 		return fmt.Errorf("ledger digest: unsupported version %d", d.Version)
 	}
 	pub, ok := keys[d.KeyID]
@@ -123,6 +131,9 @@ type Keyring map[string]ed25519.PublicKey
 // HasTree reports whether d signs a log tree root.
 func (d Digest) HasTree() bool { return d.Version >= Version2 }
 
+// HasState reports whether d signs a state tree root.
+func (d Digest) HasState() bool { return d.Version >= Version3 }
+
 // Add trusts pub under its derived key id.
 func (k Keyring) Add(pub ed25519.PublicKey) { k[KeyID(pub)] = pub }
 
@@ -135,6 +146,7 @@ type digestJSON struct {
 	Term      uint64 `json:"term"`
 	Timestamp uint64 `json:"timestamp"`
 	TreeRoot  string `json:"tree_root,omitempty"`
+	StateRoot string `json:"state_root,omitempty"`
 	NodeID    string `json:"node_id"`
 	KeyID     string `json:"key_id"`
 	SignedAt  string `json:"signed_at"`
@@ -144,9 +156,12 @@ type digestJSON struct {
 // MarshalJSON encodes the chain in hex, the signature in base64 and
 // SignedAt as RFC 3339 with nanoseconds, so it round-trips exactly.
 func (d Digest) MarshalJSON() ([]byte, error) {
-	var treeRoot string
+	var treeRoot, stateRoot string
 	if d.HasTree() {
 		treeRoot = hex.EncodeToString(d.TreeRoot[:])
+	}
+	if d.HasState() {
+		stateRoot = hex.EncodeToString(d.StateRoot[:])
 	}
 	return json.Marshal(digestJSON{
 		Version:   d.Version,
@@ -155,6 +170,7 @@ func (d Digest) MarshalJSON() ([]byte, error) {
 		Term:      d.Term,
 		Timestamp: d.Timestamp,
 		TreeRoot:  treeRoot,
+		StateRoot: stateRoot,
 		NodeID:    d.NodeID,
 		KeyID:     d.KeyID,
 		SignedAt:  d.SignedAt.UTC().Format(time.RFC3339Nano),
@@ -180,10 +196,15 @@ func (d *Digest) UnmarshalJSON(data []byte) error {
 	if err != nil {
 		return fmt.Errorf("ledger digest: sig: %w", err)
 	}
-	var treeRoot []byte
+	var treeRoot, stateRoot []byte
 	if j.Version >= Version2 {
 		if treeRoot, err = hex.DecodeString(j.TreeRoot); err != nil || len(treeRoot) != 32 {
 			return fmt.Errorf("ledger digest: tree_root must be 32 bytes of hex")
+		}
+	}
+	if j.Version >= Version3 {
+		if stateRoot, err = hex.DecodeString(j.StateRoot); err != nil || len(stateRoot) != 32 {
+			return fmt.Errorf("ledger digest: state_root must be 32 bytes of hex")
 		}
 	}
 	*d = Digest{
@@ -198,11 +219,12 @@ func (d *Digest) UnmarshalJSON(data []byte) error {
 	}
 	copy(d.Chain[:], chain)
 	copy(d.TreeRoot[:], treeRoot)
+	copy(d.StateRoot[:], stateRoot)
 	return nil
 }
 
 // Sign fills in d's key id and signs it. A zero version means version 1;
-// version 2 also signs d.TreeRoot.
+// version 2 also signs d.TreeRoot, and version 3 d.StateRoot.
 func Sign(signer ports.LedgerSigner, d Digest) (Digest, error) {
 	if d.Version == 0 {
 		d.Version = Version1

@@ -61,28 +61,47 @@ func (engine *Engine) TimeTravelQueryAsOfLSN(ctx context.Context, sql string, tx
 		return Result{Status: "OK", Rows: rows}, nil
 	}
 
-	if cachedState, ok := engine.cachedHistoricalState(targetLSN); ok {
-		if len(imports) > 0 {
-			cachedState, err = applyImports(cachedState, imports)
-			if err != nil {
-				return Result{}, err
-			}
-		}
-		rows, err := engine.executeQueryPlan(ctx, cachedState, plan)
+	tempState, temp, err := engine.historicalStateAt(ctx, targetLSN)
+	if err != nil {
+		return Result{}, err
+	}
+	if len(imports) > 0 {
+		tempState, err = applyImports(tempState, imports)
 		if err != nil {
 			return Result{}, err
 		}
-		engine.perf.recordRead(time.Since(readStart))
-		return Result{Status: "OK", Rows: rows}, nil
+	}
+	if temp == nil {
+		// A cached state runs on the engine itself, as before.
+		temp = engine
+	}
+	rows, err := temp.executeQueryPlan(ctx, tempState, plan)
+	if err != nil {
+		return Result{}, err
+	}
+	if temp != engine {
+		engine.mergeScanStrategyCounts(temp.scanStrategySnapshot())
+	}
+
+	engine.perf.recordRead(time.Since(readStart))
+	return Result{Status: "OK", Rows: rows}, nil
+}
+
+// historicalStateAt returns the engine state at targetLSN, from the cache
+// of historical states or rebuilt from the closest snapshot and the WAL.
+// temp is the scratch engine that rebuilt it, nil for a cached state.
+func (engine *Engine) historicalStateAt(ctx context.Context, targetLSN uint64) (state *readableState, temp *Engine, err error) {
+	if cachedState, ok := engine.cachedHistoricalState(targetLSN); ok {
+		return cachedState, nil, nil
 	}
 
 	// Slow path: historical query — restore from nearest snapshot + partial replay.
 	records, err := engine.readAllRecords(ctx)
 	if err != nil {
-		return Result{}, fmt.Errorf("time travel read wal: %w", err)
+		return nil, nil, fmt.Errorf("time travel read wal: %w", err)
 	}
 
-	temp := &Engine{
+	temp = &Engine{
 		catalog:   domains.NewCatalog(),
 		scanStats: make(map[scanStrategy]uint64),
 		logStore:  engine.logStore,
@@ -134,27 +153,12 @@ func (engine *Engine) TimeTravelQueryAsOfLSN(ctx context.Context, sql string, tx
 	// because WAL was truncated), rebuildFromRecordsPartial applies no records
 	// and the caller receives the fallback snapshot state.
 	if err := temp.rebuildFromRecordsPartial(records, startFromLSN, targetLSN); err != nil {
-		return Result{}, err
+		return nil, nil, err
 	}
 
 	tempState := temp.readState.Load()
 	engine.storeHistoricalState(targetLSN, tempState)
-	if len(imports) > 0 {
-		tempState, err = applyImports(tempState, imports)
-		if err != nil {
-			return Result{}, err
-		}
-	}
-	rows, err := temp.executeQueryPlan(ctx, tempState, plan)
-	tempStats := temp.scanStrategySnapshot()
-	if err != nil {
-		return Result{}, err
-	}
-
-	engine.mergeScanStrategyCounts(tempStats)
-
-	engine.perf.recordRead(time.Since(readStart))
-	return Result{Status: "OK", Rows: rows}, nil
+	return tempState, temp, nil
 }
 
 // TimeTravelQueryAsOfLSNAsPrincipal evaluates a SELECT query at targetLSN only

@@ -101,8 +101,11 @@ the digests, which gain a version 2.
   DEFAULT` change rows without writing row changes to the audit store, so a tree fed
   only by the audit store would disagree with the state. The node keeps the tree of
   the latest checkpoint in memory, with immutable nodes so the trees of recent
-  checkpoints stay available. At each checkpoint it updates only the keys the audit
-  store says changed, and rebuilds a table whose schema or verifiability changed.
+  checkpoints stay available. At each checkpoint it scans the verifiable tables' live
+  rows, hashes again only those whose version changed (each row carries the LSN of the
+  record that wrote it), and rebuilds a table whose columns or primary key changed.
+  The scan is `O(rows)` per checkpoint and the hashing `O(changed rows)`; driving it
+  from the audit store's row changes instead is a later optimisation.
   Proofs at an older checkpoint rebuild its tree from the historical state, which
   costs `O(rows of verifiable tables)`; nothing is persisted.
 - **Digest v3** adds `state_root` at the digest's LSN; v1 and v2 digests keep
@@ -132,7 +135,8 @@ the digests, which gain a version 2.
   leaves ordered by primary key would do the same, but it must reveal the two keys
   bounding the range, such as the next artifact's UUID v7 and the time it carries;
   group leaves reveal nothing beyond the group.
-- **Salt**: `HMAC-SHA-256(state key, key || commit LSN of the row version)`. The salt
+- **Salt**: `HMAC-SHA-256(state key, key || LSN of the WAL record that wrote the row
+  version)`, which the engine keeps with every row. The salt
   depends only on the key, the WAL and the secret, so replicas sharing the secret build
   the same tree. Leaves are salted from the first release of the state tree: adding
   salt later would change every leaf and root.
