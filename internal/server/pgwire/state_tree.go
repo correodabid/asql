@@ -32,7 +32,15 @@ type stateTreeBuilder struct {
 	built  bool
 	tree   statetree.Tree
 	tables map[string]*stateTreeTable
+	// groups holds the group keys of each table's verifiable groups, by
+	// table id and the groups' shape.
+	groups map[string]*stateTreeGroups
 	recent []stateTreeCheckpoint
+}
+
+type stateTreeGroups struct {
+	shape string
+	keys  map[statetree.Hash]bool
 }
 
 type stateTreeTable struct {
@@ -41,8 +49,8 @@ type stateTreeTable struct {
 }
 
 type stateTreeRow struct {
-	key statetree.Hash
-	lsn uint64
+	key, leaf statetree.Hash
+	lsn       uint64
 }
 
 type stateTreeCheckpoint struct {
@@ -51,7 +59,7 @@ type stateTreeCheckpoint struct {
 }
 
 func newStateTreeBuilder(engine *executor.Engine, key ledgerdigest.StateKey) *stateTreeBuilder {
-	return &stateTreeBuilder{engine: engine, key: key, tables: map[string]*stateTreeTable{}}
+	return &stateTreeBuilder{engine: engine, key: key, tables: map[string]*stateTreeTable{}, groups: map[string]*stateTreeGroups{}}
 }
 
 // State brings the tree to the committed head and returns the head's LSN
@@ -71,7 +79,9 @@ func (b *stateTreeBuilder) State(context.Context) (uint64, [32]byte, bool, error
 func (b *stateTreeBuilder) advance(view executor.VerifiableView) error {
 	tree := b.tree
 	seenTables := map[string]bool{}
-	for _, table := range view.Tables() {
+	changed := map[string]bool{} // tables with a row set or removed
+	tables := view.Tables()
+	for _, table := range tables {
 		id := table.Domain + "." + table.Name
 		seenTables[id] = true
 		shape := strings.Join(table.PrimaryKey, ",") + "|" + strings.Join(table.Columns, ",")
@@ -84,6 +94,7 @@ func (b *stateTreeBuilder) advance(view executor.VerifiableView) error {
 			}
 			st = &stateTreeTable{shape: shape, rows: map[string]stateTreeRow{}}
 			b.tables[id] = st
+			changed[id] = true
 		}
 		seen := make(map[string]bool, len(st.rows))
 		err := view.Rows(table.Domain, table.Name, func(row executor.VerifiableRow) error {
@@ -97,16 +108,18 @@ func (b *stateTreeBuilder) advance(view executor.VerifiableView) error {
 				return err
 			}
 			tree = tree.Set(key, leaf)
-			st.rows[id] = stateTreeRow{key: key, lsn: row.LSN}
+			st.rows[id] = stateTreeRow{key: key, leaf: leaf, lsn: row.LSN}
+			changed[table.Domain+"."+table.Name] = true
 			return nil
 		})
 		if err != nil {
 			return fmt.Errorf("state tree: %s: %w", id, err)
 		}
-		for id, row := range st.rows {
-			if !seen[id] {
+		for pk, row := range st.rows {
+			if !seen[pk] {
 				tree = tree.Delete(row.key)
-				delete(st.rows, id)
+				delete(st.rows, pk)
+				changed[id] = true
 			}
 		}
 	}
@@ -117,6 +130,10 @@ func (b *stateTreeBuilder) advance(view executor.VerifiableView) error {
 			}
 			delete(b.tables, id)
 		}
+	}
+	tree, err := b.advanceGroups(view, tables, changed, tree)
+	if err != nil {
+		return err
 	}
 	b.tree, b.lsn, b.built = tree, view.LSN, true
 	b.recent = append(b.recent, stateTreeCheckpoint{lsn: view.LSN, tree: tree})
@@ -149,23 +166,87 @@ func (b *stateTreeBuilder) TreeAt(ctx context.Context, lsn uint64) (statetree.Tr
 	return tree, view, err
 }
 
-// buildStateTree builds the state tree of a view from scratch.
+// buildStateTree builds the state tree of a view from scratch, through the
+// same code that keeps the head's, so the two cannot disagree.
 func buildStateTree(key [32]byte, view executor.VerifiableView) (statetree.Tree, error) {
-	var entries []statetree.Entry
-	for _, table := range view.Tables() {
-		err := view.Rows(table.Domain, table.Name, func(row executor.VerifiableRow) error {
-			k, leaf, err := stateTreeEntry(key, table.Domain, table.Name, row)
+	b := &stateTreeBuilder{key: key, tables: map[string]*stateTreeTable{}, groups: map[string]*stateTreeGroups{}}
+	if err := b.advance(view); err != nil {
+		return statetree.Tree{}, err
+	}
+	return b.tree, nil
+}
+
+// advanceGroups keeps one group leaf per row of each verifiable group's
+// referenced table (ADR 0008, completeness upwards). A table's group
+// leaves are recomputed when its rows, its referenced tables' rows or its
+// groups changed.
+func (b *stateTreeBuilder) advanceGroups(view executor.VerifiableView, tables []executor.VerifiableTable, changed map[string]bool, tree statetree.Tree) (statetree.Tree, error) {
+	seen := map[string]bool{}
+	for _, table := range tables {
+		id := table.Domain + "." + table.Name
+		if len(table.Groups) == 0 {
+			continue
+		}
+		seen[id] = true
+		var shape strings.Builder
+		dirty := changed[id]
+		for _, g := range table.Groups {
+			fmt.Fprintf(&shape, "%s>%s(%s);", strings.Join(g.Columns, ","), g.RefTable, strings.Join(g.RefColumns, ","))
+			dirty = dirty || changed[table.Domain+"."+g.RefTable]
+		}
+		gs := b.groups[id]
+		if gs != nil && gs.shape == shape.String() && !dirty {
+			continue
+		}
+		next := map[statetree.Hash]bool{}
+		for _, g := range table.Groups {
+			// Members by their group values.
+			members := map[string][]statetree.Entry{}
+			st := b.tables[id]
+			err := view.Rows(table.Domain, table.Name, func(row executor.VerifiableRow) error {
+				values := make([]ast.Literal, len(g.Columns))
+				for i, column := range g.Columns {
+					values[i] = row.Row[column]
+				}
+				cached := st.rows[primaryKeyText(row.PrimaryKey)]
+				members[primaryKeyText(values)] = append(members[primaryKeyText(values)], statetree.Entry{Key: cached.key, Leaf: cached.leaf})
+				return nil
+			})
 			if err != nil {
-				return err
+				return tree, fmt.Errorf("state tree: groups of %s: %w", id, err)
 			}
-			entries = append(entries, statetree.Entry{Key: k, Leaf: leaf})
-			return nil
-		})
-		if err != nil {
-			return statetree.Tree{}, fmt.Errorf("state tree: %s.%s: %w", table.Domain, table.Name, err)
+			// One leaf per referenced row, empty when it has no members.
+			err = view.Rows(table.Domain, g.RefTable, func(ref executor.VerifiableRow) error {
+				key, err := statetree.GroupKey(table.Domain, table.Name, g.Columns, g.RefTable, ref.PrimaryKey)
+				if err != nil {
+					return err
+				}
+				tree = tree.Set(key, statetree.GroupLeaf(members[primaryKeyText(ref.PrimaryKey)]))
+				next[key] = true
+				return nil
+			})
+			if err != nil {
+				return tree, fmt.Errorf("state tree: groups of %s: %w", id, err)
+			}
+		}
+		if gs != nil {
+			for key := range gs.keys {
+				if !next[key] {
+					tree = tree.Delete(key)
+				}
+			}
+		}
+		b.groups[id] = &stateTreeGroups{shape: shape.String(), keys: next}
+	}
+	for id, gs := range b.groups {
+		if !seen[id] {
+			for key := range gs.keys {
+				tree = tree.Delete(key)
+			}
+			delete(b.groups, id)
 		}
 	}
-	return statetree.Build(entries)
+	return tree, nil
 }
 
 // stateTreeEntry returns a row's key and salted leaf.
