@@ -180,8 +180,8 @@ ALTER TABLE artifact_parents ADD VERIFIABLE GROUP (child_id) REFERENCES artifact
 - The WAL and snapshots record it, and `asql_admin.schema_snapshot` reports it under
   `verifiable_groups`.
 
-The group leaves and the proofs that a set of rows is a whole group come in the next
-release; for now the declaration only records which groups they will cover.
+With a state key, the state tree holds one group leaf per row of the referenced table;
+see [Complete groups](#complete-groups) for the proofs.
 
 With `ledger=signed` and a state key, every digest is version 3: besides the chain and
 the log tree root it signs `state_root`, the root of the state tree of the verifiable
@@ -205,7 +205,7 @@ asqlctl -command verify-rows -proof proof.json -pubkey node.pub
 ```
 
 - The same proof is `SELECT * FROM asql_admin.prove_rows WHERE keys = '<that JSON>'
-  [AND lsn = N]`, one row with `digest`, `rows` and `proof` as JSON. Without `lsn` it is
+  [AND lsn = N]`, one row with `digest`, `rows`, `proof` and `groups` as JSON. Without `lsn` it is
   proven at the latest digest; with it, at the digest signed at exactly that LSN.
 - It needs the privileges of reading those tables, plus `SELECT_HISTORY` at an LSN other
   than the head, like `attest_query`.
@@ -214,9 +214,33 @@ asqlctl -command verify-rows -proof proof.json -pubkey node.pub
   `state_root`. Changing any value, dropping a row from the batch or citing a row by
   another key makes `verify-rows` fail.
 - What it reveals beyond the rows: the digest's LSN, and roughly the order of magnitude
-  of the number of rows in the verifiable tables. It cannot prove that a row is absent,
-  nor (yet) that the rows shown are all of some kind, such as all of an artifact's
-  parents (ADR 0008).
+  of the number of rows in the verifiable tables. It cannot prove that a row is absent.
+
+### Complete groups
+
+With a verifiable group, a proof can also show that it lists *all* the rows of a group,
+for example all the parents of an artifact, none for a source:
+
+```sql
+ALTER TABLE artifact_parents ADD VERIFIABLE GROUP (child_id) REFERENCES artifacts (id);
+```
+
+```json
+[{"domain": "lab", "table": "artifacts", "pk": ["0192…"]},
+ {"domain": "lab", "table": "artifact_parents", "group": ["0192…"]}]
+```
+
+- An entry with `group` instead of `pk` asks for the group of the referenced row with
+  that primary key; the node adds every row of the group to the proof. With more than
+  one group on the table, name it with `"group_columns": ["child_id"]`.
+- Every row of the referenced table has a group leaf, an empty one when it has no rows,
+  so "this artifact has no parents" is proven like any other group. Asking for the group
+  of a row that does not exist fails.
+- `verify-rows` rebuilds each group from the proof's own rows and lists it, for example
+  `lab.artifact_parents(child_id=…): all 2 rows`. A row of the group left out of the
+  proof, or a source presented without its parents, makes it fail.
+- Groups prove completeness upwards only, as declared; nothing proves the rows that
+  reference a given row from elsewhere.
 
 ## Ledger keys
 

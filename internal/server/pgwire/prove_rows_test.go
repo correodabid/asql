@@ -16,12 +16,12 @@ import (
 )
 
 func queryRowsProof(ctx context.Context, conn *pgx.Conn, sql string) (statetree.RowsProof, error) {
-	var digest, rows, proof string
-	if err := conn.QueryRow(ctx, sql).Scan(&digest, &rows, &proof); err != nil {
+	var digest, rows, groups, proof string
+	if err := conn.QueryRow(ctx, sql).Scan(&digest, &rows, &proof, &groups); err != nil {
 		return statetree.RowsProof{}, err
 	}
 	var p statetree.RowsProof
-	err := json.Unmarshal([]byte(`{"digest":`+digest+`,"rows":`+rows+`,"proof":`+proof+`}`), &p)
+	err := json.Unmarshal([]byte(`{"digest":`+digest+`,"rows":`+rows+`,"groups":`+groups+`,"proof":`+proof+`}`), &p)
 	return p, err
 }
 
