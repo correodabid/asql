@@ -137,6 +137,19 @@ The recommended first response is to clarify the scenario and make the workflow 
 - cross-domain dependencies must be included in the selected domain set
 - dependency cycles fail export instead of producing unstable output
 
+Table options survive export and load:
+
+- a composite primary key is written as a `PRIMARY KEY (a, b)` constraint, and rows are
+  exported in key order;
+- `APPEND ONLY` and `VERIFIABLE` follow the column list of the `CREATE TABLE`. An
+  append-only table still takes the `INSERT`s of the data steps, so it can be declared
+  before them;
+- verifiable groups are declared with `ALTER TABLE … ADD VERIFIABLE GROUP` in a step of
+  their own after every table is created, since a group needs both of its tables.
+
+Fixtures exported before keep loading: these are ordinary statements, and the format
+stays v1.
+
 ## Current limitations
 
 v1 does **not** yet provide:
