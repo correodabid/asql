@@ -286,6 +286,7 @@ func Apply(ctx context.Context, fixture *File, exec SQLExecutor) error {
 		}
 
 		for statementIdx, statement := range step.Statements {
+			statement = dropRowVersionColumn(statement)
 			if err := exec.Exec(ctx, statement); err != nil {
 				_ = exec.Exec(ctx, "ROLLBACK")
 				return fmt.Errorf("fixture step %d (%s) statement %d failed: %w", stepIdx+1, step.Name, statementIdx+1, err)
@@ -706,6 +707,9 @@ func exportTableRows(ctx context.Context, conn *pgx.Conn, table exportTable) ([]
 	columnNames := make([]string, 0, len(columns))
 	columnTypes := make(map[string]string, len(columns))
 	for _, column := range columns {
+		if column.Name == "_lsn" {
+			continue // the loading engine writes its own
+		}
 		columnNames = append(columnNames, column.Name)
 		columnTypes[column.Name] = column.Type
 	}
@@ -839,4 +843,67 @@ func sqlLiteralForValue(value any, columnType string) string {
 	default:
 		return quoteSQLString(fmt.Sprint(value))
 	}
+}
+
+// dropRowVersionColumn removes a declared _lsn column from a CREATE TABLE.
+// Fixtures exported by v0.7.0 and earlier declare it, and the engine, which
+// adds its own, now refuses that; dropping it lets those fixtures load as
+// they were meant to.
+func dropRowVersionColumn(statement string) string {
+	trimmed := strings.TrimSpace(statement)
+	if !strings.HasPrefix(strings.ToUpper(trimmed), "CREATE TABLE") {
+		return statement
+	}
+	open := strings.Index(trimmed, "(")
+	if open < 0 {
+		return statement
+	}
+	depth, end, quoted := 0, -1, false
+	for i := open; i < len(trimmed) && end < 0; i++ {
+		switch c := trimmed[i]; {
+		case c == '\'':
+			quoted = !quoted
+		case quoted:
+		case c == '(':
+			depth++
+		case c == ')':
+			depth--
+			if depth == 0 {
+				end = i
+			}
+		}
+	}
+	if end < 0 {
+		return statement
+	}
+	var kept []string
+	dropped := false
+	depth, quoted, start := 0, false, open+1
+	items := []string{}
+	for i := open + 1; i <= end; i++ {
+		c := trimmed[i]
+		switch {
+		case c == '\'':
+			quoted = !quoted
+		case quoted:
+		case c == '(':
+			depth++
+		case c == ')' && depth > 0:
+			depth--
+		case (c == ',' && depth == 0) || i == end:
+			items = append(items, trimmed[start:i])
+			start = i + 1
+		}
+	}
+	for _, item := range items {
+		if fields := strings.Fields(item); len(fields) > 0 && strings.EqualFold(strings.Trim(fields[0], `"`), "_lsn") {
+			dropped = true
+			continue
+		}
+		kept = append(kept, strings.TrimSpace(item))
+	}
+	if !dropped {
+		return statement
+	}
+	return trimmed[:open+1] + strings.Join(kept, ", ") + trimmed[end:]
 }
