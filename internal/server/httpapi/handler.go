@@ -610,6 +610,7 @@ func (svc *service) handleSchemaSnapshot(w http.ResponseWriter, r *http.Request)
 					Name:             col.Name,
 					Type:             col.Type,
 					PrimaryKey:       col.PrimaryKey,
+					NotNull:          col.NotNull,
 					Unique:           col.Unique,
 					ReferencesTable:  col.ReferencesTable,
 					ReferencesColumn: col.ReferencesColumn,
@@ -636,7 +637,19 @@ func (svc *service) handleSchemaSnapshot(w http.ResponseWriter, r *http.Request)
 					ReferencesColumn: vfk.ReferencesColumn,
 				})
 			}
-			tables = append(tables, SchemaSnapshotTable{Name: table.Name, Columns: columns, Indexes: indexes, VersionedForeignKeys: vfks})
+			var groups []SchemaSnapshotVerifiableGroup
+			for _, g := range table.VerifiableGroups {
+				groups = append(groups, SchemaSnapshotVerifiableGroup{
+					Columns:           append([]string(nil), g.Columns...),
+					References:        g.References,
+					ReferencedColumns: append([]string(nil), g.ReferencedColumns...),
+				})
+			}
+			tables = append(tables, SchemaSnapshotTable{
+				Name: table.Name, Columns: columns, Indexes: indexes, VersionedForeignKeys: vfks,
+				PrimaryKey: append([]string(nil), table.PrimaryKey...), AppendOnly: table.AppendOnly,
+				Verifiable: table.Verifiable, VerifiableGroups: groups,
+			})
 		}
 		var entities []SchemaSnapshotEntity
 		for _, entity := range domain.Entities {
@@ -764,6 +777,10 @@ func (svc *service) handleTimelineCommits(w http.ResponseWriter, r *http.Request
 			tables[j] = TimelineCommitMutationEntry{Domain: t.Domain, Table: t.Table, Operation: t.Operation}
 		}
 		entries[i] = TimelineCommitEntry{LSN: c.LSN, TxID: c.TxID, Timestamp: c.Timestamp, Tables: tables}
+		if c.CommitTimeMicros != 0 {
+			t := time.UnixMicro(c.CommitTimeMicros).UTC()
+			entries[i].CommitTime = &t
+		}
 	}
 
 	svc.auditSuccess("admin.timeline_commits", slog.Int("commits", len(entries)))

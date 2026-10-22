@@ -1049,9 +1049,17 @@ type SchemaEntity struct {
 }
 
 type SchemaColumn struct {
-	Name             string
-	Type             string
-	PrimaryKey       bool
+	Name string
+	Type string
+	// PrimaryKey is true only for the column of a single-column primary
+	// key. The columns of a composite key leave it false: a DDL generator
+	// that wrote PRIMARY KEY on each of them would declare several keys.
+	// SchemaTable.PrimaryKey, the key columns in key order, is the source
+	// of truth for both.
+	PrimaryKey bool
+	// NotNull is true for a column declared NOT NULL and for every column
+	// of the primary key, single or composite.
+	NotNull          bool
 	Unique           bool
 	ReferencesTable  string
 	ReferencesColumn string

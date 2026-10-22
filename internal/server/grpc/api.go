@@ -3,6 +3,8 @@ package grpc
 import (
 	"context"
 
+	"github.com/correodabid/asql/pkg/adminapi"
+
 	grpcgo "google.golang.org/grpc"
 )
 
@@ -121,58 +123,6 @@ type LeadershipStateResponse struct {
 	LastLeaderLSN      uint64 `json:"last_leader_lsn"`
 	// Peers carries the node's known peer list for address gossip.
 	Peers []PeerInfo `json:"peers,omitempty"`
-}
-
-type SchemaSnapshotRequest struct {
-	Domains []string `json:"domains,omitempty"`
-}
-
-type SchemaSnapshotColumn struct {
-	Name             string `json:"name"`
-	Type             string `json:"type"`
-	PrimaryKey       bool   `json:"primary_key,omitempty"`
-	Unique           bool   `json:"unique,omitempty"`
-	ReferencesTable  string `json:"references_table,omitempty"`
-	ReferencesColumn string `json:"references_column,omitempty"`
-	DefaultValue     string `json:"default_value,omitempty"`
-}
-
-type SchemaSnapshotIndex struct {
-	Name    string   `json:"name"`
-	Columns []string `json:"columns"`
-	Method  string   `json:"method"`
-}
-
-type SchemaSnapshotVersionedFK struct {
-	Column           string `json:"column"`
-	LSNColumn        string `json:"lsn_column"`
-	ReferencesDomain string `json:"references_domain"`
-	ReferencesTable  string `json:"references_table"`
-	ReferencesColumn string `json:"references_column"`
-}
-
-type SchemaSnapshotTable struct {
-	Name                 string                      `json:"name"`
-	Columns              []SchemaSnapshotColumn      `json:"columns"`
-	Indexes              []SchemaSnapshotIndex       `json:"indexes,omitempty"`
-	VersionedForeignKeys []SchemaSnapshotVersionedFK `json:"versioned_foreign_keys,omitempty"`
-}
-
-type SchemaSnapshotDomain struct {
-	Name     string                 `json:"name"`
-	Tables   []SchemaSnapshotTable  `json:"tables"`
-	Entities []SchemaSnapshotEntity `json:"entities,omitempty"`
-}
-
-type SchemaSnapshotEntity struct {
-	Name      string   `json:"name"`
-	RootTable string   `json:"root_table"`
-	Tables    []string `json:"tables"`
-}
-
-type SchemaSnapshotResponse struct {
-	Status  string                 `json:"status"`
-	Domains []SchemaSnapshotDomain `json:"domains"`
 }
 
 type MigrationPreflightRequest struct {
@@ -304,33 +254,24 @@ type ExecuteBatchResponse struct {
 	Executed int    `json:"executed"`
 }
 
-// TimelineCommitsRequest requests commit summaries for the timeline UI.
-type TimelineCommitsRequest struct {
-	FromLSN uint64 `json:"from_lsn,omitempty"`
-	ToLSN   uint64 `json:"to_lsn,omitempty"`
-	Limit   int    `json:"limit,omitempty"`
-	Domain  string `json:"domain,omitempty"`
-}
+// The schema snapshot and timeline types are adminapi's, so the gRPC and
+// HTTP admin surfaces cannot drift apart from the public Go types.
+type (
+	SchemaSnapshotRequest         = adminapi.SchemaSnapshotRequest
+	SchemaSnapshotColumn          = adminapi.SchemaSnapshotColumn
+	SchemaSnapshotIndex           = adminapi.SchemaSnapshotIndex
+	SchemaSnapshotVersionedFK     = adminapi.SchemaSnapshotVersionedFK
+	SchemaSnapshotVerifiableGroup = adminapi.SchemaSnapshotVerifiableGroup
+	SchemaSnapshotTable           = adminapi.SchemaSnapshotTable
+	SchemaSnapshotDomain          = adminapi.SchemaSnapshotDomain
+	SchemaSnapshotEntity          = adminapi.SchemaSnapshotEntity
+	SchemaSnapshotResponse        = adminapi.SchemaSnapshotResponse
 
-// TimelineCommitsResponse returns aggregated commit summaries.
-type TimelineCommitsResponse struct {
-	Commits []TimelineCommitEntry `json:"commits"`
-}
-
-// TimelineCommitEntry is a single commit summary for the timeline.
-type TimelineCommitEntry struct {
-	LSN       uint64                        `json:"lsn"`
-	TxID      string                        `json:"tx_id"`
-	Timestamp uint64                        `json:"timestamp"`
-	Tables    []TimelineCommitMutationEntry `json:"tables"`
-}
-
-// TimelineCommitMutationEntry describes one mutation within a commit.
-type TimelineCommitMutationEntry struct {
-	Domain    string `json:"domain"`
-	Table     string `json:"table"`
-	Operation string `json:"operation"`
-}
+	TimelineCommitsRequest      = adminapi.TimelineCommitsRequest
+	TimelineCommitsResponse     = adminapi.TimelineCommitsResponse
+	TimelineCommitEntry         = adminapi.TimelineCommitEntry
+	TimelineCommitMutationEntry = adminapi.TimelineCommitMutationEntry
+)
 
 // PeerInfo carries a peer's identity and gRPC address.
 type PeerInfo struct {

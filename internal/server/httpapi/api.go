@@ -62,14 +62,15 @@ type (
 	LeadershipStateRequest  = adminapi.LeadershipStateRequest
 	LeadershipStateResponse = adminapi.LeadershipStateResponse
 
-	SchemaSnapshotRequest     = adminapi.SchemaSnapshotRequest
-	SchemaSnapshotColumn      = adminapi.SchemaSnapshotColumn
-	SchemaSnapshotIndex       = adminapi.SchemaSnapshotIndex
-	SchemaSnapshotVersionedFK = adminapi.SchemaSnapshotVersionedFK
-	SchemaSnapshotTable       = adminapi.SchemaSnapshotTable
-	SchemaSnapshotDomain      = adminapi.SchemaSnapshotDomain
-	SchemaSnapshotEntity      = adminapi.SchemaSnapshotEntity
-	SchemaSnapshotResponse    = adminapi.SchemaSnapshotResponse
+	SchemaSnapshotRequest         = adminapi.SchemaSnapshotRequest
+	SchemaSnapshotColumn          = adminapi.SchemaSnapshotColumn
+	SchemaSnapshotIndex           = adminapi.SchemaSnapshotIndex
+	SchemaSnapshotVersionedFK     = adminapi.SchemaSnapshotVersionedFK
+	SchemaSnapshotVerifiableGroup = adminapi.SchemaSnapshotVerifiableGroup
+	SchemaSnapshotTable           = adminapi.SchemaSnapshotTable
+	SchemaSnapshotDomain          = adminapi.SchemaSnapshotDomain
+	SchemaSnapshotEntity          = adminapi.SchemaSnapshotEntity
+	SchemaSnapshotResponse        = adminapi.SchemaSnapshotResponse
 
 	TimelineCommitsRequest      = adminapi.TimelineCommitsRequest
 	TimelineCommitMutationEntry = adminapi.TimelineCommitMutationEntry
