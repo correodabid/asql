@@ -1,5 +1,59 @@
 # Changelog
 
+## v0.5.0 — 2026-10-22
+
+### Upgrade notes
+
+- **No downgrade to v0.4.0.** Snapshots move to format v17 (verifiable tables and
+  composite primary keys), and the WAL gains DDL records v0.4.0 cannot replay
+  (`SET VERIFIABLE`, `ADD PRIMARY KEY`, and the matching `CREATE TABLE` flags).
+  v0.5.0 reads everything v0.4.0 wrote.
+- **`asql_admin.ledger_digest` has an eleventh column, `state_root`,** last, NULL
+  unless the digest is version 3. A client reading the row with `SELECT *` into ten
+  destinations now fails; name the columns (#96).
+- **A node with a state key signs version 3 digests,** which also sign the state root
+  of the `VERIFIABLE` tables (`state_root`, also in `GET /api/v1/ledger/digest`).
+  Verifiers from v0.4.0 and earlier reject them: verify with this release's `asqlctl`.
+  A node without a state key keeps signing version 2 (#96).
+- **The state key.** `asqlctl -command ledger-keygen -output node.key` now also writes
+  `node.key.state` (32 secret bytes, mode 0600) and reports it as `state_key` and
+  `created` in its JSON. Run on an existing private key without a `.state` file, it
+  writes only that file and leaves the key pair as it is; before, it failed with
+  "file exists". `asqld` loads `<ledger-key>.state` unless `-ledger-state-key` names
+  another file (`LedgerStateKeyFile` in `pkg/embed`): a file named with the flag, or a
+  default file that exists, must load, while a missing default file only logs a
+  warning. Every node of a cluster needs the same state key (#90).
+- **`schema_snapshot` reports `primary_key`** as the list of key columns in key order,
+  also for single-column keys (#93).
+
+### Verifiable rows (ADR 0008)
+
+- **Composite primary keys**: `PRIMARY KEY (child_id, parent_id)` as a table constraint,
+  with `NOT NULL` key columns (`23502`), tuple uniqueness (`23505`) and `ON CONFLICT` on
+  the key columns. `ALTER TABLE … ADD PRIMARY KEY (…)` adds one to an existing table,
+  `APPEND ONLY` included, after checking the existing rows for NULLs and repeated
+  tuples; it fails without changing anything when they break it (#93).
+- **`VERIFIABLE` tables**: `CREATE TABLE … VERIFIABLE` (with `APPEND ONLY` in either
+  order) or `ALTER TABLE … SET VERIFIABLE`. It needs a primary key (`42P16` without one)
+  and `ADMIN`, restricts nothing, and cannot be undone (#91, #94).
+- **State tree**: with `ledger=signed` and a state key, the node keeps a salted Merkle
+  tree of the verifiable tables' live rows, off the commit path, and each digest signs
+  its root (#95, #96).
+- **Row proofs**: `SELECT * FROM asql_admin.prove_rows WHERE keys = '[{"domain", "table",
+  "pk": [...]}, …]' [AND lsn = N]`, `asqlctl -command prove-rows -keys rows.json` and
+  `verify-rows -proof proof.json -pubkey node.pub` prove a set of rows, cited by primary
+  key, in one batch against a signed digest, revealing nothing about other rows beyond
+  the digest's LSN and the rough size of the tree. They need the privileges of reading
+  those tables, plus `SELECT_HISTORY` away from the head. A proof cannot show that a row
+  is absent, nor yet that the rows shown are all of some kind (#97).
+- `verify-ledger -digest` reports a version 3 digest's `state_root` as `not-checked`:
+  rebuilding it needs the secret state key.
+
+### Docs
+
+- ADR 0008 amended: batch proofs by primary key, typed and group leaves, digest v3, the
+  state tree as a function of the engine's state (#92, #95).
+
 ## v0.4.0 — 2026-10-21
 
 ### Upgrade notes
