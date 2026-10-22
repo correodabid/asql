@@ -2,6 +2,8 @@ package fixtures
 
 import (
 	"context"
+	"encoding/json"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -257,5 +259,139 @@ func TestSaveFilePersistsExportedFixture(t *testing.T) {
 	}
 	if loaded.Name != fixture.Name || len(loaded.Steps) != 1 {
 		t.Fatalf("unexpected loaded fixture: %+v", loaded)
+	}
+}
+
+// TestExportKeepsTableOptions: APPEND ONLY, VERIFIABLE, composite primary
+// keys and verifiable groups survive export and load, with every row.
+func TestExportKeepsTableOptions(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server, err := pgwire.New(pgwire.Config{
+		Address:     "127.0.0.1:0",
+		DataDirPath: filepath.Join(t.TempDir(), "fixture-options-data"),
+		Logger:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(server.Stop)
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.ServeOnListener(ctx, listener) }()
+	t.Cleanup(func() {
+		cancel()
+		<-errCh
+	})
+	conn, err := pgx.Connect(ctx, "postgres://asql@"+listener.Addr().String()+"/asql?sslmode=disable&default_query_exec_mode=simple_protocol")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close(ctx)
+	for _, sql := range []string{
+		"BEGIN DOMAIN lab",
+		"CREATE TABLE artifacts (id TEXT PRIMARY KEY, kind TEXT) VERIFIABLE",
+		"CREATE TABLE artifact_parents (child_id TEXT, parent_id TEXT, ordinal INT, PRIMARY KEY (child_id, parent_id)) APPEND ONLY VERIFIABLE",
+		"CREATE TABLE notes (id INT PRIMARY KEY, body TEXT)",
+		"COMMIT",
+		"BEGIN DOMAIN lab",
+		"ALTER TABLE artifact_parents ADD VERIFIABLE GROUP (child_id) REFERENCES artifacts (id)",
+		"COMMIT",
+		"BEGIN DOMAIN lab",
+		"INSERT INTO artifacts (id, kind) VALUES ('aa', 'source'), ('bb', 'run'), ('cc', 'source')",
+		"INSERT INTO artifact_parents (child_id, parent_id, ordinal) VALUES ('bb', 'cc', 2), ('bb', 'aa', 1)",
+		"INSERT INTO notes (id, body) VALUES (1, 'x')",
+		"COMMIT",
+	} {
+		if _, err := conn.Exec(ctx, sql); err != nil {
+			t.Fatalf("exec %q: %v", sql, err)
+		}
+	}
+	var raw string
+	if err := conn.QueryRow(ctx, "SELECT snapshot FROM asql_admin.schema_snapshot").Scan(&raw); err != nil {
+		t.Fatal(err)
+	}
+
+	exported, err := ExportFromPGWire(ctx, conn, ExportOptions{Domains: []string{"lab"}, Name: "options"})
+	if err != nil {
+		t.Fatalf("export: %v", err)
+	}
+	if err := ValidateSpec(exported); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if err := ValidateDryRun(ctx, exported); err != nil {
+		t.Fatalf("dry run: %v", err)
+	}
+	store, err := wal.NewSegmentedLogStore(filepath.Join(t.TempDir(), "options.wal"), wal.AlwaysSync{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	engine, err := executor.New(ctx, store, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Apply(ctx, exported, newEngineExecutor(engine)); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+
+	// The source's options, as asql_admin.schema_snapshot reports them.
+	type group struct {
+		Columns           []string `json:"columns"`
+		References        string   `json:"references"`
+		ReferencedColumns []string `json:"referenced_columns"`
+	}
+	type options struct {
+		AppendOnly bool     `json:"append_only"`
+		Verifiable bool     `json:"verifiable"`
+		PrimaryKey []string `json:"primary_key"`
+		Groups     []group  `json:"verifiable_groups"`
+	}
+	var source struct {
+		Domains []struct {
+			Name   string `json:"name"`
+			Tables []struct {
+				Name string `json:"name"`
+				options
+			} `json:"tables"`
+		} `json:"domains"`
+	}
+	if err := json.Unmarshal([]byte(raw), &source); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]options{}
+	for _, d := range source.Domains {
+		for _, tbl := range d.Tables {
+			if d.Name == "lab" {
+				want[tbl.Name] = tbl.options
+			}
+		}
+	}
+	got := map[string]options{}
+	for _, d := range engine.SchemaSnapshot([]string{"lab"}).Domains {
+		for _, tbl := range d.Tables {
+			var groups []group
+			for _, g := range tbl.VerifiableGroups {
+				groups = append(groups, group{Columns: g.Columns, References: g.References, ReferencedColumns: g.ReferencedColumns})
+			}
+			got[tbl.Name] = options{AppendOnly: tbl.AppendOnly, Verifiable: tbl.Verifiable, PrimaryKey: tbl.PrimaryKey, Groups: groups}
+		}
+	}
+	wantJSON, _ := json.Marshal(want)
+	gotJSON, _ := json.Marshal(got)
+	if string(wantJSON) != string(gotJSON) {
+		t.Fatalf("options after export and load:\n got %s\nwant %s", gotJSON, wantJSON)
+	}
+	if !got["artifact_parents"].AppendOnly || !got["artifact_parents"].Verifiable || len(got["artifact_parents"].Groups) != 1 || got["notes"].Verifiable {
+		t.Fatalf("unexpected options: %s", gotJSON)
+	}
+	for table, rows := range map[string]int{"artifacts": 3, "artifact_parents": 2, "notes": 1} {
+		result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT * FROM "+table, []string{"lab"}, ^uint64(0))
+		if err != nil || len(result.Rows) != rows {
+			t.Fatalf("%s: %d rows, %v; want %d", table, len(result.Rows), err, rows)
+		}
 	}
 }
