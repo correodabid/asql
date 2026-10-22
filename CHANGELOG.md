@@ -55,7 +55,11 @@
   default file that exists, must load, while a missing default file only logs a
   warning. Every node of a cluster needs the same state key (#90).
 - **`schema_snapshot` reports `primary_key`** as the list of key columns in key order,
-  also for single-column keys (#93).
+  also for single-column keys (#93). In a composite key, each column's own
+  `primary_key` flag stays `false`, on purpose: a client that read only that flag
+  sees no key at all, and one that set it on several columns would write several
+  column-level `PRIMARY KEY`s. Read the table-level `primary_key` list instead. Those
+  columns are `NOT NULL`, which the column entries do not report either.
 
 ### Verifiable rows (ADR 0008)
 
