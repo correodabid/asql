@@ -1,5 +1,36 @@
 # Changelog
 
+## v0.6.0 — 2026-10-22
+
+### Upgrade notes
+
+- **No downgrade to v0.5.0.** Snapshots move to format v18 (verifiable groups) and the
+  WAL gains a DDL record v0.5.0 cannot replay (`ADD VERIFIABLE GROUP`). v0.6.0 reads
+  everything v0.5.0 wrote.
+- **`asql_admin.prove_rows` has a fourth column, `groups`,** after `digest`, `rows` and
+  `proof` (`[]` when no group was asked for). A client reading the row positionally
+  into three destinations must add one; `asqlctl prove-rows` handles it (#100).
+- **`schema_snapshot` reports `verifiable_groups`** for tables that declare them (#99).
+
+### Verifiable rows (ADR 0008): complete groups
+
+- **Verifiable groups**: `ALTER TABLE artifact_parents ADD VERIFIABLE GROUP (child_id)
+  REFERENCES artifacts (id)`. Both tables must be `VERIFIABLE`, and the referenced
+  columns must be the referenced table's primary key, with the same types. It needs
+  `ADMIN` and cannot be undone. `DROP COLUMN` of a column a group uses, and `DROP TABLE`
+  of a referenced table, are refused, `CASCADE` included; `RENAME COLUMN` follows on
+  both sides (#99).
+- **Proofs that a group is complete**: every row of the referenced table has a group
+  leaf in the state tree, an empty one when it has no rows. A `prove_rows` key entry
+  `{"domain", "table", "group": [values]}` (with `"group_columns"` when the table has
+  several groups) adds every row of that group and the group itself to the proof, so it
+  shows all the parents of an artifact, and none for a source, without proofs of
+  absence. `verify-rows` rebuilds each group from the proof's rows and lists it, for
+  example `lab.artifact_parents(child_id=…): all 2 rows`; a row left out, or a source
+  presented without its parents, makes it fail (#100).
+- The node checks every row proof against the digest's state root before handing it
+  out (#100).
+
 ## v0.5.0 — 2026-10-22
 
 ### Upgrade notes
