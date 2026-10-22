@@ -270,6 +270,9 @@ type tableState struct {
 	// CREATE TABLE ... VERIFIABLE or ALTER TABLE ... SET VERIFIABLE and
 	// never cleared.
 	verifiable bool
+	// verifiableGroups are the table's verifiable groups (see
+	// verifiable_group.go), sorted, never removed.
+	verifiableGroups []verifiableGroup
 	// changeLogTrimmedLSN is the commit LSN of the newest entry trimChangeLog
 	// dropped: the changeLog is complete only after it.
 	changeLogTrimmedLSN uint64
@@ -1021,6 +1024,8 @@ type SchemaTable struct {
 	// single-column key (also flagged on that column), several for a
 	// composite one, none without a key.
 	PrimaryKey []string `json:",omitempty"`
+	// VerifiableGroups are the table's verifiable groups (ADR 0008).
+	VerifiableGroups []SchemaVerifiableGroup `json:",omitempty"`
 }
 
 type SchemaIndex struct {
@@ -1122,4 +1127,11 @@ func tableRowsToMaps(ts *tableState) []map[string]ast.Literal {
 		result[i] = rowToMap(ts, row)
 	}
 	return result
+}
+
+// SchemaVerifiableGroup is a verifiable group as the schema reports it.
+type SchemaVerifiableGroup struct {
+	Columns           []string
+	References        string
+	ReferencedColumns []string
 }

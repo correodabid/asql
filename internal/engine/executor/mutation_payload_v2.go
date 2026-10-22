@@ -43,11 +43,14 @@ package executor
 //   0x07 DropTable            0x08 DropIndex
 //   0x09 TruncateTable        0x0A AlterTableSetAppendOnly
 //   0x0B AlterTableSetVerifiable 0x0C AlterTableAddPrimaryKey
+//   0x0D AlterTableAddVerifiableGroup
 //
 // CreateTable flags byte: bit0 IfNotExists, bit1 AppendOnly, bit2 Verifiable,
 // bit3 composite primary key: [uv n][str column]... after the versioned
 // foreign keys, in key order. AlterTableAddPrimaryKey is [str table][uv n]
-// [str column]..., in key order.
+// [str column]..., in key order. AlterTableAddVerifiableGroup is [str table]
+// [uv n][str column]... [str referenced table][uv n][str column]..., the
+// referenced columns in key order.
 //
 // ColumnDefinition flags byte (bitmask in encodeColumnDef):
 //   bit0 PrimaryKey  bit1 Unique  bit2 NotNull
@@ -124,18 +127,19 @@ const (
 
 // DDL sub-operation codes (written after v2OpDDLStruct)
 const (
-	ddlSubCreateTable       byte = 0x01
-	ddlSubAlterAddColumn    byte = 0x02
-	ddlSubAlterDropColumn   byte = 0x03
-	ddlSubAlterRenameColumn byte = 0x04
-	ddlSubCreateIndex       byte = 0x05
-	ddlSubCreateEntity      byte = 0x06
-	ddlSubDropTable         byte = 0x07
-	ddlSubDropIndex         byte = 0x08
-	ddlSubTruncateTable     byte = 0x09
-	ddlSubSetAppendOnly     byte = 0x0A
-	ddlSubSetVerifiable     byte = 0x0B
-	ddlSubAddPrimaryKey     byte = 0x0C
+	ddlSubCreateTable        byte = 0x01
+	ddlSubAlterAddColumn     byte = 0x02
+	ddlSubAlterDropColumn    byte = 0x03
+	ddlSubAlterRenameColumn  byte = 0x04
+	ddlSubCreateIndex        byte = 0x05
+	ddlSubCreateEntity       byte = 0x06
+	ddlSubDropTable          byte = 0x07
+	ddlSubDropIndex          byte = 0x08
+	ddlSubTruncateTable      byte = 0x09
+	ddlSubSetAppendOnly      byte = 0x0A
+	ddlSubSetVerifiable      byte = 0x0B
+	ddlSubAddPrimaryKey      byte = 0x0C
+	ddlSubAddVerifiableGroup byte = 0x0D
 )
 
 // ColumnDefinition flag bits (used in encodeColumnDef)
@@ -577,7 +581,8 @@ func encodeMutationPayloadV2(domain string, plan planner.Plan, sql string) []byt
 		planner.OperationTruncateTable,
 		planner.OperationAlterTableSetAppendOnly,
 		planner.OperationAlterTableSetVerifiable,
-		planner.OperationAlterTableAddPrimaryKey:
+		planner.OperationAlterTableAddPrimaryKey,
+		planner.OperationAlterTableAddVerifiableGroup:
 		return encodeDDLStructPayload(domain, plan)
 	default:
 		// SELECT, SetOp, or future ops not yet handled — fall back to SQL.
@@ -769,6 +774,13 @@ func encodeDDLStructPayload(domain string, plan planner.Plan) []byte {
 		w.writeByte(ddlSubAddPrimaryKey)
 		w.writeStr(plan.TableName)
 		writeStrList(w, plan.PrimaryKeyColumns)
+
+	case planner.OperationAlterTableAddVerifiableGroup:
+		w.writeByte(ddlSubAddVerifiableGroup)
+		w.writeStr(plan.TableName)
+		writeStrList(w, plan.GroupColumns)
+		w.writeStr(plan.GroupReferencesTable)
+		writeStrList(w, plan.GroupReferencesColumns)
 
 	default:
 		// should not happen: caller must only pass DDL operations
@@ -1422,6 +1434,21 @@ func decodeDDLStructPayload(r *v2Reader, domain string, plan *planner.Plan) erro
 		}
 		if plan.PrimaryKeyColumns, err = readStrList(r); err != nil {
 			return fmt.Errorf("payloadv2: ADD PRIMARY KEY columns: %w", err)
+		}
+
+	case ddlSubAddVerifiableGroup:
+		plan.Operation = planner.OperationAlterTableAddVerifiableGroup
+		if plan.TableName, err = r.readStr(); err != nil {
+			return fmt.Errorf("payloadv2: ADD VERIFIABLE GROUP tableName: %w", err)
+		}
+		if plan.GroupColumns, err = readStrList(r); err != nil {
+			return fmt.Errorf("payloadv2: ADD VERIFIABLE GROUP columns: %w", err)
+		}
+		if plan.GroupReferencesTable, err = r.readStr(); err != nil {
+			return fmt.Errorf("payloadv2: ADD VERIFIABLE GROUP referenced table: %w", err)
+		}
+		if plan.GroupReferencesColumns, err = readStrList(r); err != nil {
+			return fmt.Errorf("payloadv2: ADD VERIFIABLE GROUP referenced columns: %w", err)
 		}
 
 	case ddlSubSetVerifiable:

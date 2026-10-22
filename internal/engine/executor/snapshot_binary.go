@@ -15,7 +15,14 @@ import (
 	"github.com/correodabid/asql/internal/engine/parser/ast"
 )
 
-// Binary snapshot format (version 17).
+// Binary snapshot format (version 18).
+//
+// Changes vs v17:
+//   - [4B] num_verifiable_groups + [domain][table][2B n][column]...
+//     [referenced table][2B n][referenced column]... each, after the
+//     composite key list: the verifiable groups (ALTER TABLE ... ADD
+//     VERIFIABLE GROUP, ADR 0008), sorted by table. Older versions decode
+//     none.
 //
 // Changes vs v16:
 //   - [4B] num_composite_keys + [domain][table][2B n][column]... each, after
@@ -118,7 +125,7 @@ import (
 
 var (
 	snapMagic   = [4]byte{'A', 'S', 'N', 'P'}
-	snapVersion = byte(17)
+	snapVersion = byte(18)
 
 	// snapCRC32C is the CRC32C (Castagnoli) table, hardware-accelerated on x86 (SSE4.2) and ARM.
 	snapCRC32C = crc32.MakeTable(crc32.Castagnoli)
@@ -419,6 +426,55 @@ func (r *binReader) readCompositeKeys() []compositeKeyRef {
 		}
 	}
 	return refs
+}
+
+// verifiableGroups writes the v18 list of verifiable groups, sorted by
+// table.
+func (w *binWriter) verifiableGroups(domains map[string]*domainState) {
+	refs := verifiableGroupRefs(domains)
+	w.u32(uint32(len(refs)))
+	for _, ref := range refs {
+		w.str(ref.domain)
+		w.str(ref.table)
+		w.strList16(ref.group.columns)
+		w.str(ref.group.refTable)
+		w.strList16(ref.group.refColumns)
+	}
+}
+
+func (w *binWriter) strList16(list []string) {
+	w.u16(uint16(len(list)))
+	for _, s := range list {
+		w.str(s)
+	}
+}
+
+// readVerifiableGroups reads the v18 list of verifiable groups; older
+// versions have none.
+func (r *binReader) readVerifiableGroups() []verifiableGroupRef {
+	if r.version < 18 {
+		return nil
+	}
+	n := int(r.u32())
+	if n == 0 || !r.need(n) {
+		return nil
+	}
+	refs := make([]verifiableGroupRef, n)
+	for i := range refs {
+		refs[i].domain, refs[i].table = r.str(), r.str()
+		refs[i].group.columns = r.strList16()
+		refs[i].group.refTable = r.str()
+		refs[i].group.refColumns = r.strList16()
+	}
+	return refs
+}
+
+func (r *binReader) strList16() []string {
+	list := make([]string, int(r.u16()))
+	for i := range list {
+		list[i] = r.str()
+	}
+	return list
 }
 
 // readLastTxNum reads the v14 TxID high-water mark; older versions have none.
@@ -1568,6 +1624,7 @@ func (w *binWriter) snapshot(snap *engineSnapshot, isFull bool, prevLogicalTS ui
 	w.appendOnlyTables(snap.state.domains)
 	w.verifiableTables(snap.state.domains)
 	w.compositeKeys(snap.state.domains)
+	w.verifiableGroups(snap.state.domains)
 	w.catalog(snap)
 	w.principals(snap.state.principals)
 
@@ -1653,6 +1710,7 @@ type rawSnapshotFileEntry struct {
 	appendOnly     [][2]string
 	verifiable     [][2]string
 	compositeKeys  []compositeKeyRef
+	groups         []verifiableGroupRef
 }
 
 // decodeSnapshotFileBinaryRaw decodes a binary snapshot file and returns the raw
@@ -1708,6 +1766,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 		appendOnly := r.readAppendOnlyTables()
 		verifiable := r.readVerifiableTables()
 		compositeKeys := r.readCompositeKeys()
+		groups := r.readVerifiableGroups()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1728,6 +1787,7 @@ func decodeSnapshotFileBinaryRaw(data []byte) ([]rawSnapshotFileEntry, error) {
 			appendOnly:     appendOnly,
 			verifiable:     verifiable,
 			compositeKeys:  compositeKeys,
+			groups:         groups,
 		})
 	}
 	return entries, nil
@@ -1891,6 +1951,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 		appendOnly := r.readAppendOnlyTables()
 		verifiable := r.readVerifiableTables()
 		compositeKeys := r.readCompositeKeys()
+		groups := r.readVerifiableGroups()
 		catalog := r.readCatalog()
 		principals := r.readPrincipals()
 		domains := r.readDomains()
@@ -1918,6 +1979,7 @@ func decodeSnapshotsBinary(data []byte) ([]engineSnapshot, error) {
 			AppendOnly:     appendOnly,
 			Verifiable:     verifiable,
 			CompositeKeys:  compositeKeys,
+			Groups:         groups,
 		}
 
 		result[i] = marshalableToSnapshot(full)
@@ -1978,6 +2040,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 	appendOnly := r.readAppendOnlyTables()
 	verifiable := r.readVerifiableTables()
 	compositeKeys := r.readCompositeKeys()
+	groups := r.readVerifiableGroups()
 	snap.catalog = r.readCatalogState()
 	snap.state.principals = principalsStateFromPersisted(r.readPrincipals())
 
@@ -2004,6 +2067,7 @@ func decodeSingleFullSnapshotBinary(data []byte) ([]engineSnapshot, bool, error)
 	markAppendOnlyTables(snap.state.domains, appendOnly)
 	markVerifiableTables(snap.state.domains, verifiable)
 	markCompositeKeys(snap.state.domains, compositeKeys)
+	markVerifiableGroups(snap.state.domains, groups)
 	rebuildAllIndexes(&snap)
 	return []engineSnapshot{snap}, true, nil
 }

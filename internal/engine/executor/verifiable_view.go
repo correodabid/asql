@@ -25,6 +25,16 @@ type VerifiableTable struct {
 	// means rows changed without row changes in the audit store (DROP,
 	// RENAME or ADD COLUMN), so the builder rebuilds the table.
 	Columns []string
+	// Groups are the table's verifiable groups, sorted by RefTable and
+	// then Columns.
+	Groups []VerifiableGroup
+}
+
+// VerifiableGroup is a verifiable group of a table: for every row of the referenced table, the rows of this table whose Columns equal that row's primary key.
+type VerifiableGroup struct {
+	Columns    []string // in this table, in the referenced key's order
+	RefTable   string   // same domain
+	RefColumns []string // the referenced table's primary key, in key order
 }
 
 // VerifiableRow is a live row of a verifiable table.
@@ -85,6 +95,7 @@ func (v VerifiableView) Tables() []VerifiableTable {
 				Name:       tableName,
 				PrimaryKey: slices.Clone(primaryKeyColumnsOf(table)),
 				Columns:    slices.Clone(table.columns),
+				Groups:     viewGroups(table),
 			})
 		}
 	}
@@ -219,4 +230,12 @@ func coerceKeyValue(table *tableState, column string, value ast.Literal) ast.Lit
 		}
 	}
 	return value
+}
+
+func viewGroups(table *tableState) []VerifiableGroup {
+	var out []VerifiableGroup
+	for _, g := range table.verifiableGroups {
+		out = append(out, VerifiableGroup{Columns: slices.Clone(g.columns), RefTable: g.refTable, RefColumns: slices.Clone(g.refColumns)})
+	}
+	return out
 }
