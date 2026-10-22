@@ -400,6 +400,13 @@ func TestExportKeepsTableOptions(t *testing.T) {
 	if !got["artifact_parents"].AppendOnly || !got["artifact_parents"].Verifiable || len(got["artifact_parents"].Groups) != 1 || got["notes"].Verifiable {
 		t.Fatalf("unexpected options: %s", gotJSON)
 	}
+	for _, step := range exported.Steps {
+		for _, statement := range step.Statements {
+			if strings.Contains(statement, "_lsn") {
+				t.Fatalf("the export mentions _lsn: %s", statement)
+			}
+		}
+	}
 	// One _lsn per table, and NOT NULL outside the key kept.
 	for table, opts := range got {
 		lsn := 0
@@ -420,5 +427,49 @@ func TestExportKeepsTableOptions(t *testing.T) {
 		if err != nil || len(result.Rows) != rows {
 			t.Fatalf("%s: %d rows, %v; want %d", table, len(result.Rows), err, rows)
 		}
+	}
+}
+
+// TestOldExportedFixturesStillLoad: fixtures exported by v0.7.0 and
+// earlier declare _lsn in CREATE TABLE and insert it; they load with the
+// engine's own _lsn only.
+func TestOldExportedFixturesStillLoad(t *testing.T) {
+	ctx := context.Background()
+	store, err := wal.NewSegmentedLogStore(filepath.Join(t.TempDir(), "old-fixture.wal"), wal.AlwaysSync{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	engine, err := executor.New(ctx, store, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := &File{Version: CurrentVersion, Name: "exported-by-v0.7.0", Steps: []Step{
+		{Name: "schema", Mode: "domain", Domains: []string{"lab"}, Statements: []string{
+			"CREATE TABLE lab.artifacts (id TEXT PRIMARY KEY, kind TEXT, _lsn TEXT)",
+		}},
+		{Name: "data", Mode: "domain", Domains: []string{"lab"}, Statements: []string{
+			"INSERT INTO lab.artifacts (id, kind, _lsn) VALUES ('aa', 'source', '7')",
+		}},
+	}}
+	if err := Apply(ctx, fixture, newEngineExecutor(engine)); err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	for _, d := range engine.SchemaSnapshot([]string{"lab"}).Domains {
+		for _, tbl := range d.Tables {
+			n := 0
+			for _, c := range tbl.Columns {
+				if c.Name == "_lsn" {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Fatalf("%s has %d _lsn columns", tbl.Name, n)
+			}
+		}
+	}
+	result, err := engine.TimeTravelQueryAsOfLSN(ctx, "SELECT id FROM artifacts", []string{"lab"}, ^uint64(0))
+	if err != nil || len(result.Rows) != 1 {
+		t.Fatalf("rows: %v, %v", result.Rows, err)
 	}
 }
