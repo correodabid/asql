@@ -24,6 +24,10 @@ pgwire.
 - Helpers are deterministic scalar lookups.
 - Missing rows or entities return SQL `NULL`.
 - Missing entity versions return SQL `NULL`.
+- `row_lsn`, `resolve_reference` and the entity helpers find rows by a single-column
+  primary key. On a table with a composite primary key or none, or an entity whose root
+  table has one, they fail with SQLSTATE `0A000` instead of returning `NULL`, so a
+  client can tell "not supported for this table" from "no such row".
 - Invalid argument shapes or semantic mismatches return explicit errors.
 - `resolve_reference(...)` returns:
   - the latest entity version for entity root tables,

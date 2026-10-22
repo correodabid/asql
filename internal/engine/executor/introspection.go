@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/correodabid/asql/internal/engine/parser/ast"
+	"github.com/correodabid/asql/internal/engine/sqlerr"
 )
 
 // RowLSN returns the current visible row-head LSN for a row identified by its
@@ -30,8 +31,11 @@ func (engine *Engine) RowLSN(tableRef, rawPrimaryKey string) (lsn uint64, ok boo
 		return 0, false, nil
 	}
 	table, ok := domainState.tables[tableName]
-	if !ok || table == nil || table.primaryKey == "" {
+	if !ok || table == nil {
 		return 0, false, nil
+	}
+	if err := needsSingleColumnKey("row_lsn", domainName, tableName, table); err != nil {
+		return 0, false, err
 	}
 
 	row, ok := lookupRowByPrimaryKey(table, rawPrimaryKey)
@@ -49,6 +53,9 @@ func (engine *Engine) RowLSN(tableRef, rawPrimaryKey string) (lsn uint64, ok boo
 // EntityVersion returns the latest visible version number for an entity root PK.
 // It returns ok=false when the entity instance does not exist.
 func (engine *Engine) EntityVersion(domain, entityName, rawRootPK string) (version uint64, ok bool, err error) {
+	if err := engine.entityNeedsSingleColumnKey("entity_version", domain, entityName); err != nil {
+		return 0, false, err
+	}
 	entry, ok, err := engine.latestEntityVersionEntry(domain, entityName, rawRootPK)
 	if !ok || err != nil {
 		return 0, ok, err
@@ -59,6 +66,9 @@ func (engine *Engine) EntityVersion(domain, entityName, rawRootPK string) (versi
 // EntityHeadLSN returns the commit LSN of the latest visible version for an
 // entity root PK. It returns ok=false when the entity instance does not exist.
 func (engine *Engine) EntityHeadLSN(domain, entityName, rawRootPK string) (lsn uint64, ok bool, err error) {
+	if err := engine.entityNeedsSingleColumnKey("entity_head_lsn", domain, entityName); err != nil {
+		return 0, false, err
+	}
 	entry, ok, err := engine.latestEntityVersionEntry(domain, entityName, rawRootPK)
 	if !ok || err != nil {
 		return 0, ok, err
@@ -71,6 +81,9 @@ func (engine *Engine) EntityHeadLSN(domain, entityName, rawRootPK string) (lsn u
 func (engine *Engine) EntityVersionLSN(domain, entityName, rawRootPK string, version uint64) (lsn uint64, ok bool, err error) {
 	if engine == nil {
 		return 0, false, nil
+	}
+	if err := engine.entityNeedsSingleColumnKey("entity_version_lsn", domain, entityName); err != nil {
+		return 0, false, err
 	}
 
 	state := engine.readState.Load()
@@ -125,8 +138,11 @@ func (engine *Engine) ResolveReference(tableRef, rawPrimaryKey string) (token ui
 		return 0, false, nil
 	}
 	table, ok := domainState.tables[tableName]
-	if !ok || table == nil || table.primaryKey == "" {
+	if !ok || table == nil {
 		return 0, false, nil
+	}
+	if err := needsSingleColumnKey("resolve_reference", domainName, tableName, table); err != nil {
+		return 0, false, err
 	}
 
 	row, ok := lookupRowByPrimaryKey(table, rawPrimaryKey)
@@ -261,4 +277,46 @@ func literalKeyCandidates(raw string) []string {
 		keys = append(keys, candidate)
 	}
 	return keys
+}
+
+// needsSingleColumnKey fails with 0A000 when a helper that finds rows by a
+// single-column primary key is asked about a table without one, so a client
+// can tell "not supported for this table" from "no such row", which stays
+// NULL.
+func needsSingleColumnKey(helper, domain, name string, table *tableState) error {
+	switch {
+	case table.primaryKey != "":
+		return nil
+	case len(table.primaryKeyColumns) > 0:
+		return sqlerr.New("0A000", fmt.Sprintf("%s needs a table with a single-column primary key: %s.%s has a composite primary key (%s)",
+			helper, domain, name, strings.Join(table.primaryKeyColumns, ", ")))
+	default:
+		return sqlerr.New("0A000", fmt.Sprintf("%s needs a table with a single-column primary key: %s.%s has no primary key", helper, domain, name))
+	}
+}
+
+// entityNeedsSingleColumnKey applies needsSingleColumnKey to an entity's
+// root table. An unknown domain or entity is not an error: it has no rows.
+func (engine *Engine) entityNeedsSingleColumnKey(helper, domain, entityName string) error {
+	if engine == nil {
+		return nil
+	}
+	state := engine.readState.Load()
+	if state == nil {
+		return nil
+	}
+	domainName := strings.ToLower(strings.TrimSpace(domain))
+	domainState, ok := state.domains[domainName]
+	if !ok || domainState == nil {
+		return nil
+	}
+	entity, ok := domainState.entities[strings.ToLower(strings.TrimSpace(entityName))]
+	if !ok || entity == nil {
+		return nil
+	}
+	root := domainState.tables[entity.rootTable]
+	if root == nil {
+		return nil
+	}
+	return needsSingleColumnKey(helper, domainName, entity.rootTable, root)
 }
