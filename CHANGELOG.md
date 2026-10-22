@@ -1,5 +1,28 @@
 # Changelog
 
+## v0.8.0 — 2026-10-22
+
+### Upgrade notes
+
+- **`_lsn` cannot be declared, renamed or dropped.** A client statement that does
+  (`CREATE TABLE … (…, _lsn …)`, `ADD COLUMN _lsn`, `DROP COLUMN _lsn`, `RENAME COLUMN`
+  to or from `_lsn`) fails with `42701`. Declaring it used to give the table two `_lsn`
+  columns, since the engine adds its own. WALs that hold such a statement still replay
+  as they did (#110).
+- **Fixtures exported by v0.7.0 and earlier keep loading.** They declare `_lsn` in
+  `CREATE TABLE`, and loading drops it; the `_lsn` values in their `INSERT`s are
+  overwritten by the engine, as before. Re-exporting them gives cleaner files, but is
+  not needed (#110).
+- No format change: v0.8.0 reads and writes the same data as v0.7.0, and v0.7.0 can
+  read what v0.8.0 writes.
+
+### Fixes
+
+- **`fixture-export` reconstructs the schema.** It no longer declares `_lsn`, which
+  left every loaded table with two, nor writes it in `INSERT`s, and it keeps `NOT NULL`
+  on columns outside the primary key, which it used to drop. The round-trip test now
+  compares every column (#109, #110).
+
 ## v0.7.0 — 2026-10-22
 
 ### Upgrade notes
