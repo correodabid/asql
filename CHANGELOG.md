@@ -1,5 +1,32 @@
 # Changelog
 
+## v0.9.0 — 2026-10-23
+
+### Upgrade notes
+
+- **`pg_index` and `pg_indexes` return rows.** They used to answer with no rows, and
+  `pg_indexes` answered with `pg_index`'s columns. A tool that browses a schema now
+  sees its keys and indexes; one that relied on the empty answer sees them too (#112).
+- **`pg_constraint.conindid` is set** for primary key and unique constraints, to the
+  `indexrelid` of their index in `pg_index`. It used to be `0` (#112).
+- No format change: v0.9.0 reads and writes the same data as v0.8.0, and v0.8.0 can
+  read what v0.9.0 writes.
+
+### Features
+
+- **`pg_index` and `pg_indexes` list each table's indexes**: the primary key, single
+  or composite, as `<table>_pkey`; each unique column as `<table>_<column>_key`; and
+  each index made with `CREATE INDEX`, with its method. `CREATE INDEX` without `USING`
+  makes a hash index, and the catalog says so; key and unique indexes show as `btree`,
+  as Postgres backs those constraints. `pg_index` can be filtered by `indrelid` and
+  `pg_indexes` by `tablename` and `schemaname` (#112).
+- **Public Go types for the ledger's signed objects** in `pkg/adminapi`:
+  `LedgerDigest`, `ConsistencyProof`, `RowsProof` (with `ProvenRow`, `ProvenGroup` and
+  `StateProof`), `ResultAttestation` and `AttestedResult`, in the JSON form the server
+  writes. A client can decode a digest from `GET /api/v1/ledger/digest`, the JSON
+  columns of `prove_consistency` and `prove_rows`, or an `attest-query` file without
+  its own structs, and hand them on to `asqlctl` unchanged (#113).
+
 ## v0.8.0 — 2026-10-22
 
 ### Upgrade notes
