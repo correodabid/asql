@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.10.0 — 2026-10-23
+
+### Upgrade notes
+
+- Nothing to change: this release adds API and corrects documentation. No format
+  change: v0.10.0 reads and writes the same data as v0.9.0, and v0.9.0 can read what
+  v0.10.0 writes.
+- **`adminapi.ProvenRow.Row` never carried `_lsn`**, although its comment said so. A
+  row's leaf is built from its declared columns, sorted by name, and `salt`; the row
+  version enters through the salt, an HMAC of the row's key and LSN under the state
+  key, so a verifier needs neither. Only the comment changed (#115).
+
+### Features
+
+- **`pkg/servertest` can start a node that signs.** `Options.SignedLedger` starts it in
+  ledger mode `signed` with a signing key and a state key made for the test, so
+  `ledger_digest`, `prove_consistency`, `prove_rows` and `attest_query` answer; `Server`
+  hands back `LedgerPublicKey`, `LedgerKeyID` and `LedgerPublicKeyFile` (for `asqlctl
+  -pubkey`) (#115).
+- **Digests on demand.** `SignLedgerDigest` in `pkg/servertest` and `pkg/embed` signs
+  the committed head at once; when it returns, the latest digest covers the head. A test
+  gets a digest at a known LSN, or two to prove consistency between, without waiting for
+  the 1s cadence. `embed.Options` also takes `LedgerDigestInterval` and
+  `LedgerDigestEveryLSNs` (#115).
+- **`NodeID` in `pkg/embed` and `pkg/servertest`** sets the `node_id` of what the node
+  signs, which was always empty in an embedded node. It does not enable cluster mode.
+  `node_id` is a label the node gives itself; `key_id` identifies the signer (#115).
+
+### Documentation
+
+- `adminapi.SchemaSnapshotIndex` and the compatibility surface describe the two index
+  naming conventions: `__auto_<table>_<column>` and `__pk_<table>` in the schema
+  snapshot, `<table>_pkey` and `<table>_<column>_key` in `pg_index` and `pg_indexes`
+  (#115).
+
 ## v0.9.0 — 2026-10-23
 
 ### Upgrade notes
