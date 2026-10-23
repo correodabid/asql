@@ -294,19 +294,17 @@ func (server *Server) interceptCatalog(ctx context.Context, sql string, activeDo
 		strings.Contains(lower, "pg_database"):
 		return catalogPgDatabase()
 
-	// ── pg_catalog.pg_index / pg_constraint / pg_proc ────────────────────
-	// Return schema-stable empty result sets for tables we haven't fully
-	// implemented so clients still receive RowDescription metadata.
+	// ── pg_catalog.pg_indexes / pg_index / pg_constraint ─────────────────
+	// pg_indexes first: its name contains pg_index.
+	case strings.Contains(lower, "pg_indexes"):
+		return server.catalogPgIndexes(trimmed)
 	case strings.Contains(lower, "pg_index"):
-		return emptyResultWithColumns(
-			"indexrelid", "indrelid", "indnatts", "indnkeyatts", "indisunique",
-			"indnullsnotdistinct", "indisprimary", "indisexclusion", "indimmediate",
-			"indisclustered", "indisvalid", "indcheckxmin", "indisready",
-			"indislive", "indisreplident", "indkey", "indcollation", "indclass",
-			"indoption", "indexprs", "indpred",
-		)
+		return server.catalogPgIndex(trimmed)
 	case strings.Contains(lower, "pg_constraint"):
 		return server.catalogConstraints()
+	// ── pg_proc, pg_am, pg_extension, roles ──────────────────────────────
+	// Return schema-stable empty result sets for tables we haven't fully
+	// implemented so clients still receive RowDescription metadata.
 	case strings.Contains(lower, "pg_proc"):
 		return emptyResultWithColumns(
 			"oid", "proname", "pronamespace", "proowner", "prolang", "procost",
@@ -1692,16 +1690,7 @@ func (server *Server) catalogConstraintRows() []map[string]ast.Literal {
 		tableIndexes := make(map[string]int, len(d.Tables))
 		for tableIndex, t := range d.Tables {
 			tableIndexes[t.Name] = tableIndex
-			ordinals := make(map[string]int64, len(t.Columns))
-			ordinal := int64(1)
-			for _, c := range t.Columns {
-				if strings.HasPrefix(c.Name, "_") {
-					continue
-				}
-				ordinals[c.Name] = ordinal
-				ordinal++
-			}
-			tableOrdinals[t.Name] = ordinals
+			tableOrdinals[t.Name] = catalogColumnOrdinals(t)
 		}
 
 		constraintIndex := 0
@@ -1753,6 +1742,21 @@ func (server *Server) catalogConstraintRows() []map[string]ast.Literal {
 					arrayLiteralFromOrdinals(ordinals[c.Name]), arrayLiteralFromOrdinals(refOrdinal),
 					t.Name, namespaceOID,
 				))
+			}
+		}
+	}
+	// Key and UNIQUE constraints name the index behind them, as in Postgres.
+	indexOIDs := make(map[int64]map[string]int64)
+	for _, idx := range catalogIndexes(snap) {
+		if indexOIDs[idx.relOID] == nil {
+			indexOIDs[idx.relOID] = make(map[string]int64)
+		}
+		indexOIDs[idx.relOID][idx.name] = idx.oid
+	}
+	for _, row := range rows {
+		if contype := row["contype"].StringValue; contype == "p" || contype == "u" {
+			if oid, ok := indexOIDs[row["conrelid"].NumberValue][row["conname"].StringValue]; ok {
+				row["conindid"] = lit(oid)
 			}
 		}
 	}
