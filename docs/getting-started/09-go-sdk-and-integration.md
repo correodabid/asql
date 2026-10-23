@@ -60,6 +60,25 @@ srv := servertest.StartForTesting(t, servertest.Options{})
 conn, err := pgx.Connect(ctx, srv.DSN)
 ```
 
+To test against the ledger, `SignedLedger: true` starts the server in ledger mode
+`signed`, with a signing key and a state key made for the test, so `ledger_digest`,
+`prove_consistency`, `prove_rows` and `attest_query` answer. The server hands back the
+public key (`LedgerPublicKey`, `LedgerKeyID`, and `LedgerPublicKeyFile` for `asqlctl
+-pubkey`) to verify what it signs. Digests are still signed every second;
+`srv.SignLedgerDigest(t)` signs the committed head at once, so a test gets a digest at
+a known LSN, or two to prove consistency between, without waiting for the clock:
+
+```go
+srv := servertest.StartForTesting(t, servertest.Options{SignedLedger: true, NodeID: "test-node"})
+// … commit …
+srv.SignLedgerDigest(t) // the latest digest now covers the head
+```
+
+`pkg/embed` has the same pieces: `Server.SignLedgerDigest`, `NodeID`, and
+`LedgerDigestInterval` and `LedgerDigestEveryLSNs` for the cadence. The Go types for
+what the ledger signs (`LedgerDigest`, `ConsistencyProof`, `RowsProof`,
+`AttestedResult`) are in `pkg/adminapi`.
+
 ## Typical integration shape
 
 A Go service usually needs these operations:

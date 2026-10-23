@@ -128,3 +128,14 @@ func TestASecondServerOnTheSameDataDirFails(t *testing.T) {
 	again := start(t, embed.Options{DataDir: dir})
 	closeWithin(t, again, 5*time.Second)
 }
+
+func TestSignLedgerDigestNeedsLedgerModeSigned(t *testing.T) {
+	srv, err := embed.Start(context.Background(), embed.Options{DataDir: filepath.Join(t.TempDir(), "data")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = srv.Close() })
+	if _, err := srv.SignLedgerDigest(context.Background()); !errors.Is(err, embed.ErrLedgerNotSigning) {
+		t.Fatalf("SignLedgerDigest in ledger mode chain: %v, want ErrLedgerNotSigning", err)
+	}
+}

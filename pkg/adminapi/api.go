@@ -267,6 +267,13 @@ type SchemaSnapshotColumn struct {
 	DefaultValue     string `json:"default_value,omitempty"`
 }
 
+// SchemaSnapshotIndex is one of a table's indexes as the engine holds it.
+// The engine's own indexes behind the primary key and unique columns are
+// listed too, named __auto_<table>_<column> (a single-column key or a
+// unique column) or __pk_<table> (a composite key); DDL generators skip
+// them. pg_index and pg_indexes show those under Postgres's names instead,
+// <table>_pkey and <table>_<column>_key. Method is "hash" or "btree";
+// CREATE INDEX without USING makes a hash index.
 type SchemaSnapshotIndex struct {
 	Name    string   `json:"name"`
 	Columns []string `json:"columns"`

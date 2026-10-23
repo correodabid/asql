@@ -255,6 +255,11 @@ asqlctl -command ledger-keygen -output /etc/asql/node.key
 asqld -ledger signed -ledger-key /etc/asql/node.key [-ledger-state-key /other/path]
 ```
 
+Digests and attestations carry the node's `-node-id` (`NodeID` in `pkg/embed`) as
+`node_id`. It is signed, but it is a label the node gives itself: outside a cluster it
+is empty unless set, and the signer is identified by `key_id`, the hash of the public
+key that verifies the signature.
+
 The **state key** is a 32-byte secret, separate from the signing key, that will salt
 the leaves of the state tree of `VERIFIABLE` tables
 ([ADR 0008](../adr/0008-inclusion-and-consistency-proofs.md)), so a proof about one row

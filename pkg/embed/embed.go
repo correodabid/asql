@@ -49,6 +49,17 @@ type Options struct {
 	// LedgerStateKeyFile is the state key for LedgerMode "signed" (ADR 0008).
 	// Empty means LedgerKeyFile + ".state", which may be missing.
 	LedgerStateKeyFile string
+	// LedgerDigestInterval and LedgerDigestEveryLSNs set how often
+	// LedgerMode "signed" signs the committed head: at most every interval,
+	// or sooner once that many LSNs were committed. Zero means the defaults
+	// (1s and 10,000). Server.SignLedgerDigest signs one at once.
+	LedgerDigestInterval  time.Duration
+	LedgerDigestEveryLSNs uint64
+	// NodeID names the node in the digests and attestations it signs
+	// (node_id). Empty leaves it empty; the signing key's key_id still
+	// tells nodes apart. It does not enable cluster mode: the server logs
+	// that it runs standalone, and lists itself in cluster_members.
+	NodeID string
 	// Compliance refuses to start unless the ledger vouches for the whole WAL.
 	Compliance bool
 	// Logger receives the server's logs. Nil discards them.
@@ -90,14 +101,17 @@ func Start(ctx context.Context, opts Options) (*Server, error) {
 		return nil, fmt.Errorf("embed: listen %s: %w", address, err)
 	}
 	server, err := pgwireserver.New(pgwireserver.Config{
-		Address:            listener.Addr().String(),
-		DataDirPath:        opts.DataDir,
-		Logger:             logger,
-		AuthToken:          opts.AuthToken,
-		LedgerMode:         opts.LedgerMode,
-		LedgerKeyFile:      opts.LedgerKeyFile,
-		LedgerStateKeyFile: opts.LedgerStateKeyFile,
-		Compliance:         opts.Compliance,
+		Address:               listener.Addr().String(),
+		DataDirPath:           opts.DataDir,
+		Logger:                logger,
+		AuthToken:             opts.AuthToken,
+		LedgerMode:            opts.LedgerMode,
+		LedgerKeyFile:         opts.LedgerKeyFile,
+		LedgerStateKeyFile:    opts.LedgerStateKeyFile,
+		LedgerDigestInterval:  opts.LedgerDigestInterval,
+		LedgerDigestEveryLSNs: opts.LedgerDigestEveryLSNs,
+		NodeID:                opts.NodeID,
+		Compliance:            opts.Compliance,
 	})
 	if err != nil {
 		_ = listener.Close()
@@ -114,6 +128,20 @@ func Start(ctx context.Context, opts Options) (*Server, error) {
 	}
 	go func() { s.served <- server.ServeOnListener(serveCtx, listener) }()
 	return s, nil
+}
+
+// ErrLedgerNotSigning reports SignLedgerDigest on a server whose
+// LedgerMode is not "signed".
+var ErrLedgerNotSigning = pgwireserver.ErrLedgerNotSigning
+
+// SignLedgerDigest signs the committed head now, without waiting for the
+// digest cadence. When it returns, the latest digest covers the head; it
+// reports false when one already did (the cadence may have got there
+// first). A commit is in the head once its COMMIT returns, so a test can
+// commit, sign, and read the digest from asql_admin.ledger_digest at a
+// known LSN.
+func (s *Server) SignLedgerDigest(ctx context.Context) (bool, error) {
+	return s.server.SignLedgerDigest(ctx)
 }
 
 // Addr is the "host:port" the server listens on.

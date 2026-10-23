@@ -199,6 +199,30 @@ func (ls *ledgerSigning) stop() {
 	_ = ls.tree.Close()
 }
 
+// ErrLedgerNotSigning reports a call that needs ledger mode signed.
+var ErrLedgerNotSigning = errors.New("ledger mode is not signed")
+
+// SignLedgerDigest signs the committed head now instead of at the next
+// tick of the digest cadence. When it returns, the latest digest covers
+// the head; it reports false when one already did. Tests use it to get a
+// digest at a known LSN without waiting for the clock.
+func (server *Server) SignLedgerDigest(ctx context.Context) (bool, error) {
+	if server.ledger == nil {
+		return false, ErrLedgerNotSigning
+	}
+	return server.ledger.sign(ctx)
+}
+
+func (ls *ledgerSigning) sign(ctx context.Context) (bool, error) {
+	ls.mu.Lock()
+	defer ls.mu.Unlock()
+	if ls.stopped {
+		return false, errors.New("ledger: the server is shut down")
+	}
+	_, ok, err := ls.checkpointer.Checkpoint(ctx)
+	return ok, err
+}
+
 // digest returns the latest digest, or with lsn > 0 the oldest one covering
 // lsn.
 func (ls *ledgerSigning) digest(lsn uint64) (ledgerdigest.Digest, bool, error) {
