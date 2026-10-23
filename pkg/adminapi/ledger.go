@@ -55,7 +55,11 @@ type RowsProof struct {
 }
 
 // ProvenRow is one row of a RowsProof, cited by its primary key in key
-// order. Row holds every column, the engine's _lsn included.
+// order. Row holds the table's declared columns, without the engine's
+// _lsn: the leaf is built from Row's columns, sorted by name, and Salt.
+// The row version enters through Salt instead, an HMAC of the row's key
+// and the LSN that wrote it under the node's state key, so a verifier
+// needs Salt but neither the LSN nor the state key.
 type ProvenRow struct {
 	Domain            string                     `json:"domain"`
 	Table             string                     `json:"table"`
