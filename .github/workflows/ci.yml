@@ -150,7 +150,7 @@ jobs:
         run: syft dir:. -o spdx-json > dist/sbom.spdx.json
 
       - name: Install cosign
-        uses: sigstore/cosign-installer@v4.1.1
+        uses: sigstore/cosign-installer@v4.1.3
 
       - name: Sign checksums with keyless Sigstore
         # cosign v3 writes the signature and certificate as one Sigstore
